@@ -76,6 +76,21 @@ public sealed record RoundTripSeatLockResult(
     DateTimeOffset ExpiresAt);
 
 /// <summary>
+/// Authoritative outcome of the payment-recovery seat confirmation seam.
+/// Definitive failures may expire/refund a Booking; transient failures must be retried.
+/// </summary>
+public abstract record SeatConfirmationOutcome
+{
+    private SeatConfirmationOutcome() { }
+
+    public sealed record Success : SeatConfirmationOutcome;
+
+    public sealed record DefinitiveSeatUnavailable(string Message) : SeatConfirmationOutcome;
+
+    public sealed record TransientFailure(string Message) : SeatConfirmationOutcome;
+}
+
+/// <summary>
 /// Discriminated-union result of <see cref="ITripServiceClient.LockSeatsAsync"/>.
 /// </summary>
 public abstract record LockSeatsOutcome
@@ -210,12 +225,68 @@ public interface ITripServiceClient
         IReadOnlyList<PassengerSeatAssignment> passengerSeatAssignments,
         CancellationToken cancellationToken = default);
 
+    async Task<SeatConfirmationOutcome> ConfirmBookedSeatsAsync(
+        Guid tripId,
+        Guid seatLockToken,
+        Guid bookingId,
+        IReadOnlyList<PassengerSeatAssignment> passengerSeatAssignments,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await BookSeatsAsync(
+                    tripId,
+                    seatLockToken,
+                    bookingId,
+                    passengerSeatAssignments,
+                    cancellationToken)
+                ? new SeatConfirmationOutcome.Success()
+                : new SeatConfirmationOutcome.DefinitiveSeatUnavailable(
+                    "Seat lock expired before booking could be confirmed.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return new SeatConfirmationOutcome.TransientFailure(exception.Message);
+        }
+    }
+
     Task<bool> BookRoundTripSeatsAsync(
         RoundTripBookSeatsLeg outbound,
         RoundTripBookSeatsLeg @return,
         CancellationToken cancellationToken = default,
         Guid? operationId = null)
         => Task.FromException<bool>(new NotSupportedException("Round-trip seat confirmation is not supported."));
+
+    async Task<SeatConfirmationOutcome> ConfirmBookedRoundTripSeatsAsync(
+        RoundTripBookSeatsLeg outbound,
+        RoundTripBookSeatsLeg @return,
+        CancellationToken cancellationToken = default,
+        Guid? operationId = null)
+    {
+        try
+        {
+            return await BookRoundTripSeatsAsync(
+                    outbound,
+                    @return,
+                    cancellationToken,
+                    operationId)
+                ? new SeatConfirmationOutcome.Success()
+                : new SeatConfirmationOutcome.DefinitiveSeatUnavailable(
+                    "Round-trip seat locks expired before confirmation.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return new SeatConfirmationOutcome.TransientFailure(exception.Message);
+        }
+    }
 
     /// <summary>
     /// POST /internal/v1/trips/{tripId}/release-seats — compensation (204 idempotent).

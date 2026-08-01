@@ -87,7 +87,7 @@ public sealed class ResendInitialPasswordCommandHandler
         var setInitialPasswordUrl = _initialPasswordTokens.BuildSetInitialPasswordUrl(code, user.Role);
         await _emailService.SendAccountCreatedLinkAsync(
             user.Email,
-            new AccountCreatedEmailDto(user.Id, user.DisplayName, setInitialPasswordUrl, expiresAt),
+            new AccountCreatedEmailDto(token.Id, user.Id, user.DisplayName, setInitialPasswordUrl, expiresAt),
             cancellationToken);
 
         var metadata = JsonSerializer.Serialize(new

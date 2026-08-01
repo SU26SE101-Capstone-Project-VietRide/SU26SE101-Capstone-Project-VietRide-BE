@@ -24,6 +24,7 @@ public sealed class RabbitMqConnectionFactory : IRabbitMqConnectionFactory
     private readonly ILogger<RabbitMqConnectionFactory> _logger;
     private readonly object _lock = new();
     private readonly ResiliencePipeline _retry;
+    private readonly Func<IConnection> _createConnection;
 
     private IConnection? _connection;
     private bool _disposed;
@@ -31,9 +32,25 @@ public sealed class RabbitMqConnectionFactory : IRabbitMqConnectionFactory
     public RabbitMqConnectionFactory(
         IOptions<RabbitMqOptions> options,
         ILogger<RabbitMqConnectionFactory> logger)
+        : this(options, logger, null)
+    {
+    }
+
+    internal RabbitMqConnectionFactory(
+        IOptions<RabbitMqOptions> options,
+        ILogger<RabbitMqConnectionFactory> logger,
+        Func<IConnection>? createConnection)
     {
         _options = options.Value;
         _logger = logger;
+        _createConnection = createConnection ?? CreateConnection;
+        if (_options.ConnectionAttemptTimeoutSeconds <= 0)
+        {
+            throw new OptionsValidationException(
+                RabbitMqOptions.SectionName,
+                typeof(RabbitMqOptions),
+                new[] { "RabbitMq:ConnectionAttemptTimeoutSeconds must be greater than zero." });
+        }
 
         _retry = new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions
@@ -61,35 +78,73 @@ public sealed class RabbitMqConnectionFactory : IRabbitMqConnectionFactory
 
     public IConnection GetOrCreate()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        lock (_lock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (IsOpen(_connection))
+                return _connection!;
+        }
 
-        if (_connection is { IsOpen: true })
-            return _connection;
+        var candidate = _retry.Execute(_ => _createConnection(), CancellationToken.None);
+        IConnection? connectionToDispose;
+        IConnection? installedConnection;
+        var disposedWhileCreating = false;
 
         lock (_lock)
         {
-            if (_connection is { IsOpen: true })
-                return _connection;
+            if (_disposed)
+            {
+                connectionToDispose = candidate;
+                installedConnection = null;
+                disposedWhileCreating = true;
+            }
+            else if (IsOpen(_connection))
+            {
+                connectionToDispose = candidate;
+                installedConnection = _connection;
+            }
+            else
+            {
+                connectionToDispose = _connection;
+                _connection = candidate;
+                installedConnection = candidate;
+            }
+        }
 
-            _connection?.Dispose();
-            _connection = _retry.Execute(_ => CreateConnection(), CancellationToken.None);
-            return _connection;
+        DisposeConnection(connectionToDispose);
+        if (disposedWhileCreating)
+            throw new ObjectDisposedException(nameof(RabbitMqConnectionFactory));
+
+        return installedConnection!;
+    }
+
+    private static bool IsOpen(IConnection? connection)
+    {
+        try
+        {
+            return connection?.IsOpen == true;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+    }
+
+    private void DisposeConnection(IConnection? connection)
+    {
+        try
+        {
+            connection?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error disposing unused RabbitMQ connection.");
         }
     }
 
     private IConnection CreateConnection()
     {
-        var factory = new ConnectionFactory
-        {
-            HostName = _options.HostName,
-            Port = _options.Port,
-            UserName = _options.UserName,
-            Password = _options.Password,
-            VirtualHost = _options.VirtualHost,
-            AutomaticRecoveryEnabled = true,
-            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
-            DispatchConsumersAsync = true,
-        };
+        var factory = CreateClientFactory();
 
         var conn = factory.CreateConnection("vietride-publisher");
         _logger.LogInformation(
@@ -98,15 +153,35 @@ public sealed class RabbitMqConnectionFactory : IRabbitMqConnectionFactory
         return conn;
     }
 
+    internal ConnectionFactory CreateClientFactory()
+        => new()
+        {
+            HostName = _options.HostName,
+            Port = _options.Port,
+            UserName = _options.UserName,
+            Password = _options.Password,
+            VirtualHost = _options.VirtualHost,
+            AutomaticRecoveryEnabled = true,
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
+            RequestedConnectionTimeout = TimeSpan.FromSeconds(_options.ConnectionAttemptTimeoutSeconds),
+            DispatchConsumersAsync = true,
+        };
+
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        IConnection? connection;
+        lock (_lock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            connection = _connection;
+            _connection = null;
+        }
 
         try
         {
-            if (_connection is { IsOpen: true }) _connection.Close();
-            _connection?.Dispose();
+            if (IsOpen(connection)) connection!.Close();
+            connection?.Dispose();
         }
         catch (Exception ex)
         {

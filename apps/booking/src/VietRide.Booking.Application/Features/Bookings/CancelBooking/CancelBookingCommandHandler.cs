@@ -58,6 +58,10 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
         CancelBookingCommand request,
         CancellationToken cancellationToken)
     {
+        await _bookings.AcquirePaymentTransitionLocksAsync(
+            [request.BookingId],
+            cancellationToken).ConfigureAwait(false);
+
         var booking = await _bookings.FindByIdWithPassengersAsync(request.BookingId, cancellationToken);
         if (booking is null)
         {

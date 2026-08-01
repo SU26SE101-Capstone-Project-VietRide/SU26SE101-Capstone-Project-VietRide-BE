@@ -21,6 +21,18 @@ public sealed class RabbitMqConsumerOptions
     public ushort PrefetchCount { get; set; } = 1;
 
     /// <summary>
+    /// Maximum delayed broker retries for explicitly transient handler failures.
+    /// Zero disables the retry queue and preserves terminal dead-letter behavior.
+    /// </summary>
+    public int TransientRetryCount { get; set; }
+
+    /// <summary>
+    /// Per-message expiration used by the durable retry queue before redelivery.
+    /// Keeping the delay off the queue declaration makes topology redeclaration stable.
+    /// </summary>
+    public TimeSpan TransientRetryDelay { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
     /// Dead-letter exchange used when handler failures are nacked without requeue.
     /// Defaults to a deterministic queue-scoped exchange.
     /// </summary>
@@ -59,6 +71,17 @@ public sealed class RabbitMqConsumerOptions
 
         if (PrefetchCount == 0)
             throw new InvalidOperationException("RabbitMQ consumer prefetch count must be greater than zero.");
+
+        if (TransientRetryCount < 0)
+            throw new InvalidOperationException("RabbitMQ transient retry count cannot be negative.");
+
+        if (TransientRetryCount > 0
+            && (TransientRetryDelay.TotalMilliseconds < 1
+                || TransientRetryDelay.TotalMilliseconds > int.MaxValue))
+        {
+            throw new InvalidOperationException(
+                "RabbitMQ transient retry delay must be between 1 millisecond and Int32.MaxValue milliseconds.");
+        }
     }
 }
 

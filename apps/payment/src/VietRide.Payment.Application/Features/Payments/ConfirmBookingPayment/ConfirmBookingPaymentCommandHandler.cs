@@ -72,12 +72,35 @@ public sealed class ConfirmBookingPaymentCommandHandler
             return OrderNotFound();
         }
 
+        var paymentSnapshot = await FindBookingVnPayPaymentAsync(vnPayTxnRef, cancellationToken)
+            .ConfigureAwait(false);
+        if (paymentSnapshot is null)
+        {
+            _logger.LogWarning("VNPay booking payment IPN references unknown transaction {VnPayTxnRef}.", vnPayTxnRef);
+            return OrderNotFound();
+        }
+
+        if (!TryValidateSignedPaymentFacts(
+                request.Parameters,
+                paymentSnapshot.Amount.Amount,
+                out var amountValid,
+                out var responseCode,
+                out var transactionStatus,
+                out var paidAt))
+        {
+            _logger.LogWarning(
+                "VNPay booking payment IPN {VnPayTxnRef} has invalid signed payment facts.",
+                vnPayTxnRef);
+            return amountValid ? ConfirmFailure() : AmountInvalid();
+        }
+
         var reservationAcquired = await _vnPayClient.TryReserveIpnAsync(vnPayTxnRef, cancellationToken)
             .ConfigureAwait(false);
         if (!reservationAcquired)
         {
             _logger.LogInformation("Skipping duplicate VNPay booking payment IPN for transaction {VnPayTxnRef}.", vnPayTxnRef);
-            var currentPayment = FindBookingVnPayPayment(vnPayTxnRef, pendingOnly: false);
+            var currentPayment = await FindBookingVnPayPaymentAsync(vnPayTxnRef, cancellationToken)
+                .ConfigureAwait(false);
             if (currentPayment is null)
                 return OrderNotFound();
 
@@ -88,61 +111,42 @@ public sealed class ConfirmBookingPaymentCommandHandler
 
         try
         {
-            var payment = FindBookingVnPayPayment(vnPayTxnRef, pendingOnly: true);
-            if (payment is null)
+            var payment = await _payments.LockAndReloadAsync(paymentSnapshot.Id, cancellationToken)
+                .ConfigureAwait(false);
+            if (payment is null || !IsSupportedVnPayPayment(payment, vnPayTxnRef))
             {
-                var currentPayment = FindBookingVnPayPayment(vnPayTxnRef, pendingOnly: false);
-                if (currentPayment is null)
-                {
-                    _logger.LogWarning("VNPay booking payment IPN references unknown transaction {VnPayTxnRef}.", vnPayTxnRef);
-                    return OrderNotFound();
-                }
+                return OrderNotFound();
+            }
 
+            if (payment.Status is not (PaymentStatus.PENDING_REDIRECT or PaymentStatus.EXPIRED))
+            {
                 return AlreadyProcessed();
             }
 
-            await _payments.AcquirePaymentReferenceLockAsync(
-                    payment.ReferenceType,
-                    payment.ReferenceId,
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            payment = FindBookingVnPayPayment(vnPayTxnRef, pendingOnly: true);
-            if (payment is null)
-            {
-                return ConfirmSuccess();
-            }
-
-            var responseCode = request.Parameters.TryGetValue(VnPayResponseCodeKey, out var value)
-                ? value
-                : null;
-
             if (!string.Equals(responseCode, SuccessCode, StringComparison.Ordinal))
             {
+                if (payment.Status == PaymentStatus.EXPIRED)
+                {
+                    return AlreadyProcessed();
+                }
+
                 await MarkFailedAsync(payment, responseCode, responseCode ?? "VNPay payment failed.", cancellationToken)
                     .ConfigureAwait(false);
                 return ConfirmSuccess();
             }
 
-            if (!IsSignedAmountValid(request.Parameters, payment.Amount.Amount))
+            if (!string.Equals(transactionStatus, SuccessCode, StringComparison.Ordinal))
             {
-                _logger.LogWarning(
-                    "VNPay booking payment IPN {VnPayTxnRef} has missing, invalid, or mismatched amount.",
-                    vnPayTxnRef);
-                await MarkFailedAsync(payment, responseCode, "AMOUNT_MISMATCH", cancellationToken)
-                    .ConfigureAwait(false);
-                return AmountInvalid();
-            }
+                if (payment.Status == PaymentStatus.EXPIRED)
+                {
+                    return AlreadyProcessed();
+                }
 
-            if (!request.Parameters.TryGetValue(VnPayTransactionStatusKey, out var transactionStatus)
-                || !string.Equals(transactionStatus, SuccessCode, StringComparison.Ordinal))
-            {
-                await MarkFailedAsync(payment, transactionStatus, transactionStatus ?? "MISSING_TRANSACTION_STATUS", cancellationToken)
-                    .ConfigureAwait(false);
+                await MarkFailedAsync(payment, transactionStatus, transactionStatus, cancellationToken).ConfigureAwait(false);
                 return ConfirmSuccess();
             }
 
-            payment.MarkSucceeded(responseCode, ResolvePaidAt(request.Parameters, _clock.UtcNow));
+            payment.MarkSucceeded(responseCode, paidAt);
             _payments.Update(payment);
 
             var platformRef = MapHoldRef(payment.ReferenceType);
@@ -164,8 +168,15 @@ public sealed class ConfirmBookingPaymentCommandHandler
             }
             else
             {
-                await EnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
-                await EnqueueLateParcelRefundIfNeededAsync(payment, cancellationToken).ConfigureAwait(false);
+                var effectiveDueAt = payment.DueAt ?? payment.CreatedAt.AddMinutes(15);
+                await EnqueuePaymentSucceededAsync(
+                    payment,
+                    effectiveDueAt,
+                    cancellationToken).ConfigureAwait(false);
+                await EnqueueLateParcelRefundIfNeededAsync(
+                    payment,
+                    effectiveDueAt,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             _logger.LogInformation(
@@ -184,24 +195,27 @@ public sealed class ConfirmBookingPaymentCommandHandler
         }
     }
 
-    private VietRide.Payment.Domain.Entities.Payment? FindBookingVnPayPayment(string vnPayTxnRef, bool pendingOnly)
+    private async Task<VietRide.Payment.Domain.Entities.Payment?> FindBookingVnPayPaymentAsync(
+        string vnPayTxnRef,
+        CancellationToken cancellationToken)
     {
-        var query = _payments.Query()
-            .Where(payment =>
-                payment.VnPayTxnRef == vnPayTxnRef
-                && payment.Method == PaymentMethod.VNPAY
-                && (payment.ReferenceType == PaymentReferenceType.BOOKING
-                    || payment.ReferenceType == PaymentReferenceType.BOOKING_GROUP
-                    || payment.ReferenceType == PaymentReferenceType.PARCEL
-                    || payment.ReferenceType == PaymentReferenceType.PARCEL_ADDITIONAL));
-
-        if (pendingOnly)
-        {
-            query = query.Where(payment => payment.Status == PaymentStatus.PENDING_REDIRECT);
-        }
-
-        return query.FirstOrDefault();
+        var payment = await _payments.FindVnPayPaymentByTxnRefAsync(vnPayTxnRef, cancellationToken)
+            .ConfigureAwait(false);
+        return payment is not null && IsSupportedVnPayPayment(payment, vnPayTxnRef)
+            ? payment
+            : null;
     }
+
+    private static bool IsSupportedVnPayPayment(
+        VietRide.Payment.Domain.Entities.Payment payment,
+        string vnPayTxnRef)
+        => string.Equals(payment.VnPayTxnRef, vnPayTxnRef, StringComparison.Ordinal)
+            && payment.Method == PaymentMethod.VNPAY
+            && payment.ReferenceType is (
+                PaymentReferenceType.BOOKING
+                or PaymentReferenceType.BOOKING_GROUP
+                or PaymentReferenceType.PARCEL
+                or PaymentReferenceType.PARCEL_ADDITIONAL);
 
     private async Task MarkFailedAsync(
         VietRide.Payment.Domain.Entities.Payment payment,
@@ -216,6 +230,7 @@ public sealed class ConfirmBookingPaymentCommandHandler
 
     private async Task EnqueuePaymentSucceededAsync(
         VietRide.Payment.Domain.Entities.Payment payment,
+        DateTimeOffset effectiveDueAt,
         CancellationToken cancellationToken)
     {
         var context = PaymentContextCodec.DeserializeTrusted(payment.Context);
@@ -227,7 +242,7 @@ public sealed class ConfirmBookingPaymentCommandHandler
             payment.Method,
             context,
             payment.SucceededAt!.Value,
-            payment.DueAt);
+            effectiveDueAt);
         await _revenueLedger.RecordPaymentSucceededAsync(
             evt.EventId,
             context,
@@ -252,12 +267,12 @@ public sealed class ConfirmBookingPaymentCommandHandler
 
     private async Task EnqueueLateParcelRefundIfNeededAsync(
         VietRide.Payment.Domain.Entities.Payment payment,
+        DateTimeOffset effectiveDueAt,
         CancellationToken cancellationToken)
     {
         if (payment.ReferenceType is not (PaymentReferenceType.PARCEL or PaymentReferenceType.PARCEL_ADDITIONAL)
-            || !payment.DueAt.HasValue
             || !payment.SucceededAt.HasValue
-            || payment.SucceededAt.Value < payment.DueAt.Value
+            || payment.SucceededAt.Value < effectiveDueAt
             || !payment.UserId.HasValue)
         {
             return;
@@ -294,11 +309,25 @@ public sealed class ConfirmBookingPaymentCommandHandler
         }
     }
 
-    private static DateTimeOffset ResolvePaidAt(
+    private static bool TryValidateSignedPaymentFacts(
         IReadOnlyDictionary<string, string> parameters,
-        DateTimeOffset fallback)
+        long paymentAmount,
+        out bool amountValid,
+        out string responseCode,
+        out string transactionStatus,
+        out DateTimeOffset paidAt)
     {
-        if (!parameters.TryGetValue(VnPayPayDateKey, out var payDate)
+        amountValid = IsSignedAmountValid(parameters, paymentAmount);
+        responseCode = string.Empty;
+        transactionStatus = string.Empty;
+        paidAt = default;
+
+        if (!amountValid
+            || !parameters.TryGetValue(VnPayResponseCodeKey, out var signedResponseCode)
+            || string.IsNullOrWhiteSpace(signedResponseCode)
+            || !parameters.TryGetValue(VnPayTransactionStatusKey, out var signedTransactionStatus)
+            || string.IsNullOrWhiteSpace(signedTransactionStatus)
+            || !parameters.TryGetValue(VnPayPayDateKey, out var payDate)
             || !DateTime.TryParseExact(
                 payDate,
                 "yyyyMMddHHmmss",
@@ -306,13 +335,16 @@ public sealed class ConfirmBookingPaymentCommandHandler
                 DateTimeStyles.None,
                 out var localPaidAt))
         {
-            return fallback;
+            return false;
         }
 
-        return new DateTimeOffset(
+        responseCode = signedResponseCode;
+        transactionStatus = signedTransactionStatus;
+        paidAt = new DateTimeOffset(
                 DateTime.SpecifyKind(localPaidAt, DateTimeKind.Unspecified),
                 TimeSpan.FromHours(7))
             .ToUniversalTime();
+        return true;
     }
 
     private static ConfirmBookingPaymentResult ConfirmSuccess()

@@ -146,6 +146,7 @@ public static class InfrastructureServiceCollectionExtensions
                 "VNPay TMN code and hash secret are required in production.")
             .ValidateOnStart();
         services.AddScoped<IVnPayClient, VnPayClient>();
+        services.AddSingleton<IVnPayRedirectUrlValidator, VnPayRedirectUrlValidator>();
         services.Configure<InvoicePdfOptions>(configuration.GetSection(InvoicePdfOptions.SectionName));
         services.Configure<InvoiceStorageOptions>(configuration.GetSection(InvoiceStorageOptions.SectionName));
         services.Configure<OperatorWebOptions>(configuration.GetSection(OperatorWebOptions.SectionName));
@@ -170,6 +171,12 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "payment.booking-refund";
                 options.BindingKeys = [BookingCancelledIntegrationEvent.EventType];
+            });
+
+            services.AddVietRideEventConsumer<BookingPaymentRefundRequestedIntegrationEvent, BookingPaymentRefundRequestedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "payment.booking-payment-refund-requested";
+                options.BindingKeys = [BookingPaymentRefundRequestedIntegrationEvent.EventType];
             });
 
             services.AddVietRideEventConsumer<WalletCreditedConsumerEvent, MarkPaymentRefundedCommandHandler>(options =>

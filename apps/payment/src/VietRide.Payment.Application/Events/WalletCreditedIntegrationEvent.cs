@@ -15,12 +15,16 @@ public sealed class WalletCreditedIntegrationEvent : IntegrationEventBase
         Guid userId,
         long amount,
         string referenceType,
-        Guid referenceId)
+        Guid referenceId,
+        Guid? eventId = null,
+        Guid? paymentId = null)
+        : base(eventId ?? Guid.NewGuid(), DateTime.UtcNow)
     {
         UserId = userId;
         Amount = amount;
         ReferenceType = referenceType;
         ReferenceId = referenceId;
+        PaymentId = paymentId;
     }
 
     [JsonPropertyName("userId")]
@@ -34,6 +38,10 @@ public sealed class WalletCreditedIntegrationEvent : IntegrationEventBase
 
     [JsonPropertyName("referenceId")]
     public Guid ReferenceId { get; }
+
+    [JsonPropertyName("paymentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? PaymentId { get; }
 
     public override string EventType => EventTypeValue;
 }

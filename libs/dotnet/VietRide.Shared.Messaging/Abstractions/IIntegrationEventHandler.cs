@@ -1,5 +1,3 @@
-using VietRide.Shared.Messaging.Abstractions;
-
 namespace VietRide.Shared.Messaging.Abstractions;
 
 /// <summary>
@@ -15,8 +13,9 @@ public interface IIntegrationEventHandler<in TEvent>
     where TEvent : IIntegrationEvent
 {
     /// <summary>
-    /// Processes one integration event instance. Throw to reject the delivery
-    /// with <c>BasicNack(requeue: false)</c> so broker dead-lettering can handle it.
+    /// Processes one integration event instance. Throw
+    /// <see cref="TransientIntegrationEventException"/> to request a configured durable,
+    /// delayed broker retry; other failures are rejected without requeue for dead-letter handling.
     /// </summary>
     Task HandleAsync(TEvent integrationEvent, CancellationToken cancellationToken);
 }

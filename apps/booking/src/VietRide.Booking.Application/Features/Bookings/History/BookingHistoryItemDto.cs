@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace VietRide.Booking.Application.Features.Bookings.History;
 
 public sealed record BookingHistoryItemDto(
@@ -13,4 +15,6 @@ public sealed record BookingHistoryItemDto(
     Guid? BookingGroupId,
     string? TripDirection,
     string? RouteName,
-    IReadOnlyList<BookingHistoryTicketDto> Tickets);
+    IReadOnlyList<BookingHistoryTicketDto> Tickets,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    string? PaymentRedirectUrl = null);

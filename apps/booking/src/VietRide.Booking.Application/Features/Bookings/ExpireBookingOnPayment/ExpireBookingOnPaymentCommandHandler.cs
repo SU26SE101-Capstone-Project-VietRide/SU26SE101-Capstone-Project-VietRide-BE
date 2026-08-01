@@ -45,22 +45,75 @@ public sealed class ExpireBookingOnPaymentCommandHandler
             var bookingIds = _bookings.QueryNoTracking()
                 .Where(x => x.BookingGroupId == request.ReferenceId)
                 .Select(x => x.Id)
+                .OrderBy(bookingId => bookingId)
                 .ToList();
             if (bookingIds.Count != 2) return false;
 
-            var changed = false;
-            foreach (var bookingId in bookingIds.Order())
+            await _bookings.AcquirePaymentTransitionLocksAsync(
+                bookingIds,
+                cancellationToken);
+
+            var statuses = _bookings.QueryNoTracking()
+                .Where(booking => bookingIds.Contains(booking.Id))
+                .ToDictionary(booking => booking.Id, booking => booking.Status);
+            if (statuses.Count != 2
+                || statuses.Values.Any(status =>
+                    status is not (BookingStatus.PENDING_PAYMENT or BookingStatus.EXPIRED)))
             {
-                changed |= await Handle(new ExpireBookingOnPaymentCommand(
-                    request.PaymentId, BookingReferenceType, bookingId), cancellationToken);
+                return false;
             }
-            return changed;
+
+            var snapshots = new List<BookingPaymentTransitionSnapshot>();
+            foreach (var bookingId in bookingIds.Where(id => statuses[id] == BookingStatus.PENDING_PAYMENT))
+            {
+                var groupSnapshot = await _bookings.GetPendingPaymentTransitionSnapshotAsync(
+                    bookingId,
+                    cancellationToken);
+                if (groupSnapshot is null)
+                {
+                    throw new InvalidOperationException(
+                        "Serialized round-trip expiry could not reload a pending Booking.");
+                }
+
+                snapshots.Add(groupSnapshot);
+            }
+
+            if (snapshots.Count == 0)
+            {
+                return false;
+            }
+
+            var groupNow = _clock.UtcNow;
+            foreach (var groupSnapshot in snapshots)
+            {
+                if (!await _bookings.TryExpirePendingPaymentAsync(
+                        groupSnapshot.BookingId,
+                        groupNow,
+                        cancellationToken))
+                {
+                    throw new InvalidOperationException(
+                        "Round-trip payment expiry lost its serialized Booking transition.");
+                }
+
+                await AddHistoryAsync(groupSnapshot.BookingId, groupNow, cancellationToken);
+            }
+
+            foreach (var groupSnapshot in snapshots)
+            {
+                await CompensateAsync(groupSnapshot, cancellationToken);
+            }
+
+            return true;
         }
 
         if (!string.Equals(request.ReferenceType, BookingReferenceType, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
+
+        await _bookings.AcquirePaymentTransitionLocksAsync(
+            [request.ReferenceId],
+            cancellationToken);
 
         var snapshot = await _bookings.GetPendingPaymentTransitionSnapshotAsync(
             request.ReferenceId,
@@ -88,14 +141,28 @@ public sealed class ExpireBookingOnPaymentCommandHandler
             return false;
         }
 
-        await _statusHistory.AddAsync(
+        await AddHistoryAsync(request.ReferenceId, now, cancellationToken);
+        await CompensateAsync(snapshot, cancellationToken);
+
+        return true;
+    }
+
+    private async Task AddHistoryAsync(
+        Guid bookingId,
+        DateTimeOffset expiredAt,
+        CancellationToken cancellationToken)
+        => await _statusHistory.AddAsync(
             BookingStatusHistory.Create(
-                request.ReferenceId,
+                bookingId,
                 BookingStatus.EXPIRED,
-                now,
+                expiredAt,
                 BookingStatusHistorySource.ExpireOnPayment),
             cancellationToken);
 
+    private async Task CompensateAsync(
+        BookingPaymentTransitionSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
         var seatNumbers = snapshot.PassengerSeatAssignments
             .Select(p => p.SeatNumber)
             .ToArray();
@@ -118,7 +185,5 @@ public sealed class ExpireBookingOnPaymentCommandHandler
         {
             await _voucherService.CompensateAsync(snapshot.BookingId, cancellationToken);
         }
-
-        return true;
     }
 }

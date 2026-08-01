@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace VietRide.Parcel.Application.Features.PassengerHistory;
 
 public sealed record PassengerHistoryItemDto(
@@ -13,4 +15,6 @@ public sealed record PassengerHistoryItemDto(
     DateTimeOffset? DepartureDateTime,
     DateTimeOffset? EstimatedArrivalTime,
     TicketHistoryDetailsDto? Ticket,
-    ParcelHistoryDetailsDto? Parcel);
+    ParcelHistoryDetailsDto? Parcel,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    string? PaymentRedirectUrl = null);

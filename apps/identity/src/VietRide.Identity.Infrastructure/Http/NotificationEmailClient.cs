@@ -37,8 +37,16 @@ public sealed class NotificationEmailClient : INotificationEmailClient
             templateData = request.TemplateData,
         };
 
+        using var message = new HttpRequestMessage(HttpMethod.Post, EmailsPath)
+        {
+            Content = JsonContent.Create(body, options: JsonOptions),
+        };
+        message.Headers.TryAddWithoutValidation(
+            "Idempotency-Key",
+            request.IdempotencyKey.ToString("D"));
+
         using var response = await _httpClient
-            .PostAsJsonAsync(EmailsPath, body, JsonOptions, cancellationToken)
+            .SendAsync(message, cancellationToken)
             .ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)

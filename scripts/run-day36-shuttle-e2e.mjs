@@ -3,6 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { importPKCS8, SignJWT } from 'jose';
 import { io } from 'socket.io-client';
+import { day36IdempotencyKey } from './day36-idempotency-keys.mjs';
+import { day36StopSnapshotFixtureSql } from './day36-stop-snapshot-fixture.mjs';
+import {
+  day36SubscriptionFixtureIds,
+  day36SubscriptionFixtureSql,
+} from './day36-subscription-fixture.mjs';
 
 const root = process.cwd();
 const useDev = process.env.DAY36_E2E_USE_DEV_STACK === '1';
@@ -51,6 +57,7 @@ const ids = {
   warning60Trip: '36000000-0000-4000-8000-000000000133',
   cutoffTrip: '36000000-0000-4000-8000-000000000134',
   raceTrip: '36000000-0000-4000-8000-000000000135',
+  ...day36SubscriptionFixtureIds,
 };
 const results = [];
 
@@ -100,7 +107,9 @@ async function waitFor(url, timeoutMs = 240_000) {
     try {
       const response = await fetch(url);
       if (response.ok) return;
-    } catch {}
+    } catch {
+      // The service may still be starting.
+    }
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
   throw new Error(`Timed out waiting for ${url}`);
@@ -184,6 +193,7 @@ function seed() {
       ('${ids.operatorA}','Day 36 Operator A','D36-A-BRN','D36-A-TAX','a@day36.test','+84910036991','APPROVED',now(),true),
       ('${ids.operatorB}','Day 36 Operator B','D36-B-BRN','D36-B-TAX','b@day36.test','+84910036992','APPROVED',now(),true)
     ON CONFLICT (id) DO UPDATE SET registration_status='APPROVED',is_active=true,deleted_at=NULL;
+    ${day36SubscriptionFixtureSql(ids)}
     ${users
       .map(
         ([id, email, phone, name, role, operatorId]) => `
@@ -235,6 +245,7 @@ function seed() {
       ('${ids.raceTrip}','${ids.operatorA}','${ids.route}','${ids.mainVehicle}','${ids.mainDriver}',now()+interval '6 hours 4 minutes',now()+interval '8 hours 4 minutes','SCHEDULED','MANUAL',100000),
       ('${ids.conflictTrip}','${ids.operatorA}','${ids.route}','${ids.mainVehicle}','${ids.mainDriver}',now()+interval '2 hours',now()+interval '3 hours','SCHEDULED','MANUAL',100000)
     ON CONFLICT (id) DO UPDATE SET departure_date_time=EXCLUDED.departure_date_time,estimated_arrival_time=EXCLUDED.estimated_arrival_time,status='SCHEDULED';
+    ${day36StopSnapshotFixtureSql(ids)}
     INSERT INTO trip_seats (id,trip_id,seat_number,seat_type,status)
     SELECT ('36000000-0000-4000-8000-' || lpad((4000+n)::text,12,'0'))::uuid,'${ids.mainTrip}','D'||lpad(n::text,2,'0'),'STANDARD','AVAILABLE'
     FROM generate_series(1,20) n ON CONFLICT (trip_id,seat_number) DO UPDATE SET status='AVAILABLE',disabled_reason=NULL;
@@ -300,7 +311,7 @@ async function api(method, pathname, accessToken, body, idempotencyKey) {
         headers: {
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
           ...(body ? { 'Content-Type': 'application/json' } : {}),
-          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+          ...(idempotencyKey ? { 'Idempotency-Key': day36IdempotencyKey(idempotencyKey) } : {}),
         },
         body: body ? JSON.stringify(body) : undefined,
       });

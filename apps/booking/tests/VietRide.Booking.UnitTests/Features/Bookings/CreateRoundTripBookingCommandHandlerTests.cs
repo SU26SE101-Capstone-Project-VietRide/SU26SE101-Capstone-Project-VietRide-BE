@@ -244,6 +244,102 @@ public class CreateRoundTripBookingCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_VNPayPayment_PassesEarlierLegExpiryToPayment()
+    {
+        var now = new DateTimeOffset(2026, 7, 31, 10, 0, 0, TimeSpan.Zero);
+        var outboundExpiresAt = now.AddMinutes(9);
+        var returnExpiresAt = now.AddMinutes(6);
+        var outboundLock = OutboundLockData with { ExpiresAt = outboundExpiresAt };
+        var returnLock = ReturnLockData with { ExpiresAt = returnExpiresAt };
+        _clock.UtcNow.Returns(now);
+        _tripClient.GetTripSnapshotAsync(
+                OutboundTripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(
+                ReturnTripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(ReturnTrip);
+        _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(outboundLock, returnLock));
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<BookingEntity>());
+        _paymentClient.ChargeAsync(default!, default, default, default, default!, default!, default)
+            .ReturnsForAnyArgs(new ChargeOutcome.Success(
+                new ChargeResult(
+                    Guid.NewGuid(),
+                    "PENDING_REDIRECT",
+                    "https://vnpay.vn/pay?token=round-trip")));
+
+        var result = await BuildSut().Handle(
+            BuildCommand(paymentMethod: "VNPAY"),
+            CancellationToken.None);
+
+        result.Status.Should().Be("PENDING_PAYMENT");
+        await _paymentClient.Received(1).ChargeAsync(
+            "BOOKING_GROUP",
+            result.BookingGroupId,
+            PassengerUserId,
+            380_000,
+            "VNPAY",
+            "round-trip-idempotency-key",
+            Arg.Any<CancellationToken>(),
+            Arg.Any<PaymentContextSnapshot>(),
+            returnExpiresAt);
+        await _paymentClient.DidNotReceiveWithAnyArgs()
+            .BatchChargeAsync(default, default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task Handle_WhenEarlierLegDeadlineElapsesBeforeCharge_ReleasesBothLocksAndSkipsPayment()
+    {
+        var startedAt = new DateTimeOffset(2026, 7, 31, 10, 0, 0, TimeSpan.Zero);
+        var expiresAt = startedAt.AddMinutes(1);
+        var outboundLock = OutboundLockData with { ExpiresAt = expiresAt.AddMinutes(1) };
+        var returnLock = ReturnLockData with { ExpiresAt = expiresAt };
+        _clock.UtcNow.Returns(startedAt, expiresAt);
+        _tripClient.GetTripSnapshotAsync(
+                OutboundTripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(
+                ReturnTripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(ReturnTrip);
+        _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(outboundLock, returnLock));
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<BookingEntity>());
+
+        var act = () => BuildSut().Handle(
+            BuildCommand(paymentMethod: "VNPAY"),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<VietRide.Booking.Application.Exceptions.BookingPaymentException>()
+            .Where(exception =>
+                exception.StatusCode == 422
+                && exception.ErrorCode == "PAYMENT_DEADLINE_PASSED");
+        await _bookingService.Received(1).ReleaseSeatsAsync(
+            OutboundTripId,
+            OutboundLockData.SeatLockToken,
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Any<CancellationToken>());
+        await _bookingService.Received(1).ReleaseSeatsAsync(
+            ReturnTripId,
+            ReturnLockData.SeatLockToken,
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Any<CancellationToken>());
+        await _paymentClient.DidNotReceiveWithAnyArgs()
+            .ChargeAsync(default!, default, default, default, default!, default!, default);
+        await _paymentClient.DidNotReceiveWithAnyArgs()
+            .BatchChargeAsync(default, default!, default!, default!, default);
+    }
+
+    [Fact]
     public async Task Handle_WalletPayment_WithShuttleOnBothLegs_PersistsTwoActiveIntents()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);

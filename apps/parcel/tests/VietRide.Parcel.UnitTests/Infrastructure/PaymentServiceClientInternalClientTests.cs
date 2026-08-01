@@ -153,6 +153,93 @@ public class PaymentServiceClientInternalClientTests
         result.Kind.Should().Be(RefundOutcomeKind.TransportError);
     }
 
+    [Fact]
+    public async Task RedirectLookupAsync_SendsOneReadOnlyBatchAndReadsRawResponse()
+    {
+        var userId = Guid.NewGuid();
+        var parcelId = Guid.NewGuid();
+        var paymentId = Guid.NewGuid();
+        var dueAt = new DateTimeOffset(2026, 8, 1, 4, 0, 0, TimeSpan.Zero);
+        var body = JsonSerializer.Serialize(new[]
+        {
+            new
+            {
+                paymentId,
+                referenceType = "PARCEL",
+                referenceId = parcelId,
+                amount = 30_000L,
+                dueAt,
+                paymentRedirectUrl = "https://sandbox.vnpayment.vn/deposit",
+            },
+        }, JsonOptions);
+        var client = BuildRedirectLookupClient(new FakeMessageHandler(HttpStatusCode.OK, body));
+
+        var result = await client.LookupAsync(
+            userId,
+            [new PaymentRedirectLookupReference("PARCEL", parcelId)]);
+
+        result.Should().ContainSingle().Which.Should().Be(new PaymentRedirectLookupItem(
+            paymentId,
+            "PARCEL",
+            parcelId,
+            30_000,
+            dueAt,
+            "https://sandbox.vnpayment.vn/deposit"));
+        _handler.LastRequest.Should().NotBeNull();
+        _handler.LastRequest!.Method.Should().Be(HttpMethod.Post);
+        _handler.LastRequest.RequestUri!.AbsolutePath.Should()
+            .Be("/internal/v1/payments/redirect-sessions/lookup");
+        _handler.LastRequest.Headers.Contains("Idempotency-Key").Should().BeFalse();
+        using var requestBody = JsonDocument.Parse(_handler.LastBody!);
+        requestBody.RootElement.GetProperty("userId").GetGuid().Should().Be(userId);
+        requestBody.RootElement.GetProperty("references").GetArrayLength().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RedirectLookupAsync_MalformedPayloadFailsOpen()
+    {
+        var client = BuildRedirectLookupClient(
+            new FakeMessageHandler(HttpStatusCode.OK, "{not-json"));
+
+        var result = await client.LookupAsync(
+            Guid.NewGuid(),
+            [new PaymentRedirectLookupReference("PARCEL", Guid.NewGuid())]);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RedirectLookupAsync_NonSuccessAndTimeoutFailOpen()
+    {
+        var reference = new PaymentRedirectLookupReference("PARCEL_ADDITIONAL", Guid.NewGuid());
+        var nonSuccess = BuildRedirectLookupClient(
+            new FakeMessageHandler(HttpStatusCode.ServiceUnavailable, "{}"));
+
+        var nonSuccessResult = await nonSuccess.LookupAsync(Guid.NewGuid(), [reference]);
+        var timeout = BuildRedirectLookupClient(
+            new ExceptionMessageHandler(new TaskCanceledException("timeout")));
+        var timeoutResult = await timeout.LookupAsync(Guid.NewGuid(), [reference]);
+
+        nonSuccessResult.Should().BeEmpty();
+        timeoutResult.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RedirectLookupAsync_CallerCancellationPropagates()
+    {
+        var client = BuildRedirectLookupClient(
+            new ExceptionMessageHandler(new InvalidOperationException("must not be observed")));
+        using var source = new CancellationTokenSource();
+        source.Cancel();
+
+        var action = () => client.LookupAsync(
+            Guid.NewGuid(),
+            [new PaymentRedirectLookupReference("PARCEL", Guid.NewGuid())],
+            source.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     private PaymentServiceClient BuildClient(HttpStatusCode status, string body)
     {
         _handler = new FakeMessageHandler(status, body);
@@ -161,5 +248,17 @@ public class PaymentServiceClientInternalClientTests
             BaseAddress = new Uri("http://payment-service"),
         };
         return new PaymentServiceClient(httpClient, NullLogger<PaymentServiceClient>.Instance);
+    }
+
+    private PaymentRedirectLookupClient BuildRedirectLookupClient(HttpMessageHandler handler)
+    {
+        if (handler is FakeMessageHandler fakeHandler)
+            _handler = fakeHandler;
+
+        var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://payment-service"),
+        };
+        return new PaymentRedirectLookupClient(httpClient);
     }
 }

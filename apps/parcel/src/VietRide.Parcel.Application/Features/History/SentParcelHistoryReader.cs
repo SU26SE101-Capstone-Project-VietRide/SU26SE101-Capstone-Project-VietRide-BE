@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Features.PassengerHistory;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Kernel.Primitives;
+using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
 namespace VietRide.Parcel.Application.Features.History;
 
@@ -27,6 +29,69 @@ public sealed class SentParcelHistoryReader
         int pageSize,
         CancellationToken cancellationToken)
     {
+        var context = await LoadPageAsync(
+            userId,
+            statusValue,
+            fromValue,
+            toValue,
+            page,
+            pageSize,
+            cancellationToken);
+        var items = context.Page.Items
+            .Select(parcel => MapHistoryItem(parcel, context.TripSnapshots))
+            .ToList();
+
+        return PagedResult<SentParcelHistoryItemDto>.Create(
+            items,
+            context.Page.Page,
+            context.Page.PageSize,
+            context.Page.TotalItems);
+    }
+
+    internal async Task<PagedResult<PassengerParcelHistoryProjection>> ReadForPassengerHistoryAsync(
+        Guid userId,
+        string? statusValue,
+        string? fromValue,
+        string? toValue,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        var context = await LoadPageAsync(
+            userId,
+            statusValue,
+            fromValue,
+            toValue,
+            page,
+            pageSize,
+            cancellationToken);
+        var items = context.Page.Items.Select(parcel => new PassengerParcelHistoryProjection(
+            MapHistoryItem(parcel, context.TripSnapshots),
+            parcel.Status,
+            parcel.DepositPaymentId,
+            parcel.BalancePaymentId,
+            RemainingAmount(parcel.DepositRequiredVnd.Amount, parcel.DepositPaidVnd.Amount),
+            RemainingAmount(parcel.BalanceRequiredVnd.Amount, parcel.BalancePaidVnd.Amount),
+            parcel.LatestCheckInAt,
+            parcel.FinalPaymentDeadline))
+            .ToList();
+
+        return PagedResult<PassengerParcelHistoryProjection>.Create(
+            items,
+            context.Page.Page,
+            context.Page.PageSize,
+            context.Page.TotalItems);
+    }
+
+    private async Task<SentHistoryReadContext> LoadPageAsync(
+        Guid userId,
+        string? statusValue,
+        string? fromValue,
+        string? toValue,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
         var range = ParcelHistoryDateRange.Parse(fromValue, toValue);
         var status = statusValue is null
             ? (ParcelStatus?)null
@@ -43,33 +108,34 @@ public sealed class SentParcelHistoryReader
             result.Items.Select(parcel => parcel.TripId).Distinct(),
             cancellationToken);
 
-        var items = result.Items.Select(parcel =>
-        {
-            snapshots.TryGetValue(parcel.TripId, out var trip);
-            return new SentParcelHistoryItemDto(
-                parcel.Id,
-                parcel.ParcelCode,
-                parcel.TripId,
-                parcel.Status.ToString(),
-                parcel.CreatedAt,
-                parcel.TotalPrice.Amount,
-                trip?.OriginStation.Name,
-                trip?.DestinationStation.Name,
-                trip?.DepartureDateTime,
-                trip?.EstimatedArrivalTime,
-                parcel.BookingId,
-                parcel.RecipientName,
-                parcel.SizeCategory.ToString(),
-                parcel.PhotoUrl,
-                parcel.DeliveryMethod.ToString());
-        }).ToList();
-
-        return PagedResult<SentParcelHistoryItemDto>.Create(
-            items,
-            result.Page,
-            result.PageSize,
-            result.TotalItems);
+        return new SentHistoryReadContext(result, snapshots);
     }
+
+    private static SentParcelHistoryItemDto MapHistoryItem(
+        ParcelEntity parcel,
+        IReadOnlyDictionary<Guid, TripParcelSnapshot> snapshots)
+    {
+        snapshots.TryGetValue(parcel.TripId, out var trip);
+        return new SentParcelHistoryItemDto(
+            parcel.Id,
+            parcel.ParcelCode,
+            parcel.TripId,
+            parcel.Status.ToString(),
+            parcel.CreatedAt,
+            parcel.TotalPrice.Amount,
+            trip?.OriginStation.Name,
+            trip?.DestinationStation.Name,
+            trip?.DepartureDateTime,
+            trip?.EstimatedArrivalTime,
+            parcel.BookingId,
+            parcel.RecipientName,
+            parcel.SizeCategory.ToString(),
+            parcel.PhotoUrl,
+            parcel.DeliveryMethod.ToString());
+    }
+
+    private static long RemainingAmount(long required, long paid)
+        => required <= paid ? 0 : required - paid;
 
     private async Task<IReadOnlyDictionary<Guid, TripParcelSnapshot>> LoadTripSnapshotsAsync(
         IEnumerable<Guid> tripIds,
@@ -103,4 +169,8 @@ public sealed class SentParcelHistoryReader
         await Task.WhenAll(tasks);
         return snapshots;
     }
+
+    private sealed record SentHistoryReadContext(
+        PagedResult<ParcelEntity> Page,
+        IReadOnlyDictionary<Guid, TripParcelSnapshot> TripSnapshots);
 }

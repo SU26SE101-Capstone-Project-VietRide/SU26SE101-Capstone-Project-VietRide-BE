@@ -56,6 +56,9 @@ public abstract record ChargeOutcome
     /// </summary>
     public sealed record InsufficientFunds(string Message) : ChargeOutcome;
 
+    /// <summary>The authoritative Payment deadline has already elapsed.</summary>
+    public sealed record DeadlinePassed(string Message) : ChargeOutcome;
+
     /// <summary>Unexpected HTTP / transport error.</summary>
     public sealed record TransportError(string Message) : ChargeOutcome;
 }
@@ -97,7 +100,8 @@ public interface IPaymentServiceClient
         string method,
         string idempotencyKey,
         CancellationToken cancellationToken = default,
-        PaymentContextSnapshot? context = null);
+        PaymentContextSnapshot? context = null,
+        DateTimeOffset? dueAt = null);
 
     Task<BatchChargeOutcome> BatchChargeAsync(
         Guid userId,

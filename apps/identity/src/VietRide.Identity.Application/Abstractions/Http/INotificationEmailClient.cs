@@ -6,6 +6,8 @@ namespace VietRide.Identity.Application.Abstractions.Http;
 /// <c>CreateEmailSend</c> contract: <c>{ notificationId?, toEmail, templateKey,
 /// templateData }</c> (BSOT §5.1 internal-email contract).
 /// </summary>
+/// <param name="IdempotencyKey">Stable UUID-v4 for this email operation. It is
+/// sent as the HTTP <c>Idempotency-Key</c> header and reused by transport retries.</param>
 /// <param name="ToEmail">Recipient address.</param>
 /// <param name="TemplateKey">Notification <c>EmailTemplateKey</c> value
 /// (e.g. <c>AUTH_OTP</c>, <c>SET_INITIAL_PASSWORD</c>).</param>
@@ -15,6 +17,7 @@ namespace VietRide.Identity.Application.Abstractions.Http;
 /// <param name="NotificationId">Optional related notification id; null for
 /// standalone transactional emails.</param>
 public sealed record NotificationEmailRequest(
+    Guid IdempotencyKey,
     string ToEmail,
     string TemplateKey,
     IReadOnlyDictionary<string, object?> TemplateData,

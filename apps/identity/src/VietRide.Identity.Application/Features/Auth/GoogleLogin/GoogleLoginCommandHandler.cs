@@ -117,7 +117,8 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
                 DisplayName: user.DisplayName,
                 Role: user.Role.ToString(),
                 OperatorId: user.OperatorId,
-                Status: user.Status.ToString()));
+                Status: user.Status.ToString(),
+                AvatarUrl: user.AvatarUrl));
     }
 
     private static void EnsureCanLogin(User user)

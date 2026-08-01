@@ -85,12 +85,20 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
         long refundAmount,
         CancellationToken cancellationToken)
     {
-        if (refundAmount <= 0)
+        if (refundAmount < 0)
             throw new ArgumentOutOfRangeException(nameof(refundAmount));
 
         var allocation = context.Allocations.SingleOrDefault(item =>
             item.ReferenceId == allocationReferenceId)
             ?? throw new InvalidOperationException("Refund allocation is missing from payment context.");
+        if (await IsRefundRecordedAsync(
+            sourceEventId,
+            allocationReferenceId,
+            cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
         var referenceType = allocation.ReferenceType == "BOOKING"
             ? OperatorLedgerReferenceType.BOOKING
             : OperatorLedgerReferenceType.PARCEL;
@@ -98,16 +106,19 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
             ? OperatorLedgerEntryType.BOOKING_REFUND
             : OperatorLedgerEntryType.PARCEL_REFUND;
 
-        await _ledger.AddAsync(
-            OperatorLedgerEntry.Create(
-                allocation.OperatorId,
-                allocation.TripId,
-                entryType,
-                -refundAmount,
-                referenceType,
-                allocation.ReferenceId,
-                sourceEventId),
-            cancellationToken);
+        if (refundAmount > 0)
+        {
+            await _ledger.AddAsync(
+                OperatorLedgerEntry.Create(
+                    allocation.OperatorId,
+                    allocation.TripId,
+                    entryType,
+                    -refundAmount,
+                    referenceType,
+                    allocation.ReferenceId,
+                    sourceEventId),
+                cancellationToken);
+        }
 
         if (allocation.ReferenceType == "BOOKING"
             && allocation.VoucherVietRideFundedAmount > 0)
@@ -123,6 +134,97 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                     sourceEventId,
                     "reverse-vietride-funded-voucher"),
                 cancellationToken);
+        }
+    }
+
+    public Task<bool> IsRefundRecordedAsync(
+        Guid sourceEventId,
+        Guid allocationReferenceId,
+        CancellationToken cancellationToken)
+        => _ledger.HasSourceEntryAsync(
+            sourceEventId,
+            allocationReferenceId,
+            cancellationToken);
+
+    public async Task RecordGenericBookingRefundEntitlementAsync(
+        Guid sourceEventId,
+        PaymentContextV1 context,
+        Guid allocationReferenceId,
+        CancellationToken cancellationToken)
+    {
+        var allocation = context.Allocations.SingleOrDefault(item =>
+            item.ReferenceType == "BOOKING" && item.ReferenceId == allocationReferenceId)
+            ?? throw new InvalidOperationException("Booking refund allocation is missing from payment context.");
+        if (await IsRefundRecordedAsync(
+            sourceEventId,
+            allocationReferenceId,
+            cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        await _ledger.AddAsync(
+            OperatorLedgerEntry.Create(
+                allocation.OperatorId,
+                allocation.TripId,
+                OperatorLedgerEntryType.ADJUSTMENT,
+                0,
+                OperatorLedgerReferenceType.BOOKING,
+                allocation.ReferenceId,
+                sourceEventId,
+                "generic-booking-refund-entitlement"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task RecordCorrelatedBookingRefundAsync(
+        Guid sourceEventId,
+        Guid voucherAdjustmentSourceEventId,
+        PaymentContextV1 context,
+        Guid allocationReferenceId,
+        long refundAmount,
+        CancellationToken cancellationToken)
+    {
+        if (refundAmount < 0)
+            throw new ArgumentOutOfRangeException(nameof(refundAmount));
+
+        var allocation = context.Allocations.SingleOrDefault(item =>
+            item.ReferenceType == "BOOKING" && item.ReferenceId == allocationReferenceId)
+            ?? throw new InvalidOperationException("Booking refund allocation is missing from payment context.");
+        if (refundAmount > 0
+            && !await IsRefundRecordedAsync(
+                sourceEventId,
+                allocationReferenceId,
+                cancellationToken).ConfigureAwait(false))
+        {
+            await _ledger.AddAsync(
+                OperatorLedgerEntry.Create(
+                    allocation.OperatorId,
+                    allocation.TripId,
+                    OperatorLedgerEntryType.BOOKING_REFUND,
+                    -refundAmount,
+                    OperatorLedgerReferenceType.BOOKING,
+                    allocation.ReferenceId,
+                    sourceEventId),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (allocation.VoucherVietRideFundedAmount > 0
+            && !await IsRefundRecordedAsync(
+                voucherAdjustmentSourceEventId,
+                allocationReferenceId,
+                cancellationToken).ConfigureAwait(false))
+        {
+            await _ledger.AddAsync(
+                OperatorLedgerEntry.Create(
+                    allocation.OperatorId,
+                    allocation.TripId,
+                    OperatorLedgerEntryType.ADJUSTMENT,
+                    -allocation.VoucherVietRideFundedAmount,
+                    OperatorLedgerReferenceType.BOOKING,
+                    allocation.ReferenceId,
+                    voucherAdjustmentSourceEventId,
+                    "reverse-vietride-funded-voucher"),
+                cancellationToken).ConfigureAwait(false);
         }
     }
 }

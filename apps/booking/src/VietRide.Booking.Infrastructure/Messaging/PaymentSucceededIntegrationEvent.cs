@@ -11,6 +11,9 @@ public sealed record PaymentSucceededIntegrationEvent : IIntegrationEvent
     public string ReferenceType { get; init; } = string.Empty;
     public Guid ReferenceId { get; init; }
     public long Amount { get; init; }
+    public string Method { get; init; } = string.Empty;
+    public DateTimeOffset? PaidAt { get; init; }
+    public DateTimeOffset? DueAt { get; init; }
 
     [JsonIgnore]
     public Guid EventId => PaymentId;

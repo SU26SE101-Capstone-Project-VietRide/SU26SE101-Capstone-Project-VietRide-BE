@@ -44,16 +44,19 @@ public sealed class PaymentEventHandlersTests
     [Fact]
     public async Task ConfirmBookingOnPayment_WhenPending_BooksPersistedLockConfirmsAndEmitsOnce()
     {
-        _bookings.GetPendingPaymentTransitionSnapshotAsync(BookingId, Arg.Any<CancellationToken>())
-            .Returns(CreateSnapshot());
-        _tripClient.BookSeatsAsync(
+        var booking = CreateBookingProjection(Guid.NewGuid(), 200_000);
+        var snapshot = CreateSnapshot(bookingId: booking.Id);
+        _bookings.QueryNoTracking().Returns(new[] { booking }.AsQueryable());
+        _bookings.GetPendingPaymentTransitionSnapshotAsync(booking.Id, Arg.Any<CancellationToken>())
+            .Returns(snapshot);
+        _tripClient.ConfirmBookedSeatsAsync(
                 TripId,
                 SeatLockToken,
-                BookingId,
+                booking.Id,
                 Arg.Any<IReadOnlyList<PassengerSeatAssignment>>(),
                 Arg.Any<CancellationToken>())
-            .Returns(true);
-        _bookings.TryConfirmPendingPaymentAsync(BookingId, Now, Arg.Any<CancellationToken>())
+            .Returns(new SeatConfirmationOutcome.Success());
+        _bookings.TryConfirmPendingPaymentAsync(booking.Id, Now, Arg.Any<CancellationToken>())
             .Returns(true);
 
         var handler = new ConfirmBookingOnPaymentCommandHandler(
@@ -65,12 +68,12 @@ public sealed class PaymentEventHandlersTests
             _statusHistory);
 
         var transitioned = await handler.Handle(
-            new ConfirmBookingOnPaymentCommand(PaymentId, "BOOKING", BookingId, 200_000),
+            new ConfirmBookingOnPaymentCommand(PaymentId, "BOOKING", booking.Id, 200_000),
             CancellationToken.None);
 
         transitioned.Should().BeTrue();
         await _statusHistory.Received(1).AddAsync(
-            Arg.Is<BookingStatusHistory>(history => history.BookingId == BookingId
+            Arg.Is<BookingStatusHistory>(history => history.BookingId == booking.Id
                 && history.Status == BookingStatus.CONFIRMED
                 && history.OccurredAt == Now
                 && history.Source == "CONFIRM_ON_PAYMENT"
@@ -87,15 +90,16 @@ public sealed class PaymentEventHandlersTests
         await _outbox.Received(1)
             .EnqueueAsync(
                 "booking.booking.confirmed",
-                Arg.Is<string>(json => json.Contains(BookingId.ToString(), StringComparison.OrdinalIgnoreCase)),
+                Arg.Is<string>(json => json.Contains(booking.Id.ToString(), StringComparison.OrdinalIgnoreCase)),
                 Arg.Any<CancellationToken>());
     }
 
     [Fact]
     public async Task ConfirmBookingOnPayment_WhenAlreadyConfirmed_IsNoOpWithoutOutbox()
     {
-        _bookings.GetPendingPaymentTransitionSnapshotAsync(BookingId, Arg.Any<CancellationToken>())
-            .Returns((BookingPaymentTransitionSnapshot?)null);
+        var booking = CreateBookingProjection(Guid.NewGuid(), 200_000);
+        booking.Confirm(Now.AddMinutes(-1));
+        _bookings.QueryNoTracking().Returns(new[] { booking }.AsQueryable());
 
         var handler = new ConfirmBookingOnPaymentCommandHandler(
             _bookings,
@@ -106,15 +110,109 @@ public sealed class PaymentEventHandlersTests
             _statusHistory);
 
         var transitioned = await handler.Handle(
-            new ConfirmBookingOnPaymentCommand(PaymentId, "BOOKING", BookingId, 200_000),
+            new ConfirmBookingOnPaymentCommand(PaymentId, "BOOKING", booking.Id, 200_000),
             CancellationToken.None);
 
         transitioned.Should().BeFalse();
         await _statusHistory.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
         await _tripClient.DidNotReceiveWithAnyArgs()
-            .BookSeatsAsync(default, default, default, default!, default);
+            .ConfirmBookedSeatsAsync(default, default, default, default!, default);
         await _outbox.DidNotReceiveWithAnyArgs()
             .EnqueueAsync(default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ConfirmBookingOnPayment_WhenOnTimeVnPayFindsCancelled_PreservesStateAndRequestsExactRefund()
+    {
+        var booking = CreateBookingProjection(Guid.NewGuid(), 200_000);
+        booking.Cancel(BookingCancellationReason.USER_INITIATED, Now.AddMinutes(-1));
+        _bookings.QueryNoTracking().Returns(new[] { booking }.AsQueryable());
+
+        var handler = new ConfirmBookingOnPaymentCommandHandler(
+            _bookings,
+            _tripClient,
+            _outbox,
+            _clock,
+            NullLogger<ConfirmBookingOnPaymentCommandHandler>.Instance,
+            _statusHistory);
+
+        var transitioned = await handler.Handle(
+            new ConfirmBookingOnPaymentCommand(
+                PaymentId,
+                "BOOKING",
+                booking.Id,
+                200_000,
+                "VNPAY",
+                Now.AddMinutes(-1),
+                Now.AddMinutes(1)),
+            CancellationToken.None);
+
+        transitioned.Should().BeFalse();
+        booking.Status.Should().Be(BookingStatus.CANCELLED);
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .ConfirmBookedSeatsAsync(default, default, default, default!, default);
+        await _outbox.Received(1).EnqueueAsync(
+            "booking.payment_refund.requested",
+            Arg.Is<string>(payload =>
+                payload.Contains(PaymentId.ToString(), StringComparison.OrdinalIgnoreCase)
+                && payload.Contains(booking.Id.ToString(), StringComparison.OrdinalIgnoreCase)
+                && payload.Contains("SEAT_CONFIRMATION_FAILED", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ConfirmBookingOnPayment_WhenOnTimeGroupHasConfirmedLeg_ExpiresPendingLegAndRefundsBoth()
+    {
+        var firstBooking = CreateBookingProjection(BookingGroupId, 200_000);
+        var secondBooking = CreateBookingProjection(BookingGroupId, 300_000);
+        firstBooking.Confirm(Now.AddMinutes(-1));
+        _bookings.QueryNoTracking().Returns(new[]
+        {
+            firstBooking,
+            secondBooking,
+        }.AsQueryable());
+        _bookings.TryExpirePendingPaymentAsync(
+                secondBooking.Id,
+                Now,
+                Arg.Any<CancellationToken>())
+            .Returns(true);
+        var payloads = new List<string>();
+        _outbox.When(outbox => outbox.EnqueueAsync(
+                "booking.payment_refund.requested",
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>()))
+            .Do(call => payloads.Add(call.ArgAt<string>(1)));
+
+        var handler = new ConfirmBookingOnPaymentCommandHandler(
+            _bookings,
+            _tripClient,
+            _outbox,
+            _clock,
+            NullLogger<ConfirmBookingOnPaymentCommandHandler>.Instance,
+            _statusHistory);
+
+        var transitioned = await handler.Handle(
+            new ConfirmBookingOnPaymentCommand(
+                PaymentId,
+                "BOOKING_GROUP",
+                BookingGroupId,
+                500_000,
+                "VNPAY",
+                Now.AddMinutes(-1),
+                Now.AddMinutes(1)),
+            CancellationToken.None);
+
+        transitioned.Should().BeTrue();
+        firstBooking.Status.Should().Be(BookingStatus.CONFIRMED);
+        await _bookings.Received(1).TryExpirePendingPaymentAsync(
+            secondBooking.Id,
+            Now,
+            Arg.Any<CancellationToken>());
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .ConfirmBookedRoundTripSeatsAsync(default!, default!, default, default);
+        payloads.Should().HaveCount(2);
+        payloads.Should().OnlyContain(payload =>
+            payload.Contains("SEAT_CONFIRMATION_FAILED", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -138,14 +236,19 @@ public sealed class PaymentEventHandlersTests
             .Returns(firstSnapshot);
         _bookings.GetPendingPaymentTransitionSnapshotAsync(secondBooking.Id, Arg.Any<CancellationToken>())
             .Returns(secondSnapshot);
-        _tripClient.BookRoundTripSeatsAsync(
+        _tripClient.ConfirmBookedRoundTripSeatsAsync(
                 Arg.Any<RoundTripBookSeatsLeg>(),
                 Arg.Any<RoundTripBookSeatsLeg>(),
                 Arg.Any<CancellationToken>(),
                 PaymentId)
+            .Returns(new SeatConfirmationOutcome.Success());
+        _bookings.TryConfirmPendingPaymentGroupAsync(
+                Arg.Is<IReadOnlyCollection<Guid>>(ids =>
+                    ids.Order().SequenceEqual(
+                        new[] { firstBooking.Id, secondBooking.Id }.Order())),
+                Now,
+                Arg.Any<CancellationToken>())
             .Returns(true);
-        _bookings.TryConfirmPendingPaymentAsync(firstBooking.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
-        _bookings.TryConfirmPendingPaymentAsync(secondBooking.Id, Now, Arg.Any<CancellationToken>()).Returns(true);
 
         var handler = new ConfirmBookingOnPaymentCommandHandler(
             _bookings,
@@ -160,7 +263,7 @@ public sealed class PaymentEventHandlersTests
             CancellationToken.None);
 
         transitioned.Should().BeTrue();
-        await _tripClient.Received(1).BookRoundTripSeatsAsync(
+        await _tripClient.Received(1).ConfirmBookedRoundTripSeatsAsync(
             Arg.Any<RoundTripBookSeatsLeg>(),
             Arg.Any<RoundTripBookSeatsLeg>(),
             Arg.Any<CancellationToken>(),

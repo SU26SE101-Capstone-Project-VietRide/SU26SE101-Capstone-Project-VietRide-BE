@@ -51,6 +51,30 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_WhenLegacyDueAtIsNull_PublishesCreatedAtPlusFifteenMinutes()
+    {
+        var userId = Guid.NewGuid();
+        var bookingId = Guid.NewGuid();
+        var payment = CreatePendingPayment(userId, bookingId, "legacy-due-at", 250_000);
+        payment.DueAt.Should().BeNull();
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(
+            new FakeVnPayClient(isSignatureValid: true),
+            new FakePaymentRepository(payment),
+            new FakePlatformWalletRepository(Money.FromRaw(1_000_000)),
+            outbox);
+
+        await handler.Handle(
+            CreateCommand("legacy-due-at", "00", "25000000"),
+            CancellationToken.None);
+
+        using var payload = JsonDocument.Parse(
+            outbox.Events.Single(evt => evt.EventType == "payment.payment.succeeded").Payload);
+        payload.RootElement.GetProperty("dueAt").GetDateTimeOffset()
+            .Should().Be(payment.CreatedAt.AddMinutes(15));
+    }
+
+    [Fact]
     public async Task Handle_WhenSameIpnReplays_DoesNotDoubleCreditOrEnqueue()
     {
         var userId = Guid.NewGuid();
@@ -120,6 +144,113 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
         payment.Status.Should().Be(PaymentStatus.PENDING_REDIRECT);
         platformWallets.Transactions.Should().BeEmpty();
         outbox.Events.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_WhenMerchantIsInvalid_DoesNotMutateState()
+    {
+        var payment = CreatePendingPayment(Guid.NewGuid(), Guid.NewGuid(), "merchant-invalid", 250_000);
+        var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(1_000_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(
+            new FakeVnPayClient(isSignatureValid: true, isExpectedMerchant: false),
+            new FakePaymentRepository(payment),
+            platformWallets,
+            outbox);
+
+        var result = await handler.Handle(
+            CreateCommand("merchant-invalid", "00", "25000000"),
+            CancellationToken.None);
+
+        result.RspCode.Should().Be("99");
+        payment.Status.Should().Be(PaymentStatus.PENDING_REDIRECT);
+        platformWallets.Transactions.Should().BeEmpty();
+        outbox.Events.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("20260230010101")]
+    [InlineData("2026-06-24T17:00:00")]
+    public async Task Handle_WhenPayDateIsMissingOrInvalid_DoesNotMutateState(string? payDate)
+    {
+        var payment = CreatePendingPayment(Guid.NewGuid(), Guid.NewGuid(), "pay-date-invalid", 250_000);
+        var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(1_000_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(
+            new FakeVnPayClient(isSignatureValid: true),
+            new FakePaymentRepository(payment),
+            platformWallets,
+            outbox);
+
+        var result = await handler.Handle(
+            CreateCommand("pay-date-invalid", "00", "25000000", payDate: payDate),
+            CancellationToken.None);
+
+        result.RspCode.Should().Be("99");
+        payment.Status.Should().Be(PaymentStatus.PENDING_REDIRECT);
+        platformWallets.Transactions.Should().BeEmpty();
+        outbox.Events.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("24999900", "00")]
+    [InlineData("not-an-amount", "00")]
+    [InlineData("25000000", "")]
+    public async Task Handle_WhenSignedAmountOrTransactionStatusIsInvalid_DoesNotMutateState(
+        string signedAmount,
+        string transactionStatus)
+    {
+        var payment = CreatePendingPayment(Guid.NewGuid(), Guid.NewGuid(), "signed-facts-invalid", 250_000);
+        var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(1_000_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(
+            new FakeVnPayClient(isSignatureValid: true),
+            new FakePaymentRepository(payment),
+            platformWallets,
+            outbox);
+
+        var result = await handler.Handle(
+            CreateCommand("signed-facts-invalid", "00", signedAmount, transactionStatus),
+            CancellationToken.None);
+
+        result.RspCode.Should().Be(signedAmount == "25000000" ? "99" : "04");
+        payment.Status.Should().Be(PaymentStatus.PENDING_REDIRECT);
+        platformWallets.Transactions.Should().BeEmpty();
+        outbox.Events.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_WhenExpiryWonButSignedPaymentWasOnTime_RecordsCaptureAndPublishesSuccessOnce()
+    {
+        var dueAt = Now;
+        var payment = CreatePendingPayment(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "expiry-won-on-time",
+            250_000,
+            dueAt);
+        payment.CreatedAt = Now.AddMinutes(-5);
+        payment.MarkExpired(Now);
+        var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(1_000_000));
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(
+            new FakeVnPayClient(isSignatureValid: true),
+            new FakePaymentRepository(payment),
+            platformWallets,
+            outbox);
+
+        var result = await handler.Handle(
+            CreateCommand("expiry-won-on-time", "00", "25000000", payDate: "20260624165959"),
+            CancellationToken.None);
+
+        result.RspCode.Should().Be("00");
+        payment.Status.Should().Be(PaymentStatus.SUCCEEDED);
+        payment.ExpiredAt.Should().Be(Now);
+        payment.SucceededAt.Should().Be(Now.AddSeconds(-1));
+        platformWallets.Transactions.Should().ContainSingle();
+        outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.payment.succeeded");
     }
 
     [Fact]
@@ -208,7 +339,7 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
         string responseCode,
         string signedAmount,
         string transactionStatus = "00",
-        string? payDate = null)
+        string? payDate = "20260624170000")
     {
         var parameters = new Dictionary<string, string>
         {
@@ -223,15 +354,22 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
         return new ConfirmBookingPaymentCommand(parameters);
     }
 
-    private static PaymentEntity CreatePendingPayment(Guid userId, Guid bookingId, string txnRef, long amount)
+    private static PaymentEntity CreatePendingPayment(
+        Guid userId,
+        Guid bookingId,
+        string txnRef,
+        long amount,
+        DateTimeOffset? dueAt = null)
     {
-        var payment = PaymentEntity.CreatePendingRedirectVnPayBooking(
+        var payment = PaymentEntity.CreatePendingRedirectVnPay(
+            PaymentReferenceType.BOOKING,
             bookingId,
             userId,
             Money.FromRaw(amount),
             txnRef,
             $"idem-{txnRef}",
-            "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html");
+            "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+            dueAt);
         payment.AttachContext(PaymentContextCodec.ValidateAndSerialize(
             new PaymentContextV1(1,
             [
@@ -319,11 +457,16 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
     private sealed class FakeVnPayClient : IVnPayClient
     {
         private readonly bool _isSignatureValid;
+        private readonly bool _isExpectedMerchant;
         private readonly HashSet<string> _reserved = new(StringComparer.Ordinal);
 
-        public FakeVnPayClient(bool isSignatureValid, IEnumerable<string>? reservedTxnRefs = null)
+        public FakeVnPayClient(
+            bool isSignatureValid,
+            IEnumerable<string>? reservedTxnRefs = null,
+            bool isExpectedMerchant = true)
         {
             _isSignatureValid = isSignatureValid;
+            _isExpectedMerchant = isExpectedMerchant;
             if (reservedTxnRefs is not null)
             {
                 foreach (var txnRef in reservedTxnRefs)
@@ -347,6 +490,9 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
 
         public bool VerifySignature(IReadOnlyDictionary<string, string> parameters)
             => _isSignatureValid;
+
+        public bool IsExpectedMerchant(IReadOnlyDictionary<string, string> parameters)
+            => _isExpectedMerchant;
 
         public Task<bool> TryReserveIpnAsync(string vnPayTxnRef, CancellationToken cancellationToken)
         {
@@ -420,8 +566,8 @@ public sealed class ConfirmBookingPaymentCommandHandlerTests
             Guid userId, Guid referenceId, Money amount, WalletTransactionRef walletRef, CancellationToken ct)
             => throw new NotSupportedException("Confirm booking payment tests do not debit user wallets.");
 
-        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
-            DateTimeOffset expiresBefore,
+        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectDueAsync(
+            DateTimeOffset legacyCreatedAtOrBefore,
             DateTimeOffset expiredAt,
             CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<PaymentEntity>>([]);

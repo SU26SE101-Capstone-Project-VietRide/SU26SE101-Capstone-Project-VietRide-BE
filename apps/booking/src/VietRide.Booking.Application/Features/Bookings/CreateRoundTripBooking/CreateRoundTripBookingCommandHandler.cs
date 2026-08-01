@@ -154,9 +154,13 @@ public sealed class CreateRoundTripBookingCommandHandler
             ttlSeconds: SeatLockTtlSeconds,
             cancellationToken: cancellationToken);
 
-        var (outboundLockToken, returnLockToken) = roundTripLockOutcome switch
+        var (outboundLockToken, outboundLockExpiresAt, returnLockToken, returnLockExpiresAt) = roundTripLockOutcome switch
         {
-            LockRoundTripSeatsOutcome.Success success => (success.Outbound.SeatLockToken, success.Return.SeatLockToken),
+            LockRoundTripSeatsOutcome.Success success => (
+                success.Outbound.SeatLockToken,
+                success.Outbound.ExpiresAt,
+                success.Return.SeatLockToken,
+                success.Return.ExpiresAt),
             LockRoundTripSeatsOutcome.SeatUnavailable unavailable => throw new ConflictException(
                 "BOOKING_SEAT_UNAVAILABLE",
                 $"One or more seats are unavailable: {string.Join(", ", unavailable.UnavailableSeats)}."),
@@ -170,6 +174,9 @@ public sealed class CreateRoundTripBookingCommandHandler
                 $"Round-trip seat lock failed: {transportError.Message}"),
             _ => throw new InvalidOperationException("Round-trip seat lock failed: Unknown lock error."),
         };
+        var paymentDueAt = outboundLockExpiresAt <= returnLockExpiresAt
+            ? outboundLockExpiresAt
+            : returnLockExpiresAt;
 
         var bookingGroupId = Guid.NewGuid();
         var outboundPerSeatFare = Money.FromRaw(outboundTrip.BaseFare);
@@ -405,6 +412,7 @@ public sealed class CreateRoundTripBookingCommandHandler
             returnVoucherUsageId,
             outboundVoucherFundingType,
             returnVoucherFundingType,
+            paymentDueAt,
             cancellationToken);
 
         if (string.Equals(request.PaymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase))
@@ -643,6 +651,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         Guid? returnVoucherUsageId,
         VoucherFundingType? outboundVoucherFundingType,
         VoucherFundingType? returnVoucherFundingType,
+        DateTimeOffset paymentDueAt,
         CancellationToken cancellationToken)
     {
         try
@@ -682,6 +691,14 @@ public sealed class CreateRoundTripBookingCommandHandler
                 }
             }
 
+            if (paymentDueAt <= _clock.UtcNow)
+            {
+                throw new BookingPaymentException(
+                    422,
+                    "PAYMENT_DEADLINE_PASSED",
+                    "The round-trip seat-lock payment deadline has passed.");
+            }
+
             var chargeOutcome = await _paymentClient.ChargeAsync(
                 referenceType: "BOOKING_GROUP",
                 referenceId: bookingGroupId,
@@ -694,6 +711,7 @@ public sealed class CreateRoundTripBookingCommandHandler
                     returnBooking,
                     outboundVoucherFundingType,
                     returnVoucherFundingType),
+                dueAt: paymentDueAt,
                 cancellationToken: cancellationToken);
 
             switch (chargeOutcome)
@@ -703,6 +721,8 @@ public sealed class CreateRoundTripBookingCommandHandler
                 case ChargeOutcome.InsufficientFunds insufficientFunds:
                     // S1 fix: compensate voucher usages before re-throwing (mirrors WALLET path).
                     throw new BookingPaymentException(402, "PAYMENT_INSUFFICIENT_WALLET", insufficientFunds.Message);
+                case ChargeOutcome.DeadlinePassed deadlinePassed:
+                    throw new BookingPaymentException(422, "PAYMENT_DEADLINE_PASSED", deadlinePassed.Message);
                 case ChargeOutcome.TransportError transportError:
                     throw new BookingPaymentException(502, "PAYMENT_VNPAY_ERROR", transportError.Message);
                 default:

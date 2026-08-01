@@ -130,7 +130,7 @@ public sealed class CreateOperatorUserCommandHandler
         var setInitialPasswordUrl = _initialPasswordTokens.BuildSetInitialPasswordUrl(code, user.Role);
         await _emailService.SendAccountCreatedLinkAsync(
             user.Email,
-            new AccountCreatedEmailDto(user.Id, user.DisplayName, setInitialPasswordUrl, expiresAt),
+            new AccountCreatedEmailDto(token.Id, user.Id, user.DisplayName, setInitialPasswordUrl, expiresAt),
             cancellationToken);
 
         return new CreateOperatorUserResponseDto(

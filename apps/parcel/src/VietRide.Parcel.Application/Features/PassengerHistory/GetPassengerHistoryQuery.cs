@@ -1,4 +1,4 @@
-using MediatR;
+using VietRide.Shared.Application.Cqrs;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Parcel.Application.Features.PassengerHistory;
@@ -10,4 +10,4 @@ public sealed record GetPassengerHistoryQuery(
     string? From,
     string? To,
     int Page,
-    int PageSize) : IRequest<PagedResult<PassengerHistoryItemDto>>;
+    int PageSize) : IQuery<PagedResult<PassengerHistoryItemDto>>;

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const root = process.cwd();
 const inventoryPath = path.join(root, 'tests/dotnet/idempotency-endpoint-inventory.json');
@@ -21,29 +22,42 @@ function normalizeRoute(route) {
   return `/${normalized}`;
 }
 
-function combineRoute(controllerRoute, actionRoute, controllerName) {
+export function combineDotNetRoute(controllerRoute, actionRoute, controllerName) {
   const controllerToken = controllerName.replace(/Controller$/, '');
-  const expandedControllerRoute = controllerRoute.replace(/\[controller\]/gi, controllerToken);
-  return normalizeRoute([expandedControllerRoute, actionRoute].filter(Boolean).join('/'));
+  const expandControllerToken = (route) => route.replace(/\[controller\]/gi, controllerToken);
+  const expandedControllerRoute = expandControllerToken(controllerRoute);
+  const expandedActionRoute = expandControllerToken(actionRoute);
+  const isAbsoluteActionRoute =
+    expandedActionRoute.startsWith('/') || expandedActionRoute.startsWith('~/');
+
+  if (isAbsoluteActionRoute) {
+    return normalizeRoute(expandedActionRoute.replace(/^~(?=\/)/, ''));
+  }
+
+  return normalizeRoute([expandedControllerRoute, expandedActionRoute].filter(Boolean).join('/'));
 }
 
-function findControllerRoute(source, classIndex, file) {
+function combineNestRoute(controllerRoute, actionRoute) {
+  return normalizeRoute([controllerRoute, actionRoute].filter(Boolean).join('/'));
+}
+
+function findControllerRoute(source, classIndex, file, reportError) {
   const routeMatches = [
     ...source.slice(0, classIndex).matchAll(/\[\s*Route\(\s*"([^"]+)"\s*\)\s*\]/g),
   ];
   if (routeMatches.length !== 1) {
-    fail(`${file}: expected exactly one controller [Route], found ${routeMatches.length}`);
+    reportError(`${file}: expected exactly one controller [Route], found ${routeMatches.length}`);
     return '';
   }
   return routeMatches[0][1];
 }
 
-function findAction(source, attributeEnd, file) {
+function findAction(source, attributeEnd, file, reportError) {
   const remainder = source.slice(attributeEnd);
   const nextMutation = remainder.search(/\[\s*Http(?:Post|Patch|Put|Delete)/);
-  const method = /\bpublic\s+(?:async\s+)?[\w?.<>,\[\]\s]+\s+([A-Za-z_]\w*)\s*\(/.exec(remainder);
+  const method = /\bpublic\s+(?:async\s+)?[\w?.<>,[\]\s]+\s+([A-Za-z_]\w*)\s*\(/.exec(remainder);
   if (!method || (nextMutation !== -1 && nextMutation < method.index)) {
-    fail(`${file}: mutation attribute is not followed by a public action`);
+    reportError(`${file}: mutation attribute is not followed by a public action`);
     return null;
   }
 
@@ -81,20 +95,28 @@ function findAttributeBlockStart(source, attributeStart) {
   return blockStart;
 }
 
-function scanController(file, serviceName, requiredMetadata = []) {
-  const source = fs.readFileSync(file, 'utf8');
-  const relativeFile = path.relative(root, file).replace(/\\/g, '/');
+export function scanControllerSource(
+  source,
+  serviceName,
+  relativeFile,
+  requiredMetadata = [],
+  reportError = fail,
+) {
   const classMatch = /\bclass\s+([A-Za-z_]\w*Controller)\b/.exec(source);
   if (!classMatch) {
-    fail(`${relativeFile}: controller class declaration not found`);
-    return { controllerName: path.basename(file, '.cs'), mutations: [], skipCount: 0 };
+    reportError(`${relativeFile}: controller class declaration not found`);
+    return {
+      controllerName: path.basename(relativeFile, '.cs'),
+      mutations: [],
+      skipCount: 0,
+    };
   }
 
   const controllerName = classMatch[1];
-  const controllerRoute = findControllerRoute(source, classMatch.index, relativeFile);
+  const controllerRoute = findControllerRoute(source, classMatch.index, relativeFile, reportError);
   const controllerPrefix = source.slice(0, classMatch.index);
   if (skipAttribute.test(controllerPrefix)) {
-    fail(`${relativeFile}: controller-level [SkipIdempotency] is not auditable per route`);
+    reportError(`${relativeFile}: controller-level [SkipIdempotency] is not auditable per route`);
   }
   skipAttribute.lastIndex = 0;
 
@@ -103,20 +125,23 @@ function scanController(file, serviceName, requiredMetadata = []) {
   let attribute;
   while ((attribute = mutationAttribute.exec(source)) !== null) {
     const attributeBlockStart = findAttributeBlockStart(source, attribute.index);
-    const action = findAction(source, mutationAttribute.lastIndex, relativeFile);
+    const action = findAction(source, mutationAttribute.lastIndex, relativeFile, reportError);
     if (!action) continue;
 
     const actionAttributes =
       source.slice(attributeBlockStart, mutationAttribute.lastIndex) + action.attributes;
+    if (/\[\s*NonAction(?:Attribute)?\s*\]/.test(actionAttributes)) {
+      continue;
+    }
 
     skipAttribute.lastIndex = 0;
     const skipMatches = [...actionAttributes.matchAll(skipAttribute)];
     if (skipMatches.length > 1) {
-      fail(`${relativeFile}:${action.name}: multiple [SkipIdempotency] attributes`);
+      reportError(`${relativeFile}:${action.name}: multiple [SkipIdempotency] attributes`);
     }
 
     const method = attribute[1].toUpperCase();
-    const route = combineRoute(controllerRoute, attribute[2] ?? '', controllerName);
+    const route = combineDotNetRoute(controllerRoute, attribute[2] ?? '', controllerName);
     mutations.push({
       serviceName,
       controllerName,
@@ -136,6 +161,12 @@ function scanController(file, serviceName, requiredMetadata = []) {
 
   const skipCount = [...source.matchAll(skipAttribute)].length;
   return { controllerName, mutations, skipCount };
+}
+
+function scanController(file, serviceName, requiredMetadata = []) {
+  const source = fs.readFileSync(file, 'utf8');
+  const relativeFile = path.relative(root, file).replace(/\\/g, '/');
+  return scanControllerSource(source, serviceName, relativeFile, requiredMetadata);
 }
 
 function listControllerFiles(directory) {
@@ -215,17 +246,22 @@ function validateExactEndpoints(serviceName, service, mutations) {
       continue;
     }
     if (approved.policy !== policy) {
-      fail(`${mutation.file}:${mutation.actionName}: ${key} runtime=${policy} inventory=${approved.policy}`);
+      fail(
+        `${mutation.file}:${mutation.actionName}: ${key} runtime=${policy} inventory=${approved.policy}`,
+      );
     }
     if (policy === 'exempt' && approved.reason !== mutation.exemptionReason) {
       fail(`${mutation.file}:${mutation.actionName}: exemption reason mismatch for ${key}`);
     }
   }
   for (const key of expected.keys()) {
-    if (!actual.has(key)) fail(`${serviceName}: inventory endpoint ${key} does not exist at runtime`);
+    if (!actual.has(key))
+      fail(`${serviceName}: inventory endpoint ${key} does not exist at runtime`);
   }
   if (actual.size !== expected.size) {
-    fail(`${serviceName}: exact inventory has ${expected.size} endpoints but runtime has ${actual.size}`);
+    fail(
+      `${serviceName}: exact inventory has ${expected.size} endpoints but runtime has ${actual.size}`,
+    );
   }
 }
 
@@ -296,7 +332,7 @@ function validateService(serviceName, service) {
   const inventoryExemptions = new Map();
   const approvedExemptions = service.endpoints
     ? service.endpoints.filter((endpoint) => endpoint.policy === 'exempt')
-    : service.exemptions ?? [];
+    : (service.exemptions ?? []);
   for (const exemption of approvedExemptions) {
     const key = exemptionKey(exemption);
     if (inventoryExemptions.has(key)) {
@@ -430,12 +466,159 @@ function listFiles(directory, predicate) {
   });
 }
 
-function scanNestController(file, serviceName, decoratorName) {
-  const source = fs.readFileSync(file, 'utf8');
-  const relativeFile = path.relative(root, file).replace(/\\/g, '/');
+export function scanDotNetOutboundHttpSource(source) {
+  const callsites = [];
+  const patterns = [
+    { pattern: /HttpMethod\.(Post|Put|Patch|Delete)\b/g, style: 'http-method' },
+    {
+      pattern: /\.(Post|Put|Patch|Delete)AsJsonAsync\s*\(/g,
+      style: 'json-extension',
+    },
+    {
+      pattern: /\.(Post|Put|Patch|Delete)Async\s*\(/g,
+      style: 'http-extension',
+    },
+  ];
+
+  for (const { pattern, style } of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      callsites.push({
+        method: match[1].toUpperCase(),
+        style,
+        index: match.index,
+      });
+    }
+  }
+
+  return callsites.sort((left, right) => left.index - right.index);
+}
+
+function getCSharpMethodSections(source) {
+  const methodDeclaration =
+    /^[ \t]*(?:public|private|protected|internal)\s+(?:(?:static|async|virtual|override|sealed)\s+)*[^;{}=]*?\([^;{}]*?\)\s*(?:\{|=>)/gm;
+  const declarations = [...source.matchAll(methodDeclaration)];
+  return declarations.map((declaration, index) => {
+    const start = declaration.index;
+    const end = declarations[index + 1]?.index ?? source.length;
+    return {
+      start,
+      end,
+      declaration: declaration[0],
+      source: source.slice(start, end),
+    };
+  });
+}
+
+function splitCSharpArguments(source, openParenthesisIndex) {
+  const argumentsList = [];
+  let current = '';
+  let parenthesisDepth = 1;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  let quote = null;
+  let escaped = false;
+
+  for (let index = openParenthesisIndex + 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      current += character;
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      current += character;
+      continue;
+    }
+    if (character === '(') parenthesisDepth += 1;
+    else if (character === ')') {
+      parenthesisDepth -= 1;
+      if (parenthesisDepth === 0) {
+        argumentsList.push(current.trim());
+        return argumentsList;
+      }
+    } else if (character === '[') bracketDepth += 1;
+    else if (character === ']') bracketDepth -= 1;
+    else if (character === '{') braceDepth += 1;
+    else if (character === '}') braceDepth -= 1;
+    else if (
+      character === ',' &&
+      parenthesisDepth === 1 &&
+      bracketDepth === 0 &&
+      braceDepth === 0
+    ) {
+      argumentsList.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += character;
+  }
+
+  return null;
+}
+
+function getEnclosingCSharpMethod(source, index) {
+  const sections = getCSharpMethodSections(source);
+  return sections.findLast((section) => section.start <= index && index < section.end) ?? null;
+}
+
+export function getEnclosingCSharpMethodSource(source, index) {
+  return getEnclosingCSharpMethod(source, index)?.source ?? null;
+}
+
+export function outboundCallsiteHasIdempotencyKey(source, callsite) {
+  const enclosingMethod = getEnclosingCSharpMethod(source, callsite.index);
+  if (!enclosingMethod) return false;
+  if (enclosingMethod.source.includes('Idempotency-Key')) return true;
+
+  const prefix = source.slice(enclosingMethod.start, callsite.index);
+  const helperCall = /([A-Za-z_]\w*)\s*\(\s*$/.exec(prefix);
+  if (!helperCall) return false;
+
+  const helperName = helperCall[1];
+  const escapedHelperName = helperName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const helperNamePattern = new RegExp(`\\b${escapedHelperName}(?:<[^>]+>)?\\s*\\(`);
+  const helperMethod = getCSharpMethodSections(source).find(
+    (section) =>
+      helperNamePattern.test(section.declaration) && section.source.includes('Idempotency-Key'),
+  );
+  if (!helperMethod) return false;
+
+  const signatureOpenParenthesis = helperMethod.declaration.indexOf('(');
+  const helperParameters = splitCSharpArguments(helperMethod.declaration, signatureOpenParenthesis);
+  const idempotencyParameterIndex = helperParameters?.findIndex((parameter) =>
+    /\bidempotencyKey\b/i.test(parameter),
+  );
+  if (idempotencyParameterIndex === undefined || idempotencyParameterIndex < 0) return false;
+
+  const invocationOpenParenthesis =
+    enclosingMethod.start + helperCall.index + helperCall[0].lastIndexOf('(');
+  const invocationArguments = splitCSharpArguments(source, invocationOpenParenthesis);
+  return Boolean(invocationArguments?.[idempotencyParameterIndex]?.trim());
+}
+
+export function countNotificationBindingCollection(source, collectionName) {
+  const escapedName = collectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declaration = new RegExp(
+    `(?:export\\s+)?const\\s+${escapedName}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s+as\\s+const\\s*;`,
+  ).exec(source);
+
+  if (!declaration) return null;
+  return [...declaration[1].matchAll(/\bqueue\s*:/g)].length;
+}
+
+export function scanNestControllerSource(
+  source,
+  serviceName,
+  decoratorName,
+  relativeFile,
+  reportError = fail,
+) {
   const controller = /@Controller\(\s*(?:(['"])(.*?)\1)?\s*\)/.exec(source);
   if (!controller) {
-    fail(`${relativeFile}: @Controller route not found`);
+    reportError(`${relativeFile}: @Controller route not found`);
     return [];
   }
 
@@ -447,7 +630,7 @@ function scanNestController(file, serviceName, decoratorName) {
     const nextMutation = remainder.search(/@(Post|Patch|Put|Delete)\s*\(/);
     const method = /(?:^|\r?\n)\s*(?:public\s+)?(?:async\s+)?([A-Za-z_]\w*)\s*\(/m.exec(remainder);
     if (!method || (nextMutation !== -1 && nextMutation < method.index)) {
-      fail(`${relativeFile}: @${match[1]} is not followed by a controller action`);
+      reportError(`${relativeFile}: @${match[1]} is not followed by a controller action`);
       continue;
     }
 
@@ -458,20 +641,22 @@ function scanNestController(file, serviceName, decoratorName) {
       serviceName,
       actionName: method[1],
       method: match[1].toUpperCase(),
-      path: combineRoute(
-        controller[2] ?? '',
-        match[3] ?? '',
-        path.basename(file, '.controller.ts'),
-      ),
+      path: combineNestRoute(controller[2] ?? '', match[3] ?? ''),
       requiredBy: decoratorPattern.test(attributes) ? [decoratorName] : [],
       exemptionReason: exemptDecoratorPattern.test(attributes)
-        ? /@ApiIdempotencyExempt\s*\(\s*['"]([^'"]+)['"]\s*,?\s*\)/.exec(attributes)?.[1] ?? null
+        ? (/@ApiIdempotencyExempt\s*\(\s*['"]([^'"]+)['"]\s*,?\s*\)/.exec(attributes)?.[1] ?? null)
         : null,
       file: relativeFile,
     });
   }
 
   return mutations;
+}
+
+function scanNestController(file, serviceName, decoratorName) {
+  const source = fs.readFileSync(file, 'utf8');
+  const relativeFile = path.relative(root, file).replace(/\\/g, '/');
+  return scanNestControllerSource(source, serviceName, decoratorName, relativeFile);
 }
 
 function validateNestService(serviceName, service) {
@@ -603,41 +788,110 @@ function validateCrossSystemCoverage(coverage) {
     const source = fs.readFileSync(file, 'utf8');
     return total + [...source.matchAll(/\.subscribe\s*\(/g)].length;
   }, 0);
-  if (subscriptionCount !== coverage.notificationRabbitMqSubscriptions) {
+  if (subscriptionCount !== coverage.notificationRabbitMqSubscriptionCallsites) {
     fail(
-      `Notification RabbitMQ inventory drift: expected ${coverage.notificationRabbitMqSubscriptions}, found ${subscriptionCount}`,
+      `Notification RabbitMQ subscription-callsite drift: expected ${coverage.notificationRabbitMqSubscriptionCallsites}, found ${subscriptionCount}`,
     );
   }
 
-  const outboundPattern = /HttpMethod\.(Post|Put|Patch|Delete)\b/g;
+  const bindingCollections = coverage.notificationRabbitMqBindingCollections ?? [];
+  let mappedBindingCount = 0;
+  const bindingCollectionKeys = new Set();
+  for (const collection of bindingCollections) {
+    const key = `${collection.file}:${collection.name}`;
+    if (bindingCollectionKeys.has(key)) {
+      fail(`duplicate Notification RabbitMQ binding collection: ${key}`);
+      continue;
+    }
+    bindingCollectionKeys.add(key);
+
+    const bindingFile = path.join(root, collection.file ?? '');
+    const consumerFile = path.join(root, collection.consumerFile ?? '');
+    if (!fs.existsSync(bindingFile) || !fs.existsSync(consumerFile)) {
+      fail(`Notification RabbitMQ binding collection files not found: ${key}`);
+      continue;
+    }
+
+    const bindingSource = fs.readFileSync(bindingFile, 'utf8');
+    const consumerSource = fs.readFileSync(consumerFile, 'utf8');
+    const count = countNotificationBindingCollection(bindingSource, collection.name);
+    if (count === null) {
+      fail(`${collection.file}: Notification binding collection ${collection.name} not found`);
+      continue;
+    }
+    if (!consumerSource.includes(`${collection.name}.map`)) {
+      fail(`${collection.consumerFile}: ${collection.name} is not mapped into subscriptions`);
+      continue;
+    }
+    mappedBindingCount += count;
+  }
+
+  const runtimeBindingCount = subscriptionCount - bindingCollections.length + mappedBindingCount;
+  if (runtimeBindingCount !== coverage.notificationRabbitMqRuntimeBindings) {
+    fail(
+      `Notification RabbitMQ runtime-binding drift: expected ${coverage.notificationRabbitMqRuntimeBindings}, found ${runtimeBindingCount}`,
+    );
+  }
+
+  const exemptions = coverage.dotnetOutboundHttpExemptions ?? [];
+  const exemptionKeys = new Set();
+  for (const exemption of exemptions) {
+    const key = `${exemption.file}|${exemption.method}|${exemption.match}`;
+    if (exemptionKeys.has(key)) fail(`duplicate outbound HTTP exemption: ${key}`);
+    exemptionKeys.add(key);
+    if (!exemption.file || !exemption.method || !exemption.match || !exemption.reason?.trim()) {
+      fail(`outbound HTTP exemption must define file, method, match and reason: ${key}`);
+    }
+  }
+
   const outboundCallsites = [];
   for (const file of dotnetSourceFiles) {
     const source = fs.readFileSync(file, 'utf8');
-    for (const match of source.matchAll(outboundPattern)) {
-      outboundCallsites.push({ file, source, method: match[1] });
+    for (const callsite of scanDotNetOutboundHttpSource(source)) {
+      outboundCallsites.push({ file, source, ...callsite });
     }
   }
-  if (outboundCallsites.length !== coverage.dotnetOutboundHttpMutations) {
+  if (outboundCallsites.length !== coverage.dotnetOutboundHttpCallsites) {
     fail(
-      `.NET outbound HTTP mutation inventory drift: expected ${coverage.dotnetOutboundHttpMutations}, found ${outboundCallsites.length}`,
+      `.NET outbound HTTP callsite drift: expected ${coverage.dotnetOutboundHttpCallsites}, found ${outboundCallsites.length}`,
     );
   }
 
-  const exemptions = new Set(coverage.dotnetOutboundHttpExemptions ?? []);
+  const matchedExemptions = new Set();
   for (const callsite of outboundCallsites) {
     const relativeFile = path.relative(root, callsite.file).replace(/\\/g, '/');
-    if (exemptions.has(relativeFile)) continue;
-    if (!callsite.source.includes('Idempotency-Key')) {
+    const context = callsite.source.slice(
+      Math.max(0, callsite.index - 150),
+      Math.min(callsite.source.length, callsite.index + 600),
+    );
+    const matchingExemptions = exemptions.filter(
+      (exemption) =>
+        exemption.file === relativeFile &&
+        exemption.method === callsite.method &&
+        context.includes(exemption.match),
+    );
+    if (matchingExemptions.length > 1) {
+      fail(`${relativeFile}: outbound ${callsite.method} matches multiple exemptions`);
+      continue;
+    }
+    if (matchingExemptions.length === 1) {
+      matchedExemptions.add(matchingExemptions[0]);
+      continue;
+    }
+    if (!outboundCallsiteHasIdempotencyKey(callsite.source, callsite)) {
       fail(`${relativeFile}: outbound ${callsite.method} does not forward Idempotency-Key`);
     }
   }
   for (const exemption of exemptions) {
-    if (!outboundCallsites.some((callsite) => path.relative(root, callsite.file).replace(/\\/g, '/') === exemption)) {
-      fail(`outbound HTTP exemption no longer exists: ${exemption}`);
+    if (!matchedExemptions.has(exemption)) {
+      fail(
+        `outbound HTTP exemption no longer exists: ${exemption.file} ${exemption.method} ${exemption.match}`,
+      );
     }
   }
 
-  const forbiddenInternalKey = /(?:Idempotency-Key|idempotencyKey)[^\r\n]{0,100}\$"[^"\r\n]*(?:cargo:|refund:|booking-|payment:|parcel:)/i;
+  const forbiddenInternalKey =
+    /(?:Idempotency-Key|idempotencyKey)[^\r\n]{0,100}\$"[^"\r\n]*(?:cargo:|refund:|booking-|payment:|parcel:)/i;
   for (const file of dotnetSourceFiles) {
     const source = fs.readFileSync(file, 'utf8');
     if (forbiddenInternalKey.test(source)) {
@@ -650,7 +904,15 @@ function validateCrossSystemCoverage(coverage) {
     fail(`Gateway route table not found: ${coverage.gatewayRouteTable}`);
   } else {
     const routeSource = fs.readFileSync(routeTable, 'utf8');
-    for (const service of ['IDENTITY', 'TRIP', 'BOOKING', 'PAYMENT', 'PARCEL', 'NOTIFICATION', 'RAG']) {
+    for (const service of [
+      'IDENTITY',
+      'TRIP',
+      'BOOKING',
+      'PAYMENT',
+      'PARCEL',
+      'NOTIFICATION',
+      'RAG',
+    ]) {
       if (!routeSource.includes(`env.${service}_BASE_URL`)) {
         fail(`Gateway route table has no ${service} target`);
       }
@@ -658,49 +920,73 @@ function validateCrossSystemCoverage(coverage) {
   }
 }
 
-const inventory = JSON.parse(fs.readFileSync(inventoryPath, 'utf8'));
-if (inventory.version !== 3 || inventory.policy !== 'system-wide-idempotency-contract') {
-  fail('inventory must use version 3 and policy system-wide-idempotency-contract');
+function main() {
+  const inventory = JSON.parse(fs.readFileSync(inventoryPath, 'utf8'));
+  if (inventory.version !== 3 || inventory.policy !== 'system-wide-idempotency-contract') {
+    fail('inventory must use version 3 and policy system-wide-idempotency-contract');
+  }
+
+  const expectedServices = [
+    'identity',
+    'trip',
+    'booking',
+    'payment',
+    'parcel',
+    'notification',
+    'rag',
+  ];
+  const actualServices = Object.keys(inventory.services ?? {}).sort();
+  if (JSON.stringify(actualServices) !== JSON.stringify([...expectedServices].sort())) {
+    fail(`inventory services must be exactly: ${expectedServices.join(', ')}`);
+  }
+
+  const results = [];
+  for (const serviceName of expectedServices) {
+    const service = inventory.services?.[serviceName];
+    if (!service) continue;
+    const result =
+      service.stack === 'nestjs'
+        ? validateNestService(serviceName, service)
+        : service.requireAllMutations
+          ? validateService(serviceName, service)
+          : validateExplicitDotnetService(serviceName, service);
+    results.push([serviceName, result]);
+  }
+
+  validateSocketOperations(inventory.socketOperations);
+  validateCrossSystemCoverage(inventory.coverage ?? {});
+
+  if (process.argv.includes('--discover')) {
+    console.log(JSON.stringify(Object.fromEntries(discoveredEndpoints), null, 2));
+    process.exit(0);
+  }
+
+  if (errors.length > 0) {
+    console.error('idempotency inventory FAIL');
+    for (const error of errors) console.error(`- ${error}`);
+    process.exitCode = 1;
+  } else {
+    const details = results
+      .map(([name, result]) =>
+        result.exemptions === undefined
+          ? `${name}=${result.controllers} controllers/${result.mutations} mutations/${result.required} required`
+          : `${name}=${result.controllers} controllers/${result.mutations} mutations/${result.exemptions} exemptions`,
+      )
+      .join(', ');
+    const coverage = inventory.coverage;
+    const crossSystem = [
+      `${coverage.dotnetRabbitMqRegistrations} .NET handlers`,
+      `${coverage.notificationRabbitMqSubscriptionCallsites} Notification subscribe callsites`,
+      `${coverage.notificationRabbitMqRuntimeBindings} Notification runtime bindings`,
+      `${coverage.dotnetOutboundHttpCallsites} outbound HTTP callsites`,
+      `${coverage.dotnetOutboundHttpExemptions.length} outbound exemptions`,
+    ].join('/');
+    console.log(`idempotency inventory PASS (${details}; ${crossSystem})`);
+  }
 }
 
-const expectedServices = ['identity', 'trip', 'booking', 'payment', 'parcel', 'notification', 'rag'];
-const actualServices = Object.keys(inventory.services ?? {}).sort();
-if (JSON.stringify(actualServices) !== JSON.stringify([...expectedServices].sort())) {
-  fail(`inventory services must be exactly: ${expectedServices.join(', ')}`);
-}
-
-const results = [];
-for (const serviceName of expectedServices) {
-  const service = inventory.services?.[serviceName];
-  if (!service) continue;
-  const result =
-    service.stack === 'nestjs'
-      ? validateNestService(serviceName, service)
-      : service.requireAllMutations
-        ? validateService(serviceName, service)
-        : validateExplicitDotnetService(serviceName, service);
-  results.push([serviceName, result]);
-}
-
-validateSocketOperations(inventory.socketOperations);
-validateCrossSystemCoverage(inventory.coverage ?? {});
-
-if (process.argv.includes('--discover')) {
-  console.log(JSON.stringify(Object.fromEntries(discoveredEndpoints), null, 2));
-  process.exit(0);
-}
-
-if (errors.length > 0) {
-  console.error('idempotency inventory FAIL');
-  for (const error of errors) console.error(`- ${error}`);
-  process.exitCode = 1;
-} else {
-  const details = results
-    .map(([name, result]) =>
-      result.exemptions === undefined
-        ? `${name}=${result.controllers} controllers/${result.mutations} mutations/${result.required} required`
-        : `${name}=${result.controllers} controllers/${result.mutations} mutations/${result.exemptions} exemptions`,
-    )
-    .join(', ');
-  console.log(`idempotency inventory PASS (${details})`);
+const isMain =
+  process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
+if (isMain) {
+  main();
 }

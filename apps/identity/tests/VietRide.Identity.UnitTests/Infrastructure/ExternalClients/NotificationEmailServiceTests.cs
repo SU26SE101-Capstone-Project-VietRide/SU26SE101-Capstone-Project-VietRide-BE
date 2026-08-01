@@ -31,6 +31,7 @@ public sealed class NotificationEmailServiceTests
     [Fact]
     public async Task SendAccountCreatedLinkAsync_PostsSetInitialPasswordTemplate()
     {
+        var operationId = Guid.NewGuid();
         var userId = Guid.NewGuid();
         var expiresAt = DateTimeOffset.UtcNow.AddHours(24);
         NotificationEmailRequest? captured = null;
@@ -38,10 +39,11 @@ public sealed class NotificationEmailServiceTests
 
         await _sut.SendAccountCreatedLinkAsync(
             "staff@vietride.local",
-            new AccountCreatedEmailDto(userId, "Staff Member", "https://app.vietride.app/auth/set-password?token=abc", expiresAt));
+            new AccountCreatedEmailDto(operationId, userId, "Staff Member", "https://app.vietride.app/auth/set-password?token=abc", expiresAt));
 
         captured.Should().NotBeNull();
-        captured!.TemplateKey.Should().Be("SET_INITIAL_PASSWORD");
+        captured!.IdempotencyKey.Should().Be(operationId);
+        captured.TemplateKey.Should().Be("SET_INITIAL_PASSWORD");
         captured.ToEmail.Should().Be("staff@vietride.local");
         captured.TemplateData.Should().Contain("userId", userId);
         captured.TemplateData.Should().Contain("displayName", "Staff Member");
@@ -57,7 +59,7 @@ public sealed class NotificationEmailServiceTests
 
         var act = () => _sut.SendAccountCreatedLinkAsync(
             "staff@vietride.local",
-            new AccountCreatedEmailDto(Guid.NewGuid(), "Staff", "https://url", DateTimeOffset.UtcNow.AddHours(1)));
+            new AccountCreatedEmailDto(Guid.NewGuid(), Guid.NewGuid(), "Staff", "https://url", DateTimeOffset.UtcNow.AddHours(1)));
 
         await act.Should().ThrowAsync<NotificationEmailDeliveryException>();
     }
@@ -70,7 +72,7 @@ public sealed class NotificationEmailServiceTests
 
         var act = () => _sut.SendAccountCreatedLinkAsync(
             "staff@vietride.local",
-            new AccountCreatedEmailDto(Guid.NewGuid(), "Staff", "https://url", DateTimeOffset.UtcNow.AddHours(1)));
+            new AccountCreatedEmailDto(Guid.NewGuid(), Guid.NewGuid(), "Staff", "https://url", DateTimeOffset.UtcNow.AddHours(1)));
 
         var assertion = await act.Should().ThrowAsync<NotificationEmailDeliveryException>();
         assertion.Which.InnerException.Should().BeOfType<HttpRequestException>();

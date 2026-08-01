@@ -12,7 +12,8 @@ public sealed record WalletCreditedConsumerEvent(
     [property: JsonPropertyName("userId")] Guid UserId,
     [property: JsonPropertyName("amount")] long Amount,
     [property: JsonPropertyName("referenceType")] string ReferenceType,
-    [property: JsonPropertyName("referenceId")] Guid ReferenceId) : IIntegrationEvent
+    [property: JsonPropertyName("referenceId")] Guid ReferenceId,
+    [property: JsonPropertyName("paymentId")] Guid? PaymentId = null) : IIntegrationEvent
 {
     public const string EventType = WalletCreditedIntegrationEvent.EventTypeValue;
 

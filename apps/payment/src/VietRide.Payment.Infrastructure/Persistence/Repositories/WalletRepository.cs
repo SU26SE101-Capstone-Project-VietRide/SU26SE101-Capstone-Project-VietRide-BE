@@ -155,6 +155,16 @@ internal sealed class WalletRepository : IWalletRepository
                     && transaction.ReferenceId == referenceId,
                 cancellationToken);
 
+    public async Task<WalletTransaction?> FindTransactionByIdAsync(
+        Guid transactionId,
+        CancellationToken cancellationToken)
+        => await _db.WalletTransactions
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                transaction => transaction.Id == transactionId,
+                cancellationToken)
+            .ConfigureAwait(false);
+
     public async Task<long> GetTotalRefundedByReferenceAsync(
         WalletTransactionRef referenceType,
         Guid referenceId,
@@ -169,11 +179,69 @@ internal sealed class WalletRepository : IWalletRepository
         return amounts.Sum(amount => amount.Amount);
     }
 
-    public async Task<WalletTransaction> CreditRefundAsync(
+    public async Task<long> GetTotalRefundedByReferenceAndUserAsync(
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var amounts = await _db.WalletTransactions
+            .AsNoTracking()
+            .Where(transaction => transaction.ReferenceType == referenceType
+                && transaction.ReferenceId == referenceId
+                && transaction.UserId == userId)
+            .Select(transaction => transaction.Amount)
+            .ToListAsync(cancellationToken);
+        return amounts.Sum(amount => amount.Amount);
+    }
+
+    public async Task<IReadOnlyList<WalletTransaction>> ListRefundTransactionsByReferenceAsync(
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => await _db.WalletTransactions
+            .AsNoTracking()
+            .Where(transaction => transaction.ReferenceType == referenceType
+                && transaction.ReferenceId == referenceId)
+            .OrderBy(transaction => transaction.CreatedAt)
+            .ThenBy(transaction => transaction.Id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+    public Task<WalletTransaction> CreditRefundAsync(
         Guid userId,
         Money amount,
         WalletTransactionRef referenceType,
         Guid referenceId,
+        CancellationToken cancellationToken)
+        => CreditRefundCoreAsync(
+            userId,
+            amount,
+            referenceType,
+            referenceId,
+            transactionId: null,
+            cancellationToken);
+
+    public Task<WalletTransaction> CreditBookingRefundAsync(
+        Guid userId,
+        Money amount,
+        Guid bookingId,
+        Guid transactionId,
+        CancellationToken cancellationToken)
+        => CreditRefundCoreAsync(
+            userId,
+            amount,
+            WalletTransactionRef.BOOKING_REFUND,
+            bookingId,
+            transactionId,
+            cancellationToken);
+
+    private async Task<WalletTransaction> CreditRefundCoreAsync(
+        Guid userId,
+        Money amount,
+        WalletTransactionRef referenceType,
+        Guid referenceId,
+        Guid? transactionId,
         CancellationToken cancellationToken)
     {
         var wallet = await _db.Wallets.FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken)
@@ -183,13 +251,21 @@ internal sealed class WalletRepository : IWalletRepository
         wallet.Credit(amount);
         var balanceAfter = wallet.Balance;
 
-        var transaction = WalletTransaction.CreateRefundCredit(
-            userId,
-            referenceType,
-            referenceId,
-            amount,
-            balanceBefore,
-            balanceAfter);
+        var transaction = transactionId.HasValue
+            ? WalletTransaction.CreateBookingRefundCredit(
+                transactionId.Value,
+                userId,
+                referenceId,
+                amount,
+                balanceBefore,
+                balanceAfter)
+            : WalletTransaction.CreateRefundCredit(
+                userId,
+                referenceType,
+                referenceId,
+                amount,
+                balanceBefore,
+                balanceAfter);
 
         await _db.WalletTransactions.AddAsync(transaction, cancellationToken);
         return transaction;

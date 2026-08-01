@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { importPKCS8, SignJWT } from 'jose';
+import { resolveParcelSettlementE2ePorts } from './parcel-settlement-e2e-ports.mjs';
 
 const root = process.cwd();
 const envFile = fs.existsSync(path.join(root, '.env')) ? '.env' : '.env.example';
@@ -17,23 +18,12 @@ const compose = [
   '--profile',
   'app',
 ];
-const gateway = process.env.GATEWAY_BASE_URL || 'http://localhost:55300';
+const e2ePorts = await resolveParcelSettlementE2ePorts();
+const gateway = process.env.GATEWAY_BASE_URL || e2ePorts.urls.gateway;
 const postgresContainer = 'day37-e2e-postgres';
 const postgresUser = process.env.POSTGRES_USER || 'vietride';
 const reuseImages = process.argv.includes('--reuse-images') || process.env.E2E_REUSE_IMAGES === '1';
-const e2eEnv = Object.freeze({
-  POSTGRES_PORT: '55437',
-  REDIS_PORT: '56379',
-  RABBITMQ_PORT: '55672',
-  RABBITMQ_MGMT_PORT: '55673',
-  IDENTITY_PORT: '55001',
-  TRIP_PORT: '55002',
-  BOOKING_PORT: '55003',
-  PAYMENT_PORT: '55004',
-  PARCEL_PORT: '55005',
-  NOTIFICATION_PORT: '55012',
-  GATEWAY_PORT: '55300',
-});
+const e2eEnv = e2ePorts.env;
 const ids = Object.freeze({
   operator: crypto.randomUUID(),
   subscriptionPlan: crypto.randomUUID(),
@@ -65,9 +55,7 @@ const departureDateTime = `${tomorrow}T08:00:00+07:00`;
 const estimatedArrivalTime = new Date(
   Date.parse(departureDateTime) + 8 * 60 * 60 * 1000,
 ).toISOString();
-const fullTripDepartureTime = new Date(
-  Date.parse(departureDateTime) + 5 * 60 * 1000,
-).toISOString();
+const fullTripDepartureTime = new Date(Date.parse(departureDateTime) + 5 * 60 * 1000).toISOString();
 const fullTripArrivalTime = new Date(
   Date.parse(estimatedArrivalTime) + 5 * 60 * 1000,
 ).toISOString();
@@ -255,51 +243,55 @@ async function buildAndStartStack() {
       run('docker', [...compose, 'build', service], { stdio: 'inherit' });
     }
   }
-  run(
-    'docker',
-    [...compose, 'up', '-d', '--no-build', 'postgres', 'redis', 'rabbitmq'],
-    { stdio: 'inherit' },
+  run('docker', [...compose, 'up', '-d', '--no-build', 'postgres', 'redis', 'rabbitmq'], {
+    stdio: 'inherit',
+  });
+  await poll(
+    () => {
+      try {
+        run('docker', ['exec', 'day37-e2e-rabbitmq', 'rabbitmq-diagnostics', '-q', 'ping']);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    'RabbitMQ did not become ready',
+    180_000,
   );
-  await poll(() => {
-    try {
-      run('docker', ['exec', 'day37-e2e-rabbitmq', 'rabbitmq-diagnostics', '-q', 'ping']);
-      return true;
-    } catch {
-      return false;
-    }
-  }, 'RabbitMQ did not become ready', 180_000);
   run(
     'docker',
     [...compose, 'up', '-d', '--no-build', '--wait', 'identity', 'trip', 'payment', 'parcel'],
     { stdio: 'inherit' },
   );
-  run(
-    'docker',
-    [...compose, 'up', '-d', '--no-build', '--no-deps', '--wait', 'gateway'],
-    { stdio: 'inherit' },
-  );
+  run('docker', [...compose, 'up', '-d', '--no-build', '--no-deps', '--wait', 'gateway'], {
+    stdio: 'inherit',
+  });
 }
 
 async function waitForStack() {
   await Promise.all([
-    waitFor('http://localhost:55001/health'),
-    waitFor('http://localhost:55002/health'),
-    waitFor('http://localhost:55004/health'),
-    waitFor('http://localhost:55005/health'),
+    waitFor(`${e2ePorts.urls.identity}/health`),
+    waitFor(`${e2ePorts.urls.trip}/health`),
+    waitFor(`${e2ePorts.urls.payment}/health`),
+    waitFor(`${e2ePorts.urls.parcel}/health`),
     waitFor(`${gateway}/health`),
   ]);
   pass('isolated Gateway, Identity, Trip, Payment, Parcel and RabbitMQ health');
 }
 
 async function waitForRabbitMq() {
-  await poll(() => {
-    try {
-      run('docker', ['exec', 'day37-e2e-rabbitmq', 'rabbitmq-diagnostics', '-q', 'ping']);
-      return true;
-    } catch {
-      return false;
-    }
-  }, 'RabbitMQ did not become ready', 180_000);
+  await poll(
+    () => {
+      try {
+        run('docker', ['exec', 'day37-e2e-rabbitmq', 'rabbitmq-diagnostics', '-q', 'ping']);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    'RabbitMQ did not become ready',
+    180_000,
+  );
 }
 
 async function triggerSettlementTimeoutJob() {
@@ -311,30 +303,34 @@ async function triggerSettlementTimeoutJob() {
       WHERE key='${jobKey}';
     `),
   );
-  const jobId = await poll(() => {
-    const currentLastJobId = scalar(
-      parcelSql(`
+  const jobId = await poll(
+    () => {
+      const currentLastJobId = scalar(
+        parcelSql(`
         SELECT coalesce(max(value) FILTER (WHERE field='LastJobId'),'')
         FROM hangfire.hash
         WHERE key='${jobKey}';
       `),
-    );
-    return currentLastJobId && currentLastJobId !== previousLastJobId
-      ? currentLastJobId
-      : false;
-  }, 'Hangfire did not schedule parcel.settlement-timeout', 360_000);
-  const terminalState = await poll(() => {
-    const state = scalar(
-      parcelSql(`
+      );
+      return currentLastJobId && currentLastJobId !== previousLastJobId ? currentLastJobId : false;
+    },
+    'Hangfire did not schedule parcel.settlement-timeout',
+    360_000,
+  );
+  const terminalState = await poll(
+    () => {
+      const state = scalar(
+        parcelSql(`
         SELECT statename
         FROM hangfire.job
         WHERE id=${jobId};
       `),
-    );
-    return state === 'Succeeded' || state === 'Failed' || state === 'Deleted'
-      ? state
-      : false;
-  }, `Hangfire parcel.settlement-timeout job ${jobId} did not finish`, 90_000);
+      );
+      return state === 'Succeeded' || state === 'Failed' || state === 'Deleted' ? state : false;
+    },
+    `Hangfire parcel.settlement-timeout job ${jobId} did not finish`,
+    90_000,
+  );
   assert(
     terminalState === 'Succeeded',
     `Hangfire parcel.settlement-timeout job ${jobId} ended as ${terminalState}`,
@@ -460,10 +456,14 @@ async function getParcel(parcelId, token) {
 }
 
 async function waitForParcel(parcelId, token, predicate, message, timeoutMs = 120_000) {
-  return poll(async () => {
-    const parcel = await getParcel(parcelId, token);
-    return predicate(parcel) ? parcel : false;
-  }, message, timeoutMs);
+  return poll(
+    async () => {
+      const parcel = await getParcel(parcelId, token);
+      return predicate(parcel) ? parcel : false;
+    },
+    message,
+    timeoutMs,
+  );
 }
 
 async function createParcel(token, tripId, estimatedWeightKg, suffix) {
@@ -555,11 +555,9 @@ async function runJourney() {
   const unauthorized = await api('GET', searchPath());
   assertEnvelope(unauthorized, 401, 'AUTH_TOKEN_INVALID');
 
-  const invalid = await api(
-    'GET',
-    searchPath().replace('lengthCm=20', 'lengthCm=0'),
-    { token: passengerToken },
-  );
+  const invalid = await api('GET', searchPath().replace('lengthCm=20', 'lengthCm=0'), {
+    token: passengerToken,
+  });
   assertEnvelope(invalid, 422, 'VALIDATION_ERROR');
 
   const searchWithoutHint = await api('GET', searchPath(), { token: passengerToken });
@@ -574,11 +572,9 @@ async function runJourney() {
   assert(availableTrip.depositPercent === 20, 'Deposit percent must be 20');
   assert(availableTrip.estimatedDepositVnd === 640, 'Estimated deposit must be 640 VND');
 
-  const mismatchedHintSearch = await api(
-    'GET',
-    searchPath({ sizeCategory: 'MEDIUM' }),
-    { token: passengerToken },
-  );
+  const mismatchedHintSearch = await api('GET', searchPath({ sizeCategory: 'MEDIUM' }), {
+    token: passengerToken,
+  });
   const mismatchedData = assertEnvelope(mismatchedHintSearch, 200);
   const mismatchedTrip = mismatchedData.items.find((trip) => trip.tripId === ids.trip);
   assert(mismatchedTrip, 'Legacy mismatched size hint hid the valid trip');
@@ -599,26 +595,18 @@ async function runJourney() {
   assert(balanceReweigh.finalGrossPriceVnd === 4500, '4.5 kg must price as 4,500 VND');
   assert(balanceReweigh.balanceRequiredVnd === 3860, 'Balance must equal 4,500 - 640');
 
-  const prematureLoad = await api(
-    'POST',
-    `/v1/assistant/parcels/${balanceParcel.parcelId}/load`,
-    {
-      token: assistantToken,
-      key: crypto.randomUUID(),
-      body: { tripId: ids.trip, parcelCode: balanceParcel.parcelCode },
-    },
-  );
+  const prematureLoad = await api('POST', `/v1/assistant/parcels/${balanceParcel.parcelId}/load`, {
+    token: assistantToken,
+    key: crypto.randomUUID(),
+    body: { tripId: ids.trip, parcelCode: balanceParcel.parcelCode },
+  });
   assertEnvelope(prematureLoad, 409, 'INVALID_STATUS');
 
-  const finalPayment = await api(
-    'POST',
-    `/v1/parcels/${balanceParcel.parcelId}/final-payment`,
-    {
-      token: passengerToken,
-      key: crypto.randomUUID(),
-      body: { paymentMethod: 'WALLET' },
-    },
-  );
+  const finalPayment = await api('POST', `/v1/parcels/${balanceParcel.parcelId}/final-payment`, {
+    token: passengerToken,
+    key: crypto.randomUUID(),
+    body: { paymentMethod: 'WALLET' },
+  });
   const finalPaymentData = assertEnvelope(finalPayment, 200);
   assert(finalPaymentData.balancePaymentId, 'Final payment ID missing');
   const readyBalance = await waitForParcel(
@@ -758,7 +746,7 @@ async function runJourney() {
   );
   assert(releasedOutboxStatus === 'PENDING', 'Callback-race outbox event was not released');
   run('docker', ['restart', 'day37-e2e-payment']);
-  await waitFor('http://localhost:55004/health', 180_000);
+  await waitFor(`${e2ePorts.urls.payment}/health`, 180_000);
   const reconciledRaceParcel = await waitForParcel(
     callbackRaceParcel.parcelId,
     passengerToken,
@@ -784,20 +772,20 @@ async function runJourney() {
     WHERE id='${ids.trip}';
   `);
   const paymentCountBefore = Number(
-    scalar(paymentSql(`SELECT count(*) FROM payments WHERE reference_id='${staleParcel.parcelId}';`)),
+    scalar(
+      paymentSql(`SELECT count(*) FROM payments WHERE reference_id='${staleParcel.parcelId}';`),
+    ),
   );
-  const staleDeposit = await api(
-    'POST',
-    `/v1/parcels/${staleParcel.parcelId}/deposit-payment`,
-    {
-      token: passengerToken,
-      key: crypto.randomUUID(),
-      body: { paymentMethod: 'WALLET' },
-    },
-  );
+  const staleDeposit = await api('POST', `/v1/parcels/${staleParcel.parcelId}/deposit-payment`, {
+    token: passengerToken,
+    key: crypto.randomUUID(),
+    body: { paymentMethod: 'WALLET' },
+  });
   assertEnvelope(staleDeposit, 409, 'TRIP_CARGO_CAPACITY_EXCEEDED');
   const paymentCountAfter = Number(
-    scalar(paymentSql(`SELECT count(*) FROM payments WHERE reference_id='${staleParcel.parcelId}';`)),
+    scalar(
+      paymentSql(`SELECT count(*) FROM payments WHERE reference_id='${staleParcel.parcelId}';`),
+    ),
   );
   assert(paymentCountAfter === paymentCountBefore, 'Capacity race created a Payment');
   pass('stale search result loses cargo race without charging passenger');
@@ -838,7 +826,9 @@ try {
       const logs = run('docker', [...compose, 'logs', '--no-color', '--tail', '180', service]);
       const relevant = logs
         .split(/\r?\n/u)
-        .filter((line) => /error|exception|failed|HTTP (POST|GET)|payment|refund|parcel/iu.test(line))
+        .filter((line) =>
+          /error|exception|failed|HTTP (POST|GET)|payment|refund|parcel/iu.test(line),
+        )
         .slice(-60)
         .join('\n');
       console.error(`DIAGNOSTIC ${service}\n${relevant || '(no relevant logs)'}`);
