@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
@@ -99,6 +100,8 @@ public sealed class Day23BookingCurrentDepartureBackfillIntegrationTests : IAsyn
         var options = new DbContextOptionsBuilder<BookingDbContext>()
             .UseNpgsql(_dataSource!, npgsql =>
                 npgsql.MigrationsHistoryTable("__ef_migrations_history", BookingDbContext.SchemaName))
+            .ConfigureWarnings(warnings =>
+                warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning))
             .Options;
         return new BookingDbContext(options, new SystemClock());
     }
