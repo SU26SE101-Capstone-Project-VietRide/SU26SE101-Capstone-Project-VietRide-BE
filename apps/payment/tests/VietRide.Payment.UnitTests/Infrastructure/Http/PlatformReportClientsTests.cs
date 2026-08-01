@@ -3,8 +3,11 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
+using VietRide.Payment.Infrastructure.DependencyInjection;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Payment.UnitTests.Infrastructure.Http;
@@ -170,6 +173,34 @@ public sealed class PlatformReportClientsTests
         await timeout.Should().ThrowAsync<UpstreamUnavailableException>();
         await serverError.Should().ThrowAsync<UpstreamUnavailableException>();
     }
+
+    [Fact]
+    public void IdentityClients_DefaultToCanonicalContainerPortWhenUnset()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["InternalJwt:Secret"] = "test-secret-at-least-32-characters-long",
+                ["InvoiceStorage:Provider"] = "E2E_LOCAL",
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddInfrastructure(configuration, registerConsumers: false);
+        using var provider = services.BuildServiceProvider();
+
+        var financialClient = provider.GetRequiredService<IIdentityFinancialProjectionClient>();
+        var operatorClient = provider.GetRequiredService<IIdentityOperatorSummaryClient>();
+
+        GetBaseAddress(financialClient).Should().Be(new Uri("http://identity:5001/"));
+        GetBaseAddress(operatorClient).Should().Be(new Uri("http://identity:5001/"));
+    }
+
+    private static Uri? GetBaseAddress(object client)
+        => ((HttpClient)client.GetType()
+            .GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(client)!)
+            .BaseAddress;
 
     private static TClient Create<TClient>(string typeName, HttpMessageHandler handler)
     {
