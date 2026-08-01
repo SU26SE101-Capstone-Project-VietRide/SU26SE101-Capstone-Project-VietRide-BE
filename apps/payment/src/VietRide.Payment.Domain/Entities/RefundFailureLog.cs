@@ -61,14 +61,17 @@ public sealed class RefundFailureLog : BaseEntity<Guid>
         Guid bookingId,
         Guid userId,
         long amount,
+        Guid paymentId,
         string triggerEventType,
         string failureReason,
         DateTimeOffset occurredAt)
     {
         if (userId == Guid.Empty)
             throw new ArgumentException("User id is required.", nameof(userId));
-        if (amount <= 0)
-            throw new ArgumentOutOfRangeException(nameof(amount), "Refund amount must be positive.");
+        if (amount < 0)
+            throw new ArgumentOutOfRangeException(nameof(amount), "Captured-payment refund amount cannot be negative.");
+        if (paymentId == Guid.Empty)
+            throw new ArgumentException("Payment id is required.", nameof(paymentId));
 
         return CreateForBooking(
             bookingId,
@@ -77,8 +80,8 @@ public sealed class RefundFailureLog : BaseEntity<Guid>
             occurredAt,
             userId,
             amount,
-            "BOOKING_REFUND",
-            bookingId);
+            "BOOKING_REFUND_PAYMENT",
+            paymentId);
     }
 
     public void RecordRetryAttempt(DateTimeOffset attemptedAt)
@@ -139,8 +142,13 @@ public sealed class RefundFailureLog : BaseEntity<Guid>
             throw new ArgumentException("Failure reason is required.", nameof(failureReason));
         if (userId == Guid.Empty)
             throw new ArgumentException("User id cannot be empty.", nameof(userId));
-        if (amount <= 0)
-            throw new ArgumentOutOfRangeException(nameof(amount), "Refund amount must be positive.");
+        if (amount < 0
+            || (amount == 0 && referenceType != "BOOKING_REFUND_PAYMENT"))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(amount),
+                "Refund amount must be positive unless it is an exact captured-payment Booking reconciliation.");
+        }
         if (referenceId == Guid.Empty)
             throw new ArgumentException("Reference id cannot be empty.", nameof(referenceId));
         if (referenceType is not null && string.IsNullOrWhiteSpace(referenceType))

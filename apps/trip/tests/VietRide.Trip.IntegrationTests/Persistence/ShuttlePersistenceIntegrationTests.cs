@@ -8,11 +8,15 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 using Npgsql.NameTranslation;
+using VietRide.Shared.Application.Inbox;
 using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Messaging.Abstractions;
+using VietRide.Shared.Persistence.Inbox;
 using VietRide.Shared.Persistence.Outbox;
+using VietRide.Shared.Persistence.UnitOfWork;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Domain.Entities;
@@ -99,6 +103,134 @@ public sealed class ShuttlePersistenceIntegrationTests
             manifests.Should().HaveCount(3);
             manifests.Select(x => x.TicketId).Should().OnlyHaveUniqueItems();
             manifests.Should().OnlyContain(x => x.Status == ShuttlePassenger.PendingAssignmentStatus);
+        }
+        finally
+        {
+            await setup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConfirmedFanOut_RealInbox_CommitsMarkerAndManifests_ThenReplayIsDuplicate()
+    {
+        var databaseName = $"vietride_trip_shuttle_inbox_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        var clock = new FrozenClock(now);
+        await using var setup = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await setup.Database.MigrateAsync();
+            var seed = await SeedBaseAsync(setup, now.AddHours(4));
+            var integrationEvent = CreateConfirmedEvent(seed.MainTripId, ticketCount: 3);
+            var messageId = Guid.NewGuid();
+            const string consumerName = "trip.booking-shuttle-confirmed";
+            const string payloadHash = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+            await using (var deliveryDb = CreateDbContext(databaseName, clock))
+            {
+                var unitOfWork = new EfUnitOfWork(deliveryDb);
+                var handler = CreateConfirmedHandler(deliveryDb, unitOfWork);
+                var inbox = new EfIntegrationEventInbox<TripDbContext>(deliveryDb, unitOfWork, clock);
+
+                var result = await inbox.ExecuteAsync(
+                    consumerName,
+                    messageId,
+                    payloadHash,
+                    cancellationToken => handler.HandleAsync(integrationEvent, cancellationToken),
+                    CancellationToken.None);
+
+                result.Should().Be(IntegrationEventInboxResult.Processed);
+            }
+
+            await using (var assertionDb = CreateDbContext(databaseName, clock))
+            {
+                (await assertionDb.ShuttlePassengers.AsNoTracking()
+                    .CountAsync(x => x.BookingId == integrationEvent.BookingId)).Should().Be(3);
+                (await assertionDb.Set<IntegrationInboxRecord>().AsNoTracking()
+                    .CountAsync(x => x.ConsumerName == consumerName && x.MessageId == messageId))
+                    .Should().Be(1);
+            }
+
+            await using (var replayDb = CreateDbContext(databaseName, clock))
+            {
+                var unitOfWork = new EfUnitOfWork(replayDb);
+                var handler = CreateConfirmedHandler(replayDb, unitOfWork);
+                var inbox = new EfIntegrationEventInbox<TripDbContext>(replayDb, unitOfWork, clock);
+                var handlerCalled = false;
+
+                var result = await inbox.ExecuteAsync(
+                    consumerName,
+                    messageId,
+                    payloadHash,
+                    async cancellationToken =>
+                    {
+                        handlerCalled = true;
+                        await handler.HandleAsync(integrationEvent, cancellationToken);
+                    },
+                    CancellationToken.None);
+
+                result.Should().Be(IntegrationEventInboxResult.Duplicate);
+                handlerCalled.Should().BeFalse();
+            }
+
+            await using var replayAssertionDb = CreateDbContext(databaseName, clock);
+            (await replayAssertionDb.ShuttlePassengers.AsNoTracking()
+                .CountAsync(x => x.BookingId == integrationEvent.BookingId)).Should().Be(3);
+            (await replayAssertionDb.Set<IntegrationInboxRecord>().AsNoTracking()
+                .CountAsync(x => x.ConsumerName == consumerName && x.MessageId == messageId))
+                .Should().Be(1);
+        }
+        finally
+        {
+            await setup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConfirmedFanOut_RealInbox_FailureBeforeMarker_RollsBackManifestsAndMarker()
+    {
+        var databaseName = $"vietride_trip_shuttle_inbox_failure_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        var clock = new FrozenClock(now);
+        await using var setup = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await setup.Database.MigrateAsync();
+            var seed = await SeedBaseAsync(setup, now.AddHours(4));
+            var integrationEvent = CreateConfirmedEvent(seed.MainTripId, ticketCount: 3);
+            var messageId = Guid.NewGuid();
+            const string consumerName = "trip.booking-shuttle-confirmed";
+            const string payloadHash = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+
+            await using (var deliveryDb = CreateDbContext(databaseName, clock))
+            {
+                var unitOfWork = new EfUnitOfWork(deliveryDb);
+                var handler = CreateConfirmedHandler(deliveryDb, unitOfWork);
+                var inbox = new EfIntegrationEventInbox<TripDbContext>(deliveryDb, unitOfWork, clock);
+
+                var act = () => inbox.ExecuteAsync(
+                    consumerName,
+                    messageId,
+                    payloadHash,
+                    async cancellationToken =>
+                    {
+                        await handler.HandleAsync(integrationEvent, cancellationToken);
+                        throw new InvalidOperationException("crash before inbox marker");
+                    },
+                    CancellationToken.None);
+
+                await act.Should().ThrowAsync<InvalidOperationException>()
+                    .WithMessage("crash before inbox marker");
+            }
+
+            await using var assertionDb = CreateDbContext(databaseName, clock);
+            (await assertionDb.ShuttlePassengers.AsNoTracking()
+                .CountAsync(x => x.BookingId == integrationEvent.BookingId)).Should().Be(0);
+            (await assertionDb.Set<IntegrationInboxRecord>().AsNoTracking()
+                .CountAsync(x => x.ConsumerName == consumerName && x.MessageId == messageId))
+                .Should().Be(0);
         }
         finally
         {
@@ -305,13 +437,39 @@ public sealed class ShuttlePersistenceIntegrationTests
             mainTrip.Id);
     }
 
+    private static BookingShuttleConfirmedIntegrationEvent CreateConfirmedEvent(
+        Guid tripId,
+        int ticketCount)
+    {
+        var passengerId = Guid.NewGuid();
+        return new BookingShuttleConfirmedIntegrationEvent
+        {
+            BookingId = Guid.NewGuid(),
+            TripId = tripId,
+            UserId = passengerId,
+            Tickets = Enumerable.Range(0, ticketCount)
+                .Select(_ => new BookingShuttleConfirmedIntegrationEvent.ConfirmedTicket(
+                    Guid.NewGuid(),
+                    passengerId))
+                .ToArray(),
+            ShuttlePickup = new BookingShuttleConfirmedIntegrationEvent.ShuttlePickupPayload(
+                "12 Nguyen Hue, District 1",
+                10.7731m,
+                106.7032m),
+        };
+    }
+
     private static IIntegrationEventHandler<BookingShuttleConfirmedIntegrationEvent> CreateConfirmedHandler(
-        TripDbContext db)
+        TripDbContext db,
+        IUnitOfWork? unitOfWork = null)
     {
         var type = typeof(TripDbContext).Assembly.GetType(
             "VietRide.Trip.Infrastructure.Messaging.BookingShuttleConfirmedIntegrationEventHandler",
             throwOnError: true)!;
-        return (IIntegrationEventHandler<BookingShuttleConfirmedIntegrationEvent>)Activator.CreateInstance(type, db)!;
+        return (IIntegrationEventHandler<BookingShuttleConfirmedIntegrationEvent>)Activator.CreateInstance(
+            type,
+            db,
+            unitOfWork ?? new EfUnitOfWork(db))!;
     }
 
     private static IShuttleDispatchService CreateDispatchService(

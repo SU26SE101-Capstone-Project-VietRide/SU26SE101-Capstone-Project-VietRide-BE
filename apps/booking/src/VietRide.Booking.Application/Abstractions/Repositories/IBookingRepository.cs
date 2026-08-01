@@ -49,6 +49,11 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         CancellationToken ct = default)
         => throw new NotSupportedException("Passenger booking history is not implemented by this repository.");
 
+    Task<IReadOnlyDictionary<Guid, long>> GetBookingGroupNetTotalsAsync(
+        IReadOnlyCollection<Guid> bookingGroupIds,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Booking group net-total lookup is not implemented by this repository.");
+
     Task<IReadOnlyList<PlatformBookingReportItem>> GetPlatformBookingMetricsAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
@@ -57,6 +62,15 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
 
     Task AcquireEventLockAsync(Guid sourceEventId, CancellationToken ct = default)
         => throw new NotSupportedException("Booking event lock is not implemented by this repository.");
+
+    /// <summary>
+    /// Serializes payment confirmation, cancellation, and expiry for the supplied Booking rows.
+    /// Implementations must acquire locks in deterministic identifier order.
+    /// </summary>
+    Task AcquirePaymentTransitionLocksAsync(
+        IReadOnlyCollection<Guid> bookingIds,
+        CancellationToken ct = default)
+        => Task.CompletedTask;
 
     Task<IReadOnlyList<BookingEntity>> GetScheduleChangeBookingsForUpdateAsync(
         Guid tripId,
@@ -192,6 +206,16 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         Guid bookingId,
         DateTimeOffset confirmedAt,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically transitions every supplied round-trip leg from PENDING_PAYMENT to CONFIRMED.
+    /// Returns false without changing any leg when the complete set is not pending.
+    /// </summary>
+    Task<bool> TryConfirmPendingPaymentGroupAsync(
+        IReadOnlyCollection<Guid> bookingIds,
+        DateTimeOffset confirmedAt,
+        CancellationToken ct = default)
+        => Task.FromResult(false);
 
     /// <summary>
     /// Status-guarded PENDING_PAYMENT -> EXPIRED transition.

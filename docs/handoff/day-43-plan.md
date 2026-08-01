@@ -187,6 +187,51 @@ Legend: todo / in progress / done (reviewer APPROVED + human `/verify`) / done-w
 - Mỗi service đang sở hữu Hangfire (`Identity`, `Trip`, `Booking`, `Payment`, `Parcel`) expose service-local `GET /internal/jobs/status`, chỉ Internal JWT, không qua Gateway và không mở dashboard. DTO gồm job id, status, lastRun, nextRun, lagSeconds; lag là `max(0, nowUtc - nextRunUtc)` cho job quá hạn, `null` khi chưa có next run/disabled. Endpoint không đổi schedule/readiness.
 - Chaos gate phải chứng minh RabbitMQ outage giữ Outbox trong Postgres, broker restart drain được event eligible, và event vượt threshold xuất hiện đúng một DLQ row/query được từ Identity facade.
 
+## Reopening addendum — 2026-07-31
+
+Day 43's original DLQ, job-status, idempotency middleware, and E2E delivery remain historical
+completed work. Closure is reopened because the executable idempotency inventory drifted after
+later endpoint merges. This addendum does not alter the prior tracker or audit evidence.
+
+The approved repair in `docs/handoff/day-36-43-fe-gap-repair-plan.md` first fixes discovery
+semantics for absolute action routes and `[NonAction]`, then freezes the final inventory only after
+the new internal Payment redirect lookup, Booking refund consumer, and two read-only lookup
+clients exist. The final gate reruns the inventory verifier, Day 43 reliability E2E, impacted
+regression, and writes a fresh `docs/handoff/day-43-checklist.md`.
+
+### Final inventory freeze — 2026-08-01
+
+The reopened audit freezes the exact mutation surface after the later endpoint merges and the
+Payment redirect-history work:
+
+| Service | Total | Required | Exempt |
+| --- | ---: | ---: | ---: |
+| Identity | 35 | 30 | 5 |
+| Trip | 56 | 53 | 3 |
+| Booking | 27 | 26 | 1 |
+| Payment | 15 | 11 | 4 |
+| Parcel | 31 | 30 | 1 |
+| Notification | 3 | 3 | 0 |
+| RAG | 13 | 12 | 1 |
+| **Total** | **180** | **165** | **15** |
+
+The cross-system inventory now distinguishes source-level registration sites from registrations
+created by mapped binding arrays:
+
+- 45 .NET `IIntegrationEventHandler<T>` registrations.
+- 14 Notification `.subscribe(...)` source callsites, expanding to 73 runtime RabbitMQ binding
+  registrations (five callsites map binding collections; nine are direct registrations).
+- 28 .NET outbound POST/PUT/PATCH/DELETE-style HTTP callsites. Nineteen target
+  idempotency-required mutations and nine are exact read-only exemptions across eight files. The
+  post-merge additions are Payment's Identity financial projection lookup, two Trip revenue
+  analytics batch lookups, and Parcel's Trip summary batch lookup.
+
+The provisional repair-plan baseline of 22 outbound callsites and four exemption files omitted two
+older `PostAsJsonAsync` callsites. Merging `origin/main` at `5b00b313` then added the UI-gap policy,
+analytics and projection surfaces, raising the executable baseline to 180/165/15, 45 handlers and
+28/9 outbound callsites/exemptions. The inventory uses callsite tokens rather than whole-file
+exemptions so mixed clients cannot exempt mutation callsites accidentally.
+
 ## Open questions đã đóng
 
 Các Q1–Q4 cũ bên dưới được giữ làm lịch sử của bản draft; quyết định ở mục trên là SOT hiện hành và không còn là blocker.

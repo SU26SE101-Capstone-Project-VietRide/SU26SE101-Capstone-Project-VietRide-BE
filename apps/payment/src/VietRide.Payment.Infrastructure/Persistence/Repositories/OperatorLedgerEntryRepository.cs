@@ -114,6 +114,15 @@ internal sealed class OperatorLedgerEntryRepository : IOperatorLedgerEntryReposi
     public Task<long> SumTripNetAmountAsync(Guid operatorId, Guid tripId, CancellationToken cancellationToken)
         => _db.OperatorLedgerEntries.Where(x => x.OperatorId == operatorId && x.TripId == tripId).SumAsync(x => x.Amount, cancellationToken);
 
+    public Task<bool> HasSourceEntryAsync(
+        Guid sourceEventId,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => _db.OperatorLedgerEntries.AnyAsync(
+            entry => entry.SourceEventId == sourceEventId
+                && entry.ReferenceId == referenceId,
+            cancellationToken);
+
     private static void AddParameter(System.Data.Common.DbCommand command, string name, object value)
     {
         var parameter = command.CreateParameter();

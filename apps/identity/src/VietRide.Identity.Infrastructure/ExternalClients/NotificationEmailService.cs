@@ -38,6 +38,7 @@ public sealed class NotificationEmailService : IEmailService
         CancellationToken ct = default)
     {
         var request = new NotificationEmailRequest(
+            IdempotencyKey: accountInfo.OperationId,
             ToEmail: to,
             TemplateKey: SetInitialPasswordTemplateKey,
             TemplateData: new Dictionary<string, object?>

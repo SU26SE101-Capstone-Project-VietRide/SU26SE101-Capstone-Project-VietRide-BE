@@ -143,6 +143,38 @@ public sealed class CancelBookingCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_AcquiresPaymentTransitionLockBeforeAuthoritativeReadAndCancelCas()
+    {
+        var booking = CreateBooking(
+            BookingStatus.CONFIRMED,
+            SeatLockToken,
+            totalAmount: 200_000);
+        booking.AddPassenger("A01");
+        SetupBookingTripAndOperator(
+            booking,
+            CreateTripSnapshot("SCHEDULED", Now.AddHours(24)));
+
+        await BuildSut().Handle(BuildCommand(booking.Id), CancellationToken.None);
+
+        Received.InOrder(() =>
+        {
+            _ = _bookings.AcquirePaymentTransitionLocksAsync(
+                Arg.Is<IReadOnlyCollection<Guid>>(ids =>
+                    ids.SequenceEqual(new[] { booking.Id })),
+                Arg.Any<CancellationToken>());
+            _ = _bookings.FindByIdWithPassengersAsync(
+                booking.Id,
+                Arg.Any<CancellationToken>());
+            _ = _bookings.TryCancelAsync(
+                booking.Id,
+                BookingCancellationReason.USER_INITIATED,
+                Now,
+                false,
+                Arg.Any<CancellationToken>());
+        });
+    }
+
+    [Fact]
     public async Task Handle_NonCancellableBookingStatus_ThrowsBeforeTripLookup()
     {
         var booking = CreateBooking(BookingStatus.EXPIRED, SeatLockToken);

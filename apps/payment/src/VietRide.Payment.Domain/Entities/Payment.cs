@@ -211,6 +211,9 @@ public sealed class Payment : BaseEntity<Guid>
 
     public void MarkSucceeded(string? vnPayResponseCode, DateTimeOffset succeededAt)
     {
+        if (Status is not (PaymentStatus.PENDING_REDIRECT or PaymentStatus.EXPIRED))
+            throw new InvalidOperationException("Only pending or expired VNPay payments can record a capture.");
+
         Status = PaymentStatus.SUCCEEDED;
         VnPayResponseCode = vnPayResponseCode;
         SucceededAt = succeededAt;
@@ -218,6 +221,9 @@ public sealed class Payment : BaseEntity<Guid>
 
     public void MarkFailed(string? vnPayResponseCode, DateTimeOffset failedAt)
     {
+        if (Status != PaymentStatus.PENDING_REDIRECT)
+            throw new InvalidOperationException("Only pending VNPay payments can fail.");
+
         Status = PaymentStatus.FAILED;
         VnPayResponseCode = vnPayResponseCode;
         FailedAt = failedAt;
@@ -225,6 +231,9 @@ public sealed class Payment : BaseEntity<Guid>
 
     public void MarkExpired(DateTimeOffset expiredAt)
     {
+        if (Status != PaymentStatus.PENDING_REDIRECT)
+            throw new InvalidOperationException("Only pending VNPay payments can expire.");
+
         Status = PaymentStatus.EXPIRED;
         ExpiredAt = expiredAt;
     }

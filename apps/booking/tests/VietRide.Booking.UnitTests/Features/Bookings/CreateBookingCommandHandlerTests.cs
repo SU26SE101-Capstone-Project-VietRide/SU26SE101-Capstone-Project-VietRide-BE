@@ -485,6 +485,68 @@ public class CreateBookingCommandHandlerTests
             .EnqueueAsync(default!, default!, default);
     }
 
+    [Fact]
+    public async Task Handle_VNPayPayment_PassesExactSeatLockExpiryToPayment()
+    {
+        var now = new DateTimeOffset(2026, 7, 31, 10, 0, 0, TimeSpan.Zero);
+        var expiresAt = now.AddMinutes(7);
+        var lockData = LockData with { ExpiresAt = expiresAt };
+        _clock.UtcNow.Returns(now);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(ValidTrip);
+        _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockSeatsOutcome.Success(lockData));
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<BookingEntity>());
+        _paymentClient.ChargeAsync(default!, default, default, default, default!, default!, default)
+            .ReturnsForAnyArgs(new ChargeOutcome.Success(
+                new ChargeResult(PaymentId, "PENDING", "https://vnpay.vn/pay?token=abc")));
+
+        await BuildSut().Handle(
+            BuildCommand(paymentMethod: "VNPAY"),
+            CancellationToken.None);
+
+        await _paymentClient.Received(1).ChargeAsync(
+            "BOOKING",
+            Arg.Any<Guid>(),
+            PassengerUserId,
+            200_000,
+            "VNPAY",
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>(),
+            Arg.Any<PaymentContextSnapshot>(),
+            expiresAt);
+    }
+
+    [Fact]
+    public async Task Handle_WhenSeatLockDeadlineElapsesBeforeCharge_ReleasesSeatsAndSkipsPayment()
+    {
+        var startedAt = new DateTimeOffset(2026, 7, 31, 10, 0, 0, TimeSpan.Zero);
+        var expiresAt = startedAt.AddMinutes(1);
+        var lockData = LockData with { ExpiresAt = expiresAt };
+        _clock.UtcNow.Returns(startedAt, expiresAt);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(ValidTrip);
+        _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockSeatsOutcome.Success(lockData));
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<BookingEntity>());
+
+        var act = () => BuildSut().Handle(
+            BuildCommand(paymentMethod: "VNPAY"),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<VietRide.Booking.Application.Exceptions.BookingPaymentException>()
+            .Where(exception =>
+                exception.StatusCode == 422
+                && exception.ErrorCode == "PAYMENT_DEADLINE_PASSED");
+        await _bookingService.Received(1).ReleaseSeatsAsync(
+            TripId,
+            SeatLockToken,
+            Arg.Is<IReadOnlyList<string>>(seats => seats.SequenceEqual(new[] { "A01" })),
+            Arg.Any<CancellationToken>());
+        await _paymentClient.DidNotReceiveWithAnyArgs()
+            .ChargeAsync(default!, default, default, default, default!, default!, default);
+    }
+
     // -----------------------------------------------------------------------
     // BLOCKER-2: voucher-applied happy path
     //   Stub VoucherService to return discount=10_000 and a voucherId,

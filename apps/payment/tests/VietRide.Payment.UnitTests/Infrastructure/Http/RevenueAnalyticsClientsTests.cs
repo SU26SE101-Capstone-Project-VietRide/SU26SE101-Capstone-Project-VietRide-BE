@@ -137,19 +137,19 @@ public sealed class RevenueAnalyticsClientsTests
     public async Task TripAnalyticsClient_MapsSlowResponseBodyToUpstreamUnavailableWithinClientDeadline()
     {
         using var safetyTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var slowContent = new SlowContent();
         var client = Create<ITripRevenueAnalyticsClient>(
             "VietRide.Payment.Infrastructure.Http.TripRevenueAnalyticsClient",
             new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new SlowContent(),
+                Content = slowContent,
             })),
             TimeSpan.FromMilliseconds(100));
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         var act = () => client.GetVehicleCountsAsync([Guid.NewGuid()], safetyTimeout.Token);
 
         await act.Should().ThrowAsync<UpstreamUnavailableException>();
-        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromMilliseconds(700));
+        slowContent.CancellationObserved.Should().BeTrue();
         safetyTimeout.IsCancellationRequested.Should().BeFalse();
     }
 
@@ -203,6 +203,10 @@ public sealed class RevenueAnalyticsClientsTests
 
     private sealed class SlowContent : HttpContent
     {
+        private int cancellationObserved;
+
+        public bool CancellationObserved => Volatile.Read(ref cancellationObserved) == 1;
+
         protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
         {
             await Task.Delay(TimeSpan.FromSeconds(1));
@@ -214,8 +218,16 @@ public sealed class RevenueAnalyticsClientsTests
             TransportContext? context,
             CancellationToken cancellationToken)
         {
-            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-            await stream.WriteAsync("[]"u8.ToArray(), cancellationToken);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                await stream.WriteAsync("[]"u8.ToArray(), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                Interlocked.Exchange(ref cancellationObserved, 1);
+                throw;
+            }
         }
 
         protected override bool TryComputeLength(out long length)

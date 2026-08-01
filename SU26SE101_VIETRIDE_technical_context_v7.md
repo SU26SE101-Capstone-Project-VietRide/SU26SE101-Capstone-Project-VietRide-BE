@@ -339,10 +339,14 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 > Hangfire cần persistent storage để track job queue. Dùng `Hangfire.PostgreSql` package — Hangfire tự tạo các bảng (`hangfire.job`, `hangfire.queue`, v.v.) trong **cùng PostgreSQL DB** của service đó (không phải DB share riêng).
 >
 > Services dùng Hangfire (business scheduled jobs) và lý do:
-> - **Booking Service:** seat release khi VNPay timeout 15 phút (EXPIRED), schedule-change confirmation auto-accept khi quá deadline, PENDING_SEAT_ASSIGNMENT escalation (T+2h re-alert) + auto-cancel/refund 100% nếu unresolved tại `departure - 30 phút` (job interval 15 phút)
+> - **Booking Service:** seat release khi tới authoritative Payment deadline (Trip seat-lock
+>   `expiresAt`; round-trip dùng leg sớm hơn), schedule-change confirmation auto-accept khi quá
+>   deadline, PENDING_SEAT_ASSIGNMENT escalation (T+2h re-alert) + auto-cancel/refund 100% nếu
+>   unresolved tại `departure - 30 phút` (job interval 15 phút)
 > - **Trip-Route-Vehicle Service:** auto-generate Trip từ DriverSchedule (2 trigger: immediate on-create + weekly CN 23:00), auto-BOARDING 30 phút trước departure, auto-COMPLETED fallback sau estimatedArrivalTime + 30 phút
 > - **Parcel Service:** undo-reject window 15 phút (DELIVERY_REJECTED → RETURN_INITIATED), cancel EXTRA_LARGE review timeout sau 24h, reject/forfeit `RESERVED` quá `latestCheckInAt`, reject/forfeit `PENDING_FINAL_PAYMENT` quá `finalPaymentDeadline` (interval 5 phút), PENDING_TRANSFER_CONFIRM escalation 30 phút, PENDING_OPERATOR_ACTION re-alert 2h
-> - **Payment Service:** Payment PENDING_REDIRECT EXPIRED sau 15 phút cho Booking/Parcel VNPay, TopUpRequest EXPIRED sau 15 phút
+> - **Payment Service:** Payment PENDING_REDIRECT EXPIRED khi `dueAt ?? createdAt + 15 phút <= now`;
+>   TopUpRequest EXPIRED sau 15 phút
 >
 > **Outbox polling KHÔNG dùng Hangfire** — dùng `BackgroundService`/`IHostedService` (xem Decisions section).
 >
@@ -1796,17 +1800,21 @@ Single-direction booking vẫn dùng `POST /v1/bookings` (không thay đổi).
 
 Cả 2 Booking_outbound + Booking_return được tạo trong cùng DB transaction với cùng `bookingGroupId`. Seat lock cho cả 2 trip atomic trong 1 Lua script (xem "Seat lock cho round-trip" phía trên). Payment record `referenceType=BOOKING_GROUP` được tạo với `referenceId=bookingGroupId`, `amount=outboundFare+returnFare`.
 
-**Vấn đề:** Hangfire seat-release job (15 phút sau Booking.createdAt nếu Payment chưa SUCCEEDED) chạy per-Booking. Trên lý thuyết 2 Booking cùng `bookingGroupId` cùng `createdAt`, job sẽ release cả 2 cùng lúc. Tuy nhiên race condition vẫn có thể xảy ra (Hangfire worker chạy không atomic giữa 2 booking).
+**Vấn đề:** Hangfire seat-release job chạy per-Booking khi Payment đã tới deadline mà chưa
+`SUCCEEDED`. Trên lý thuyết 2 Booking cùng `bookingGroupId` dùng chung deadline sớm hơn của hai
+seat lock, nên job sẽ release cả 2 cùng lúc. Tuy nhiên race condition vẫn có thể xảy ra (Hangfire
+worker chạy không atomic giữa 2 booking).
 
 **Rule chốt cho round-trip group:**
 ```
 Hangfire job seat-release CHECK bookingGroupId trước khi release:
-  SELECT Booking WHERE status = PENDING_PAYMENT AND createdAt < now - 15 phút
+  SELECT Booking WHERE status = PENDING_PAYMENT
+    AND effectivePaymentDueAt <= now
   FOR EACH:
     IF Booking.bookingGroupId IS NOT NULL:
       -- Group transaction: chỉ release nếu CẢ 2 booking trong group đều PENDING_PAYMENT timeout
       groupBookings = SELECT * FROM Booking WHERE bookingGroupId = :gid
-      IF ALL groupBookings.status = PENDING_PAYMENT AND ALL exceed 15 phút:
+      IF ALL groupBookings.status = PENDING_PAYMENT AND group payment deadline <= now:
         Release seats cho cả 2 + UPDATE both to EXPIRED
       ELSE:
         SKIP (case này không xảy ra vì cùng createdAt — nhưng defensive)
@@ -1985,7 +1993,7 @@ Trong DB transaction của Booking Service handler:
 - Booking đã INSERT với totalAmount cũ (lock tại step 4).
 - VNPay charge theo totalAmount cũ (đã encode trong vnp_Amount).
 - Operator edit baseFare → không ảnh hưởng booking đã có. Chỉ áp cho booking tạo sau update.
-- Nếu VNPay timeout 15 phút + booking EXPIRED → passenger book lại sẽ thấy giá mới.
+- Nếu authoritative Payment deadline qua + booking EXPIRED → passenger book lại sẽ thấy giá mới.
 
 **Seat selection — có sơ đồ ghế (seat map):**
 
@@ -2618,17 +2626,65 @@ Ai trigger REFUNDED:
   - Operator hủy chuyến: Trip CANCELLED → Booking Service cancel + refund hàng loạt
     → mỗi booking về REFUNDED sau khi WalletCredited
   - NO_SHOW: KHÔNG chuyển REFUNDED (không có refund)
-  - EXPIRED: KHÔNG chuyển REFUNDED (không có refund — seat release only)
+  - EXPIRED khi chưa capture: KHÔNG chuyển REFUNDED (seat release only). Capture được xác minh sau
+    expiry phải đi qua compensation về ví như rule authoritative bên dưới.
 
 BookingStatus machine (đầy đủ):
   PENDING_PAYMENT → CONFIRMED → COMPLETED
-                  ↘ EXPIRED   (VNPay timeout 15 phút)
+                  ↘ EXPIRED   (authoritative payment deadline)
                   CONFIRMED → CANCELLED → REFUNDED  (hủy chủ động + tiền về)
                   CONFIRMED → NO_SHOW               (không hoàn)
                   CONFIRMED → PARTIAL_NO_SHOW → COMPLETED  (một phần passenger no-show, không hoàn)
                   CONFIRMED → CANCELLED              (operator hủy chuyến TRƯỚC IN_PROGRESS — sau đó → REFUNDED khi wallet credited)
                   CONFIRMED → DISRUPTED → REFUNDED   (Trip IN_PROGRESS bị gián đoạn không thay xe — refund proportional)
 ```
+
+**Authoritative VNPay deadline, late IPN và Booking compensation (ratified 2026-07-31):**
+
+- Mỗi VNPay Payment dùng `effectiveDueAt = dueAt ?? createdAt + 15 phút`. `dueAt` persisted là
+  authoritative khi có; fallback 15 phút chỉ dành cho Payment cũ thiếu deadline.
+- Booking one-way truyền nguyên `expiresAt` của Trip seat lock vào `Payment.dueAt`. Round-trip dùng
+  deadline sớm hơn của hai leg. Cấu hình VNPay timeout 15 phút không kéo dài seat lock 10 phút.
+  Parcel tiếp tục truyền deadline nghiệp vụ của chính flow; vì vậy final-payment window 30 phút
+  không được expire ở phút 15.
+- `effectiveDueAt <= now` là hết hạn. Expiry phải là CAS atomic trên `PENDING_REDIRECT`; transition
+  và `payment.payment.expired` Outbox cùng transaction.
+- IPN xác minh signature, merchant, amount, transaction status và signed `vnp_PayDate` trước khi
+  mutate. `paidAt` từ `vnp_PayDate` là thời điểm tài chính authoritative, kể cả callback đến sau khi
+  job đã chuyển local Payment sang `EXPIRED`.
+- Booking đã `EXPIRED`, `paidAt >= effectiveDueAt`, hoặc không còn confirm được seat thì không được
+  hồi sinh. Khoản capture phải hoàn idempotent về PassengerWallet, một allocation cho mỗi Booking.
+  Lỗi Trip tạm thời (timeout/network/5xx) phải retry; không expire/refund cho tới khi có outcome
+  definitive.
+- Booking phát `booking.payment_refund.requested` trong cùng transaction với terminal transition:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "date-time",
+  "paymentId": "uuid",
+  "paymentReferenceType": "BOOKING|BOOKING_GROUP",
+  "paymentReferenceId": "uuid",
+  "bookingId": "uuid",
+  "userId": "uuid",
+  "amount": 350000,
+  "reason": "PAYMENT_CAPTURE_AFTER_BOOKING_EXPIRY|SEAT_CONFIRMATION_FAILED"
+}
+```
+
+Payment không tin `userId`/`amount` từ event; phải revalidate captured VNPay Payment, owner, original
+reference và exact net allocation từ immutable trusted context. One-way Payment chỉ thành
+`REFUNDED` sau exact refund. `BOOKING_GROUP` chỉ thành `REFUNDED` khi mọi allocation có tổng
+`BOOKING_REFUND` đúng exact net amount; partial refund lịch sử không được tính là hoàn đủ.
+
+**Resumable VNPay history (ratified 2026-07-31):**
+
+Booking và Passenger history có nullable root field `paymentRedirectUrl`, luôn serialize. Chỉ
+Payment attempt mới nhất theo `(createdAt DESC, id DESC)` của requested reference được xét; không
+fallback URL cũ. URL chỉ hợp lệ khi đúng owner, exact domain amount, trusted context, method
+`VNPAY`, status `PENDING_REDIRECT`, persisted `dueAt > now`, và absolute HTTPS authority trùng
+VNPay base URI cấu hình. Payment lookup unavailable/malformed phải fail open thành `null`, không
+làm hỏng base history.
 
 ### 6.6 Giao nhận hàng ký gửi (Parcel Delivery)
 
@@ -3339,7 +3395,8 @@ Parcel có tính phí. Operator define bảng giá theo route + size category. C
   4. Nếu Wallet success → Payment `SUCCEEDED`, Parcel → `PENDING`
   5. Nếu VNPay → Payment `PENDING_REDIRECT`, Parcel giữ `PENDING_PAYMENT`, response trả `paymentRedirectUrl`
   6. VNPay callback success → Payment Service publish `PaymentSucceeded { referenceType=PARCEL, parcelId }` → Parcel Service update Parcel → `PENDING`
-  7. VNPay fail/timeout 15 phút → Payment `FAILED/EXPIRED`, Parcel → `EXPIRED` (chưa nhận hàng, chưa refund)
+  7. VNPay fail hoặc tới authoritative payment deadline → Payment `FAILED/EXPIRED`, Parcel →
+     `EXPIRED` (chưa nhận hàng, chưa refund)
 - EXTRA_LARGE:
   1. Tạo parcel ban đầu status = `PENDING_OPERATOR_REVIEW`, chưa charge
   2. Operator APPROVE → chuyển sang `PENDING_PAYMENT`, rồi chạy cùng payment flow Wallet/VNPay như trên
@@ -3565,7 +3622,7 @@ Booking flow chạm nhiều service (Booking, Trip-Route-Vehicle, Payment, Walle
         7. Tính discountAmount theo voucher type (PERCENT_OFF / FIXED_AMOUNT) + cap maxDiscountAmount
       Sau đó trừ voucherDiscount, làm tròn đến đồng gần nhất nếu ra số lẻ (BSOT v1.11.0 — không floor 1000)
    d. Tạo Booking record status = PENDING_PAYMENT, tạo 3 Passenger record (chỉ operational: seatNumber + boardingStatus default PENDING)
-   e. HTTP POST Payment Service /charge { bookingId, amount, method }
+   e. HTTP POST Payment Service /charge { bookingId, amount, method, dueAt=seatLock.expiresAt }
       → Payment:
         - method = WALLET: deduct wallet balance, log transaction
         - method = VNPAY: tạo VNPay redirect URL, status = PENDING_REDIRECT
@@ -3643,7 +3700,7 @@ Worker implementation theo service stack:
 |---|---|
 | Seat lock fail | Return error, không tạo Booking |
 | Payment fail (wallet/VNPay) | Release seat, set Booking CANCELLED |
-| VNPay timeout (15 phút) | Hangfire job: release seat, set Booking EXPIRED |
+| VNPay tới authoritative deadline | Hangfire job: release seat, set Booking EXPIRED |
 | User hủy vé chủ động | Release seat, refund wallet (theo policy 6.2) |
 
 ### 6.10 Station vs Stop — Entity Model
@@ -4583,7 +4640,7 @@ geo/fuzzy matching vẫn v2; Day 40 chỉ System Admin merge thủ công.
 | Parcel delivery link TTL | 48 giờ |
 | Edit pickup/dropoff cutoff | **2 giờ trước departure time** (hardcode toàn hệ thống) |
 | Max seats per booking | **5 ghế** (ngăn đầu cơ) |
-| VNPay payment timeout | 15 phút (sau đó auto-release seat) |
+| VNPay payment timeout | Persisted `dueAt`; legacy fallback 15 phút. Booking dùng Trip seat-lock expiry (10 phút mặc định) |
 | Wallet data type | BIGINT, đơn vị VND — không dùng float/decimal |
 | Wallet top-up min | **10,000 VND** |
 | Wallet top-up max | **Không giới hạn** — VNPay tự enforce theo policy của họ |
@@ -4620,7 +4677,7 @@ TripStatus:        SCHEDULED → BOARDING → IN_PROGRESS → COMPLETED
                    DELAYED là overlay flag (xe vẫn IN_PROGRESS nhưng trễ ETA), không phải status riêng
 
 BookingStatus:     PENDING_PAYMENT → CONFIRMED → COMPLETED
-                                  ↘ EXPIRED   (VNPay timeout 15 phút — không refund)
+                                  ↘ EXPIRED   (authoritative Payment deadline; captured late payment được refund)
                    CONFIRMED → CANCELLED → REFUNDED  (hủy chủ động + tiền về ví)
                    CONFIRMED → NO_SHOW               (tất cả passenger no-show, không hoàn tiền)
                    CONFIRMED → PARTIAL_NO_SHOW → COMPLETED  (Trip hoàn thành bình thường)
@@ -4805,16 +4862,18 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 
 **Reliability:**
 - **Outbox:** mỗi service có bảng `OutboxEvent {eventType, payload JSONB, status PENDING|PUBLISHING|PUBLISHED|FAILED, retryCount, lastError, createdAt, publishedAt}`. .NET dùng `BackgroundService` poll mỗi 5s. NestJS dùng BullMQ scheduled job poll mỗi 5s. Notification Service không có Outbox (chỉ consume).
-- **Compensation:** Payment fail → HTTP release seat về Trip-Route-Vehicle. VNPay timeout 15 phút → Hangfire release seat + EXPIRED.
+- **Compensation:** Payment fail → HTTP release seat về Trip-Route-Vehicle. Authoritative Payment
+  deadline → Hangfire release seat + EXPIRED; capture sau đó không hồi sinh Booking và được hoàn
+  idempotent về ví.
 - **Idempotency:** `Idempotency-Key` header (UUID) cho các mutation endpoints quan trọng. Redis `<service>:idem:{key}` TTL 24h.
 - **Hangfire scope (.NET) — chỉ dùng cho business scheduled jobs** (không dùng cho Outbox polling):
 
 | Service | Job |
 |---|---|
-| Booking | Seat release khi VNPay timeout · schedule-change auto-accept · PENDING_SEAT_ASSIGNMENT escalation (interval 15 phút) |
+| Booking | Seat release tại authoritative Payment deadline · schedule-change auto-accept · PENDING_SEAT_ASSIGNMENT escalation (interval 15 phút) |
 | Trip-Route-Vehicle | Auto-BOARDING 30 phút trước departure · COMPLETED fallback +30 phút sau ETA · Generate Trip từ DriverSchedule (CN 23:00) |
 | Parcel | Undo-reject 15 phút · cancel EXTRA_LARGE review timeout 24h · reject/forfeit RESERVED quá `latestCheckInAt` · reject/forfeit PENDING_FINAL_PAYMENT quá `finalPaymentDeadline` (interval 5 phút) · PENDING_TRANSFER_CONFIRM escalation 30 phút · stale Day-32 cargo-recovery operation replay 5 phút · PENDING_OPERATOR_ACTION re-alert 2h |
-| Payment | PENDING_REDIRECT expired 15 phút · TopUpRequest expired 15 phút · **Trip settlement eligibility flag (daily 02:00)** — set `OperatorTripSettlement.status=ELIGIBLE` khi `eligibleAt <= now` · **Trip settlement weekly auto-settle (Monday 09:00 weekly)** — debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE · Subscription trial expire check (daily 00:30) · Trial expiring T-3 days warn (daily 09:00) · Subscription upgrade attempt hết hạn sau 15 phút và reconciliation chạy mỗi phút · Subscription paid invoice generation post-payment-success (event-driven, không phải scheduled — nhưng retry via Hangfire nếu PDF gen fail) |
+| Payment | PENDING_REDIRECT expired khi `dueAt ?? createdAt + 15 phút <= now` · TopUpRequest expired 15 phút · **Trip settlement eligibility flag (daily 02:00)** — set `OperatorTripSettlement.status=ELIGIBLE` khi `eligibleAt <= now` · **Trip settlement weekly auto-settle (Monday 09:00 weekly)** — debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE · Subscription trial expire check (daily 00:30) · Trial expiring T-3 days warn (daily 09:00) · Subscription upgrade attempt hết hạn sau 15 phút và reconciliation chạy mỗi phút · Subscription paid invoice generation post-payment-success (event-driven, không phải scheduled — nhưng retry via Hangfire nếu PDF gen fail) |
 | Identity | OTP expired cleanup (optional) · FCM token stale cleanup (weekly) |
 
 **Redis namespace conventions (canonical — tránh conflict cross-service):**
@@ -4940,6 +4999,10 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
 - OAuthIdentity chưa có, email đã tồn tại → auto-link tạo OAuthIdentity, login với account cũ, push in-app banner thông báo 1 lần.
 - OAuthIdentity chưa có, email chưa tồn tại → tạo User mới `status=ACTIVE` (Google đã verify email, không cần OTP).
 
+Password login và Google login cùng trả `User.avatarUrl` đã lưu. Google provider avatar chỉ seed
+khi tạo User mới; re-login/link account không ghi đè avatar hiện hữu. `avatarUrl = null` bị omit
+khỏi auth response.
+
 Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → gửi OTP → verify → `status=ACTIVE`. Passenger mobile có thể login trước verify trong restricted session; các non-passenger account chỉ login sau khi thành `ACTIVE`.
 
 ### Entity Requirements per Service
@@ -4997,7 +5060,7 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 
 #### Payment & Wallet Service
 
-- **`Payment`** — Mọi giao dịch thanh toán. referenceType: BOOKING | BOOKING_GROUP | PARCEL | TOP_UP | SUBSCRIPTION. Method: WALLET (instant SUCCEEDED) | VNPAY (qua PENDING_REDIRECT). Có `vnpayTxnRef` UNIQUE, idempotencyKey.
+- **`Payment`** — Mọi giao dịch thanh toán. referenceType: BOOKING | BOOKING_GROUP | PARCEL | PARCEL_ADDITIONAL | TOP_UP | SUBSCRIPTION. Method: WALLET (instant SUCCEEDED) | VNPAY (qua PENDING_REDIRECT). Có `vnpayTxnRef` UNIQUE, idempotencyKey. Nullable persisted `dueAt` là authoritative deadline; request omit dùng default 15 phút và historical persisted-null row dùng `createdAt + 15 phút`.
 - **`TopUpRequest`** — Wallet (passenger) top-up qua VNPay (xem 6.5).
 - **`Wallet`** + **`WalletTransaction`** — Ví hành khách. **`Wallet.userId` là PK natural** (1-1 với User, logical FK identity.users — cùng pattern `OperatorWallet.operatorId` PK). Balance BIGINT không âm, `rowVersion` optimistic lock. `WalletTransaction.userId` là logical FK (không hard FK tới Wallet — mirror `OperatorWalletTransaction` pattern). Transaction immutable với balanceBefore/balanceAfter snapshot (audit + optimistic lock). Bootstrap qua event `identity.user.created` consume (UPSERT idempotent).
 - **`Invoice`** — Subscription invoice (VietRide → Operator): invoiceNumber UNIQUE format `VR-INV-yyyyMM-XXXXXX`, period, amount, status DRAFT | ISSUED | CANCELLED, pdfUrl. v2: e-invoice provider integration.

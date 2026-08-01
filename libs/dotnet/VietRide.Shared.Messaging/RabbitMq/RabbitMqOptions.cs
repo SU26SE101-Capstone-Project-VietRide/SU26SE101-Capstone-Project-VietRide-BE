@@ -25,4 +25,7 @@ public sealed class RabbitMqOptions
 
     /// <summary>Base delay (seconds) between connection retries; exponential.</summary>
     public int ConnectionRetryBaseDelaySeconds { get; set; } = 2;
+
+    /// <summary>Maximum duration of one broker connection attempt before retry handling.</summary>
+    public int ConnectionAttemptTimeoutSeconds { get; set; } = 5;
 }

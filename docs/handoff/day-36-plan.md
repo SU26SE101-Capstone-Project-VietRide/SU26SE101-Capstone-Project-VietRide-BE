@@ -134,6 +134,24 @@ Các contract dưới đây chưa tồn tại trong `VietRide_API_Contract_v1.md
 
 Legend: todo / in progress / done (reviewer APPROVED + human `/verify`) / done-with-carryover / blocked
 
+## Reopening addendum — 2026-07-31
+
+Day 36 feature code exists, but closure is reopened because the real E2E is not green. This
+addendum does not rewrite the original plan, questions, or tracker history. The approved repair
+scope and verification now live in
+`docs/handoff/day-36-43-fe-gap-repair-plan.md`:
+
+- Harness-readable idempotency labels must map to process-local memoized UUID-v4 values; the same
+  label replays the same key, while different labels and a fresh process receive fresh UUIDs.
+- `BookingShuttleConfirmedIntegrationEventHandler` must join the durable
+  `EfIntegrationEventInbox<TripDbContext>` transaction through `IUnitOfWork` instead of opening a
+  nested transaction.
+- Closure requires five confirmed Bookings, 15 Tickets, 15 unique Shuttle manifests, complete
+  Inbox markers, replay without duplicates, and no confirmation message in DLQ.
+
+The old rows below remain historical planning context. Final repaired evidence belongs in
+`docs/handoff/day-36-checklist.md` and the combined repair checklist.
+
 ## Open questions
 Các điểm dưới đây không được API contract/BSOT hiện tại quyết định. Cần human resolve trước khi dispatch Task 36.0/code.
 

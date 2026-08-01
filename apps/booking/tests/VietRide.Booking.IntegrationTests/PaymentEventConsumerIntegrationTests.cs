@@ -38,6 +38,11 @@ public sealed class PaymentEventConsumerIntegrationTests
             provider,
             "booking.payment-succeeded",
             "payment.payment.succeeded");
+        var paymentSucceededOptions = provider
+            .GetRequiredService<IOptions<RabbitMqConsumerOptions<PaymentSucceededIntegrationEvent>>>()
+            .Value.Value;
+        paymentSucceededOptions.TransientRetryCount.Should().Be(5);
+        paymentSucceededOptions.TransientRetryDelay.Should().Be(TimeSpan.FromSeconds(10));
         AssertConsumer<PaymentExpiredIntegrationEvent>(
             provider,
             "booking.payment-expired",

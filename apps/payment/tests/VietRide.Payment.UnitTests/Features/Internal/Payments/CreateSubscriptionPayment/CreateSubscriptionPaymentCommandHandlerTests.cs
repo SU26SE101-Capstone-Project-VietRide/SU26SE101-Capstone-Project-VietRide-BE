@@ -259,7 +259,7 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
         public Task AcquirePaymentReferenceLockAsync(PaymentReferenceType type, Guid id, CancellationToken ct) => Task.CompletedTask;
         public Task<WalletTransaction> DebitWalletBookingPaymentAsync(Guid userId, Guid bookingId, Money amount, CancellationToken ct) => throw new NotSupportedException();
         public Task<WalletTransaction> DebitWalletPaymentAsync(Guid userId, Guid id, Money amount, WalletTransactionRef walletRef, CancellationToken ct) => throw new NotSupportedException();
-        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(DateTimeOffset before, DateTimeOffset at, CancellationToken ct) => Task.FromResult<IReadOnlyList<PaymentEntity>>([]);
+        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectDueAsync(DateTimeOffset before, DateTimeOffset at, CancellationToken ct) => Task.FromResult<IReadOnlyList<PaymentEntity>>([]);
         public Task<bool> TryMarkRefundedByReferenceAsync(PaymentReferenceType type, Guid id, DateTimeOffset at, CancellationToken ct) => Task.FromResult(false);
     }
 

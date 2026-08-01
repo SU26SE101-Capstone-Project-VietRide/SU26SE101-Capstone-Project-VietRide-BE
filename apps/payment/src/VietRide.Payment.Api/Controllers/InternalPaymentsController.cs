@@ -8,9 +8,11 @@ using VietRide.Payment.Application.Features.Internal.Payments.CreateSubscription
 using VietRide.Payment.Application.Features.Internal.Payments.ExpireSubscriptionPayment;
 using VietRide.Payment.Application.Features.Internal.Payments.GetPaymentContextReadiness;
 using VietRide.Payment.Application.Features.Internal.Payments.GetSubscriptionPaymentStatuses;
+using VietRide.Payment.Application.Features.Internal.Payments.LookupRedirectSessions;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
+using VietRide.Shared.Web.Idempotency;
 using VietRide.Shared.Web.Middleware;
 
 namespace VietRide.Payment.Api.Controllers;
@@ -142,6 +144,20 @@ public sealed class InternalPaymentsController : ControllerBase
         var result = await _mediator.Send(
             new GetSubscriptionPaymentStatusesQuery(upgradeAttemptId),
             cancellationToken).ConfigureAwait(false);
+        return Ok(result);
+    }
+
+    [HttpPost("redirect-sessions/lookup")]
+    [SkipIdempotency("Read-only internal lookup; repeated requests do not mutate state.")]
+    [ProducesResponseType(typeof(IReadOnlyList<LookupRedirectSessionsResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<IReadOnlyList<LookupRedirectSessionsResult>>> LookupRedirectSessionsAsync(
+        [FromBody] LookupRedirectSessionsRequest request,
+        CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl = "no-store";
+        var result = await _mediator.Send(request.ToQuery(), cancellationToken).ConfigureAwait(false);
         return Ok(result);
     }
 }

@@ -49,9 +49,13 @@ public sealed class ResendInitialPasswordCommandHandlerTests
         result.ExpiresAt.Should().Be(Now.AddHours(48));
         oldToken.UsedAt.Should().Be(Now);
         tokens.Entities.Should().HaveCount(2);
-        tokens.Entities.Should().ContainSingle(t => t.Code == "new-token" && t.UsedAt == null);
+        var freshToken = tokens.Entities.Should()
+            .ContainSingle(t => t.Code == "new-token" && t.UsedAt == null)
+            .Subject;
         emailService.Sent.Should().ContainSingle();
         emailService.Sent[0].To.Should().Be(user.Email);
+        emailService.Sent[0].Info.OperationId.Should().Be(freshToken.Id);
+        emailService.Sent[0].Info.OperationId.Should().NotBe(oldToken.Id);
         emailService.Sent[0].Info.SetInitialPasswordUrl.Should().EndWith("new-token");
         var activityLog = activityLogs.Entities.Should()
             .ContainSingle(l => l.Action == ActivityLogAction.RESEND_INITIAL_PASSWORD)

@@ -248,8 +248,11 @@ public sealed class TripServiceClient : ITripServiceClient
             if (response.StatusCode == HttpStatusCode.NoContent)
                 return true;
 
-            if (response.StatusCode == HttpStatusCode.Conflict)
-                return false; // lock expired (BOOKING_SEAT_UNAVAILABLE)
+            if (response.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.NotFound)
+            {
+                return await ReadBookSeatsFailureAsync(response, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             response.EnsureSuccessStatusCode();
             return true;
@@ -275,7 +278,12 @@ public sealed class TripServiceClient : ITripServiceClient
             (operationId ?? outbound.BookingId).ToString("D"));
         using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NoContent) return true;
-        if (response.StatusCode == HttpStatusCode.Conflict) return false;
+        if (response.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.NotFound)
+        {
+            return await ReadBookSeatsFailureAsync(response, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         response.EnsureSuccessStatusCode();
         return true;
 
@@ -442,6 +450,38 @@ public sealed class TripServiceClient : ITripServiceClient
         {
             return new LockRoundTripSeatsOutcome.TripNotBookable("One of the trips is not bookable.");
         }
+    }
+
+    private static async Task<bool> ReadBookSeatsFailureAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        var envelope = await response.Content
+            .ReadFromJsonAsync<ApiErrorEnvelope>(JsonOptions, cancellationToken)
+            .ConfigureAwait(false);
+
+        var errorCode = envelope?.Error?.Code;
+        var isDefinitive = response.StatusCode switch
+        {
+            HttpStatusCode.Conflict => string.Equals(
+                errorCode,
+                "BOOKING_SEAT_UNAVAILABLE",
+                StringComparison.Ordinal),
+            HttpStatusCode.NotFound => string.Equals(
+                errorCode,
+                "TRIP_NOT_FOUND",
+                StringComparison.Ordinal),
+            _ => false,
+        };
+        if (isDefinitive)
+        {
+            return false;
+        }
+
+        throw new HttpRequestException(
+            "Trip service returned a non-definitive failure while confirming seats.",
+            inner: null,
+            response.StatusCode);
     }
 
     private static RoundTripSeatLockResult ToRoundTripSeatLockResult(RoundTripLockSeatData data)

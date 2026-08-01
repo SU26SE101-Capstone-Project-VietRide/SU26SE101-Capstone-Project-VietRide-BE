@@ -17,7 +17,7 @@ public sealed class ExpirePaymentCommandHandlerTests
     private static readonly DateTimeOffset Now = new(2026, 6, 23, 10, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task Handle_WhenPendingVnPayBookingPaymentIsOlderThan15Minutes_ExpiresItAndEnqueuesOutbox()
+    public async Task Handle_WhenLegacyPendingVnPayPaymentIsOlderThan15Minutes_ExpiresItAndEnqueuesOutbox()
     {
         var bookingId = Guid.NewGuid();
         var stalePayment = CreatePendingVnPayBookingPayment(bookingId, Now.AddMinutes(-16));
@@ -30,7 +30,7 @@ public sealed class ExpirePaymentCommandHandlerTests
         result.ExpiredCount.Should().Be(1);
         stalePayment.Status.Should().Be(PaymentStatus.EXPIRED);
         stalePayment.ExpiredAt.Should().Be(Now);
-        repository.LastExpiresBefore.Should().Be(Now.AddMinutes(-15));
+        repository.LastLegacyCreatedAtOrBefore.Should().Be(Now.AddMinutes(-15));
         outbox.Events.Should().ContainSingle(evt => evt.EventType == "payment.payment.expired");
         using var payload = JsonDocument.Parse(outbox.Events.Single().PayloadJson);
         payload.RootElement.GetProperty("paymentId").GetGuid().Should().Be(stalePayment.Id);
@@ -39,9 +39,28 @@ public sealed class ExpirePaymentCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_WhenPaymentIsExactly15MinutesOld_LeavesItPendingAndDoesNotEnqueue()
+    public async Task Handle_WhenLegacyPaymentReaches15MinuteDeadline_ExpiresAtInclusiveBoundary()
     {
         var payment = CreatePendingVnPayBookingPayment(Guid.NewGuid(), Now.AddMinutes(-15));
+        var repository = new FakePaymentRepository(payment);
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(repository, outbox);
+
+        var result = await handler.Handle(new ExpirePaymentCommand(Now), CancellationToken.None);
+
+        result.ExpiredCount.Should().Be(1);
+        payment.Status.Should().Be(PaymentStatus.EXPIRED);
+        payment.ExpiredAt.Should().Be(Now);
+        outbox.Events.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Handle_WhenPersistedDeadlineIsInFuture_DoesNotExpireOldPayment()
+    {
+        var payment = CreatePendingVnPayBookingPayment(
+            Guid.NewGuid(),
+            Now.AddMinutes(-30),
+            Now.AddMinutes(1));
         var repository = new FakePaymentRepository(payment);
         var outbox = new FakeIntegrationEventOutbox();
         var handler = CreateHandler(repository, outbox);
@@ -54,6 +73,25 @@ public sealed class ExpirePaymentCommandHandlerTests
         outbox.Events.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Handle_WhenPersistedDeadlineEqualsNow_ExpiresAtInclusiveBoundary()
+    {
+        var payment = CreatePendingVnPayBookingPayment(
+            Guid.NewGuid(),
+            Now.AddMinutes(-1),
+            Now);
+        var repository = new FakePaymentRepository(payment);
+        var outbox = new FakeIntegrationEventOutbox();
+        var handler = CreateHandler(repository, outbox);
+
+        var result = await handler.Handle(new ExpirePaymentCommand(Now), CancellationToken.None);
+
+        result.ExpiredCount.Should().Be(1);
+        payment.Status.Should().Be(PaymentStatus.EXPIRED);
+        payment.ExpiredAt.Should().Be(Now);
+        outbox.Events.Should().ContainSingle();
+    }
+
     private static ExpirePaymentCommandHandler CreateHandler(
         FakePaymentRepository repository,
         FakeIntegrationEventOutbox outbox)
@@ -63,15 +101,20 @@ public sealed class ExpirePaymentCommandHandlerTests
             new FrozenClock(Now),
             NullLogger<ExpirePaymentCommandHandler>.Instance);
 
-    private static PaymentEntity CreatePendingVnPayBookingPayment(Guid bookingId, DateTimeOffset createdAt)
+    private static PaymentEntity CreatePendingVnPayBookingPayment(
+        Guid bookingId,
+        DateTimeOffset createdAt,
+        DateTimeOffset? dueAt = null)
     {
-        var payment = PaymentEntity.CreatePendingRedirectVnPayBooking(
+        var payment = PaymentEntity.CreatePendingRedirectVnPay(
+            PaymentReferenceType.BOOKING,
             bookingId,
             Guid.NewGuid(),
             Money.FromRaw(250_000),
             Guid.NewGuid().ToString("D"),
             Guid.NewGuid().ToString("N"),
-            "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html");
+            "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+            dueAt);
         payment.CreatedAt = createdAt;
         payment.UpdatedAt = createdAt;
         return payment;
@@ -86,7 +129,7 @@ public sealed class ExpirePaymentCommandHandlerTests
             _payments = payments.ToList();
         }
 
-        public DateTimeOffset? LastExpiresBefore { get; private set; }
+        public DateTimeOffset? LastLegacyCreatedAtOrBefore { get; private set; }
 
         public Task<PaymentEntity?> GetByIdAsync(Guid id, CancellationToken ct)
             => Task.FromResult(_payments.FirstOrDefault(payment => payment.Id == id));
@@ -137,18 +180,24 @@ public sealed class ExpirePaymentCommandHandlerTests
             Guid userId, Guid referenceId, Money amount, WalletTransactionRef walletRef, CancellationToken ct)
             => throw new NotSupportedException("Payment expiration tests do not debit wallets.");
 
-        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectOlderThanAsync(
-            DateTimeOffset expiresBefore,
+        public Task<IReadOnlyList<PaymentEntity>> ExpirePendingRedirectDueAsync(
+            DateTimeOffset legacyCreatedAtOrBefore,
             DateTimeOffset expiredAt,
             CancellationToken cancellationToken)
         {
-            LastExpiresBefore = expiresBefore;
+            LastLegacyCreatedAtOrBefore = legacyCreatedAtOrBefore;
             var expired = _payments
                 .Where(payment =>
                     payment.Status == PaymentStatus.PENDING_REDIRECT
                     && payment.Method == PaymentMethod.VNPAY
-                    && payment.ReferenceType == PaymentReferenceType.BOOKING
-                    && payment.CreatedAt < expiresBefore)
+                    && payment.ReferenceType is (
+                        PaymentReferenceType.BOOKING
+                        or PaymentReferenceType.BOOKING_GROUP
+                        or PaymentReferenceType.SUBSCRIPTION
+                        or PaymentReferenceType.PARCEL
+                        or PaymentReferenceType.PARCEL_ADDITIONAL)
+                    && (payment.DueAt <= expiredAt
+                        || (payment.DueAt is null && payment.CreatedAt <= legacyCreatedAtOrBefore)))
                 .ToList();
 
             foreach (var payment in expired)

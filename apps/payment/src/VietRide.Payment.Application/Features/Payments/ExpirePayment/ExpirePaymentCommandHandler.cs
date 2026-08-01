@@ -36,10 +36,10 @@ public sealed class ExpirePaymentCommandHandler : IRequestHandler<ExpirePaymentC
         CancellationToken cancellationToken)
     {
         var now = request.Now ?? _clock.UtcNow;
-        var expiresBefore = now - PaymentTimeout;
+        var legacyCreatedAtOrBefore = now - PaymentTimeout;
 
-        var expiredPayments = await _payments.ExpirePendingRedirectOlderThanAsync(
-                expiresBefore,
+        var expiredPayments = await _payments.ExpirePendingRedirectDueAsync(
+                legacyCreatedAtOrBefore,
                 now,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -70,9 +70,11 @@ public sealed class ExpirePaymentCommandHandler : IRequestHandler<ExpirePaymentC
         if (expiredPayments.Count > 0)
         {
             _logger.LogInformation(
-                "Expired {PaymentCount} pending VNPay payments older than {ExpiresBefore}.",
+                "Expired {PaymentCount} pending VNPay payments due at or before {ExpiredAt}; "
+                + "legacy rows used created-at cutoff {LegacyCreatedAtOrBefore}.",
                 expiredPayments.Count,
-                expiresBefore);
+                now,
+                legacyCreatedAtOrBefore);
         }
 
         return new ExpirePaymentResult(expiredPayments.Count);

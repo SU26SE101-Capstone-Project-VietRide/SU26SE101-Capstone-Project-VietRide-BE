@@ -87,7 +87,8 @@ public class CreateBookingIntegrationTests
                 Arg.Any<string>(),
                 Arg.Any<string>(),
                 Arg.Any<CancellationToken>(),
-                Arg.Any<PaymentContextSnapshot?>())
+                Arg.Any<PaymentContextSnapshot?>(),
+                Arg.Any<DateTimeOffset?>())
             .Returns(new ChargeOutcome.Success(
                 new ChargeResult(Guid.NewGuid(), "SUCCEEDED", null)));
         _factory.TripClient.BookSeatsAsync(
@@ -290,7 +291,8 @@ public class CreateBookingIntegrationTests
                 Arg.Any<string>(),
                 Arg.Any<string>(),
                 Arg.Any<CancellationToken>(),
-                Arg.Any<PaymentContextSnapshot?>())
+                Arg.Any<PaymentContextSnapshot?>(),
+                Arg.Any<DateTimeOffset?>())
             .Returns(new ChargeOutcome.Success(
                 new ChargeResult(Guid.NewGuid(), "SUCCEEDED", null)));
         // book-seats returns false (lock expired)

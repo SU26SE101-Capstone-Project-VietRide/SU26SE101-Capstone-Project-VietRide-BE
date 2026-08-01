@@ -7,4 +7,5 @@ public sealed record RefundToWalletCommand(
     long Amount,
     string ReferenceType,
     Guid ReferenceId,
-    string? IdempotencyKey) : IRequest<RefundToWalletResult>;
+    string? IdempotencyKey,
+    Guid? PaymentId = null) : IRequest<RefundToWalletResult>;

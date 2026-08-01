@@ -108,11 +108,12 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
         string method,
         string idempotencyKey,
         CancellationToken cancellationToken = default,
-        PaymentContextSnapshot? context = null)
+        PaymentContextSnapshot? context = null,
+        DateTimeOffset? dueAt = null)
     {
         try
         {
-            var body = new ChargeRequest(referenceType, referenceId, userId, amount, method, context);
+            var body = new ChargeRequest(referenceType, referenceId, userId, amount, method, context, dueAt);
             using var request = BuildJsonRequest(
                 HttpMethod.Post,
                 "/internal/v1/payments/charge",
@@ -144,6 +145,21 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
                 // Insufficient funds or business rule rejection
                 return new ChargeOutcome.InsufficientFunds(
                     await ReadErrorMessageAsync(response, "Payment service rejected charge.", cancellationToken));
+            }
+
+            if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+            {
+                var error = await ReadErrorAsync(
+                    response,
+                    "Payment service rejected charge.",
+                    cancellationToken);
+
+                return string.Equals(
+                    error.Code,
+                    "PAYMENT_DEADLINE_PASSED",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? new ChargeOutcome.DeadlinePassed(error.Message)
+                    : new ChargeOutcome.TransportError(error.Message);
             }
 
             return new ChargeOutcome.TransportError(
@@ -191,17 +207,30 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
         HttpResponseMessage response,
         string fallback,
         CancellationToken cancellationToken)
+        => (await ReadErrorAsync(response, fallback, cancellationToken)).Message;
+
+    private static async Task<UpstreamError> ReadErrorAsync(
+        HttpResponseMessage response,
+        string fallback,
+        CancellationToken cancellationToken)
     {
         try
         {
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (document.RootElement.TryGetProperty("error", out var error)
-                && error.TryGetProperty("message", out var message)
-                && message.ValueKind == JsonValueKind.String
-                && !string.IsNullOrWhiteSpace(message.GetString()))
+            if (document.RootElement.TryGetProperty("error", out var error))
             {
-                return message.GetString()!;
+                var code = error.TryGetProperty("code", out var codeElement)
+                    && codeElement.ValueKind == JsonValueKind.String
+                    ? codeElement.GetString()
+                    : null;
+                var message = error.TryGetProperty("message", out var messageElement)
+                    && messageElement.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(messageElement.GetString())
+                    ? messageElement.GetString()!
+                    : fallback;
+
+                return new UpstreamError(code, message);
             }
         }
         catch (JsonException)
@@ -209,7 +238,7 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
             // Preserve the stable fallback for non-JSON upstream responses.
         }
 
-        return fallback;
+        return new UpstreamError(null, fallback);
     }
 
     // -----------------------------------------------------------------------
@@ -222,7 +251,10 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
         Guid UserId,
         long Amount,
         string Method,
-        PaymentContextSnapshot? Context);
+        PaymentContextSnapshot? Context,
+        DateTimeOffset? DueAt);
+
+    private sealed record UpstreamError(string? Code, string Message);
 
     private sealed record BatchChargeRequest(
         Guid UserId,

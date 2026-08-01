@@ -60,7 +60,304 @@ public sealed class RabbitMqConsumerBackgroundServiceTests
     }
 
     [Fact]
-    public async Task StartAsync_DeclaresDeadLetterTopologyAndQueueArguments()
+    public async Task ProcessDeliveryAsync_DeadLettersTransientFailure_WhenRetriesAreDisabledByDefault()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        handler.HandleAsync(Arg.Any<TestIntegrationEvent>(), Arg.Any<CancellationToken>())
+            .Returns(_ => throw new TransientIntegrationEventException("trip unavailable"));
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        var service = CreateService(handler, connections, CreateInbox());
+        var channel = Substitute.For<IModel>();
+
+        await service.ProcessDeliveryAsync(
+            channel,
+            CreateDelivery(44, new TestIntegrationEvent { Name = "default-terminal" }),
+            CancellationToken.None);
+
+        channel.Received(1).BasicNack(44, multiple: false, requeue: false);
+        channel.DidNotReceive().BasicAck(Arg.Any<ulong>(), Arg.Any<bool>());
+        connections.DidNotReceive().GetOrCreate();
+    }
+
+    [Fact]
+    public async Task ProcessDeliveryAsync_WhenPreCancelled_DoesNotDispatchAcknowledgeOrPublish()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        var service = CreateService(
+            handler,
+            connections,
+            CreateInbox(),
+            EnableTransientRetries);
+        var channel = Substitute.For<IModel>();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var act = () => service.ProcessDeliveryAsync(
+            channel,
+            CreateDelivery(45, new TestIntegrationEvent { Name = "pre-cancelled" }),
+            cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        await handler.DidNotReceive().HandleAsync(
+            Arg.Any<TestIntegrationEvent>(),
+            Arg.Any<CancellationToken>());
+        channel.DidNotReceive().BasicAck(Arg.Any<ulong>(), Arg.Any<bool>());
+        channel.DidNotReceive().BasicNack(
+            Arg.Any<ulong>(),
+            Arg.Any<bool>(),
+            Arg.Any<bool>());
+        connections.DidNotReceive().GetOrCreate();
+    }
+
+    [Fact]
+    public async Task ProcessDeliveryAsync_PublishesFiveDurableRetriesThenDeadLetters_UsingPublishedHeaders()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        handler.HandleAsync(Arg.Any<TestIntegrationEvent>(), Arg.Any<CancellationToken>())
+            .Returns(_ => throw new TransientIntegrationEventException("trip unavailable"));
+
+        var channel = Substitute.For<IModel>();
+        var publishedRetries = new List<(IBasicProperties Properties, ReadOnlyMemory<byte> Body)>();
+        var retryPublishers = new List<IModel>();
+        var unrelatedProperties = Substitute.For<IBasicProperties>();
+        unrelatedProperties.MessageId.Returns(Guid.NewGuid().ToString("D"));
+        var connection = Substitute.For<IConnection>();
+        connection.CreateModel().Returns(_ =>
+        {
+            var retryPublisher = Substitute.For<IModel>();
+            retryPublisher.CreateBasicProperties()
+                .Returns(_ => Substitute.For<IBasicProperties>());
+            retryPublisher
+                .When(candidate => candidate.BasicPublish(
+                    "payment.wallet-bootstrap.retry.dlx",
+                    "payment.wallet-bootstrap.retry",
+                    true,
+                    Arg.Any<IBasicProperties>(),
+                    Arg.Any<ReadOnlyMemory<byte>>()))
+                .Do(call =>
+                {
+                    publishedRetries.Add((
+                        call.ArgAt<IBasicProperties>(3),
+                        call.ArgAt<ReadOnlyMemory<byte>>(4)));
+                    if (publishedRetries.Count == 1)
+                    {
+                        retryPublisher.BasicReturn += Raise.EventWith(new BasicReturnEventArgs
+                        {
+                            ReplyCode = 312,
+                            ReplyText = "NO_ROUTE",
+                            Exchange = "another.retry.exchange",
+                            RoutingKey = "another.retry.key",
+                            BasicProperties = unrelatedProperties,
+                            Body = call.ArgAt<ReadOnlyMemory<byte>>(4),
+                        });
+                    }
+                });
+            retryPublishers.Add(retryPublisher);
+            return retryPublisher;
+        });
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        connections.GetOrCreate().Returns(connection);
+        var service = CreateService(
+            handler,
+            connections,
+            CreateInbox(),
+            EnableTransientRetries);
+        var integrationEvent = new TestIntegrationEvent { Name = "transient" };
+        var delivery = CreateDelivery(
+            100,
+            integrationEvent,
+            headers: new Dictionary<string, object>
+            {
+                ["x-death"] = Array.Empty<object>(),
+                ["x-first-death-exchange"] = "vietride.events",
+                ["x-last-death-queue"] = "payment.wallet-bootstrap.retry",
+                ["custom-header"] = "preserved",
+            });
+
+        for (var retry = 1; retry <= 5; retry++)
+        {
+            await service.ProcessDeliveryAsync(channel, delivery, CancellationToken.None);
+
+            publishedRetries.Should().HaveCount(retry);
+            var published = publishedRetries[retry - 1];
+            published.Properties.MessageId.Should().Be(integrationEvent.EventId.ToString("D"));
+            published.Properties.DeliveryMode.Should().Be(2);
+            published.Properties.Expiration.Should().Be("10000");
+            published.Properties.Headers.Should().Contain("vietride-retry-count", (long)retry);
+            published.Properties.Headers.Should().Contain("custom-header", "preserved");
+            published.Properties.Headers.Keys.Should().NotContain(key =>
+                string.Equals(key, "x-death", StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith("x-first-death-", StringComparison.OrdinalIgnoreCase)
+                || key.StartsWith("x-last-death-", StringComparison.OrdinalIgnoreCase));
+            channel.Received(1).BasicAck(delivery.DeliveryTag, multiple: false);
+            delivery = CreateRedelivery(
+                (ulong)(100 + retry),
+                published.Properties,
+                published.Body);
+        }
+
+        await service.ProcessDeliveryAsync(channel, delivery, CancellationToken.None);
+
+        connection.Received(5).CreateModel();
+        retryPublishers.Should().HaveCount(5);
+        foreach (var retryPublisher in retryPublishers)
+        {
+            retryPublisher.Received(1).ConfirmSelect();
+            retryPublisher.Received(1).BasicPublish(
+                "payment.wallet-bootstrap.retry.dlx",
+                "payment.wallet-bootstrap.retry",
+                true,
+                Arg.Any<IBasicProperties>(),
+                Arg.Any<ReadOnlyMemory<byte>>());
+            retryPublisher.Received(1).WaitForConfirmsOrDie(Arg.Any<TimeSpan>());
+            retryPublisher.Received(1).Dispose();
+        }
+
+        channel.Received(1).BasicNack(105, multiple: false, requeue: false);
+        channel.DidNotReceive().BasicAck(105, Arg.Any<bool>());
+    }
+
+    [Fact]
+    public async Task ProcessDeliveryAsync_RequeuesOriginal_WhenRetryPublishIsNotConfirmed()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        handler.HandleAsync(Arg.Any<TestIntegrationEvent>(), Arg.Any<CancellationToken>())
+            .Returns(_ => throw new TransientIntegrationEventException("trip still unavailable"));
+
+        var channel = Substitute.For<IModel>();
+        var retryPublisher = Substitute.For<IModel>();
+        var retryProperties = Substitute.For<IBasicProperties>();
+        retryPublisher.CreateBasicProperties().Returns(retryProperties);
+        retryPublisher.When(candidate => candidate.WaitForConfirmsOrDie(Arg.Any<TimeSpan>()))
+            .Do(_ => throw new InvalidOperationException("publisher confirm timed out"));
+        var connection = Substitute.For<IConnection>();
+        connection.CreateModel().Returns(retryPublisher);
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        connections.GetOrCreate().Returns(connection);
+        var service = CreateService(
+            handler,
+            connections,
+            CreateInbox(),
+            EnableTransientRetries);
+        var delivery = CreateDelivery(
+            48,
+            new TestIntegrationEvent { Name = "transient-confirm-failure" });
+
+        await service.ProcessDeliveryAsync(channel, delivery, CancellationToken.None);
+
+        channel.Received(1).BasicNack(48, multiple: false, requeue: true);
+        channel.DidNotReceive().BasicAck(Arg.Any<ulong>(), Arg.Any<bool>());
+        retryPublisher.Received(1).BasicPublish(
+            "payment.wallet-bootstrap.retry.dlx",
+            "payment.wallet-bootstrap.retry",
+            true,
+            retryProperties,
+            Arg.Any<ReadOnlyMemory<byte>>());
+        retryPublisher.Received(1).Dispose();
+        channel.DidNotReceive().Dispose();
+        retryProperties.Headers.Should().Contain("vietride-retry-count", 1L);
+        retryProperties.Expiration.Should().Be("10000");
+        (delivery.BasicProperties.Headers?.ContainsKey("vietride-retry-count") ?? false)
+            .Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("not-an-integer")]
+    [InlineData(-1)]
+    public async Task ProcessDeliveryAsync_DeadLettersTransientFailure_WhenRetryHeaderIsInvalid(
+        object retryHeader)
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        handler.HandleAsync(Arg.Any<TestIntegrationEvent>(), Arg.Any<CancellationToken>())
+            .Returns(_ => throw new TransientIntegrationEventException("trip still unavailable"));
+
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        var service = CreateService(
+            handler,
+            connections,
+            CreateInbox(),
+            EnableTransientRetries);
+        var channel = Substitute.For<IModel>();
+        var delivery = CreateDelivery(
+            49,
+            new TestIntegrationEvent { Name = "transient-malformed-header" },
+            headers: new Dictionary<string, object>
+            {
+                ["vietride-retry-count"] = retryHeader,
+            });
+
+        await service.ProcessDeliveryAsync(channel, delivery, CancellationToken.None);
+
+        channel.Received(1).BasicNack(49, multiple: false, requeue: false);
+        connections.DidNotReceive().GetOrCreate();
+        channel.DidNotReceive().BasicAck(Arg.Any<ulong>(), Arg.Any<bool>());
+    }
+
+    [Fact]
+    public async Task ProcessDeliveryAsync_RequeuesOriginal_WhenConfirmedRetryPublishIsReturned()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        handler.HandleAsync(Arg.Any<TestIntegrationEvent>(), Arg.Any<CancellationToken>())
+            .Returns(_ => throw new TransientIntegrationEventException("trip still unavailable"));
+
+        var channel = Substitute.For<IModel>();
+        var retryPublisher = Substitute.For<IModel>();
+        var retryProperties = Substitute.For<IBasicProperties>();
+        retryPublisher.CreateBasicProperties().Returns(retryProperties);
+        retryPublisher
+            .When(candidate => candidate.BasicPublish(
+                "payment.wallet-bootstrap.retry.dlx",
+                "payment.wallet-bootstrap.retry",
+                true,
+                retryProperties,
+                Arg.Any<ReadOnlyMemory<byte>>()))
+            .Do(call =>
+            {
+                retryPublisher.BasicReturn += Raise.EventWith(new BasicReturnEventArgs
+                {
+                    ReplyCode = 312,
+                    ReplyText = "NO_ROUTE",
+                    Exchange = "payment.wallet-bootstrap.retry.dlx",
+                    RoutingKey = "payment.wallet-bootstrap.retry",
+                    BasicProperties = retryProperties,
+                    Body = call.ArgAt<ReadOnlyMemory<byte>>(4),
+                });
+            });
+        var connection = Substitute.For<IConnection>();
+        connection.CreateModel().Returns(retryPublisher);
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        connections.GetOrCreate().Returns(connection);
+        var service = CreateService(
+            handler,
+            connections,
+            CreateInbox(),
+            EnableTransientRetries);
+        var delivery = CreateDelivery(
+            49,
+            new TestIntegrationEvent { Name = "transient-unroutable" });
+
+        await service.ProcessDeliveryAsync(channel, delivery, CancellationToken.None);
+
+        Received.InOrder(() =>
+        {
+            retryPublisher.ConfirmSelect();
+            retryPublisher.BasicPublish(
+                "payment.wallet-bootstrap.retry.dlx",
+                "payment.wallet-bootstrap.retry",
+                true,
+                retryProperties,
+                Arg.Any<ReadOnlyMemory<byte>>());
+            retryPublisher.WaitForConfirmsOrDie(Arg.Any<TimeSpan>());
+            channel.BasicNack(49, multiple: false, requeue: true);
+        });
+        retryPublisher.Received(1).Dispose();
+        channel.DidNotReceive().Dispose();
+        channel.DidNotReceive().BasicAck(Arg.Any<ulong>(), Arg.Any<bool>());
+    }
+
+    [Fact]
+    public async Task StartAsync_DeclaresDeadLetterAndTransientRetryTopology()
     {
         var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
         var connection = Substitute.For<IConnection>();
@@ -69,7 +366,11 @@ public sealed class RabbitMqConsumerBackgroundServiceTests
         channel.IsOpen.Returns(true);
         var connections = Substitute.For<IRabbitMqConnectionFactory>();
         connections.GetOrCreate().Returns(connection);
-        var service = CreateService(handler, connections, CreateInbox());
+        var service = CreateService(
+            handler,
+            connections,
+            CreateInbox(),
+            EnableTransientRetries);
 
         await service.StartAsync(CancellationToken.None);
 
@@ -104,9 +405,238 @@ public sealed class RabbitMqConsumerBackgroundServiceTests
             Arg.Is<IDictionary<string, object>>(arguments =>
                 (string)arguments["x-dead-letter-exchange"] == "payment.wallet-bootstrap.dlx"
                 && (string)arguments["x-dead-letter-routing-key"] == "payment.wallet-bootstrap.dead"));
+        channel.Received(1).ExchangeDeclare(
+            "payment.wallet-bootstrap.retry.dlx",
+            ExchangeType.Direct,
+            true,
+            false,
+            null);
+        channel.Received(1).QueueDeclare(
+            "payment.wallet-bootstrap.retry",
+            true,
+            false,
+            false,
+            Arg.Is<IDictionary<string, object>>(arguments =>
+                !arguments.ContainsKey("x-message-ttl")
+                && (string)arguments["x-dead-letter-exchange"] == "vietride.events"
+                && (string)arguments["x-dead-letter-routing-key"]
+                    == "__retry__.payment.wallet-bootstrap"));
+        channel.Received(1).QueueBind(
+            "payment.wallet-bootstrap.retry",
+            "payment.wallet-bootstrap.retry.dlx",
+            "payment.wallet-bootstrap.retry",
+            null);
+        channel.Received(1).QueueBind(
+            "payment.wallet-bootstrap",
+            "vietride.events",
+            "__retry__.payment.wallet-bootstrap",
+            null);
 
         await service.StopAsync(CancellationToken.None);
         service.Dispose();
+    }
+
+    [Fact]
+    public async Task StartAsync_DefaultRetriesDisabled_DoesNotDeclareRetryTopology()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        var connection = Substitute.For<IConnection>();
+        var channel = Substitute.For<IModel>();
+        connection.CreateModel().Returns(channel);
+        channel.IsOpen.Returns(true);
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        connections.GetOrCreate().Returns(connection);
+        var service = CreateService(handler, connections, CreateInbox());
+
+        await service.StartAsync(CancellationToken.None);
+
+        channel.DidNotReceive().ExchangeDeclare(
+            "payment.wallet-bootstrap.retry.dlx",
+            Arg.Any<string>(),
+            Arg.Any<bool>(),
+            Arg.Any<bool>(),
+            Arg.Any<IDictionary<string, object>>());
+        channel.DidNotReceive().QueueDeclare(
+            "payment.wallet-bootstrap.retry",
+            Arg.Any<bool>(),
+            Arg.Any<bool>(),
+            Arg.Any<bool>(),
+            Arg.Any<IDictionary<string, object>>());
+        channel.DidNotReceive().QueueBind(
+            "payment.wallet-bootstrap",
+            "vietride.events",
+            "__retry__.payment.wallet-bootstrap",
+            Arg.Any<IDictionary<string, object>>());
+
+        await service.StopAsync(CancellationToken.None);
+        service.Dispose();
+    }
+
+    [Fact]
+    public async Task StartAsync_RecreatesConsumer_WhenActiveChannelCloses()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        var firstConnection = Substitute.For<IConnection>();
+        var secondConnection = Substitute.For<IConnection>();
+        var firstChannel = Substitute.For<IModel>();
+        var secondChannel = Substitute.For<IModel>();
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstIsOpen = 1;
+        firstChannel.IsOpen.Returns(_ => Volatile.Read(ref firstIsOpen) == 1);
+        secondChannel.IsOpen.Returns(true);
+        firstChannel
+            .BasicConsume("payment.wallet-bootstrap", false, Arg.Any<IBasicConsumer>())
+            .Returns(_ =>
+            {
+                firstStarted.TrySetResult();
+                return "first-consumer";
+            });
+        secondChannel
+            .BasicConsume("payment.wallet-bootstrap", false, Arg.Any<IBasicConsumer>())
+            .Returns(_ =>
+            {
+                secondStarted.TrySetResult();
+                return "second-consumer";
+            });
+        firstConnection.CreateModel().Returns(firstChannel);
+        secondConnection.CreateModel().Returns(secondChannel);
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        connections.GetOrCreate().Returns(firstConnection, secondConnection);
+        var service = CreateService(handler, connections, CreateInbox());
+
+        await service.StartAsync(CancellationToken.None);
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Volatile.Write(ref firstIsOpen, 0);
+
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        connections.Received(2).GetOrCreate();
+        firstChannel.Received(1).Dispose();
+
+        await service.StopAsync(CancellationToken.None);
+        service.Dispose();
+    }
+
+    [Fact]
+    public async Task StartAsync_OldConsumerCallback_AcknowledgesOnlyOriginalChannel_AfterReconnect()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        var firstConnection = Substitute.For<IConnection>();
+        var secondConnection = Substitute.For<IConnection>();
+        var firstChannel = Substitute.For<IModel>();
+        var secondChannel = Substitute.For<IModel>();
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        AsyncEventingBasicConsumer? firstConsumer = null;
+        var firstIsOpen = 1;
+        firstChannel.IsOpen.Returns(_ => Volatile.Read(ref firstIsOpen) == 1);
+        secondChannel.IsOpen.Returns(true);
+        firstChannel
+            .BasicConsume("payment.wallet-bootstrap", false, Arg.Any<IBasicConsumer>())
+            .Returns(call =>
+            {
+                firstConsumer = call.Arg<IBasicConsumer>() as AsyncEventingBasicConsumer;
+                firstStarted.TrySetResult();
+                return "first-consumer";
+            });
+        secondChannel
+            .BasicConsume("payment.wallet-bootstrap", false, Arg.Any<IBasicConsumer>())
+            .Returns(_ =>
+            {
+                secondStarted.TrySetResult();
+                return "second-consumer";
+            });
+        firstConnection.CreateModel().Returns(firstChannel);
+        secondConnection.CreateModel().Returns(secondChannel);
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        connections.GetOrCreate().Returns(firstConnection, secondConnection);
+        var service = CreateService(handler, connections, CreateInbox());
+
+        await service.StartAsync(CancellationToken.None);
+        await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Volatile.Write(ref firstIsOpen, 0);
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        firstConsumer.Should().NotBeNull();
+        var delivery = CreateDelivery(73, new TestIntegrationEvent { Name = "old-channel-delivery" });
+        await firstConsumer!.HandleBasicDeliver(
+            "first-consumer",
+            delivery.DeliveryTag,
+            delivery.Redelivered,
+            delivery.Exchange,
+            delivery.RoutingKey,
+            delivery.BasicProperties,
+            delivery.Body);
+
+        firstChannel.Received(1).BasicAck(73, multiple: false);
+        secondChannel.DidNotReceive().BasicAck(Arg.Any<ulong>(), Arg.Any<bool>());
+        secondChannel.DidNotReceive().BasicNack(Arg.Any<ulong>(), Arg.Any<bool>(), Arg.Any<bool>());
+
+        await service.StopAsync(CancellationToken.None);
+        service.Dispose();
+    }
+
+    [Fact]
+    public async Task StartAsync_RedeclaresSameRetryTopology_WhenDelayChanges()
+    {
+        var handler = Substitute.For<IIntegrationEventHandler<TestIntegrationEvent>>();
+        var connection = Substitute.For<IConnection>();
+        var firstChannel = Substitute.For<IModel>();
+        var secondChannel = Substitute.For<IModel>();
+        firstChannel.IsOpen.Returns(true);
+        secondChannel.IsOpen.Returns(true);
+        connection.CreateModel().Returns(firstChannel, secondChannel);
+        var connections = Substitute.For<IRabbitMqConnectionFactory>();
+        connections.GetOrCreate().Returns(connection);
+        var firstService = CreateService(
+            handler,
+            connections,
+            CreateInbox(),
+            options =>
+            {
+                options.TransientRetryCount = 5;
+                options.TransientRetryDelay = TimeSpan.FromSeconds(10);
+            });
+        var secondService = CreateService(
+            handler,
+            connections,
+            CreateInbox(),
+            options =>
+            {
+                options.TransientRetryCount = 5;
+                options.TransientRetryDelay = TimeSpan.FromSeconds(30);
+            });
+
+        await firstService.StartAsync(CancellationToken.None);
+        await secondService.StartAsync(CancellationToken.None);
+
+        firstChannel.Received(1).QueueDeclare(
+            "payment.wallet-bootstrap.retry",
+            true,
+            false,
+            false,
+            Arg.Is<IDictionary<string, object>>(arguments =>
+                !arguments.ContainsKey("x-message-ttl")
+                && (string)arguments["x-dead-letter-exchange"] == "vietride.events"
+                && (string)arguments["x-dead-letter-routing-key"]
+                    == "__retry__.payment.wallet-bootstrap"));
+        secondChannel.Received(1).QueueDeclare(
+            "payment.wallet-bootstrap.retry",
+            true,
+            false,
+            false,
+            Arg.Is<IDictionary<string, object>>(arguments =>
+                !arguments.ContainsKey("x-message-ttl")
+                && (string)arguments["x-dead-letter-exchange"] == "vietride.events"
+                && (string)arguments["x-dead-letter-routing-key"]
+                    == "__retry__.payment.wallet-bootstrap"));
+
+        await firstService.StopAsync(CancellationToken.None);
+        await secondService.StopAsync(CancellationToken.None);
+        firstService.Dispose();
+        secondService.Dispose();
     }
 
     [Fact]
@@ -124,49 +654,82 @@ public sealed class RabbitMqConsumerBackgroundServiceTests
 
         provider.GetRequiredService<IIntegrationEventHandler<TestIntegrationEvent>>()
             .Should().BeOfType<TestIntegrationEventHandler>();
-        provider.GetRequiredService<IOptions<RabbitMqConsumerOptions<TestIntegrationEvent>>>()
-            .Value.Value.QueueName.Should().Be("payment.wallet-bootstrap");
+        var options = provider
+            .GetRequiredService<IOptions<RabbitMqConsumerOptions<TestIntegrationEvent>>>()
+            .Value.Value;
+        options.QueueName.Should().Be("payment.wallet-bootstrap");
+        options.TransientRetryCount.Should().Be(0);
     }
 
     private static RabbitMqConsumerBackgroundService<TestIntegrationEvent> CreateService(
         IIntegrationEventHandler<TestIntegrationEvent> handler,
         IRabbitMqConnectionFactory? connections = null,
-        IIntegrationEventInbox? inbox = null)
+        IIntegrationEventInbox? inbox = null,
+        Action<RabbitMqConsumerOptions>? configureOptions = null)
     {
         var services = new ServiceCollection();
         services.AddScoped(_ => handler);
         services.AddScoped(_ => inbox ?? CreateInbox());
         var provider = services.BuildServiceProvider();
+        var consumerOptions = new RabbitMqConsumerOptions
+        {
+            QueueName = "payment.wallet-bootstrap",
+            BindingKeys = new[] { "identity.user.created" },
+        };
+        configureOptions?.Invoke(consumerOptions);
 
         return new RabbitMqConsumerBackgroundService<TestIntegrationEvent>(
             connections ?? Substitute.For<IRabbitMqConnectionFactory>(),
             Options.Create(new RabbitMqOptions()),
             Options.Create(new RabbitMqConsumerOptions<TestIntegrationEvent>
             {
-                Value = new RabbitMqConsumerOptions
-                {
-                    QueueName = "payment.wallet-bootstrap",
-                    BindingKeys = new[] { "identity.user.created" },
-                },
+                Value = consumerOptions,
             }),
             provider.GetRequiredService<IServiceScopeFactory>(),
             Substitute.For<ILogger<RabbitMqConsumerBackgroundService<TestIntegrationEvent>>>());
     }
 
-    private static BasicDeliverEventArgs CreateDelivery(ulong deliveryTag, TestIntegrationEvent integrationEvent)
+    private static BasicDeliverEventArgs CreateDelivery(
+        ulong deliveryTag,
+        TestIntegrationEvent integrationEvent,
+        IDictionary<string, object>? headers = null)
     {
         var json = JsonSerializer.Serialize(integrationEvent, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes(json));
         var properties = Substitute.For<IBasicProperties>();
         properties.MessageId.Returns(integrationEvent.EventId.ToString("D"));
+        if (headers is not null)
+        {
+            properties.Headers.Returns(headers);
+        }
+
         return new BasicDeliverEventArgs(
             "consumer-tag",
             deliveryTag,
-            false,
+            redelivered: headers is not null,
             "vietride.events",
             "identity.user.created",
             properties,
             body);
+    }
+
+    private static BasicDeliverEventArgs CreateRedelivery(
+        ulong deliveryTag,
+        IBasicProperties properties,
+        ReadOnlyMemory<byte> body)
+        => new(
+            "consumer-tag",
+            deliveryTag,
+            redelivered: true,
+            "vietride.events",
+            "__retry__.payment.wallet-bootstrap",
+            properties,
+            body);
+
+    private static void EnableTransientRetries(RabbitMqConsumerOptions options)
+    {
+        options.TransientRetryCount = 5;
+        options.TransientRetryDelay = TimeSpan.FromSeconds(10);
     }
 
     [Fact]
