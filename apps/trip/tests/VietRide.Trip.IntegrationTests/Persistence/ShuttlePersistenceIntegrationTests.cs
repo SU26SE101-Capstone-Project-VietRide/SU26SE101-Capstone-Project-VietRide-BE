@@ -428,6 +428,12 @@ public sealed class ShuttlePersistenceIntegrationTests
                 "DRIVER",
                 null,
                 CancellationToken.None);
+            var passengerContext = await service.GetTrackingContextAsync(
+                created.ShuttleTripId,
+                passengerId,
+                "PASSENGER",
+                null,
+                CancellationToken.None);
 
             first.PickedUpPassengerCount.Should().Be(2);
             replay.PickedUpPassengerCount.Should().Be(0);
@@ -438,6 +444,14 @@ public sealed class ShuttlePersistenceIntegrationTests
                 .ToArrayAsync();
             persisted.Should().OnlyContain(x =>
                 x.Status == ShuttlePassenger.PickedUpStatus && x.PickedUpAt == now);
+            passengerContext.Allowed.Should().BeTrue();
+            passengerContext.Scope.Should().Be("PASSENGER");
+            passengerContext.Stops.Should().ContainSingle(stop =>
+                stop.PickupOrder == 1
+                && stop.Status == ShuttlePassenger.PickedUpStatus
+                && stop.IsOwnPickup);
+            passengerContext.Station.Should().NotBeNull();
+            passengerContext.Station!.StationId.Should().NotBeEmpty();
         }
         finally
         {

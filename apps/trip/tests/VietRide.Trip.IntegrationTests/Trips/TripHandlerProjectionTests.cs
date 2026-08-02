@@ -1,10 +1,13 @@
+using System.Linq.Expressions;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore.Query;
 using VietRide.Shared.Application.Repositories;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Features.Internal.Trips.Tracking;
 using VietRide.Trip.Application.Features.Trips;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
 using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
@@ -18,6 +21,92 @@ namespace VietRide.Trip.IntegrationTests.Trips;
 
 public sealed class TripHandlerProjectionTests
 {
+    [Fact]
+    public async Task TrackingRouteGeometry_ProjectsPolylineStationsAndIntermediateStops()
+    {
+        var operatorId = Guid.NewGuid();
+        var origin = Station.Create("Bến đầu", "ben-dau", "Hồ Chí Minh", "Hồ Chí Minh", latitude: 10.7m, longitude: 106.6m);
+        var destination = Station.Create("Bến cuối", "ben-cuoi", "Cần Thơ", "Cần Thơ", latitude: 10.0m, longitude: 105.7m);
+        var route = Route.Create(operatorId, "Tuyến thử", origin.Id, destination.Id, Money.FromRaw(100_000), 100m, 120);
+        route.SetPathGeometry("_p~iF~ps|U_ulLnnqC_mqNvxq`@");
+        var trip = CreateTrip(operatorId, route.Id, DateTimeOffset.UtcNow.AddDays(1));
+        var waypoint = Stop.Create(operatorId, "Điểm giữa", 10.5m, 106.2m);
+        var tripStop = TripStop.Create(trip.Id, waypoint.Id, 1, trip.DepartureDateTime.AddMinutes(30), true, true, 50m);
+        var handler = new GetTripRouteGeometryTrackingHandler(
+            new InMemoryTripRepository([trip]),
+            new InMemoryRouteRepository([route]),
+            new InMemoryTripStopRepository([tripStop]),
+            new InMemoryStopRepository([waypoint]),
+            new InMemoryStationRepository([origin, destination]));
+
+        var result = await handler.Handle(new GetTripRouteGeometryTrackingQuery(trip.Id), CancellationToken.None);
+
+        result.GeometrySource.Should().Be("ROUTE_POLYLINE");
+        result.Points.Should().HaveCount(3);
+        result.OriginStation.Should().BeEquivalentTo(new
+        {
+            StationId = origin.Id,
+            origin.Name,
+            Latitude = 10.7,
+            Longitude = 106.6,
+        });
+        result.IntermediateStops.Should().ContainSingle().Which.Should().BeEquivalentTo(new
+        {
+            StopId = waypoint.Id,
+            waypoint.Name,
+            Sequence = 1,
+            Latitude = 10.5,
+            Longitude = 106.2,
+        });
+        result.DestinationStation.Should().NotBeNull();
+        result.DestinationStation!.StationId.Should().Be(destination.Id);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("!")]
+    public async Task TrackingRouteGeometry_MissingOrMalformedPolylineUsesStopOnlyFallback(string? pathPolyline)
+    {
+        var operatorId = Guid.NewGuid();
+        var origin = Station.Create("Bến đầu", "ben-dau-fallback", "Hồ Chí Minh", "Hồ Chí Minh", latitude: 10.7m, longitude: 106.6m);
+        var destination = Station.Create("Bến cuối", "ben-cuoi-fallback", "Cần Thơ", "Cần Thơ", latitude: 10.0m, longitude: 105.7m);
+        var route = Route.Create(operatorId, "Tuyến fallback", origin.Id, destination.Id, Money.FromRaw(100_000), 100m, 120);
+        route.SetPathGeometry(pathPolyline);
+        var trip = CreateTrip(operatorId, route.Id, DateTimeOffset.UtcNow.AddDays(1));
+        var waypoint = Stop.Create(operatorId, "Điểm giữa", 10.5m, 106.2m);
+        var tripStop = TripStop.Create(trip.Id, waypoint.Id, 1, trip.DepartureDateTime.AddMinutes(30), true, true, 50m);
+        var handler = new GetTripRouteGeometryTrackingHandler(
+            new InMemoryTripRepository([trip]),
+            new InMemoryRouteRepository([route]),
+            new InMemoryTripStopRepository([tripStop]),
+            new InMemoryStopRepository([waypoint]),
+            new InMemoryStationRepository([origin, destination]));
+
+        var result = await handler.Handle(new GetTripRouteGeometryTrackingQuery(trip.Id), CancellationToken.None);
+
+        result.GeometrySource.Should().Be("STOPS_ONLY");
+        result.Points.Should().Equal(new RouteGeometryPointDto(10.5, 106.2));
+        result.IntermediateStops.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task TrackingRouteStops_ProjectsSkippedStatus()
+    {
+        var operatorId = Guid.NewGuid();
+        var trip = CreateTrip(operatorId, Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(1));
+        var waypoint = Stop.Create(operatorId, "Điểm bỏ qua", 10.5m, 106.2m);
+        var tripStop = TripStop.Create(trip.Id, waypoint.Id, 1, trip.DepartureDateTime.AddMinutes(30), true, true, 50m);
+        tripStop.MarkSkipped();
+        var handler = new GetTripRouteStopsTrackingHandler(
+            new InMemoryTripRepository([trip]),
+            new InMemoryTripStopRepository([tripStop]),
+            new InMemoryStopRepository([waypoint]));
+
+        var result = await handler.Handle(new GetTripRouteStopsTrackingQuery(trip.Id), CancellationToken.None);
+
+        result.Stops.Should().ContainSingle().Which.Status.Should().Be("SKIPPED");
+    }
+
     [Fact]
     public async Task CancelPreview_AggregatesConfirmedBookingAndParcelRefunds()
     {
@@ -361,9 +450,73 @@ public sealed class TripHandlerProjectionTests
 
         public void Remove(TEntity entity) => items.Remove(entity);
 
-        public IQueryable<TEntity> Query() => items.AsQueryable();
+        public IQueryable<TEntity> Query() => new TestAsyncEnumerable<TEntity>(items);
 
-        public IQueryable<TEntity> QueryNoTracking() => items.AsQueryable();
+        public IQueryable<TEntity> QueryNoTracking() => new TestAsyncEnumerable<TEntity>(items);
+    }
+
+    private sealed class TestAsyncEnumerable<T> : EnumerableQuery<T>, IAsyncEnumerable<T>, IQueryable<T>
+    {
+        public TestAsyncEnumerable(IEnumerable<T> enumerable) : base(enumerable) { }
+        public TestAsyncEnumerable(Expression expression) : base(expression) { }
+
+        IQueryProvider IQueryable.Provider => new TestAsyncQueryProvider<T>(this);
+
+        public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
+            new TestAsyncEnumerator<T>(this.AsEnumerable().GetEnumerator());
+    }
+
+    private sealed class TestAsyncEnumerator<T> : IAsyncEnumerator<T>
+    {
+        private readonly IEnumerator<T> inner;
+
+        public TestAsyncEnumerator(IEnumerator<T> inner)
+        {
+            this.inner = inner;
+        }
+
+        public T Current => inner.Current;
+        public ValueTask<bool> MoveNextAsync() => ValueTask.FromResult(inner.MoveNext());
+
+        public ValueTask DisposeAsync()
+        {
+            inner.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class TestAsyncQueryProvider<TEntity> : IAsyncQueryProvider
+    {
+        private readonly IQueryProvider inner;
+
+        public TestAsyncQueryProvider(IQueryProvider inner)
+        {
+            this.inner = inner;
+        }
+
+        public IQueryable CreateQuery(Expression expression) =>
+            (IQueryable)Activator.CreateInstance(
+                typeof(TestAsyncEnumerable<>).MakeGenericType(expression.Type.GetGenericArguments()[0]),
+                expression)!;
+
+        public IQueryable<TElement> CreateQuery<TElement>(Expression expression) =>
+            new TestAsyncEnumerable<TElement>(expression);
+
+        public object? Execute(Expression expression) => inner.Execute(expression);
+        public TResult Execute<TResult>(Expression expression) => inner.Execute<TResult>(expression);
+
+        public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
+        {
+            var resultType = typeof(TResult).GetGenericArguments()[0];
+            var executionResult = typeof(IQueryProvider)
+                .GetMethod(nameof(IQueryProvider.Execute), 1, [typeof(Expression)])!
+                .MakeGenericMethod(resultType)
+                .Invoke(inner, [expression]);
+            return (TResult)typeof(Task)
+                .GetMethod(nameof(Task.FromResult))!
+                .MakeGenericMethod(resultType)
+                .Invoke(null, [executionResult])!;
+        }
     }
 
     private sealed class InMemoryTripRepository : InMemoryRepository<DomainTrip, Guid>, ITripRepository
