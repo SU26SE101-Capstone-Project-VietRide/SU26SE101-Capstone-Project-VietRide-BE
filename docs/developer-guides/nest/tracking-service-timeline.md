@@ -39,6 +39,7 @@ Mỗi phase phải test được bằng e2e/unit theo hướng production. Nếu
 - [x] Phase 9 — Trip/Booking/Parcel Authorization Providers
 - [x] Phase 10 — Hardening Và Final Acceptance
 - [x] Phase 11 — Shuttle GPS Và Google Routes ETA
+- [ ] Phase 12 — Public Tracking Map Context
 
 ---
 
@@ -474,6 +475,32 @@ git diff --check
 ```
 
 Real Google E2E chỉ chạy khi `RUN_REAL_GOOGLE_E2E=true`; E2E mặc định dùng fake Google HTTP server.
+
+## Phase 12 — Public Tracking Map Context
+
+**Mục tiêu:** Cung cấp dữ liệu bản đồ dự kiến và Shuttle context an toàn cho Mobile mà không đổi
+contract realtime hiện hành.
+
+### Scope
+
+- Thêm protected `GET /v1/tracking/trips/:tripId/route-geometry`, tái sử dụng tracking authorization.
+- Chỉ phát polyline thật, sanitize/simplify tối đa 1.000 điểm, strong `ETag`, cache private 10 phút;
+  thiếu polyline trả `geometry:null` cùng marker station/stop, không nối tuyến giả.
+- Thêm passenger-only `GET /v1/tracking/shuttle-trips/:shuttleTripId/passenger-context`; chỉ phát
+  own pickups và station, không phát booking/tọa độ passenger khác.
+- Cho Passenger tiếp tục REST/socket tracking khi own Shuttle manifest là `PICKED_UP`; deny terminal-only.
+- Nhận additive TripStop `status`, bỏ `ARRIVED/SKIPPED` khỏi next ETA và giảm route-stop cache còn 60 giây.
+- Giữ nguyên `latest`, `trail`, `eta`, Socket.IO payload, Gateway family và Google configuration.
+
+### Verify
+
+```bash
+npx nx run tracking:test
+npx nx run tracking:test:e2e
+npx nx run tracking:build
+node scripts/test-tracking-map-context.js
+git diff --check
+```
 
 ## Public Interfaces / Events Cần Hoàn Thành
 

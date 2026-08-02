@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.50.0
+> **Phiên bản:** 1.51.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-31
+> **Cập nhật lần cuối:** 2026-08-02
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -2034,6 +2034,9 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `GET /internal/v1/trips/{tripId}/cargo/capacity` | Parcel | Lấy available cargo capacity |
 | `POST /internal/v1/trips/{tripId}/cargo/reserve` · `remeasure` · `load` · `release` | Parcel | Idempotent single-Trip cargo-ledger mutation and counter update |
 | `POST /internal/v1/trips/{sourceTripId}/cargo/transfer` | Parcel | Exact `{parcelId,targetTripId,targetState:RESERVED\|LOADED,allowCapacityOverflow}`; lock source/target by ascending UUID and atomically release source plus reserve/load target in one Trip-local transaction. `RESERVED` always enforces capacity; `LOADED` permits explicit overflow only for approved substitution recovery. |
+| `GET /internal/v1/trips/{tripId}/route-geometry` | Tracking | Additive route-map context `{tripId,geometrySource:ROUTE_POLYLINE\|STOPS_ONLY,points,originStation?,intermediateStops,destinationStation?,alertRecipientUserIds?}`. Polyline malformed/null dùng ordered stop fallback; public Tracking chỉ render line cho `ROUTE_POLYLINE`. |
+| `GET /internal/v1/trips/{tripId}/route-stops` | Tracking | Ordered ETA stops gồm additive `status`; Tracking vẫn chấp nhận thiếu/null status khi rolling deploy. |
+| `GET /internal/v1/shuttle-trips/{shuttleTripId}/tracking-context` | Tracking | Additive `isOwnPickup` theo queried `userId` và public station metadata. Passenger allowed khi own manifest là `PENDING\|PICKED_UP`; full stops chỉ là internal input cho Driver/ETA và không được phát public. |
 
 #### Booking Service
 
@@ -3736,6 +3739,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.51.0** | 2026-08-02 | Codex | **MINOR** — Freeze public Tracking map context: authorized Trip route geometry with safe marker fallback, deterministic 1.000-point cap/ETag, passenger-only Shuttle context without foreign pickup leakage, post-pickup access continuity, and additive TripStop status for terminal-stop ETA selection. No migration, dependency, integration event, Gateway family, or Google configuration change. |
 | **1.50.0** | 2026-07-31 | BE lead (Vũ) | **MINOR** — Ratifies exact Booking refund correlation and zero-net group reconciliation: `payment.wallet.credited.paymentId?` is Booking-refund-only and backward-compatible, captured-payment retry rows use `BOOKING_REFUND_PAYMENT` with `referenceId=paymentId` and may carry amount zero, and Shared.Messaging transient retries are explicit, durable, TTL/header bounded, mandatory, and publisher-confirmed. No physical schema migration or index. |
 | **1.49.0** | 2026-07-31 | BE lead (Vũ) | **MINOR** — Reopens Day 36/43 and ratifies the payment/history/auth repair contract: Booking VNPay deadlines follow Trip seat-lock expiry, legacy null `DueAt` falls back to 15 minutes, late capture never resurrects an expired Booking and uses idempotent allocation refund, `booking.payment_refund.requested` and `PAYMENT_DEADLINE_PASSED` are registered, internal latest-attempt redirect lookup is strict/no-store, Booking and Passenger history gain fail-open `paymentRedirectUrl`, and Google login returns stored avatar without provider overwrite. No schema migration or index. |
 | **1.48.0** | 2026-07-31 | Codex | **MINOR** — Freeze the backend UI-gap ownership, compatibility, projection/backfill, Policy audit, Parcel history, Dashboard and Revenue semantics; remove stale Admin Operator, Trip code/index and fare-history scope; correct Platform Report ownership to Booking. |
