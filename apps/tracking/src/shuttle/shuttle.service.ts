@@ -26,7 +26,7 @@ export const shuttleTrackingStopSchema = z.object({
   longitude: z.number(),
   status: z.string(),
   isStation: z.boolean(),
-  isOwnPickup: z.boolean().optional().default(false),
+  isOwnPickup: z.boolean().optional(),
 });
 export const shuttleTrackingStationSchema = z.object({
   stationId: z.string().uuid(),
