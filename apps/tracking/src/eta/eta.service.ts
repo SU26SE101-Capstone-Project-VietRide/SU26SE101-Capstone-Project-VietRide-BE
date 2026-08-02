@@ -56,7 +56,14 @@ interface ProviderCalculation {
   cooldownUntil?: string;
 }
 
-const COMPLETED_STOP_STATUSES = new Set(['COMPLETED', 'ARRIVED', 'PICKED_UP', 'DROPPED_OFF', 'CANCELLED']);
+const COMPLETED_STOP_STATUSES = new Set([
+  'COMPLETED',
+  'ARRIVED',
+  'SKIPPED',
+  'PICKED_UP',
+  'DROPPED_OFF',
+  'CANCELLED',
+]);
 const RELEASE_LOCK_SCRIPT = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end`;
 
 @Injectable()

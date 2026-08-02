@@ -179,10 +179,10 @@ describe('EtaService', () => {
       ageProviderState();
     }
 
-    const cooldownState = JSON.parse(store.get(trackingEtaStateKey(TEST_TRIP_ID)) ?? '{}');
+    const cooldownState = parseStoredObject(store.get(trackingEtaStateKey(TEST_TRIP_ID)) ?? '{}');
     expect(googleProvider.calculate).toHaveBeenCalledTimes(3);
-    expect(cooldownState.googleFailureCount).toBe(3);
-    expect(new Date(cooldownState.cooldownUntil).getTime()).toBeGreaterThan(Date.now());
+    expect(cooldownState['googleFailureCount']).toBe(3);
+    expect(new Date(String(cooldownState['cooldownUntil'])).getTime()).toBeGreaterThan(Date.now());
 
     await service.handleGpsUpdate(createGps());
     expect(googleProvider.calculate).toHaveBeenCalledTimes(3);
@@ -196,6 +196,52 @@ describe('EtaService', () => {
 
     expect(googleProvider.calculate).not.toHaveBeenCalled();
     expect(localProvider.calculate).not.toHaveBeenCalled();
+  });
+
+  it.each(['ARRIVED', 'SKIPPED'])('ignores %s stops and selects the next pending stop', async (status) => {
+    tripDataProvider.getRouteStops.mockResolvedValue([
+      createStop({
+        stopId: '33333333-3333-4333-8333-333333333333',
+        sequence: 1,
+        status,
+      }),
+      createStop({ sequence: 2, status: 'PENDING', latitude: 10.85 }),
+    ]);
+
+    const result = await service.handleGpsUpdate(createGps());
+
+    expect(result?.stopId).toBe(TEST_STOP_ID);
+    expect(localProvider.calculate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ status: 'PENDING', sequence: 2 }),
+    );
+  });
+
+  it('continues selecting PENDING stops', async () => {
+    tripDataProvider.getRouteStops.mockResolvedValue([createStop({ status: 'PENDING' })]);
+
+    const result = await service.handleGpsUpdate(createGps());
+
+    expect(result?.stopId).toBe(TEST_STOP_ID);
+  });
+
+  it('keeps GPS progress selection when Trip has not deployed stop status yet', async () => {
+    tripDataProvider.getRouteStops.mockResolvedValue([
+      createStop({
+        stopId: '33333333-3333-4333-8333-333333333333',
+        latitude: 10.72,
+        sequence: 1,
+      }),
+      createStop({ sequence: 2 }),
+    ]);
+
+    const result = await service.handleGpsUpdate(createGps());
+
+    expect(result?.stopId).toBe(TEST_STOP_ID);
+    expect(localProvider.calculate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ sequence: 2 }),
+    );
   });
 
   function seedState(overrides: Partial<Record<'latitude' | 'longitude' | 'etaMinutes', number>>): void {
@@ -221,8 +267,8 @@ describe('EtaService', () => {
 
   function ageProviderState(): void {
     const key = trackingEtaStateKey(TEST_TRIP_ID);
-    const state = JSON.parse(store.get(key) ?? '{}');
-    state.lastProviderCallAt = new Date(Date.now() - 61_000).toISOString();
+    const state = parseStoredObject(store.get(key) ?? '{}');
+    state['lastProviderCallAt'] = new Date(Date.now() - 61_000).toISOString();
     store.set(key, JSON.stringify(state));
   }
 
@@ -237,14 +283,22 @@ describe('EtaService', () => {
   }
 });
 
-function createStop(): TripStopSnapshot {
+function createStop(overrides: Partial<TripStopSnapshot> = {}): TripStopSnapshot {
   return {
     stopId: TEST_STOP_ID,
     latitude: 10.8231,
     longitude: 106.66,
     sequence: 1,
     estimatedArrivalTime: '2026-06-03T10:30:00.000Z',
+    ...overrides,
   };
+}
+
+function parseStoredObject(payload: string): Record<string, unknown> {
+  const parsed = JSON.parse(payload) as unknown;
+  return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : {};
 }
 
 function createEnv(): Env {
