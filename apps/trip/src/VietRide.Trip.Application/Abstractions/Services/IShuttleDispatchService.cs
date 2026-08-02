@@ -74,7 +74,8 @@ public sealed record ShuttleTrackingContext(
     Guid DriverUserId,
     bool Allowed,
     string? Scope,
-    IReadOnlyList<ShuttleTrackingStop> Stops);
+    IReadOnlyList<ShuttleTrackingStop> Stops,
+    ShuttleTrackingStation? Station = null);
 
 public sealed record ShuttleTrackingStop(
     int PickupOrder,
@@ -82,4 +83,5 @@ public sealed record ShuttleTrackingStop(
     decimal Latitude,
     decimal Longitude,
     string Status,
-    bool IsStation);
+    bool IsStation,
+    bool IsOwnPickup = false);

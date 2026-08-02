@@ -1,8 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import type { RouteGeometryProvider, RouteGeometrySnapshot } from './route-geometry.provider';
+import type {
+  DetailedRouteGeometryProvider,
+  RouteGeometryFetchResult,
+  RouteGeometrySnapshot,
+} from './route-geometry.provider';
 
 @Injectable()
-export class NoopRouteGeometryProvider implements RouteGeometryProvider {
+export class NoopRouteGeometryProvider implements DetailedRouteGeometryProvider {
   peekCachedRouteGeometry(tripId: string): RouteGeometrySnapshot | null {
     void tripId;
     return null;
@@ -11,5 +15,10 @@ export class NoopRouteGeometryProvider implements RouteGeometryProvider {
   async getRouteGeometry(tripId: string): Promise<RouteGeometrySnapshot | null> {
     void tripId;
     return null;
+  }
+
+  async getDetailedRouteGeometry(tripId: string): Promise<RouteGeometryFetchResult> {
+    void tripId;
+    return { kind: 'unavailable' };
   }
 }

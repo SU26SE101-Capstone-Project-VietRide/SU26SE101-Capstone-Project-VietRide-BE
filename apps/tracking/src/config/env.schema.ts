@@ -28,7 +28,7 @@ export const envSchema = baseEnvSchema.merge(
     BOOKING_PICKUP_BOOKINGS_PATH: z.string().default('/internal/v1/trips/:tripId/stops/:stopId/pickup-bookings'),
     TRACKING_AUTH_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(2_000),
     TRACKING_DATA_PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(2_000),
-    TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+    TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(60),
     TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(600),
     GOOGLE_ROUTES_ENABLED: booleanEnvSchema.default(false),
     GOOGLE_ROUTES_API_KEY: z.string().trim().default(''),

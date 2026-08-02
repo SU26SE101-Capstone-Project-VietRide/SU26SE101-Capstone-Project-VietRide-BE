@@ -4259,6 +4259,7 @@ REST fallback endpoints are:
 
 - `GET /v1/tracking/shuttle-trips/{shuttleTripId}/latest`
 - `GET /v1/tracking/shuttle-trips/{shuttleTripId}/eta`
+- `GET /v1/tracking/shuttle-trips/{shuttleTripId}/passenger-context`
 
 Shuttle ETA follows `pickupOrder`, skips terminal groups (`PICKED_UP`, `DELIVERED`, `NO_SHOW`,
 `CANCELLED`), never regresses below the last published pickup order and uses the Station stop as the
@@ -4270,6 +4271,94 @@ broadcast and acknowledgement never wait for Google HTTP. Shuttle state remains 
 `tracking:shuttle:*` and does not enter main Trip `GpsTrail`, active-trip, off-route or delay chains.
 No `etaSource` or provider metadata is added to the public payload. Default E2E uses a fake Google
 server; real Google is opt-in with `RUN_REAL_GOOGLE_E2E=true`.
+
+### GET `/v1/tracking/trips/{tripId}/route-geometry`
+
+Auth: Identity User Access Token. Người gọi phải vượt qua tracking authorization hiện hành:
+Booking owner, Parcel sender/recipient, assigned Driver/Assistant hoặc cùng Operator tenant.
+
+Response `200` dùng ADR 0004 envelope với `data`:
+
+```json
+{
+  "tripId": "uuid",
+  "geometry": {
+    "source": "ROUTE_POLYLINE",
+    "points": [{ "latitude": 10.0, "longitude": 106.0 }]
+  },
+  "originStation": {
+    "stationId": "uuid",
+    "name": "string",
+    "latitude": 10.0,
+    "longitude": 106.0
+  },
+  "intermediateStops": [
+    {
+      "stopId": "uuid",
+      "name": "string",
+      "sequence": 1,
+      "latitude": 10.5,
+      "longitude": 106.5
+    }
+  ],
+  "destinationStation": {
+    "stationId": "uuid",
+    "name": "string",
+    "latitude": 11.0,
+    "longitude": 107.0
+  }
+}
+```
+
+- `geometry` chỉ chứa polyline thật của Route. Khi Route chưa có polyline, trả `geometry: null`
+  nhưng vẫn trả các marker station/stop hợp lệ; client không nối các marker thành tuyến giả.
+- `originStation` và `destinationStation` nullable khi station chưa có tọa độ hợp lệ.
+- Geometry loại tọa độ ngoài range/trùng liên tiếp, giản lược deterministic tối đa 1.000 điểm và
+  luôn giữ điểm đầu/cuối. Public payload không chứa `alertRecipientUserIds`.
+- Response đặt `Cache-Control: private, max-age=600`, `Vary: Authorization` và strong `ETag`
+  tính từ DTO public sau sanitize/simplify. `If-None-Match` khớp trả `304` body rỗng sau khi auth.
+- Errors: `400 VALIDATION_FAILED`; `401 UNAUTHORIZED`; `403 ACCESS_DENIED`; `404 TRIP_NOT_FOUND`;
+  `503 TRACKING_AUTH_UNAVAILABLE`; `503 TRACKING_ROUTE_CONTEXT_UNAVAILABLE`.
+
+### GET `/v1/tracking/shuttle-trips/{shuttleTripId}/passenger-context`
+
+Auth: `PASSENGER`. Passenger được phép khi có ít nhất một manifest của chính họ ở `PENDING` hoặc
+`PICKED_UP`; chỉ có terminal manifest (`DELIVERED`, `NO_SHOW`, `CANCELLED`) thì bị từ chối.
+
+Response `200` dùng ADR 0004 envelope với `data`:
+
+```json
+{
+  "shuttleTripId": "uuid",
+  "mainTripId": "uuid",
+  "ownPickups": [
+    {
+      "bookingId": "uuid",
+      "pickupOrder": 3,
+      "latitude": 10.0,
+      "longitude": 106.0,
+      "status": "PENDING",
+      "stopsBeforePickup": 2
+    }
+  ],
+  "station": {
+    "stationId": "uuid",
+    "name": "string",
+    "latitude": 10.0,
+    "longitude": 106.0,
+    "pickupOrder": 8
+  }
+}
+```
+
+- Chỉ trả pickup thuộc user hiện tại và station công cộng; không trả booking ID, địa chỉ hoặc tọa
+  độ của passenger khác. `station` nullable khi chưa có tọa độ hợp lệ.
+- `PICKED_UP` luôn có `stopsBeforePickup=0`. Với `PENDING`, dùng Shuttle ETA `nextPickupOrder`;
+  nếu chưa có ETA thì dùng non-terminal pickup đầu tiên, rồi chỉ trả số unique pickup group còn trước
+  own pickup, không trả chi tiết các group đó.
+- Response đặt `Cache-Control: private, no-store`.
+- Errors: `400 VALIDATION_FAILED`; `401 UNAUTHORIZED`; `403 TRACKING_ACCESS_DENIED`;
+  `404 SHUTTLE_TRIP_NOT_FOUND`; `503 TRACKING_AUTH_UNAVAILABLE`; `503 TRACKING_CONTEXT_UNAVAILABLE`.
 
 ## RAG AI Service
 

@@ -54,7 +54,8 @@ public sealed class GetTripRouteStopsTrackingHandler
                     (double)stopSnapshot.Longitude,
                     stop.OrderIndex,
                     null,
-                    stop.EstimatedArrivalTime);
+                    stop.EstimatedArrivalTime,
+                    stop.Status.ToString());
             })
             .ToArray();
 

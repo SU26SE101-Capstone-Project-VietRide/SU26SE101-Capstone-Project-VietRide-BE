@@ -20,6 +20,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Application.Abstractions.SeatLock;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Internal.Trips.BatchTripSummaries;
 using VietRide.Trip.Application.Features.Internal.Trips.BookSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
@@ -27,6 +28,7 @@ using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 using VietRide.Trip.Application.Features.Internal.Trips.LockSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.ReleaseSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.Tracking;
+using VietRide.Trip.Application.Features.Shuttle;
 using VietRide.Trip.Infrastructure.SeatLock;
 
 namespace VietRide.Trip.IntegrationTests.Internal.Trips;
@@ -389,7 +391,7 @@ public sealed class InternalTripsEndpointTests
         var eta = DateTimeOffset.UtcNow.AddMinutes(30);
         var mediator = new StubMediator(_ => new TripRouteStopsTrackingResponse(
         [
-            new TripRouteStopTrackingDto(stopId, 10.75, 106.67, 1, [Guid.NewGuid()], eta),
+            new TripRouteStopTrackingDto(stopId, 10.75, 106.67, 1, [Guid.NewGuid()], eta, "SKIPPED"),
         ]));
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
@@ -402,6 +404,7 @@ public sealed class InternalTripsEndpointTests
         var stop = document.RootElement.GetProperty("data").GetProperty("stops")[0];
         stop.GetProperty("stopId").GetGuid().Should().Be(stopId);
         stop.GetProperty("estimatedArrivalTime").GetDateTimeOffset().Should().Be(eta);
+        stop.GetProperty("status").GetString().Should().Be("SKIPPED");
         mediator.LastRequest.Should().BeOfType<GetTripRouteStopsTrackingQuery>()
             .Which.TripId.Should().Be(tripId);
     }
@@ -413,7 +416,11 @@ public sealed class InternalTripsEndpointTests
         var mediator = new StubMediator(_ => new TripRouteGeometryTrackingResponse(
             tripId,
             [new RouteGeometryPointDto(10.75, 106.67)],
-            [Guid.NewGuid()]));
+            [Guid.NewGuid()],
+            TripRouteGeometrySources.RoutePolyline,
+            new TripRouteStationTrackingDto(Guid.NewGuid(), "Bến đầu", 10.7, 106.6),
+            [new TripRouteIntermediateStopTrackingDto(Guid.NewGuid(), "Điểm giữa", 1, 10.75, 106.67)],
+            new TripRouteStationTrackingDto(Guid.NewGuid(), "Bến cuối", 10.8, 106.8)));
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
 
@@ -424,8 +431,49 @@ public sealed class InternalTripsEndpointTests
         document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         document.RootElement.GetProperty("data").GetProperty("tripId").GetGuid().Should().Be(tripId);
         document.RootElement.GetProperty("data").GetProperty("points").GetArrayLength().Should().Be(1);
+        document.RootElement.GetProperty("data").GetProperty("geometrySource").GetString().Should().Be("ROUTE_POLYLINE");
+        document.RootElement.GetProperty("data").GetProperty("originStation").GetProperty("name").GetString().Should().Be("Bến đầu");
+        document.RootElement.GetProperty("data").GetProperty("intermediateStops").GetArrayLength().Should().Be(1);
+        document.RootElement.GetProperty("data").GetProperty("destinationStation").GetProperty("name").GetString().Should().Be("Bến cuối");
         mediator.LastRequest.Should().BeOfType<GetTripRouteGeometryTrackingQuery>()
             .Which.TripId.Should().Be(tripId);
+    }
+
+    [Fact]
+    public async Task ShuttleTrackingContext_Happy_SerializesOwnershipAndNullableStationCoordinates()
+    {
+        var shuttleTripId = Guid.NewGuid();
+        var mainTripId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var stationId = Guid.NewGuid();
+        var mediator = new StubMediator(_ => new ShuttleTrackingContext(
+            shuttleTripId,
+            mainTripId,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            true,
+            "PASSENGER",
+            [new ShuttleTrackingStop(2, Guid.NewGuid(), 10.75m, 106.67m, "PICKED_UP", false, true)],
+            new ShuttleTrackingStation(stationId, "Ben den", null, null, 3)));
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+        using var request = CreateAuthorizedRequest(
+            HttpMethod.Get,
+            $"/internal/v1/shuttle-trips/{shuttleTripId}/tracking-context?userId={userId}&role=PASSENGER");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement;
+        data.GetProperty("allowed").GetBoolean().Should().BeTrue();
+        data.GetProperty("stops")[0].GetProperty("isOwnPickup").GetBoolean().Should().BeTrue();
+        var station = data.GetProperty("station");
+        station.GetProperty("stationId").GetGuid().Should().Be(stationId);
+        station.GetProperty("latitude").ValueKind.Should().Be(JsonValueKind.Null);
+        station.GetProperty("longitude").ValueKind.Should().Be(JsonValueKind.Null);
+        mediator.LastRequest.Should().BeOfType<GetShuttleTrackingContextQuery>()
+            .Which.UserId.Should().Be(userId);
     }
 
     [Fact]

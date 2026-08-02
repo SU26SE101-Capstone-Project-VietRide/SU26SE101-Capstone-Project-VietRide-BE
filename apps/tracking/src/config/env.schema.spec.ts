@@ -21,4 +21,8 @@ describe('Tracking Phase 10 environment', () => {
   it('rejects ETA intervals below the 60 second minimum', () => {
     expect(() => loadEnv({ ...BASE_ENV, TRACKING_ETA_MIN_INTERVAL_SECONDS: '59' })).toThrow();
   });
+
+  it('defaults route-stop cache freshness to 60 seconds', () => {
+    expect(loadEnv(BASE_ENV).TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS).toBe(60);
+  });
 });

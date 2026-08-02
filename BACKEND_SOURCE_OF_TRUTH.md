@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.52.0
+> **Phiên bản:** 1.53.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-08-02
 > **Capstone:** SU26SE101 — SU26
@@ -2071,6 +2071,9 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `GET /internal/v1/trips/{tripId}/cargo/capacity` | Parcel | Lấy available cargo capacity |
 | `POST /internal/v1/trips/{tripId}/cargo/reserve` · `remeasure` · `load` · `release` | Parcel | Idempotent single-Trip cargo-ledger mutation and counter update |
 | `POST /internal/v1/trips/{sourceTripId}/cargo/transfer` | Parcel | Exact `{parcelId,targetTripId,targetState:RESERVED\|LOADED,allowCapacityOverflow}`; lock source/target by ascending UUID and atomically release source plus reserve/load target in one Trip-local transaction. `RESERVED` always enforces capacity; `LOADED` permits explicit overflow only for approved substitution recovery. |
+| `GET /internal/v1/trips/{tripId}/route-geometry` | Tracking | Additive route-map context `{tripId,geometrySource:ROUTE_POLYLINE\|STOPS_ONLY,points,originStation?,intermediateStops,destinationStation?,alertRecipientUserIds?}`. Polyline malformed/null dùng ordered stop fallback; public Tracking chỉ render line cho `ROUTE_POLYLINE`. |
+| `GET /internal/v1/trips/{tripId}/route-stops` | Tracking | Ordered ETA stops gồm additive `status`; Tracking vẫn chấp nhận thiếu/null status khi rolling deploy. |
+| `GET /internal/v1/shuttle-trips/{shuttleTripId}/tracking-context` | Tracking | Additive `isOwnPickup` theo queried `userId` và public station metadata. Passenger allowed khi own manifest là `PENDING\|PICKED_UP`; full stops chỉ là internal input cho Driver/ETA và không được phát public. |
 
 #### Booking Service
 
@@ -3776,6 +3779,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.53.0** | 2026-08-02 | Codex | **MINOR** — Freeze public Tracking map context: authorized Trip route geometry with safe marker fallback, deterministic 1.000-point cap/ETag, passenger-only Shuttle context without foreign pickup leakage, post-pickup access continuity, and additive TripStop status for terminal-stop ETA selection. No migration, dependency, integration event, Gateway family, or Google configuration change. |
 | **1.52.1** | 2026-08-02 | BE lead (Vũ) | **PATCH** — Reconciles the v1.54 Shuttle pickup merge with the system-wide idempotency inventory: `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup` is UUID-v4-required, raising the executable baseline to 181 HTTP mutation surfaces / 164 required / exactly 17 exemptions. Runtime metadata and API Contract were already required; no dependency, schema, migration or additional endpoint change. |
 | **1.52.0** | 2026-08-02 | BE lead (Vũ) | **MINOR** — Freezes the Day-43 system-wide idempotency convention at 180 HTTP mutation surfaces: 163 UUID-v4-required actions and exactly 17 named exemptions. Reconciles the two post-merge read-only Trip batch POSTs and the higher-contract no-key DriverSchedule create/activate actions with auditable runtime metadata; preserves v2 replay/mismatch/pending/5xx semantics and does not rewrite historical Git metadata. No dependency, schema, migration or public endpoint change. |
 | **1.51.0** | 2026-08-01 | BE lead (Vũ) | **MINOR** — Reconciles the Days 30–43 repair boundary: defers the unregistered manual Trip-create API; keeps `activePlanId` entitlements during `PENDING_PAYMENT`; fixes the trial warning at daily 09:00 ICT; preserves one zero-net settlement marker that terminates `CANCELLED` without wallet/event side effects; and makes Day-39 Parcel unload depend on a synchronous Trip snapshot with no Parcel arrival consumer/projection. No endpoint implementation, event payload, schema or migration change. |

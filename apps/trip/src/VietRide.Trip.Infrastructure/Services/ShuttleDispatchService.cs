@@ -259,7 +259,8 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             scope = "OPERATOR";
         }
         else if (string.Equals(role, "PASSENGER", StringComparison.OrdinalIgnoreCase)
-            && manifests.Any(x => x.PassengerUserId == userId && x.Status == ShuttlePassenger.PendingStatus))
+            && manifests.Any(x => x.PassengerUserId == userId
+                && x.Status is ShuttlePassenger.PendingStatus or ShuttlePassenger.PickedUpStatus))
         {
             allowed = true;
             scope = "PASSENGER";
@@ -268,27 +269,40 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         var stops = manifests
             .Where(x => x.PickupOrder.HasValue)
             .GroupBy(x => new { x.BookingId, x.PickupOrder })
-            .Select(group => group.First())
-            .OrderBy(x => x.PickupOrder)
+            .Select(group => new
+            {
+                Manifest = group.First(),
+                IsOwnPickup = group.Any(manifest => manifest.PassengerUserId == userId),
+            })
+            .OrderBy(x => x.Manifest.PickupOrder)
             .Select(x => new ShuttleTrackingStop(
-                x.PickupOrder!.Value,
-                x.BookingId,
-                x.PickupLat,
-                x.PickupLng,
-                x.Status,
-                false))
+                x.Manifest.PickupOrder!.Value,
+                x.Manifest.BookingId,
+                x.Manifest.PickupLat,
+                x.Manifest.PickupLng,
+                x.Manifest.Status,
+                false,
+                x.IsOwnPickup))
             .ToList();
         var station = await _db.Stations.AsNoTracking().SingleAsync(x => x.Id == shuttleTrip.StationId, cancellationToken);
+        var stationPickupOrder = stops.Count == 0 ? 1 : stops.Max(x => x.PickupOrder) + 1;
         if (station.Latitude.HasValue && station.Longitude.HasValue)
         {
             stops.Add(new ShuttleTrackingStop(
-                stops.Count == 0 ? 1 : stops.Max(x => x.PickupOrder) + 1,
+                stationPickupOrder,
                 null,
                 station.Latitude.Value,
                 station.Longitude.Value,
                 "PENDING",
                 true));
         }
+
+        var trackingStation = new ShuttleTrackingStation(
+            station.Id,
+            station.Name,
+            station.Latitude,
+            station.Longitude,
+            stationPickupOrder);
 
         return new ShuttleTrackingContext(
             shuttleTrip.Id,
@@ -297,7 +311,8 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             shuttleTrip.DriverUserId,
             allowed,
             scope,
-            stops);
+            stops,
+            trackingStation);
     }
 
     public async Task<ShuttlePickupResult> MarkPickupAsync(
