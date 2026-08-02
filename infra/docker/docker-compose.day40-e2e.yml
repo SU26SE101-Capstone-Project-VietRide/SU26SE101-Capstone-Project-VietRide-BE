@@ -1,43 +1,43 @@
-name: day40-e2e
+name: ${DAY40_COMPOSE_PROJECT:-day40-e2e}
 
 # Isolated Day 40 acceptance overlay. The harness starts infrastructure first,
 # then only the services required by admin users, station merge, and reports.
 services:
   postgres:
-    container_name: day40-e2e-postgres
+    container_name: ${DAY40_CONTAINER_PREFIX:-day40-e2e}-postgres
     ports:
-      - '55440:5432'
+      - '${POSTGRES_PORT:-55440}:5432'
 
   redis:
-    container_name: day40-e2e-redis
+    container_name: ${DAY40_CONTAINER_PREFIX:-day40-e2e}-redis
     ports:
       - '${REDIS_PORT:-56382}:6379'
 
   rabbitmq:
-    container_name: day40-e2e-rabbitmq
+    container_name: ${DAY40_CONTAINER_PREFIX:-day40-e2e}-rabbitmq
     ports:
-      - '55702:5672'
-      - '55703:15672'
+      - '${RABBITMQ_PORT:-55702}:5672'
+      - '${RABBITMQ_MGMT_PORT:-55703}:15672'
 
   identity:
-    container_name: day40-e2e-identity
+    container_name: ${DAY40_CONTAINER_PREFIX:-day40-e2e}-identity
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       EMAIL_PROVIDER: LOG
     ports:
-      - '59001:5001'
+      - '${IDENTITY_PORT:-59001}:5001'
 
   trip:
-    container_name: day40-e2e-trip
+    container_name: ${DAY40_CONTAINER_PREFIX:-day40-e2e}-trip
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Identity__BaseUrl: http://identity:5001
       Identity__UseDevStub: 'false'
     ports:
-      - '59002:5002'
+      - '${TRIP_PORT:-59002}:5002'
 
   booking:
-    container_name: day40-e2e-booking
+    container_name: ${DAY40_CONTAINER_PREFIX:-day40-e2e}-booking
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Trip__BaseUrl: http://trip:5002
@@ -47,10 +47,10 @@ services:
       Identity__BaseUrl: http://identity:5001
       Identity__UseDevStub: 'false'
     ports:
-      - '59003:5003'
+      - '${BOOKING_PORT:-59003}:5003'
 
   payment:
-    container_name: day40-e2e-payment
+    container_name: ${DAY40_CONTAINER_PREFIX:-day40-e2e}-payment
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       InvoiceStorage__Provider: E2E_LOCAL
@@ -67,22 +67,22 @@ services:
     tmpfs:
       - /tmp/day40-invoices
     ports:
-      - '59004:5004'
+      - '${PAYMENT_PORT:-59004}:5004'
 
   parcel:
-    container_name: day40-e2e-parcel
+    container_name: ${DAY40_CONTAINER_PREFIX:-day40-e2e}-parcel
     environment:
       ASPNETCORE_ENVIRONMENT: Development
     ports:
-      - '59005:5005'
+      - '${PARCEL_PORT:-59005}:5005'
 
   gateway:
-    container_name: day40-e2e-gateway
+    container_name: ${DAY40_CONTAINER_PREFIX:-day40-e2e}-gateway
     environment:
       NODE_ENV: development
     ports:
-      - '59300:3000'
+      - '${GATEWAY_PORT:-59300}:3000'
 
 networks:
   default:
-    name: day40-e2e-net
+    name: ${DAY40_CONTAINER_PREFIX:-day40-e2e}-net

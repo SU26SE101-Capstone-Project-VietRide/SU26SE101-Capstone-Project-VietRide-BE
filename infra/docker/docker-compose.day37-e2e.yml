@@ -4,7 +4,7 @@ name: day37-e2e
 # the main compose file so the Day 37 harness has an isolated network and data.
 services:
   postgres:
-    container_name: day37-e2e-postgres
+    container_name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-postgres
     ports:
       - '${POSTGRES_PORT:-34000}:5432'
     healthcheck: &fast-healthcheck
@@ -13,49 +13,54 @@ services:
       retries: 90
       start_period: 5s
   redis:
-    container_name: day37-e2e-redis
+    container_name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-redis
     ports:
       - '${REDIS_PORT:-34001}:6379'
     healthcheck: *fast-healthcheck
   rabbitmq:
-    container_name: day37-e2e-rabbitmq
+    container_name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-rabbitmq
     ports:
       - '${RABBITMQ_PORT:-34002}:5672'
       - '${RABBITMQ_MGMT_PORT:-34003}:15672'
   identity:
-    container_name: day37-e2e-identity
+    container_name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-identity
     ports:
       - '${IDENTITY_PORT:-34004}:5001'
     healthcheck: *fast-healthcheck
   trip:
-    container_name: day37-e2e-trip
+    container_name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-trip
     ports:
       - '${TRIP_PORT:-34005}:5002'
     healthcheck: *fast-healthcheck
   booking:
-    container_name: day37-e2e-booking
+    container_name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-booking
     ports:
       - '${BOOKING_PORT:-34006}:5003'
     healthcheck: *fast-healthcheck
   payment:
-    container_name: day37-e2e-payment
+    container_name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-payment
     ports:
       - '${PAYMENT_PORT:-34007}:5004'
     healthcheck: *fast-healthcheck
   parcel:
-    container_name: day37-e2e-parcel
+    container_name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-parcel
     ports:
       - '${PARCEL_PORT:-34008}:5005'
   notification:
-    container_name: day37-e2e-notification
+    container_name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-notification
     ports:
       - '${NOTIFICATION_PORT:-34009}:3002'
   gateway:
-    container_name: day37-e2e-gateway
+    container_name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-gateway
     ports:
       - '${GATEWAY_PORT:-34010}:3000'
+    healthcheck: *fast-healthcheck
+  rag:
+    container_name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-rag
+    ports:
+      - '${RAG_PORT:-34011}:3003'
     healthcheck: *fast-healthcheck
 
 networks:
   default:
-    name: day37-e2e-net
+    name: ${DAY37_CONTAINER_PREFIX:-day37-e2e}-net

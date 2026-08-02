@@ -92,7 +92,7 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
     {
         var subscriptionId = await _dbContext.OperatorSubscriptions
             .Where(x => x.OperatorId == operatorId)
-            .Where(x => x.Status == SubscriptionStatus.ACTIVE)
+            .Where(x => x.Status == SubscriptionStatus.ACTIVE || x.Status == SubscriptionStatus.PENDING_PAYMENT)
             .OrderByDescending(x => x.StartedAt ?? x.LastResetAt)
             .Select(x => x.Id)
             .FirstOrDefaultAsync(cancellationToken);
@@ -128,7 +128,9 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
     {
         var subscriptionId = await _dbContext.OperatorSubscriptions
             .Where(x => x.OperatorId == operatorId)
-            .Where(x => x.Status == SubscriptionStatus.PENDING_APPROVAL || x.Status == SubscriptionStatus.ACTIVE)
+            .Where(x => x.Status == SubscriptionStatus.PENDING_APPROVAL
+                || x.Status == SubscriptionStatus.ACTIVE
+                || x.Status == SubscriptionStatus.PENDING_PAYMENT)
             .OrderByDescending(x => x.StartedAt ?? x.LastResetAt)
             .Select(x => x.Id)
             .FirstOrDefaultAsync(cancellationToken);

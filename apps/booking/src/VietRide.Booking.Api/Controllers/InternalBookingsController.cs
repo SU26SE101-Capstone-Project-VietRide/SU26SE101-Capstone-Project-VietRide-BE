@@ -71,6 +71,21 @@ public sealed class InternalBookingsController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("trips/{tripId}/notification-recipients")]
+    [ProducesResponseType(typeof(TripNotificationRecipientsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TripNotificationRecipientsDto>> GetTripNotificationRecipientsAsync(
+        string tripId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new GetTripNotificationRecipientsQuery(tripId),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
     [HttpGet("trips/{tripId}/vehicle-substitution-impact")]
     [ProducesResponseType(typeof(VehicleSubstitutionImpactDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]

@@ -206,35 +206,53 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
             if (!response.IsSuccessStatusCode)
             {
                 return SubscriptionWriteEligibilityOutcome.Rejected(
-                    (int)response.StatusCode,
+                    503,
                     "UPSTREAM_UNAVAILABLE",
                     $"Identity subscription lookup returned status {(int)response.StatusCode}.");
             }
 
             var json = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken)
                 .ConfigureAwait(false);
+            if (!TryGetGuidProperty(json, "operatorId", out var responseOperatorId)
+                || responseOperatorId != operatorId)
+            {
+                return SubscriptionWriteEligibilityOutcome.Rejected(
+                    503,
+                    "UPSTREAM_UNAVAILABLE",
+                    "Identity subscription lookup returned unusable operator data.");
+            }
+
             var status = GetStringProperty(json, "status");
-            if (string.Equals(status, "EXPIRED", StringComparison.Ordinal))
+            if (string.Equals(status, "EXPIRED", StringComparison.Ordinal)
+                || string.Equals(status, "CANCELLED", StringComparison.Ordinal))
             {
                 return SubscriptionWriteEligibilityOutcome.Rejected(
                     402,
                     "SUBSCRIPTION_EXPIRED",
-                    "Operator subscription has expired.");
+                    "Operator subscription is no longer active.");
             }
 
-            if (string.Equals(status, "PENDING_PAYMENT", StringComparison.Ordinal))
+            if (!string.Equals(status, "ACTIVE", StringComparison.Ordinal)
+                && !string.Equals(status, "PENDING_PAYMENT", StringComparison.Ordinal))
             {
                 return SubscriptionWriteEligibilityOutcome.Rejected(
-                    409,
-                    "SUBSCRIPTION_PAYMENT_PENDING",
-                    "Operator subscription payment is pending.");
+                    503,
+                    "UPSTREAM_UNAVAILABLE",
+                    "Identity subscription lookup returned an unusable status.");
             }
 
-            var parcelEnabled = json.TryGetProperty("plan", out var plan)
-                && plan.TryGetProperty("modules", out var modules)
-                && modules.TryGetProperty("enableParcel", out var enabled)
-                && enabled.ValueKind is JsonValueKind.True;
-            if (requireParcelModule && !parcelEnabled)
+            if (!requireParcelModule)
+                return SubscriptionWriteEligibilityOutcome.Allowed();
+
+            if (!TryGetBooleanProperty(json, "plan", "modules", "enableParcel", out var parcelEnabled))
+            {
+                return SubscriptionWriteEligibilityOutcome.Rejected(
+                    503,
+                    "UPSTREAM_UNAVAILABLE",
+                    "Identity subscription lookup returned unusable Parcel entitlement data.");
+            }
+
+            if (!parcelEnabled)
             {
                 return SubscriptionWriteEligibilityOutcome.Rejected(
                     403,
@@ -263,6 +281,39 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
         return json.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String
             ? prop.GetString()
             : null;
+    }
+
+    private static bool TryGetGuidProperty(JsonElement json, string propertyName, out Guid value)
+    {
+        value = Guid.Empty;
+        return json.ValueKind == JsonValueKind.Object
+            && json.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.String
+            && Guid.TryParse(property.GetString(), out value)
+            && value != Guid.Empty;
+    }
+
+    private static bool TryGetBooleanProperty(
+        JsonElement json,
+        string objectPropertyName,
+        string nestedObjectPropertyName,
+        string booleanPropertyName,
+        out bool value)
+    {
+        value = false;
+        if (json.ValueKind != JsonValueKind.Object
+            || !json.TryGetProperty(objectPropertyName, out var objectProperty)
+            || objectProperty.ValueKind != JsonValueKind.Object
+            || !objectProperty.TryGetProperty(nestedObjectPropertyName, out var nestedObjectProperty)
+            || nestedObjectProperty.ValueKind != JsonValueKind.Object
+            || !nestedObjectProperty.TryGetProperty(booleanPropertyName, out var booleanProperty)
+            || booleanProperty.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+
+        value = booleanProperty.GetBoolean();
+        return true;
     }
 
     private static ParcelNoShowPolicy ReadParcelNoShowPolicy(JsonElement json)

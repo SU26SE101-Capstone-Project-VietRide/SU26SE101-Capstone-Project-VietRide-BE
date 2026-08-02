@@ -58,11 +58,7 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>
         NetAmount = netAmount;
         if (netAmount <= 0)
         {
-            Status = OperatorTripSettlementStatus.CANCELLED;
-            SettlementMethod = OperatorTripSettlementMethod.AUTO_WEEKLY;
-            SettledAt = now;
-            SettledBySnapshotResolved = true;
-            ActiveFailureCode = null;
+            MarkCancelled(netAmount, OperatorTripSettlementMethod.AUTO_WEEKLY, now, null);
             return;
         }
 
@@ -91,7 +87,10 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>
         FinancialActorSnapshot? settledBy,
         Guid walletTransactionId)
     {
-        if (Status != OperatorTripSettlementStatus.ELIGIBLE)
+        var canSettle = Status == OperatorTripSettlementStatus.ELIGIBLE
+            || method == OperatorTripSettlementMethod.ADMIN_MANUAL
+                && Status == OperatorTripSettlementStatus.PENDING_HOLD;
+        if (!canSettle)
             throw new InvalidOperationException("Settlement is not eligible.");
         if (netAmount <= 0 || walletTransactionId == Guid.Empty)
             throw new ArgumentOutOfRangeException(nameof(netAmount));
@@ -109,6 +108,37 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>
             SettledByRole = settledBy.Role;
         }
         WalletTransactionId = walletTransactionId;
+        if (ActiveFailureCode is not null)
+        {
+            ActiveFailureCode = null;
+            FailureResolvedAt = settledAt;
+        }
+    }
+
+    public void MarkCancelled(
+        long netAmount,
+        OperatorTripSettlementMethod method,
+        DateTimeOffset settledAt,
+        FinancialActorSnapshot? settledBy)
+    {
+        if (Status is not (OperatorTripSettlementStatus.PENDING_HOLD or OperatorTripSettlementStatus.ELIGIBLE))
+            throw new InvalidOperationException("Only pending settlements can be cancelled.");
+        if (netAmount > 0)
+            throw new ArgumentOutOfRangeException(nameof(netAmount));
+
+        NetAmount = netAmount;
+        Status = OperatorTripSettlementStatus.CANCELLED;
+        SettlementMethod = method;
+        SettledAt = settledAt;
+        SettledBySnapshotResolved = true;
+        if (settledBy is not null)
+        {
+            SettledByUserId = settledBy.UserId;
+            SettledByDisplayName = settledBy.DisplayName;
+            SettledByEmail = settledBy.Email;
+            SettledByRole = settledBy.Role;
+        }
+
         if (ActiveFailureCode is not null)
         {
             ActiveFailureCode = null;

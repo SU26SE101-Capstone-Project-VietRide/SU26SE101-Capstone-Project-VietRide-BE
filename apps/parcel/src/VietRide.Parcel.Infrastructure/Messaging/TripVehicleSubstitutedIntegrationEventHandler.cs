@@ -47,10 +47,8 @@ internal sealed class TripVehicleSubstitutedIntegrationEventHandler
         }
 
         if (integrationEvent.OccurredAt == default
-            || integrationEvent.OccurredAt.Kind != DateTimeKind.Utc
             || integrationEvent.DisruptedAt == default
-            || new DateTimeOffset(integrationEvent.OccurredAt)
-                != integrationEvent.DisruptedAt.ToUniversalTime()
+            || integrationEvent.OccurredAt != integrationEvent.DisruptedAt
             || integrationEvent.NewTripDepartureDateTime == default)
         {
             throw new ArgumentException(

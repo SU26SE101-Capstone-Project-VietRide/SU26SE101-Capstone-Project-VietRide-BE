@@ -1,53 +1,54 @@
-name: day39-e2e
+name: ${DAY39_COMPOSE_PROJECT:-day39-e2e}
 
 # Isolated Day 39 acceptance overlay. The harness starts infrastructure first,
 # then starts only the services required by the driver-operations flow.
 services:
   postgres:
-    container_name: day39-e2e-postgres
+    container_name: ${DAY39_CONTAINER_PREFIX:-day39-e2e}-postgres
     ports:
-      - '55439:5432'
+      - '${POSTGRES_PORT:-55439}:5432'
 
   redis:
-    container_name: day39-e2e-redis
+    container_name: ${DAY39_CONTAINER_PREFIX:-day39-e2e}-redis
     ports:
-      - '56381:6379'
+      - '${REDIS_PORT:-56381}:6379'
 
   rabbitmq:
-    container_name: day39-e2e-rabbitmq
+    container_name: ${DAY39_CONTAINER_PREFIX:-day39-e2e}-rabbitmq
     ports:
-      - '55692:5672'
-      - '55693:15672'
+      - '${RABBITMQ_PORT:-55692}:5672'
+      - '${RABBITMQ_MGMT_PORT:-55693}:15672'
 
   identity:
-    container_name: day39-e2e-identity
+    container_name: ${DAY39_CONTAINER_PREFIX:-day39-e2e}-identity
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       EMAIL_PROVIDER: LOG
     ports:
-      - '58001:5001'
+      - '${IDENTITY_PORT:-58001}:5001'
 
   trip:
-    container_name: day39-e2e-trip
+    container_name: ${DAY39_CONTAINER_PREFIX:-day39-e2e}-trip
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Identity__BaseUrl: http://identity:5001
       Identity__UseDevStub: 'false'
+      FIREBASE_WEB_STORAGE_BUCKET: day39-e2e.firebasestorage.app
     ports:
-      - '58002:5002'
+      - '${TRIP_PORT:-58002}:5002'
 
   parcel:
-    container_name: day39-e2e-parcel
+    container_name: ${DAY39_CONTAINER_PREFIX:-day39-e2e}-parcel
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       REDIS_URL: redis:6379
       Trip__BaseUrl: http://trip:5002
       Trip__UseDevStub: 'false'
     ports:
-      - '58005:5005'
+      - '${PARCEL_PORT:-58005}:5005'
 
   notification:
-    container_name: day39-e2e-notification
+    container_name: ${DAY39_CONTAINER_PREFIX:-day39-e2e}-notification
     environment:
       NODE_ENV: development
       IDENTITY_INTERNAL_BASE_URL: http://identity:5001
@@ -57,15 +58,15 @@ services:
       FCM_PRIVATE_KEY: ''
       FCM_DRY_RUN: 'false'
     ports:
-      - '58012:3002'
+      - '${NOTIFICATION_PORT:-58012}:3002'
 
   gateway:
-    container_name: day39-e2e-gateway
+    container_name: ${DAY39_CONTAINER_PREFIX:-day39-e2e}-gateway
     environment:
       NODE_ENV: development
     ports:
-      - '58300:3000'
+      - '${GATEWAY_PORT:-58300}:3000'
 
 networks:
   default:
-    name: day39-e2e-net
+    name: ${DAY39_CONTAINER_PREFIX:-day39-e2e}-net

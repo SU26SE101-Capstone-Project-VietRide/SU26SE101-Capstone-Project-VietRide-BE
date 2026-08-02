@@ -419,6 +419,42 @@ internal sealed class BookingRepository : IBookingRepository
     }
 
     /// <inheritdoc/>
+    public async Task<TripNotificationRecipientsDto> GetTripNotificationRecipientsAsync(
+        Guid tripId,
+        CancellationToken ct = default)
+    {
+        if (tripId == Guid.Empty)
+        {
+            throw new ArgumentException("Trip id must be non-empty.", nameof(tripId));
+        }
+
+        var rows = await _db.Bookings
+            .AsNoTracking()
+            .Where(booking => booking.TripId == tripId)
+            .Where(booking => booking.Status == BookingStatus.CONFIRMED
+                || booking.Status == BookingStatus.PARTIAL_NO_SHOW)
+            .Select(booking => new
+            {
+                BookingId = booking.Id,
+                UserId = booking.PassengerUserId,
+                booking.Status,
+            })
+            .Distinct()
+            .OrderBy(recipient => recipient.BookingId)
+            .ThenBy(recipient => recipient.UserId)
+            .ToListAsync(ct);
+
+        var recipients = rows
+            .Select(row => new TripNotificationRecipientDto(
+                row.BookingId,
+                row.UserId,
+                row.Status.ToString()))
+            .ToArray();
+
+        return new TripNotificationRecipientsDto(tripId, recipients);
+    }
+
+    /// <inheritdoc/>
     public async Task<VehicleSubstitutionImpactDto> GetVehicleSubstitutionImpactAsync(
         Guid tripId,
         Guid operatorId,

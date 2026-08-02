@@ -207,13 +207,13 @@ Payment redirect-history work:
 | Service | Total | Required | Exempt |
 | --- | ---: | ---: | ---: |
 | Identity | 35 | 30 | 5 |
-| Trip | 56 | 53 | 3 |
+| Trip | 57 | 52 | 5 |
 | Booking | 27 | 26 | 1 |
 | Payment | 15 | 11 | 4 |
 | Parcel | 31 | 30 | 1 |
 | Notification | 3 | 3 | 0 |
 | RAG | 13 | 12 | 1 |
-| **Total** | **180** | **165** | **15** |
+| **Total** | **181** | **164** | **17** |
 
 The cross-system inventory now distinguishes source-level registration sites from registrations
 created by mapped binding arrays:
@@ -228,9 +228,11 @@ created by mapped binding arrays:
 
 The provisional repair-plan baseline of 22 outbound callsites and four exemption files omitted two
 older `PostAsJsonAsync` callsites. Merging `origin/main` at `5b00b313` then added the UI-gap policy,
-analytics and projection surfaces, raising the executable baseline to 180/165/15, 45 handlers and
-28/9 outbound callsites/exemptions. The inventory uses callsite tokens rather than whole-file
-exemptions so mixed clients cannot exempt mutation callsites accidentally.
+analytics and projection surfaces; reconciling the higher no-key DriverSchedule create/activate
+contract originally set the executable baseline to 180/163/17; the later v1.54 Shuttle pickup
+merge raises it to 181/164/17, with 45 handlers and 28/9 outbound
+callsites/exemptions. The inventory uses callsite tokens rather than whole-file exemptions so mixed
+clients cannot exempt mutation callsites accidentally.
 
 ## Open questions đã đóng
 

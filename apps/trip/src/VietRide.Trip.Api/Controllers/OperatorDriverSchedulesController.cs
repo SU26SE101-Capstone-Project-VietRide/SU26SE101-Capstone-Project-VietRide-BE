@@ -37,6 +37,7 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
     }
 
     [HttpPost]
+    [SkipIdempotency("DriverSchedule creation retains its legacy no-key contract; business conflict guards prevent duplicate active schedules.")]
     [ProducesResponseType(typeof(ApiResponse<DriverScheduleDto>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
@@ -67,6 +68,7 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
     }
 
     [HttpPatch("{id:guid}/activate")]
+    [SkipIdempotency("DriverSchedule activation is behavior-idempotent and explicitly requires no Idempotency-Key.")]
     [ProducesResponseType(typeof(ApiResponse<DriverScheduleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]

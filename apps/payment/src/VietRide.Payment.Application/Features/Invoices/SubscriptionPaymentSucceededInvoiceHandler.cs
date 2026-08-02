@@ -34,7 +34,7 @@ public sealed record SubscriptionPaymentSucceededInvoiceEvent(
 public sealed class SubscriptionPaymentSucceededInvoiceHandler
     : IIntegrationEventHandler<SubscriptionPaymentSucceededInvoiceEvent>
 {
-    private const string ConsumerName = "payment.subscription-invoice";
+    private const string ConsumerName = "payment.subscription-invoice-handler";
     private readonly IInvoiceRepository _invoices;
     private readonly IInvoiceNumberCounterRepository _counters;
     private readonly IProcessedIntegrationEventRepository _processed;
@@ -62,16 +62,12 @@ public sealed class SubscriptionPaymentSucceededInvoiceHandler
         SubscriptionPaymentSucceededInvoiceEvent integrationEvent,
         CancellationToken cancellationToken)
     {
-        Guid? createdInvoiceId = null;
-        await _unitOfWork.BeginTransactionAsync(cancellationToken);
-        try
+        var createdInvoiceId = await _unitOfWork.ExecuteInTransactionAsync(async () =>
         {
             if (await _processed.ExistsAsync(ConsumerName, integrationEvent.EventId, cancellationToken))
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                return;
-            }
+                return (Guid?)null;
 
+            Guid? invoiceId = null;
             var existing = await _invoices.FindByPaymentIdAsync(
                 integrationEvent.PaymentId,
                 cancellationToken);
@@ -95,20 +91,14 @@ public sealed class SubscriptionPaymentSucceededInvoiceHandler
                     integrationEvent.PeriodTo,
                     InvoiceMetadataCodec.Serialize(metadata));
                 await _invoices.AddAsync(invoice, cancellationToken);
-                createdInvoiceId = invoice.Id;
+                invoiceId = invoice.Id;
             }
 
             await _processed.AddAsync(
                 ProcessedIntegrationEvent.Create(ConsumerName, integrationEvent.EventId, _clock.UtcNow),
                 cancellationToken);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            await _unitOfWork.CommitAsync(cancellationToken);
-        }
-        catch
-        {
-            await _unitOfWork.RollbackAsync(cancellationToken);
-            throw;
-        }
+            return invoiceId;
+        }, cancellationToken);
 
         if (createdInvoiceId.HasValue)
             _jobs.EnqueuePdfGeneration(createdInvoiceId.Value);

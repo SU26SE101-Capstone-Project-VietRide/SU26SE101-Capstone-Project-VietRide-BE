@@ -37,6 +37,41 @@ public sealed class Day35VehicleSubstitutedConsumerTests
     }
 
     [Fact]
+    public async Task CanonicalUtcOffsetJson_DeserializesAndDispatches()
+    {
+        var serializerOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var json = JsonSerializer.Serialize(Event(), serializerOptions);
+        json.Should().Contain("\"occurredAt\":\"2026-07-30T05:00:00+00:00\"");
+        var integrationEvent = JsonSerializer.Deserialize<TripVehicleSubstitutedIntegrationEvent>(
+            json,
+            serializerOptions)!;
+        var mediator = Substitute.For<IMediator>();
+
+        await CreateHandler(mediator).HandleAsync(integrationEvent, CancellationToken.None);
+
+        integrationEvent.OccurredAt.Should().Be(Now);
+        await mediator.Received(1).Send(
+            Arg.Is<HandleVehicleSubstitutedCommand>(command =>
+                command.EventId == integrationEvent.EventId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task MismatchedCanonicalTimestamps_AreRejectedBeforeDispatch()
+    {
+        var mediator = Substitute.For<IMediator>();
+        var invalid = Event() with { DisruptedAt = Now.AddSeconds(1) };
+
+        var act = () => CreateHandler(mediator).HandleAsync(invalid, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*invalid timestamp*");
+        await mediator.DidNotReceiveWithAnyArgs().Send(
+            default(IRequest<int>)!,
+            default);
+    }
+
+    [Fact]
     public async Task LegacyOrSemanticallyInvalidEvent_IsRejectedBeforeDispatch()
     {
         var json = JsonSerializer.Serialize(Event());
@@ -116,7 +151,7 @@ public sealed class Day35VehicleSubstitutedConsumerTests
         return new TripVehicleSubstitutedIntegrationEvent
         {
             EventId = eventId,
-            OccurredAt = Now.UtcDateTime,
+            OccurredAt = Now,
             SubstitutionId = eventId,
             DisruptedAt = Now,
             OperatorId = Guid.NewGuid(),

@@ -475,13 +475,13 @@ dotnet format apps/parcel/VietRide.Parcel.sln --verify-no-changes --include apps
 | Service | Total | Required | Exempt |
 | --- | ---: | ---: | ---: |
 | Identity | 35 | 30 | 5 |
-| Trip | 54 | 53 | 1 |
+| Trip | 56 | 51 | 5 |
 | Booking | 27 | 26 | 1 |
 | Payment | 15 | 11 | 4 |
-| Parcel | 30 | 29 | 1 |
+| Parcel | 31 | 30 | 1 |
 | Notification | 3 | 3 | 0 |
-| RAG | 7 | 6 | 1 |
-| Total | 171 | 158 | 13 |
+| RAG | 13 | 12 | 1 |
+| Total | 180 | 163 | 17 |
 
 Cross-system baselines: 43 .NET RabbitMQ handlers; 14 Notification `.subscribe(...)` source
 callsites expanding to 73 runtime RabbitMQ bindings; and 24 outbound POST/PUT/PATCH/DELETE-style
@@ -490,10 +490,10 @@ Payment redirect lookup helpers. The corrected 24/5 baseline includes two older
 `PostAsJsonAsync` callsites omitted by the provisional count.
 
 Post-plan merge reconciliation: merging `origin/main` at `5b00b313` adds UI-gap Policy, analytics
-and projection surfaces. The executable inventory after that merge is 180 total / 165 required /
-15 exempt, with 45 .NET handlers and 28 outbound HTTP callsites / 9 exact read-only exemptions.
-This does not change the R0–R10 acceptance decisions; it keeps the final verifier aligned with the
-merged runtime surface.
+and projection surfaces. The executable inventory after that merge, plus the higher-contract
+DriverSchedule create/activate reconciliation plus the v1.54 Shuttle pickup merge, is 181 total / 164 required / 17 exempt, with 45
+.NET handlers and 28 outbound HTTP callsites / 9 exact read-only outbound exemptions. This keeps
+the final verifier aligned with the merged runtime surface and the API Contract.
 
 **Verification**
 

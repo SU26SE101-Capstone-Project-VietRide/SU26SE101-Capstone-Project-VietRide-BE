@@ -1,6 +1,11 @@
 {
   "version": 3,
   "policy": "system-wide-idempotency-contract",
+  "expectedSummary": {
+    "mutationSurfaces": 181,
+    "required": 164,
+    "exemptions": 17
+  },
   "services": {
     "identity": {
       "stack": "dotnet",
@@ -194,7 +199,7 @@
       "stack": "dotnet",
       "servicePrefix": "trip",
       "requireAllMutations": true,
-      "expectedMutationCount": 56,
+      "expectedMutationCount": 57,
       "endpoints": [
         {
           "method": "POST",
@@ -269,6 +274,11 @@
         {
           "method": "POST",
           "path": "/v1/driver/trips/{tripId:guid}/destination/arrive",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/shuttle-trips/{shuttleTripId:guid}/stops/{pickupOrder:int}/pickup",
           "policy": "required"
         },
         {
@@ -351,12 +361,14 @@
         {
           "method": "POST",
           "path": "/v1/operator/driver-schedules",
-          "policy": "required"
+          "policy": "exempt",
+          "reason": "DriverSchedule creation retains its legacy no-key contract; business conflict guards prevent duplicate active schedules."
         },
         {
           "method": "PATCH",
           "path": "/v1/operator/driver-schedules/{id:guid}/activate",
-          "policy": "required"
+          "policy": "exempt",
+          "reason": "DriverSchedule activation is behavior-idempotent and explicitly requires no Idempotency-Key."
         },
         {
           "method": "PATCH",

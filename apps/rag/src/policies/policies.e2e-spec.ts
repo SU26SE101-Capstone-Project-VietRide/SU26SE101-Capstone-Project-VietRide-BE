@@ -11,6 +11,8 @@ import type { Policy } from '../generated/rag-prisma-client';
 import { RagPrismaService } from '../prisma/rag-prisma.service';
 import { RagIdempotencyInterceptor } from '../swagger/rag-idempotency.interceptor';
 import { RagIdempotencyService } from '../swagger/rag-idempotency.service';
+import { IdentitySubscriptionEntitlementClient } from '../subscriptions/identity-subscription-entitlement.client';
+import { RagSubscriptionEntitlementGuard } from '../subscriptions/rag-subscription-entitlement.guard';
 import { AdminPoliciesController } from './admin-policies.controller';
 import { IdentityPolicyActorProvider } from './identity-policy-actor.provider';
 import { OperatorPoliciesController } from './operator-policies.controller';
@@ -64,6 +66,11 @@ describe('Policies controllers (e2e)', () => {
       providers: [
         PoliciesService,
         InternalJwtAuthGuard,
+        RagSubscriptionEntitlementGuard,
+        {
+          provide: IdentitySubscriptionEntitlementClient,
+          useValue: { get: jest.fn().mockResolvedValue({ enableRag: true }) },
+        },
         RagIdempotencyService,
         { provide: PoliciesRepository, useValue: repository },
         { provide: IdentityPolicyActorProvider, useValue: actors },

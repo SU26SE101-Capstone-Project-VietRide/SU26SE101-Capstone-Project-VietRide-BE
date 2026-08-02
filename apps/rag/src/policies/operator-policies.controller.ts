@@ -27,6 +27,7 @@ import {
   successEnvelopeSchema,
 } from '../swagger/api-response.schemas';
 import { ApiIdempotencyRequired } from '../swagger/idempotency.swagger';
+import { RagSubscriptionEntitlementGuard } from '../subscriptions/rag-subscription-entitlement.guard';
 import { CreatePolicyDto, CreatePolicySchema } from './dto/create-policy.dto';
 import { ListPoliciesQueryDto, ListPoliciesValidationSchema } from './dto/list-policies.dto';
 import { UpdatePolicyDto, UpdatePolicySchema } from './dto/update-policy.dto';
@@ -43,9 +44,21 @@ import type { PolicyPage, PolicyResponse } from './policies.types';
 import { PolicyUuidPipe } from './policy-uuid.pipe';
 import { PolicyValidationPipe } from './policy-validation.pipe';
 
+const operatorPolicyForbiddenSchema = {
+  oneOf: [
+    errorEnvelopeSchema(403, 'FORBIDDEN', 'Forbidden'),
+    errorEnvelopeSchema(403, 'SUBSCRIPTION_MODULE_DISABLED', 'RAG module is disabled'),
+  ],
+};
+const operatorPolicyUpstreamUnavailableSchema = errorEnvelopeSchema(
+  503,
+  'UPSTREAM_UNAVAILABLE',
+  'Identity subscription is unavailable',
+);
+
 @ApiTags('Operator Policies')
 @ApiBearerAuth()
-@UseGuards(InternalJwtAuthGuard)
+@UseGuards(InternalJwtAuthGuard, RagSubscriptionEntitlementGuard)
 @Controller('v1/operator/policies')
 export class OperatorPoliciesController {
   constructor(private readonly policies: PoliciesService) {}
@@ -72,7 +85,8 @@ export class OperatorPoliciesController {
     }),
   })
   @ApiResponse({ status: 401, schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Unauthorized') })
-  @ApiResponse({ status: 403, schema: errorEnvelopeSchema(403, 'FORBIDDEN', 'Forbidden') })
+  @ApiResponse({ status: 403, schema: operatorPolicyForbiddenSchema })
+  @ApiResponse({ status: 503, schema: operatorPolicyUpstreamUnavailableSchema })
   @ApiResponse({ status: 422, schema: policyValidationErrorSchema })
   list(
     @Query(new PolicyValidationPipe(ListPoliciesValidationSchema)) query: ListPoliciesQueryDto,
@@ -86,7 +100,8 @@ export class OperatorPoliciesController {
   @ApiParam({ name: 'policyId', format: 'uuid' })
   @ApiResponse({ status: 200, schema: successEnvelopeSchema(200, policySchema) })
   @ApiResponse({ status: 401, schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Unauthorized') })
-  @ApiResponse({ status: 403, schema: errorEnvelopeSchema(403, 'FORBIDDEN', 'Forbidden') })
+  @ApiResponse({ status: 403, schema: operatorPolicyForbiddenSchema })
+  @ApiResponse({ status: 503, schema: operatorPolicyUpstreamUnavailableSchema })
   @ApiResponse({
     status: 404,
     schema: errorEnvelopeSchema(404, 'POLICY_NOT_FOUND', 'Policy not found'),
@@ -105,7 +120,7 @@ export class OperatorPoliciesController {
   @ApiBody({ schema: policyCreateBodySchema })
   @ApiResponse({ status: 201, schema: successEnvelopeSchema(201, policySchema) })
   @ApiResponse({ status: 401, schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Unauthorized') })
-  @ApiResponse({ status: 403, schema: errorEnvelopeSchema(403, 'FORBIDDEN', 'Forbidden') })
+  @ApiResponse({ status: 403, schema: operatorPolicyForbiddenSchema })
   @ApiResponse({
     status: 409,
     schema: errorEnvelopeSchema(409, 'IDEMPOTENCY_REQUEST_PENDING', 'Request is processing'),
@@ -129,7 +144,7 @@ export class OperatorPoliciesController {
   @ApiBody({ schema: policyUpdateBodySchema })
   @ApiResponse({ status: 200, schema: successEnvelopeSchema(200, policySchema) })
   @ApiResponse({ status: 401, schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Unauthorized') })
-  @ApiResponse({ status: 403, schema: errorEnvelopeSchema(403, 'FORBIDDEN', 'Forbidden') })
+  @ApiResponse({ status: 403, schema: operatorPolicyForbiddenSchema })
   @ApiResponse({
     status: 404,
     schema: errorEnvelopeSchema(404, 'POLICY_NOT_FOUND', 'Policy not found'),
@@ -154,7 +169,7 @@ export class OperatorPoliciesController {
   @ApiParam({ name: 'policyId', format: 'uuid' })
   @ApiResponse({ status: 200, schema: successEnvelopeSchema(200, policySchema) })
   @ApiResponse({ status: 401, schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Unauthorized') })
-  @ApiResponse({ status: 403, schema: errorEnvelopeSchema(403, 'FORBIDDEN', 'Forbidden') })
+  @ApiResponse({ status: 403, schema: operatorPolicyForbiddenSchema })
   @ApiResponse({
     status: 404,
     schema: errorEnvelopeSchema(404, 'POLICY_NOT_FOUND', 'Policy not found'),

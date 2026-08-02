@@ -17,6 +17,12 @@ const compose = [
   '-f', 'infra/docker/docker-compose.day38-e2e.yml',
   '--profile', 'app',
 ];
+const e2eEnv = useDev ? {} : {
+  POSTGRES_PORT: '55438', REDIS_PORT: '56380', RABBITMQ_PORT: '55682',
+  RABBITMQ_MGMT_PORT: '55683', IDENTITY_PORT: '57001', TRIP_PORT: '57002',
+  BOOKING_PORT: '57003', PAYMENT_PORT: '57004', PARCEL_PORT: '57005',
+  NOTIFICATION_PORT: '57012', GATEWAY_PORT: '57300',
+};
 const containers = {
   postgres: useDev ? 'vietride_postgres' : 'day38-e2e-postgres',
   redis: useDev ? 'vietride_redis' : 'day38-e2e-redis',
@@ -49,6 +55,9 @@ const ids = {
   tripC: '38000000-0000-4000-8000-000000000053',
   tripRace: '38000000-0000-4000-8000-000000000054',
   tripLateRefund: '38000000-0000-4000-8000-000000000055',
+  tripManualPending: '38000000-0000-4000-8000-000000000056',
+  tripManualZero: '38000000-0000-4000-8000-000000000057',
+  tripWeeklyPending: '38000000-0000-4000-8000-000000000058',
   bookingA: '38000000-0000-4000-8000-000000000061',
   bookingB: '38000000-0000-4000-8000-000000000062',
   parcelA: '38000000-0000-4000-8000-000000000063',
@@ -61,6 +70,12 @@ const ids = {
 };
 const results = [];
 const state = {};
+const requestKeys = new Map();
+
+function requestKey(label) {
+  if (!requestKeys.has(label)) requestKeys.set(label, randomUUID());
+  return requestKeys.get(label);
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -111,11 +126,16 @@ function signVnPay(parameters) {
     .digest('hex');
 }
 
+function vnPayDate(date = new Date()) {
+  return new Date(date.getTime() + 7 * 60 * 60 * 1000).toISOString().replace(/[-:T]/g, '').slice(0, 14);
+}
+
 async function confirmBookingVnPay(redirectUrl, transactionNo) {
   const redirect = new URL(redirectUrl);
   const ipn = {
     vnp_Amount: redirect.searchParams.get('vnp_Amount'),
     vnp_ResponseCode: '00',
+    vnp_PayDate: vnPayDate(),
     vnp_TmnCode: redirect.searchParams.get('vnp_TmnCode'),
     vnp_TransactionNo: transactionNo,
     vnp_TransactionStatus: '00',
@@ -130,6 +150,7 @@ async function confirmSubscriptionVnPay(redirectUrl, transactionNo) {
   const ipn = {
     vnp_Amount: redirect.searchParams.get('vnp_Amount'),
     vnp_ResponseCode: '00',
+    vnp_PayDate: vnPayDate(),
     vnp_TmnCode: redirect.searchParams.get('vnp_TmnCode'),
     vnp_TransactionNo: transactionNo,
     vnp_TransactionStatus: '00',
@@ -202,7 +223,7 @@ async function api(baseUrl, method, pathname, { token, internalToken, body, key 
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(internalToken ? { 'X-Internal-Auth': `Bearer ${internalToken}` } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(key ? { 'Idempotency-Key': key } : {}),
+      ...(key ? { 'Idempotency-Key': requestKey(key) } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -213,7 +234,7 @@ async function api(baseUrl, method, pathname, { token, internalToken, body, key 
 async function publish(routingKey, payload, eventId = payload.eventId) {
   const connection = await amqp.connect({
     hostname: '127.0.0.1',
-    port: useDev ? Number(process.env.RABBITMQ_PORT || 5672) : 55682,
+    port: useDev ? Number(process.env.RABBITMQ_PORT || 5672) : Number(e2eEnv.RABBITMQ_PORT),
     username: process.env.RABBITMQ_USER || 'vietride',
     password: process.env.RABBITMQ_PASSWORD || 'vietride_dev',
   });
@@ -260,11 +281,11 @@ function seedPrerequisites() {
     VALUES ('38000000-0000-4000-8000-000000000071','${ids.adminA}','day38-admin-a-token','ANDROID',true)
     ON CONFLICT (user_id,fcm_token) DO UPDATE SET is_active=true;
     INSERT INTO operator_subscriptions
-      (id,operator_id,plan_id,status,started_at,expires_at,current_vehicles,current_routes,current_trips_this_month,last_reset_at)
+      (id,operator_id,active_plan_id,status,started_at,expires_at,current_vehicles,current_routes,current_trips_this_month,last_reset_at)
     VALUES
       ('${ids.subscriptionA}','${ids.operatorA}','${ids.starterPlan}','ACTIVE',now()-interval '1 day',now()+interval '29 days',0,0,0,now()),
       ('${ids.subscriptionB}','${ids.operatorB}','${ids.starterPlan}','ACTIVE',now()-interval '1 day',now()+interval '29 days',0,0,0,now())
-    ON CONFLICT (operator_id) DO UPDATE SET plan_id=EXCLUDED.plan_id,status='ACTIVE',previous_active_plan_id=NULL,updated_at=now();
+    ON CONFLICT (operator_id) DO UPDATE SET active_plan_id=EXCLUDED.active_plan_id,status='ACTIVE',updated_at=now();
   `);
 
   paymentSql(`
@@ -317,9 +338,22 @@ function seedPrerequisites() {
 async function triggerJob(name, invoiceId) {
   const jwt = await internalJwt();
   const query = invoiceId ? `?invoiceId=${invoiceId}` : '';
-  const response = await api(payment, 'POST', `/internal/e2e/day38/jobs/${name}${query}`, { internalToken: jwt });
+  const response = await api(payment, 'POST', `/internal/e2e/day38/jobs/${name}${query}`, {
+    internalToken: jwt,
+    key: `day38-job-${name}-${randomUUID()}`,
+  });
   assert(response.status === 202, `Could not enqueue ${name}: ${JSON.stringify(response)}`);
   return response.json?.jobId;
+}
+
+async function waitForJob(jobId) {
+  const numericJobId = Number(jobId);
+  assert(Number.isSafeInteger(numericJobId) && numericJobId > 0, `Invalid Hangfire job id: ${jobId}`);
+  await poll(() => {
+    const stateName = scalar(paymentSql(`SELECT statename FROM hangfire.job WHERE id=${numericJobId}`));
+    if (stateName === 'Failed') throw new Error(`Hangfire job ${jobId} failed`);
+    return stateName === 'Succeeded' || stateName === 'Deleted';
+  }, `Hangfire job ${jobId} did not finish`);
 }
 
 async function createCharge(referenceType, referenceId, tripId, amount, extra = {}) {
@@ -342,8 +376,8 @@ async function createCharge(referenceType, referenceId, tripId, amount, extra = 
 
 async function runAcceptance() {
   if (!useDev) {
-    run('docker', [...compose, 'down', '-v', '--remove-orphans']);
-    run('docker', [...compose, '--parallel', '1', 'up', '-d', '--build', 'gateway', 'notification']);
+    run('docker', [...compose, 'down', '-v', '--remove-orphans'], { env: e2eEnv });
+    run('docker', [...compose, '--parallel', '1', 'up', '-d', '--build', 'gateway', 'notification'], { env: e2eEnv });
   }
   await Promise.all([
     waitFor(`${gateway}/health`), waitFor(`${gateway}/ready`),
@@ -417,7 +451,12 @@ async function runAcceptance() {
     const firstIpn = await confirmBookingVnPay(pending.json.data.paymentRedirectUrl, '3800000003');
     const replayIpn = await confirmBookingVnPay(pending.json.data.paymentRedirectUrl, '3800000003');
     assert(firstIpn.status === 200 && (firstIpn.json?.rspCode ?? firstIpn.json?.RspCode) === '00', `VNPay callback failed: ${JSON.stringify(firstIpn)}`);
-    assert(replayIpn.status === 200 && (replayIpn.json?.rspCode ?? replayIpn.json?.RspCode) === '00', `VNPay callback replay failed: ${JSON.stringify(replayIpn)}`);
+    assert(
+      replayIpn.status === 200 &&
+        (replayIpn.json?.rspCode ?? replayIpn.json?.RspCode) === '02' &&
+        (replayIpn.json?.message ?? replayIpn.json?.Message) === 'Order Already Confirmed',
+      `VNPay callback replay failed: ${JSON.stringify(replayIpn)}`,
+    );
     assert(count(paymentSql(`SELECT count(*) FROM platform_wallet_transactions WHERE reference_id='${ids.bookingGroup}' AND amount=120000`)) === 1, 'VNPay callback duplicated platform hold');
   });
 
@@ -458,7 +497,11 @@ async function runAcceptance() {
     assert(first.status === 200 && first.json?.data?.status === 'COMPLETED', `Trip complete failed: ${JSON.stringify(first)}`);
     const replay = await api(gateway, 'POST', `/v1/driver/trips/${ids.tripA}/complete`, { token: state.tokens.driver, key: 'day38-complete-trip-a' });
     assert(replay.status === 200, 'Trip completion same-key replay failed');
-    await poll(() => count(paymentSql(`SELECT count(*) FROM operator_trip_settlements WHERE trip_id='${ids.tripA}'`)) === 1, 'Settlement marker timeout');
+    await poll(
+      () => count(paymentSql(`SELECT count(*) FROM operator_trip_settlements WHERE trip_id='${ids.tripA}'`)) === 1,
+      'Settlement marker timeout',
+      120_000,
+    );
     state.settlementId = scalar(paymentSql(`SELECT id FROM operator_trip_settlements WHERE trip_id='${ids.tripA}'`));
     assert(count(tripSql(`SELECT count(*) FROM outbox_events WHERE event_type='trip.trip.completed' AND payload->>'tripId'='${ids.tripA}' AND status='PUBLISHED'`)) === 1, 'Canonical Trip Outbox event missing');
   });
@@ -654,7 +697,7 @@ async function runAcceptance() {
   await scenario(16, 'OperatorWallet subscription money path', async () => {
     assert(count(paymentSql(`SELECT count(*) FROM operator_wallet_transactions WHERE reference_type='SUBSCRIPTION_PAYMENT' AND reference_id='${state.subscriptionPaymentId}' AND type='DEBIT'`)) === 1, 'Subscription OperatorWallet debit missing');
     assert(count(paymentSql(`SELECT count(*) FROM platform_wallet_transactions WHERE reference_type='SUBSCRIPTION_PAYMENT' AND reference_id='${state.subscriptionPaymentId}' AND type='CREDIT'`)) === 1, 'Subscription PlatformWallet credit missing');
-    assert(count(identitySql(`SELECT count(*) FROM operator_subscriptions WHERE operator_id='${ids.operatorA}' AND status='ACTIVE' AND plan_id='${ids.paidPlan}'`)) === 1, 'Identity subscription not activated');
+    assert(count(identitySql(`SELECT count(*) FROM operator_subscriptions WHERE operator_id='${ids.operatorA}' AND status='ACTIVE' AND active_plan_id='${ids.paidPlan}'`)) === 1, 'Identity subscription not activated');
   });
 
   await scenario(17, 'Subscription auth and validation', async () => {
@@ -677,7 +720,7 @@ async function runAcceptance() {
     const insufficient = await api(gateway, 'POST', '/v1/operator/subscription/upgrade', { token: state.tokens.operatorB, key: 'day38-wallet-insufficient', body: validWallet });
     assert(insufficient.status === 402 && insufficient.json?.error?.code === 'WALLET_INSUFFICIENT_BALANCE', `Insufficient balance contract drifted: ${JSON.stringify(insufficient)}`);
     assert(count(paymentSql(`SELECT count(*) FROM payments WHERE operator_id='${ids.operatorB}'`)) === paymentCountBefore, 'Insufficient subscription charge persisted Payment');
-    assert(count(identitySql(`SELECT count(*) FROM operator_subscriptions WHERE id='${ids.subscriptionB}' AND status='ACTIVE' AND plan_id='${ids.starterPlan}'`)) === 1, 'Insufficient charge changed subscription');
+    assert(count(identitySql(`SELECT count(*) FROM operator_subscriptions WHERE id='${ids.subscriptionB}' AND status='ACTIVE' AND active_plan_id='${ids.starterPlan}'`)) === 1, 'Insufficient charge changed subscription');
     assert(count(identitySql(`SELECT count(*) FROM subscription_upgrade_attempts WHERE operator_id='${ids.operatorB}' AND status='FAILED'`)) === 1, 'Deterministic payment failure did not close upgrade attempt');
     paymentSql(`UPDATE operator_wallets SET balance=1000000 WHERE operator_id='${ids.operatorB}'`);
   });
@@ -717,7 +760,7 @@ async function runAcceptance() {
     const callback = await confirmSubscriptionVnPay(vnpay.json.data.paymentRedirectUrl, '3800000019');
     assert(callback.status === 200 && (callback.json?.rspCode ?? callback.json?.RspCode) === '00', `VNPay subscription callback failed: ${JSON.stringify(callback)}`);
     await poll(() => count(paymentSql(`SELECT count(*) FROM invoices WHERE payment_id='${state.vnpaySubscriptionPaymentId}'`)) === 1, 'VNPay subscription did not trigger canonical invoice');
-    await poll(() => count(identitySql(`SELECT count(*) FROM operator_subscriptions WHERE id='${ids.subscriptionB}' AND status='ACTIVE' AND plan_id='${ids.paidPlan}'`)) === 1, 'VNPay subscription did not activate Identity');
+    await poll(() => count(identitySql(`SELECT count(*) FROM operator_subscriptions WHERE id='${ids.subscriptionB}' AND status='ACTIVE' AND active_plan_id='${ids.paidPlan}'`)) === 1, 'VNPay subscription did not activate Identity');
     assert(count(paymentSql(`SELECT count(*) FROM outbox_events WHERE event_type='payment.subscription.payment_succeeded' AND payload->>'paymentId' IN ('${state.subscriptionPaymentId}','${state.vnpaySubscriptionPaymentId}')`)) === 2, 'WALLET/VNPay did not share canonical event contract');
     assert(count(paymentSql(`SELECT count(*) FROM platform_wallet_transactions WHERE reference_type='SUBSCRIPTION_PAYMENT' AND reference_id='${state.vnpaySubscriptionPaymentId}'`)) === 1, 'VNPay subscription platform credit duplicated');
   });
@@ -863,7 +906,12 @@ async function runAcceptance() {
     const phaseAIpn = await confirmBookingVnPay(legacyRedirect.toString(), '3800000026');
     const phaseAReplay = await confirmBookingVnPay(legacyRedirect.toString(), '3800000026');
     assert(phaseAIpn.status === 200 && (phaseAIpn.json?.rspCode ?? phaseAIpn.json?.RspCode) === '00', `Legacy Phase-A callback failed: ${JSON.stringify(phaseAIpn)}`);
-    assert(phaseAReplay.status === 200 && (phaseAReplay.json?.rspCode ?? phaseAReplay.json?.RspCode) === '00', 'Legacy Phase-A callback replay failed');
+    assert(
+      phaseAReplay.status === 200 &&
+        (phaseAReplay.json?.rspCode ?? phaseAReplay.json?.RspCode) === '02' &&
+        (phaseAReplay.json?.message ?? phaseAReplay.json?.Message) === 'Order Already Confirmed',
+      'Legacy Phase-A callback replay failed',
+    );
     assert(count(paymentSql(`SELECT count(*) FROM payments WHERE id='${phaseAPaymentId}' AND status='SUCCEEDED' AND context='{}'::jsonb AND context_reconciliation_required=true`)) === 1, 'Legacy Phase-A payment did not settle into reconciliation state');
     assert(Number(scalar(paymentSql('SELECT balance FROM platform_wallets'))) === platformBeforePhaseA + 80000, 'Legacy Phase-A callback platform credit mismatch');
     assert(count(paymentSql(`SELECT count(*) FROM platform_wallet_transactions WHERE reference_id='${ids.legacyBooking}' AND amount=80000`)) === 1, 'Legacy Phase-A callback replay duplicated platform hold');
@@ -907,19 +955,68 @@ async function runAcceptance() {
     assert(readiness.quarantined >= 1, 'Readiness did not report quarantined legacy payment');
   });
 
+  await scenario(27, 'Manual PENDING_HOLD settlement and weekly exclusion', async () => {
+    const settlement = '38000000-0000-4000-8000-000000000101';
+    const weeklySettlement = '38000000-0000-4000-8000-000000000102';
+    paymentSql(`
+      INSERT INTO operator_ledger_entries
+        (id,operator_id,trip_id,entry_type,amount,reference_type,reference_id,source_event_id,note)
+      VALUES
+        ('38000000-0000-4000-8000-000000000111','${ids.operatorA}','${ids.tripManualPending}',
+         'BOOKING_REVENUE',75000,'BOOKING','38000000-0000-4000-8000-000000000121',
+         '38000000-0000-4000-8000-000000000131','Day 38 manual pending fixture'),
+        ('38000000-0000-4000-8000-000000000112','${ids.operatorA}','${ids.tripWeeklyPending}',
+         'BOOKING_REVENUE',65000,'BOOKING','38000000-0000-4000-8000-000000000122',
+         '38000000-0000-4000-8000-000000000132','Day 38 weekly exclusion fixture');
+      INSERT INTO operator_trip_settlements
+        (id,operator_id,trip_id,net_amount,trip_terminal_at,eligible_at,status)
+      VALUES
+        ('${settlement}','${ids.operatorA}','${ids.tripManualPending}',0,now(),now()+interval '7 days','PENDING_HOLD'),
+        ('${weeklySettlement}','${ids.operatorA}','${ids.tripWeeklyPending}',0,now(),now()+interval '7 days','PENDING_HOLD');
+    `);
+
+    const weeklyJobId = await triggerJob('settlement-weekly');
+    await waitForJob(weeklyJobId);
+    assert(scalar(paymentSql(`SELECT status FROM operator_trip_settlements WHERE id='${weeklySettlement}'`)) === 'PENDING_HOLD', 'Weekly flow settled a PENDING_HOLD marker before eligibility');
+    assert(count(paymentSql(`SELECT count(*) FROM operator_wallet_transactions WHERE reference_id='${weeklySettlement}'`)) === 0, 'Weekly exclusion created OperatorWallet movement');
+    assert(count(paymentSql(`SELECT count(*) FROM platform_wallet_transactions WHERE reference_id='${weeklySettlement}'`)) === 0, 'Weekly exclusion created PlatformWallet movement');
+
+    const manual = await api(gateway, 'POST', `/v1/admin/trip-settlements/${settlement}/settle`, { token: state.tokens.system, key: 'day38-manual-pending-hold' });
+    assert(manual.status === 200 && manual.json?.data?.status === 'SETTLED' && manual.json?.data?.netAmount === 75000, `Manual PENDING_HOLD settlement failed: ${JSON.stringify(manual)}`);
+    assert(scalar(paymentSql(`SELECT status||':'||settlement_method||':'||(settled_by_user_id='${ids.systemAdmin}')::text FROM operator_trip_settlements WHERE id='${settlement}'`)) === 'SETTLED:ADMIN_MANUAL:true', 'Manual PENDING_HOLD terminal marker or actor audit drifted');
+    assert(count(paymentSql(`SELECT count(*) FROM operator_wallet_transactions WHERE reference_id='${settlement}' AND reference_type='TRIP_SETTLEMENT'`)) === 1, 'Manual PENDING_HOLD settlement duplicated/missed OperatorWallet credit');
+    assert(count(paymentSql(`SELECT count(*) FROM platform_wallet_transactions WHERE reference_id='${settlement}' AND reference_type='TRIP_SETTLEMENT'`)) === 1, 'Manual PENDING_HOLD settlement duplicated/missed PlatformWallet debit');
+    assert(count(paymentSql(`SELECT count(*) FROM outbox_events WHERE event_type='payment.trip_settlement.completed' AND payload->>'settlementId'='${settlement}'`)) === 1, 'Manual PENDING_HOLD settlement duplicated/missed Outbox event');
+  });
+
+  await scenario(28, 'Manual zero-net settlement cancels without side effects', async () => {
+    const settlement = '38000000-0000-4000-8000-000000000103';
+    paymentSql(`INSERT INTO operator_trip_settlements (id,operator_id,trip_id,net_amount,trip_terminal_at,eligible_at,status) VALUES ('${settlement}','${ids.operatorA}','${ids.tripManualZero}',0,now(),now()+interval '7 days','PENDING_HOLD')`);
+    const operatorBalanceBefore = Number(scalar(paymentSql(`SELECT balance FROM operator_wallets WHERE operator_id='${ids.operatorA}'`)));
+    const platformBalanceBefore = Number(scalar(paymentSql('SELECT balance FROM platform_wallets')));
+    const manual = await api(gateway, 'POST', `/v1/admin/trip-settlements/${settlement}/settle`, { token: state.tokens.system, key: 'day38-manual-zero-net' });
+    assert(manual.status === 200 && manual.json?.data?.status === 'CANCELLED' && manual.json?.data?.netAmount === 0, `Manual zero-net cancellation failed: ${JSON.stringify(manual)}`);
+    assert(scalar(paymentSql(`SELECT status||':'||settlement_method||':'||(settled_by_user_id='${ids.systemAdmin}')::text FROM operator_trip_settlements WHERE id='${settlement}'`)) === 'CANCELLED:ADMIN_MANUAL:true', 'Manual zero-net marker did not retain terminal actor audit');
+    assert(Number(scalar(paymentSql(`SELECT balance FROM operator_wallets WHERE operator_id='${ids.operatorA}'`))) === operatorBalanceBefore, 'Manual zero-net cancellation moved OperatorWallet');
+    assert(Number(scalar(paymentSql('SELECT balance FROM platform_wallets'))) === platformBalanceBefore, 'Manual zero-net cancellation moved PlatformWallet');
+    assert(count(paymentSql(`SELECT count(*) FROM operator_wallet_transactions WHERE reference_id='${settlement}'`)) === 0, 'Manual zero-net cancellation created OperatorWallet transaction');
+    assert(count(paymentSql(`SELECT count(*) FROM platform_wallet_transactions WHERE reference_id='${settlement}'`)) === 0, 'Manual zero-net cancellation created PlatformWallet transaction');
+    assert(count(paymentSql(`SELECT count(*) FROM outbox_events WHERE payload->>'settlementId'='${settlement}'`)) === 0, 'Manual zero-net cancellation created Outbox event');
+  });
+
   const gates = {
     'seed/bootstrap': [1],
     'legacy-upgrade-backfill': [1, 26],
     'payment-context': [2, 3, 4],
     'platform-hold-ledger': [2, 5, 6],
     'trip-terminal-marker': [7, 8],
-    'eligibility-weekly-settlement': [10, 11],
+    'eligibility-weekly-settlement': [10, 11, 27],
     'insufficient-balance-recovery': [13],
     'operator-wallet-subscription': [16, 17, 18],
     'invoice-pdf-retry': [9, 19, 20, 21, 22, 23],
     'operator-admin-api': [14, 15, 24],
     'notification-email-redaction': [25],
-    'race-idempotency': [3, 12, 14, 18, 22],
+    'race-idempotency': [3, 12, 14, 18, 22, 27, 28],
     'database-reconciliation': [26],
   };
   for (const [gate, scenarios] of Object.entries(gates)) {
@@ -948,7 +1045,7 @@ try {
 } finally {
   if (!useDev) {
     try {
-      run('docker', [...compose, 'down', '-v', '--remove-orphans']);
+      run('docker', [...compose, 'down', '-v', '--remove-orphans'], { env: e2eEnv });
       console.log('cleanup PASS');
     } catch (error) {
       failed ??= error;
@@ -960,4 +1057,4 @@ try {
 }
 
 console.log(JSON.stringify({ suite: 'day38-invoice-settlement-e2e', scenariosPassed: results.filter((x) => x.passed).length, results }, null, 2));
-process.exitCode = failed || results.length < 26 || results.some((x) => !x.passed) ? 1 : 0;
+process.exitCode = failed || results.length < 28 || results.some((x) => !x.passed) ? 1 : 0;

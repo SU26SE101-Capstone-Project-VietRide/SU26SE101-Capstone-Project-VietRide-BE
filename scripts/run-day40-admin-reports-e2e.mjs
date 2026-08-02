@@ -7,6 +7,9 @@ import { importPKCS8, SignJWT } from 'jose';
 
 const root = process.cwd();
 const useDev = process.env.DAY40_E2E_USE_DEV_STACK === '1';
+const invocationId = `${process.pid}-${randomUUID().slice(0, 8)}`;
+const composeProject = `day40-e2e-${invocationId}`;
+const containerPrefix = composeProject;
 const urls = {
   gateway:
     process.env.DAY40_GATEWAY_BASE_URL ||
@@ -35,6 +38,8 @@ const compose = [
   'infra/docker/docker-compose.yml',
   '-f',
   'infra/docker/docker-compose.day40-e2e.yml',
+  '-p',
+  composeProject,
 ];
 const e2eEnv = useDev
   ? {}
@@ -53,6 +58,8 @@ const e2eEnv = useDev
       PAYMENT_PORT: '59004',
       PARCEL_PORT: '59005',
       GATEWAY_PORT: '59300',
+      DAY40_COMPOSE_PROJECT: composeProject,
+      DAY40_CONTAINER_PREFIX: containerPrefix,
       INTERNAL_JWT_SECRET: 'day40-e2e-internal-jwt-secret-32-bytes-minimum',
       GOOGLE_OAUTH_CLIENT_ID: '',
       GOOGLE_OAUTH_CLIENT_SECRET: '',
@@ -69,15 +76,15 @@ const rabbitPassword = useDev
   ? process.env.RABBITMQ_PASSWORD || 'vietride_dev'
   : e2eEnv.RABBITMQ_PASSWORD;
 const containers = {
-  postgres: useDev ? 'vietride_postgres' : 'day40-e2e-postgres',
-  redis: useDev ? 'vietride_redis' : 'day40-e2e-redis',
-  rabbitmq: useDev ? 'vietride_rabbitmq' : 'day40-e2e-rabbitmq',
-  identity: useDev ? 'vietride_identity' : 'day40-e2e-identity',
-  trip: useDev ? 'vietride_trip' : 'day40-e2e-trip',
-  booking: useDev ? 'vietride_booking' : 'day40-e2e-booking',
-  payment: useDev ? 'vietride_payment' : 'day40-e2e-payment',
-  parcel: useDev ? 'vietride_parcel' : 'day40-e2e-parcel',
-  gateway: useDev ? 'vietride_gateway' : 'day40-e2e-gateway',
+  postgres: useDev ? 'vietride_postgres' : `${containerPrefix}-postgres`,
+  redis: useDev ? 'vietride_redis' : `${containerPrefix}-redis`,
+  rabbitmq: useDev ? 'vietride_rabbitmq' : `${containerPrefix}-rabbitmq`,
+  identity: useDev ? 'vietride_identity' : `${containerPrefix}-identity`,
+  trip: useDev ? 'vietride_trip' : `${containerPrefix}-trip`,
+  booking: useDev ? 'vietride_booking' : `${containerPrefix}-booking`,
+  payment: useDev ? 'vietride_payment' : `${containerPrefix}-payment`,
+  parcel: useDev ? 'vietride_parcel' : `${containerPrefix}-parcel`,
+  gateway: useDev ? 'vietride_gateway' : `${containerPrefix}-gateway`,
 };
 
 const id = (suffix) => `40000000-0000-4000-8000-${String(suffix).padStart(12, '0')}`;
@@ -130,10 +137,17 @@ const ids = {
   parcelNegative: id(702),
   parcelBoundary: id(703),
   parcelNonTerminal: id(704),
+  bookingLedgerA: id(801),
+  bookingLedgerB: id(802),
+  parcelLedgerA: id(803),
+  parcelRefundA: id(804),
+  parcelLedgerB: id(805),
+  parcelRefundB: id(806),
 };
-const state = { tokens: {}, liveBookingId: null };
+const state = { tokens: {}, stationRaceBookingId: null, liveBookingId: null };
 const results = [];
 const summary = new Set();
+let stackOwned = false;
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -336,8 +350,12 @@ async function api(method, pathname, { token, body, key } = {}) {
 }
 
 async function tripInternalApi(pathname) {
+  return internalApi(urls.trip, pathname);
+}
+
+async function internalApi(baseUrl, pathname) {
   const token = await internalJwt();
-  const response = await fetch(`${urls.trip}${pathname}`, {
+  const response = await fetch(`${baseUrl}${pathname}`, {
     headers: { 'X-Internal-Auth': `Bearer ${token}` },
   });
   const text = await response.text();
@@ -371,10 +389,14 @@ function idemHash(key) {
   return createHash('sha256').update(key).digest('hex').toUpperCase();
 }
 
-async function publish(routingKey, payload, transportId = randomUUID()) {
+async function publish(routingKey, payload, transportId = payload?.eventId) {
+  assert(
+    typeof transportId === 'string' && transportId === payload?.eventId,
+    'Station event AMQP messageId must equal payload.eventId for the Inbox path',
+  );
   const connection = await amqp.connect({
     hostname: '127.0.0.1',
-    port: useDev ? Number(process.env.RABBITMQ_PORT || 5672) : 55702,
+    port: useDev ? Number(process.env.RABBITMQ_PORT || 5672) : Number(e2eEnv.RABBITMQ_PORT),
     username: rabbitUser,
     password: rabbitPassword,
   });
@@ -414,8 +436,16 @@ function stationSnapshot(stationId, name, slug, city = 'HCM', province = 'HCM') 
 }
 
 function stationMergedPayload(eventId, primaryStationId, duplicateStationId) {
-  const primary = stationSnapshot(primaryStationId, `Primary ${primaryStationId.slice(-4)}`, `p-${primaryStationId.slice(-4)}`);
-  const duplicate = stationSnapshot(duplicateStationId, `Duplicate ${duplicateStationId.slice(-4)}`, `d-${duplicateStationId.slice(-4)}`);
+  const primary = stationSnapshot(
+    primaryStationId,
+    `Primary ${primaryStationId.slice(-4)}`,
+    `p-${primaryStationId.slice(-4)}`,
+  );
+  const duplicate = stationSnapshot(
+    duplicateStationId,
+    `Duplicate ${duplicateStationId.slice(-4)}`,
+    `d-${duplicateStationId.slice(-4)}`,
+  );
   return {
     eventId,
     occurredAt: new Date().toISOString(),
@@ -541,7 +571,9 @@ function seedPrerequisites() {
     ON CONFLICT (id) DO NOTHING;
 
     INSERT INTO trip_seats (id,trip_id,seat_number,seat_type,status)
-    VALUES ('${id(520)}','${ids.liveTrip}','D01','STANDARD','AVAILABLE')
+    VALUES
+      ('${id(520)}','${ids.liveTrip}','D01','STANDARD','AVAILABLE'),
+      ('${id(521)}','${ids.liveTrip}','D02','STANDARD','AVAILABLE')
     ON CONFLICT (trip_id,seat_number) DO UPDATE SET status='AVAILABLE',disabled_reason=NULL;
 
     INSERT INTO shuttle_trips
@@ -571,14 +603,16 @@ function seedPrerequisites() {
   parcelSql(`
     INSERT INTO parcels
       (id,parcel_code,sender_user_id,recipient_name,recipient_phone,operator_id,trip_id,
-       size_category,estimated_weight_kg,delivery_method,total_price_vnd,deposit_percent,
+       size_category,estimated_size_category,estimated_length_cm,estimated_width_cm,
+       estimated_height_cm,estimated_weight_kg,estimated_volume_m3,estimated_dim_weight_kg,
+       estimated_chargeable_weight_kg,delivery_method,total_price_vnd,deposit_percent,
        deposit_amount,original_deposit_amount,discount_amount,additional_amount,refund_amount,
        status,confirmed_at,created_at,updated_at)
     VALUES
-      ('${ids.parcelA}','VRP-D40-A','${ids.passenger}','Recipient A','+84910040701','${ids.operatorA}','${ids.completedTripA}','SMALL',1,'TERMINAL_PICKUP',150000,100,100000,100000,0,50000,10000,'DELIVERY_CONFIRMED',now()-interval '45 minutes',now()-interval '2 hours',now()),
-      ('${ids.parcelNegative}','VRP-D40-N','${ids.passenger}','Recipient N','+84910040702','${ids.deletedOperator}','${ids.completedTripB}','SMALL',1,'TERMINAL_PICKUP',50000,100,10000,10000,0,0,50000,'DELIVERY_CONFIRMED',now()-interval '20 minutes',now()-interval '2 hours',now()),
-      ('${ids.parcelBoundary}','VRP-D40-B','${ids.passenger}','Recipient B','+84910040703','${ids.operatorA}','${ids.completedTripA}','SMALL',1,'TERMINAL_PICKUP',70000,100,70000,70000,0,0,0,'DELIVERY_CONFIRMED',now()-interval '2 days',now()-interval '3 days',now()),
-      ('${ids.parcelNonTerminal}','VRP-D40-P','${ids.passenger}','Recipient P','+84910040704','${ids.operatorA}','${ids.mainTrip}','SMALL',1,'TERMINAL_PICKUP',80000,100,80000,80000,0,0,0,'PENDING',NULL,now()-interval '1 hour',now())
+      ('${ids.parcelA}','VRP-D40-A','${ids.passenger}','Recipient A','+84910040701','${ids.operatorA}','${ids.completedTripA}','SMALL','SMALL',10,10,10,1,0.001,0.17,1,'TERMINAL_PICKUP',150000,100,100000,100000,0,50000,10000,'DELIVERY_CONFIRMED',now()-interval '45 minutes',now()-interval '2 hours',now()),
+      ('${ids.parcelNegative}','VRP-D40-N','${ids.passenger}','Recipient N','+84910040702','${ids.deletedOperator}','${ids.completedTripB}','SMALL','SMALL',10,10,10,1,0.001,0.17,1,'TERMINAL_PICKUP',50000,100,10000,10000,0,0,50000,'DELIVERY_CONFIRMED',now()-interval '20 minutes',now()-interval '2 hours',now()),
+      ('${ids.parcelBoundary}','VRP-D40-B','${ids.passenger}','Recipient B','+84910040703','${ids.operatorA}','${ids.completedTripA}','SMALL','SMALL',10,10,10,1,0.001,0.17,1,'TERMINAL_PICKUP',70000,100,70000,70000,0,0,0,'DELIVERY_CONFIRMED',now()-interval '2 days',now()-interval '3 days',now()),
+      ('${ids.parcelNonTerminal}','VRP-D40-P','${ids.passenger}','Recipient P','+84910040704','${ids.operatorA}','${ids.mainTrip}','SMALL','SMALL',10,10,10,1,0.001,0.17,1,'TERMINAL_PICKUP',80000,100,80000,80000,0,0,0,'PENDING',NULL,now()-interval '1 hour',now())
     ON CONFLICT (id) DO NOTHING;
   `);
 
@@ -586,10 +620,27 @@ function seedPrerequisites() {
     INSERT INTO wallets (user_id,balance,currency,row_version)
     VALUES ('${ids.passenger}',5000000,'VND',0)
     ON CONFLICT (user_id) DO UPDATE SET balance=5000000,row_version=0;
+
+    INSERT INTO operator_ledger_entries
+      (id,operator_id,trip_id,entry_type,amount,reference_type,reference_id,source_event_id,note,created_at)
+    VALUES
+      ('${ids.bookingLedgerA}','${ids.operatorA}','${ids.completedTripA}','BOOKING_REVENUE',300000,'BOOKING','${ids.reportBookingA}','${id(811)}','day40 baseline reconciliation',now()-interval '1 hour'),
+      ('${ids.bookingLedgerB}','${ids.deletedOperator}','${ids.completedTripB}','BOOKING_REVENUE',200000,'BOOKING','${ids.reportBookingB}','${id(812)}','day40 baseline reconciliation',now()-interval '30 minutes'),
+      ('${ids.parcelLedgerA}','${ids.operatorA}','${ids.completedTripA}','PARCEL_REVENUE',150000,'PARCEL','${ids.parcelA}','${id(813)}','day40 baseline reconciliation',now()-interval '45 minutes'),
+      ('${ids.parcelRefundA}','${ids.operatorA}','${ids.completedTripA}','PARCEL_REFUND',-10000,'PARCEL','${ids.parcelA}','${id(814)}','day40 baseline reconciliation',now()-interval '44 minutes'),
+      ('${ids.parcelLedgerB}','${ids.deletedOperator}','${ids.completedTripB}','PARCEL_REVENUE',10000,'PARCEL','${ids.parcelNegative}','${id(815)}','day40 baseline reconciliation',now()-interval '20 minutes'),
+      ('${ids.parcelRefundB}','${ids.deletedOperator}','${ids.completedTripB}','PARCEL_REFUND',-50000,'PARCEL','${ids.parcelNegative}','${id(816)}','day40 baseline reconciliation',now()-interval '19 minutes')
+    ON CONFLICT (id) DO NOTHING;
   `);
 
   redis('SET', `identity:login_lockout:${ids.lockedActive}`, '5', 'EX', '3600');
   redis('SET', `identity:login_lockout:${ids.lockedPending}`, '5', 'EX', '3600');
+}
+
+function clearPlatformReportCache() {
+  const keys = redis('--scan', '--pattern', 'platform-report:v1:*').split(/\r?\n/).filter(Boolean);
+  if (keys.length > 0) redis('DEL', ...keys);
+  return keys.length;
 }
 
 function seedRaceUser(suffix, { status = 'ACTIVE', lockedFromStatus = null } = {}) {
@@ -650,6 +701,29 @@ function startRowLock(database, schema, table, rowIds, seconds = 3) {
   return { done, ready };
 }
 
+function startStationAdvisoryLock(stationId, seconds = 15) {
+  const marker = `day40-station-advisory-${randomUUID()}`;
+  const done = runAsync(
+    'docker',
+    sqlArgs(
+      'vietride_booking',
+      'vietride_booking',
+      `/* ${marker} */ BEGIN; SELECT pg_advisory_xact_lock(hashtextextended('booking-station:' || '${stationId}'::uuid::text, 0)); SELECT pg_sleep(${seconds}); COMMIT;`,
+    ),
+  );
+  const ready = poll(
+    () =>
+      count(
+        bookingSql(
+          `SELECT count(*) FROM pg_stat_activity WHERE datname='vietride_booking' AND wait_event='PgSleep' AND position('${marker}' in query) > 0`,
+        ),
+      ) === 1,
+    `Timed out waiting for PostgreSQL Station advisory-lock barrier ${marker}`,
+    10_000,
+  );
+  return { done, ready };
+}
+
 function rabbitQueues() {
   return run('docker', [
     'exec',
@@ -661,6 +735,13 @@ function rabbitQueues() {
     'messages_ready',
     'messages_unacknowledged',
   ]);
+}
+
+function rabbitReadyMessages(queueName) {
+  const line = rabbitQueues()
+    .split(/\r?\n/)
+    .find((candidate) => candidate.startsWith(`${queueName}\t`));
+  return line ? Number(line.split('\t')[1]) : 0;
 }
 
 async function runMigrationGate() {
@@ -787,14 +868,17 @@ async function runMigrationGate() {
       'SELECT "MigrationId" FROM "__ef_migrations_history" ORDER BY "MigrationId";',
     );
     for (const migration of service.migrations) {
-      assert(reapplied.includes(migration), `${service.name} migration reapply missing: ${migration}`);
+      assert(
+        reapplied.includes(migration),
+        `${service.name} migration reapply missing: ${migration}`,
+      );
     }
   }
 }
 
 async function runAcceptance() {
   if (!useDev) {
-    composeRun(['--profile', 'infra', '--profile', 'app', 'down', '-v', '--remove-orphans']);
+    stackOwned = true;
     composeRun(['--profile', 'infra', 'up', '-d', '--wait', 'postgres', 'redis', 'rabbitmq']);
     composeRun([
       '--profile',
@@ -861,8 +945,7 @@ async function runAcceptance() {
       { token: state.tokens.systemAdmin },
     );
     assert(
-      deleted.status === 200 &&
-        deleted.json.data.items.some((item) => item.id === ids.deletedUser),
+      deleted.status === 200 && deleted.json.data.items.some((item) => item.id === ids.deletedUser),
       `Deleted user missing: ${deleted.text}`,
     );
     const hidden = await api(
@@ -882,203 +965,225 @@ async function runAcceptance() {
     mark('admin users');
   });
 
-  await scenario(2, 'Lock/unlock revokes refresh sessions and restores locked origins', async () => {
-    const login = await api('POST', '/v1/auth/login', {
-      body: {
-        email: 'target@day40.test',
-        password: e2eEnv.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD || 'Day40-E2E-Only-Password-123!',
-      },
-    });
-    assert(login.status === 200 && login.json?.data?.refreshToken, `Target login failed: ${login.text}`);
-
-    const lockKey = idemKey('lifecycle-lock');
-    const locked = await api('POST', `/v1/admin/users/${ids.target}/lock`, {
-      token: state.tokens.systemAdmin,
-      key: lockKey,
-    });
-    assert(
-      locked.status === 200 &&
-        locked.json?.data?.status === 'LOCKED' &&
-        locked.json?.data?.statusChanged === true,
-      locked.text,
-    );
-    assert(
-      count(
-        identitySql(
-          `SELECT count(*) FROM refresh_tokens WHERE user_id='${ids.target}' AND revoked_at IS NULL`,
-        ),
-      ) === 0,
-      'Lock left an active refresh token',
-    );
-    const refresh = await api('POST', '/v1/auth/refresh', {
-      body: { refreshToken: login.json.data.refreshToken },
-    });
-    assert([401, 403].includes(refresh.status), `Revoked refresh token survived: ${refresh.text}`);
-    const replay = await api('POST', `/v1/admin/users/${ids.target}/lock`, {
-      token: state.tokens.systemAdmin,
-      key: lockKey,
-    });
-    assert(replay.status === 200 && replay.text === locked.text, 'Lock replay was not byte-equivalent');
-    const selfLock = await api('POST', `/v1/admin/users/${ids.systemAdmin}/lock`, {
-      token: state.tokens.systemAdmin,
-      key: idemKey('self-lock'),
-    });
-    expectError(selfLock, 403, 'FORBIDDEN');
-
-    const unlocked = await api('POST', `/v1/admin/users/${ids.target}/unlock`, {
-      token: state.tokens.systemAdmin,
-      key: idemKey('lifecycle-unlock'),
-    });
-    assert(
-      unlocked.status === 200 && unlocked.json?.data?.status === 'ACTIVE',
-      `Unlock failed: ${unlocked.text}`,
-    );
-    const loginAfter = await api('POST', '/v1/auth/login', {
-      body: {
-        email: 'target@day40.test',
-        password: e2eEnv.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD || 'Day40-E2E-Only-Password-123!',
-      },
-    });
-    assert(loginAfter.status === 200, `Login after unlock failed: ${loginAfter.text}`);
-
-    const pendingUnlock = await api('POST', `/v1/admin/users/${ids.lockedPending}/unlock`, {
-      token: state.tokens.systemAdmin,
-      key: idemKey('pending-origin-unlock'),
-    });
-    assert(
-      pendingUnlock.status === 200 &&
-        pendingUnlock.json?.data?.status === 'PENDING_EMAIL_VERIFICATION',
-      `Pending origin was promoted: ${pendingUnlock.text}`,
-    );
-    assert(
-      scalar(identitySql(`SELECT status FROM users WHERE id='${ids.lockedPending}'`)) ===
-        'PENDING_EMAIL_VERIFICATION',
-      'Locked pending user did not restore pending origin',
-    );
-    assert(
-      Number(redis('EXISTS', `identity:login_lockout:${ids.lockedPending}`)) === 0,
-      'Unlock did not reset Redis lockout',
-    );
-    mark('lock/unlock');
-    mark('locked origin restore');
-  });
-
-  await scenario(3, 'Concurrent lock versus password login and refresh is linearizable', async () => {
-    const password = e2eEnv.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD || 'Day40-E2E-Only-Password-123!';
-    for (let iteration = 0; iteration < 5; iteration += 1) {
-      const user = seedRaceUser(100 + iteration);
-      await Promise.all([
-        api('POST', `/v1/admin/users/${user.id}/lock`, {
-          token: state.tokens.systemAdmin,
-          key: idemKey(`login-race-lock-${iteration}`),
-        }),
-        api('POST', '/v1/auth/login', {
-          body: { email: user.email, password },
-        }),
-      ]);
+  await scenario(
+    2,
+    'Lock/unlock revokes refresh sessions and restores locked origins',
+    async () => {
+      const login = await api('POST', '/v1/auth/login', {
+        body: {
+          email: 'target@day40.test',
+          password: e2eEnv.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD || 'Day40-E2E-Only-Password-123!',
+        },
+      });
       assert(
-        scalar(identitySql(`SELECT status FROM users WHERE id='${user.id}'`)) === 'LOCKED',
-        `Login race ${iteration} escaped final LOCKED state`,
+        login.status === 200 && login.json?.data?.refreshToken,
+        `Target login failed: ${login.text}`,
+      );
+
+      const lockKey = idemKey('lifecycle-lock');
+      const locked = await api('POST', `/v1/admin/users/${ids.target}/lock`, {
+        token: state.tokens.systemAdmin,
+        key: lockKey,
+      });
+      assert(
+        locked.status === 200 &&
+          locked.json?.data?.status === 'LOCKED' &&
+          locked.json?.data?.statusChanged === true,
+        locked.text,
       );
       assert(
         count(
           identitySql(
-            `SELECT count(*) FROM refresh_tokens WHERE user_id='${user.id}' AND revoked_at IS NULL`,
+            `SELECT count(*) FROM refresh_tokens WHERE user_id='${ids.target}' AND revoked_at IS NULL`,
           ),
         ) === 0,
-        `Login race ${iteration} left active refresh token`,
+        'Lock left an active refresh token',
       );
-
-      const refreshUser = seedRaceUser(200 + iteration);
-      const login = await api('POST', '/v1/auth/login', {
-        body: { email: refreshUser.email, password },
+      const refresh = await api('POST', '/v1/auth/refresh', {
+        body: { refreshToken: login.json.data.refreshToken },
       });
-      assert(login.status === 200 && login.json?.data?.refreshToken, login.text);
-      await Promise.all([
-        api('POST', `/v1/admin/users/${refreshUser.id}/lock`, {
-          token: state.tokens.systemAdmin,
-          key: idemKey(`refresh-race-lock-${iteration}`),
-        }),
-        api('POST', '/v1/auth/refresh', {
-          body: { refreshToken: login.json.data.refreshToken },
-        }),
-      ]);
       assert(
-        scalar(identitySql(`SELECT status FROM users WHERE id='${refreshUser.id}'`)) === 'LOCKED' &&
+        [401, 403].includes(refresh.status),
+        `Revoked refresh token survived: ${refresh.text}`,
+      );
+      const replay = await api('POST', `/v1/admin/users/${ids.target}/lock`, {
+        token: state.tokens.systemAdmin,
+        key: lockKey,
+      });
+      assert(
+        replay.status === 200 && replay.text === locked.text,
+        'Lock replay was not byte-equivalent',
+      );
+      const selfLock = await api('POST', `/v1/admin/users/${ids.systemAdmin}/lock`, {
+        token: state.tokens.systemAdmin,
+        key: idemKey('self-lock'),
+      });
+      expectError(selfLock, 403, 'FORBIDDEN');
+
+      const unlocked = await api('POST', `/v1/admin/users/${ids.target}/unlock`, {
+        token: state.tokens.systemAdmin,
+        key: idemKey('lifecycle-unlock'),
+      });
+      assert(
+        unlocked.status === 200 && unlocked.json?.data?.status === 'ACTIVE',
+        `Unlock failed: ${unlocked.text}`,
+      );
+      const loginAfter = await api('POST', '/v1/auth/login', {
+        body: {
+          email: 'target@day40.test',
+          password: e2eEnv.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD || 'Day40-E2E-Only-Password-123!',
+        },
+      });
+      assert(loginAfter.status === 200, `Login after unlock failed: ${loginAfter.text}`);
+
+      const pendingUnlock = await api('POST', `/v1/admin/users/${ids.lockedPending}/unlock`, {
+        token: state.tokens.systemAdmin,
+        key: idemKey('pending-origin-unlock'),
+      });
+      assert(
+        pendingUnlock.status === 200 &&
+          pendingUnlock.json?.data?.status === 'PENDING_EMAIL_VERIFICATION',
+        `Pending origin was promoted: ${pendingUnlock.text}`,
+      );
+      assert(
+        scalar(identitySql(`SELECT status FROM users WHERE id='${ids.lockedPending}'`)) ===
+          'PENDING_EMAIL_VERIFICATION',
+        'Locked pending user did not restore pending origin',
+      );
+      assert(
+        Number(redis('EXISTS', `identity:login_lockout:${ids.lockedPending}`)) === 0,
+        'Unlock did not reset Redis lockout',
+      );
+      mark('lock/unlock');
+      mark('locked origin restore');
+    },
+  );
+
+  await scenario(
+    3,
+    'Concurrent lock versus password login and refresh is linearizable',
+    async () => {
+      const password = e2eEnv.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD || 'Day40-E2E-Only-Password-123!';
+      for (let iteration = 0; iteration < 5; iteration += 1) {
+        const user = seedRaceUser(100 + iteration);
+        await Promise.all([
+          api('POST', `/v1/admin/users/${user.id}/lock`, {
+            token: state.tokens.systemAdmin,
+            key: idemKey(`login-race-lock-${iteration}`),
+          }),
+          api('POST', '/v1/auth/login', {
+            body: { email: user.email, password },
+          }),
+        ]);
+        assert(
+          scalar(identitySql(`SELECT status FROM users WHERE id='${user.id}'`)) === 'LOCKED',
+          `Login race ${iteration} escaped final LOCKED state`,
+        );
+        assert(
           count(
             identitySql(
-              `SELECT count(*) FROM refresh_tokens WHERE user_id='${refreshUser.id}' AND revoked_at IS NULL`,
+              `SELECT count(*) FROM refresh_tokens WHERE user_id='${user.id}' AND revoked_at IS NULL`,
             ),
           ) === 0,
-        `Refresh race ${iteration} violated lock invariant`,
+          `Login race ${iteration} left active refresh token`,
+        );
+
+        const refreshUser = seedRaceUser(200 + iteration);
+        const login = await api('POST', '/v1/auth/login', {
+          body: { email: refreshUser.email, password },
+        });
+        assert(login.status === 200 && login.json?.data?.refreshToken, login.text);
+        await Promise.all([
+          api('POST', `/v1/admin/users/${refreshUser.id}/lock`, {
+            token: state.tokens.systemAdmin,
+            key: idemKey(`refresh-race-lock-${iteration}`),
+          }),
+          api('POST', '/v1/auth/refresh', {
+            body: { refreshToken: login.json.data.refreshToken },
+          }),
+        ]);
+        assert(
+          scalar(identitySql(`SELECT status FROM users WHERE id='${refreshUser.id}'`)) ===
+            'LOCKED' &&
+            count(
+              identitySql(
+                `SELECT count(*) FROM refresh_tokens WHERE user_id='${refreshUser.id}' AND revoked_at IS NULL`,
+              ),
+            ) === 0,
+          `Refresh race ${iteration} violated lock invariant`,
+        );
+      }
+      mark('identity race invariants');
+    },
+  );
+
+  await scenario(
+    4,
+    'Failed-login, forgot-password, and reset-password races preserve lock',
+    async () => {
+      const password = e2eEnv.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD || 'Day40-E2E-Only-Password-123!';
+      const failedUser = seedRaceUser(300);
+      await Promise.all([
+        api('POST', `/v1/admin/users/${failedUser.id}/lock`, {
+          token: state.tokens.systemAdmin,
+          key: idemKey('failed-login-lock'),
+        }),
+        api('POST', '/v1/auth/login', {
+          body: { email: failedUser.email, password: 'WrongPassword123!' },
+        }),
+      ]);
+      const failedState = scalar(
+        identitySql(
+          `SELECT status||':'||failed_login_attempts FROM users WHERE id='${failedUser.id}'`,
+        ),
       );
-    }
-    mark('identity race invariants');
-  });
+      assert(/^LOCKED:(0|1)$/.test(failedState), `Failed-login race drifted: ${failedState}`);
 
-  await scenario(4, 'Failed-login, forgot-password, and reset-password races preserve lock', async () => {
-    const password = e2eEnv.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD || 'Day40-E2E-Only-Password-123!';
-    const failedUser = seedRaceUser(300);
-    await Promise.all([
-      api('POST', `/v1/admin/users/${failedUser.id}/lock`, {
-        token: state.tokens.systemAdmin,
-        key: idemKey('failed-login-lock'),
-      }),
-      api('POST', '/v1/auth/login', {
-        body: { email: failedUser.email, password: 'WrongPassword123!' },
-      }),
-    ]);
-    const failedState = scalar(
-      identitySql(
-        `SELECT status||':'||failed_login_attempts FROM users WHERE id='${failedUser.id}'`,
-      ),
-    );
-    assert(/^LOCKED:(0|1)$/.test(failedState), `Failed-login race drifted: ${failedState}`);
+      const forgotUser = seedRaceUser(301);
+      await Promise.all([
+        api('POST', `/v1/admin/users/${forgotUser.id}/lock`, {
+          token: state.tokens.systemAdmin,
+          key: idemKey('forgot-lock'),
+        }),
+        api('POST', '/v1/auth/forgot-password', { body: { email: forgotUser.email } }),
+      ]);
+      assert(
+        scalar(identitySql(`SELECT status FROM users WHERE id='${forgotUser.id}'`)) === 'LOCKED',
+        'Forgot-password race unlocked user',
+      );
+      const forgotOtpCount = count(
+        identitySql(
+          `SELECT count(*) FROM email_verification_tokens WHERE user_id='${forgotUser.id}' AND purpose='PASSWORD_RESET'`,
+        ),
+      );
+      assert([0, 1].includes(forgotOtpCount), `Forgot race duplicated OTP: ${forgotOtpCount}`);
 
-    const forgotUser = seedRaceUser(301);
-    await Promise.all([
-      api('POST', `/v1/admin/users/${forgotUser.id}/lock`, {
-        token: state.tokens.systemAdmin,
-        key: idemKey('forgot-lock'),
-      }),
-      api('POST', '/v1/auth/forgot-password', { body: { email: forgotUser.email } }),
-    ]);
-    assert(
-      scalar(identitySql(`SELECT status FROM users WHERE id='${forgotUser.id}'`)) === 'LOCKED',
-      'Forgot-password race unlocked user',
-    );
-    const forgotOtpCount = count(
-      identitySql(
-        `SELECT count(*) FROM email_verification_tokens WHERE user_id='${forgotUser.id}' AND purpose='PASSWORD_RESET'`,
-      ),
-    );
-    assert([0, 1].includes(forgotOtpCount), `Forgot race duplicated OTP: ${forgotOtpCount}`);
-
-    const resetUser = seedRaceUser(302);
-    const resetCode = '654321';
-    identitySql(`
+      const resetUser = seedRaceUser(302);
+      const resetCode = '654321';
+      identitySql(`
       INSERT INTO email_verification_tokens (id,user_id,purpose,code,expires_at,failed_attempts)
       VALUES ('${id(20_302)}','${resetUser.id}','PASSWORD_RESET','${resetCode}',now()+interval '10 minutes',0)
       ON CONFLICT DO NOTHING;
     `);
-    const [lockResult, resetResult] = await Promise.all([
-      api('POST', `/v1/admin/users/${resetUser.id}/lock`, {
-        token: state.tokens.systemAdmin,
-        key: idemKey('reset-lock'),
-      }),
-      api('POST', '/v1/auth/reset-password', {
-        body: { email: resetUser.email, code: resetCode, newPassword: 'Day40-New-Password-123!' },
-      }),
-    ]);
-    assert(lockResult.status === 200, lockResult.text);
-    assert([200, 400, 422].includes(resetResult.status), resetResult.text);
-    assert(
-      scalar(identitySql(`SELECT status FROM users WHERE id='${resetUser.id}'`)) === 'LOCKED',
-      'Reset-password race escaped final LOCKED state',
-    );
-    assert(password.length > 0, 'Password fixture missing');
-    mark('password reset lock race');
-  });
+      const [lockResult, resetResult] = await Promise.all([
+        api('POST', `/v1/admin/users/${resetUser.id}/lock`, {
+          token: state.tokens.systemAdmin,
+          key: idemKey('reset-lock'),
+        }),
+        api('POST', '/v1/auth/reset-password', {
+          body: { email: resetUser.email, code: resetCode, newPassword: 'Day40-New-Password-123!' },
+        }),
+      ]);
+      assert(lockResult.status === 200, lockResult.text);
+      assert([200, 400, 422].includes(resetResult.status), resetResult.text);
+      assert(
+        scalar(identitySql(`SELECT status FROM users WHERE id='${resetUser.id}'`)) === 'LOCKED',
+        'Reset-password race escaped final LOCKED state',
+      );
+      assert(password.length > 0, 'Password fixture missing');
+      mark('password reset lock race');
+    },
+  );
 
   await scenario(5, 'Shared idempotency pending, replay, and mismatch are exact', async () => {
     identitySql(`
@@ -1165,46 +1270,50 @@ async function runAcceptance() {
     mark('activity immutability');
   });
 
-  await scenario(7, 'Station normalize persists one Outbox event and one Identity audit', async () => {
-    const response = await api('PATCH', `/v1/admin/stations/${ids.primaryStation}`, {
-      token: state.tokens.systemAdmin,
-      key: idemKey('normalize-primary'),
-      body: {
-        addressStreet: '  40 Nguyen Hue  ',
-        supportsShuttle: true,
-      },
-    });
-    assert(
-      response.status === 200 &&
-        response.json?.data?.id === ids.primaryStation &&
-        response.json?.data?.supportsShuttle === true,
-      response.text,
-    );
-    assert(
-      count(
-        tripSql(
-          `SELECT count(*) FROM outbox_events WHERE event_type='trip.station.normalized' AND payload->>'stationId'='${ids.primaryStation}'`,
-        ),
-      ) === 1,
-      'Normalize emitted duplicate/missing Outbox event',
-    );
-    const normalizeEventId = scalar(
-      tripSql(
-        `SELECT payload->>'eventId' FROM outbox_events WHERE event_type='trip.station.normalized' AND payload->>'stationId'='${ids.primaryStation}'`,
-      ),
-    );
-    assert(normalizeEventId, 'Normalize Outbox event id is missing');
-    await poll(
-      () =>
+  await scenario(
+    7,
+    'Station normalize persists one Outbox event and one Identity audit',
+    async () => {
+      const response = await api('PATCH', `/v1/admin/stations/${ids.primaryStation}`, {
+        token: state.tokens.systemAdmin,
+        key: idemKey('normalize-primary'),
+        body: {
+          addressStreet: '  40 Nguyen Hue  ',
+          supportsShuttle: true,
+        },
+      });
+      assert(
+        response.status === 200 &&
+          response.json?.data?.id === ids.primaryStation &&
+          response.json?.data?.supportsShuttle === true,
+        response.text,
+      );
+      assert(
         count(
-          identitySql(
-            `SELECT count(*) FROM activity_logs WHERE action='STATION_NORMALIZED' AND source_event_id='${normalizeEventId}' AND user_id='${ids.systemAdmin}'`,
+          tripSql(
+            `SELECT count(*) FROM outbox_events WHERE event_type='trip.station.normalized' AND payload->>'stationId'='${ids.primaryStation}'`,
           ),
         ) === 1,
-      'Identity normalize audit timeout',
-    );
-    mark('station normalize');
-  });
+        'Normalize emitted duplicate/missing Outbox event',
+      );
+      const normalizeEventId = scalar(
+        tripSql(
+          `SELECT payload->>'eventId' FROM outbox_events WHERE event_type='trip.station.normalized' AND payload->>'stationId'='${ids.primaryStation}'`,
+        ),
+      );
+      assert(normalizeEventId, 'Normalize Outbox event id is missing');
+      await poll(
+        () =>
+          count(
+            identitySql(
+              `SELECT count(*) FROM activity_logs WHERE action='STATION_NORMALIZED' AND source_event_id='${normalizeEventId}' AND user_id='${ids.systemAdmin}'`,
+            ),
+          ) === 1,
+        'Identity normalize audit timeout',
+      );
+      mark('station normalize');
+    },
+  );
 
   await scenario(8, 'Station merge is atomic, idempotent, and fans out to consumers', async () => {
     const key = idemKey('merge-primary');
@@ -1257,11 +1366,11 @@ async function runAcceptance() {
         pickup: { stationId: ids.duplicateStation },
         dropoff: { stationId: ids.destinationStation },
         seats: [{ seatNumber: 'D01' }],
-        paymentMethod: 'WALLET',
+        paymentMethod: 'VNPAY',
       },
     });
     assert(liveBooking.status === 201, `Canonical create booking failed: ${liveBooking.text}`);
-    state.liveBookingId = liveBooking.json?.data?.bookingId;
+    state.stationRaceBookingId = liveBooking.json?.data?.bookingId;
 
     await poll(
       () =>
@@ -1271,6 +1380,14 @@ async function runAcceptance() {
           ),
         ) === 1,
       'Booking merge consumer timeout',
+    );
+    assert(
+      count(
+        bookingSql(
+          `SELECT count(*) FROM integration_inbox WHERE consumer_name='booking.station-merged' AND message_id='${mergeEventId}'`,
+        ),
+      ) === 1,
+      'Booking Station merge domain write committed without its Inbox marker',
     );
     await poll(
       () =>
@@ -1291,9 +1408,7 @@ async function runAcceptance() {
     );
     assert(
       scalar(
-        tripSql(
-          `SELECT merged_into_station_id FROM stations WHERE id='${ids.priorRedirect}'`,
-        ),
+        tripSql(`SELECT merged_into_station_id FROM stations WHERE id='${ids.priorRedirect}'`),
       ) === ids.primaryStation,
       'Prior Station redirect was not flattened',
     );
@@ -1335,7 +1450,9 @@ async function runAcceptance() {
     );
     assert(
       scalar(
-        bookingSql(`SELECT pickup_station_id FROM bookings WHERE id='${state.liveBookingId}'`),
+        bookingSql(
+          `SELECT pickup_station_id FROM bookings WHERE id='${state.stationRaceBookingId}'`,
+        ),
       ) === ids.primaryStation,
       'Concurrent canonical Booking writer persisted duplicate Station',
     );
@@ -1354,169 +1471,225 @@ async function runAcceptance() {
     mark('audit consumers');
   });
 
-  await scenario(9, 'Booking redirect graph converges under out-of-order events and replay', async () => {
-    const eventAB = id(30_901);
-    const eventBC = id(30_902);
-    const payloadAB = stationMergedPayload(eventAB, ids.graphB, ids.graphA);
-    const payloadBC = stationMergedPayload(eventBC, ids.graphC, ids.graphB);
-    await Promise.all([
-      publish('trip.station.merged', payloadBC),
-      publish('trip.station.merged', payloadAB),
-    ]);
-    await poll(
-      () =>
-        scalar(
-          bookingSql(`
+  await scenario(
+    9,
+    'Booking redirect graph converges under out-of-order events and replay',
+    async () => {
+      const eventAB = id(30_901);
+      const eventBC = id(30_902);
+      const payloadAB = stationMergedPayload(eventAB, ids.graphB, ids.graphA);
+      const payloadBC = stationMergedPayload(eventBC, ids.graphC, ids.graphB);
+      await Promise.all([
+        publish('trip.station.merged', payloadBC),
+        publish('trip.station.merged', payloadAB),
+      ]);
+      await poll(
+        () =>
+          scalar(
+            bookingSql(`
             SELECT
               (SELECT canonical_station_id FROM booking_station_redirects WHERE duplicate_station_id='${ids.graphA}')::text || ':' ||
               (SELECT canonical_station_id FROM booking_station_redirects WHERE duplicate_station_id='${ids.graphB}')::text
           `),
-        ) === `${ids.graphC}:${ids.graphC}`,
-      'Out-of-order Booking redirect graph did not converge',
-    );
-    const before = count(
-      bookingSql(
-        `SELECT count(*) FROM booking_station_redirects WHERE source_event_id IN ('${eventAB}','${eventBC}')`,
-      ),
-    );
-    await Promise.all([
-      publish('trip.station.merged', payloadAB, randomUUID()),
-      publish('trip.station.merged', payloadBC, randomUUID()),
-    ]);
-    await sleep(1_500);
-    assert(
-      count(
+          ) === `${ids.graphC}:${ids.graphC}`,
+        'Out-of-order Booking redirect graph did not converge',
+      );
+      await poll(
+        () =>
+          count(
+            bookingSql(
+              `SELECT count(*) FROM integration_inbox WHERE consumer_name='booking.station-merged' AND message_id IN ('${eventAB}','${eventBC}')`,
+            ),
+          ) === 2,
+        'Out-of-order Station events did not atomically commit Booking Inbox markers',
+      );
+      const before = count(
         bookingSql(
           `SELECT count(*) FROM booking_station_redirects WHERE source_event_id IN ('${eventAB}','${eventBC}')`,
         ),
-      ) === before,
-      'Station event replay duplicated Booking redirect rows',
-    );
-    await poll(
-      () =>
+      );
+      await Promise.all([
+        publish('trip.station.merged', payloadAB),
+        publish('trip.station.merged', payloadBC),
+      ]);
+      await sleep(1_500);
+      assert(
         count(
-          identitySql(
-            `SELECT count(*) FROM activity_logs WHERE source_event_id IN ('${eventAB}','${eventBC}')`,
+          bookingSql(
+            `SELECT count(*) FROM booking_station_redirects WHERE source_event_id IN ('${eventAB}','${eventBC}')`,
           ),
-        ) === 2,
-      'Identity out-of-order audit consumers timeout',
-    );
-  });
+        ) === before,
+        'Station event replay duplicated Booking redirect rows',
+      );
+      await poll(
+        () =>
+          count(
+            identitySql(
+              `SELECT count(*) FROM activity_logs WHERE source_event_id IN ('${eventAB}','${eventBC}')`,
+            ),
+          ) === 2,
+        'Identity out-of-order audit consumers timeout',
+      );
+    },
+  );
 
-  await scenario(10, 'Internal Station resolution distinguishes merged and ordinary deleted rows', async () => {
-    const merged = await tripInternalApi(`/internal/v1/stations/${ids.duplicateStation}`);
-    assert(
-      merged.status === 200 &&
-        merged.json?.id === ids.duplicateStation &&
-        merged.json?.isMerged === true &&
-        merged.json?.canonicalStationId === ids.primaryStation,
-      `Merged Station did not resolve to its canonical Station: ${merged.text}`,
-    );
-    const deleted = await tripInternalApi(`/internal/v1/stations/${ids.deletedStation}`);
-    expectError(deleted, 404, 'STATION_NOT_FOUND');
+  await scenario(
+    10,
+    'Internal Station resolution distinguishes merged and ordinary deleted rows',
+    async () => {
+      const merged = await tripInternalApi(`/internal/v1/stations/${ids.duplicateStation}`);
+      assert(
+        merged.status === 200 &&
+          merged.json?.id === ids.duplicateStation &&
+          merged.json?.isMerged === true &&
+          merged.json?.canonicalStationId === ids.primaryStation,
+        `Merged Station did not resolve to its canonical Station: ${merged.text}`,
+      );
+      const deleted = await tripInternalApi(`/internal/v1/stations/${ids.deletedStation}`);
+      expectError(deleted, 404, 'STATION_NOT_FOUND');
 
-    const conflict = await api(
-      'POST',
-      `/v1/admin/stations/${ids.conflictPrimary}/merge`,
-      {
+      const conflict = await api('POST', `/v1/admin/stations/${ids.conflictPrimary}/merge`, {
         token: state.tokens.systemAdmin,
         key: idemKey('merge-conflict'),
         body: { duplicateId: ids.conflictDuplicate },
-      },
-    );
-    expectError(conflict, 409, 'STATION_MERGE_CONFLICT');
-    assert(
-      scalar(
-        tripSql(
-          `SELECT (deleted_at IS NULL)::int||':'||(merged_into_station_id IS NULL)::int FROM stations WHERE id='${ids.conflictDuplicate}'`,
-        ),
-      ) === '1:1',
-      'Conflict merge partially mutated duplicate Station',
-    );
+      });
+      expectError(conflict, 409, 'STATION_MERGE_CONFLICT');
+      assert(
+        scalar(
+          tripSql(
+            `SELECT (deleted_at IS NULL)::int||':'||(merged_into_station_id IS NULL)::int FROM stations WHERE id='${ids.conflictDuplicate}'`,
+          ),
+        ) === '1:1',
+        'Conflict merge partially mutated duplicate Station',
+      );
 
-    const racePrimary = id(32_901);
-    const raceDuplicate = id(32_902);
-    tripSql(`
+      const racePrimary = id(32_901);
+      const raceDuplicate = id(32_902);
+      tripSql(`
       INSERT INTO stations (id,name,slug,city,province,is_active)
       VALUES
         ('${racePrimary}','Day 40 Race Primary','day40-race-primary','HCM','HCM',true),
         ('${raceDuplicate}','Day 40 Race Duplicate','day40-race-duplicate','HCM','HCM',true)
       ON CONFLICT (id) DO NOTHING;
     `);
-    const outcomes = await Promise.all([
-      api('POST', `/v1/admin/stations/${racePrimary}/merge`, {
-        token: state.tokens.systemAdmin,
-        key: idemKey('merge-race-a'),
-        body: { duplicateId: raceDuplicate },
-      }),
-      api('POST', `/v1/admin/stations/${racePrimary}/merge`, {
-        token: state.tokens.systemAdmin,
-        key: idemKey('merge-race-b'),
-        body: { duplicateId: raceDuplicate },
-      }),
-    ]);
-    assert(
-      outcomes.filter((outcome) => outcome.status === 200).length === 1 &&
-        outcomes.filter((outcome) => outcome.status === 409).length === 1,
-      `Merge race outcomes invalid: ${outcomes.map((outcome) => outcome.status).join(',')}`,
-    );
-    assert(
-      count(
-        tripSql(
-          `SELECT count(*) FROM outbox_events WHERE event_type='trip.station.merged' AND payload->>'duplicateStationId'='${raceDuplicate}'`,
-        ),
-      ) === 1,
-      'Merge race emitted duplicate Outbox events',
-    );
-  });
+      const outcomes = await Promise.all([
+        api('POST', `/v1/admin/stations/${racePrimary}/merge`, {
+          token: state.tokens.systemAdmin,
+          key: idemKey('merge-race-a'),
+          body: { duplicateId: raceDuplicate },
+        }),
+        api('POST', `/v1/admin/stations/${racePrimary}/merge`, {
+          token: state.tokens.systemAdmin,
+          key: idemKey('merge-race-b'),
+          body: { duplicateId: raceDuplicate },
+        }),
+      ]);
+      assert(
+        outcomes.filter((outcome) => outcome.status === 200).length === 1 &&
+          outcomes.filter((outcome) => outcome.status === 409).length === 1,
+        `Merge race outcomes invalid: ${outcomes.map((outcome) => outcome.status).join(',')}`,
+      );
+      assert(
+        count(
+          tripSql(
+            `SELECT count(*) FROM outbox_events WHERE event_type='trip.station.merged' AND payload->>'duplicateStationId'='${raceDuplicate}'`,
+          ),
+        ) === 1,
+        'Merge race emitted duplicate Outbox events',
+      );
+    },
+  );
 
   const range = currentReportRange();
   let baselineReport;
-  await scenario(11, 'Platform report aggregates boundaries, signed Parcel net, and names', async () => {
-    baselineReport = await api('GET', reportPath(range.from, range.to), {
-      token: state.tokens.systemAdmin,
-    });
-    assert(baselineReport.status === 200, baselineReport.text);
-    const data = baselineReport.json?.data;
-    assert(data?.period?.timezone === 'UTC', 'Report period timezone drifted');
-    assert(data.totals.completedBookingCount === 2, JSON.stringify(data.totals));
-    assert(data.totals.completedTripCount === 3, JSON.stringify(data.totals));
-    assert(data.totals.deliveredParcelCount === 2, JSON.stringify(data.totals));
-    assert(data.totals.bookingRevenueVnd === 500_000, JSON.stringify(data.totals));
-    assert(data.totals.parcelRevenueVnd === 100_000, JSON.stringify(data.totals));
-    assert(data.totals.netRevenueVnd === 600_000, JSON.stringify(data.totals));
-    assert(data.byOperator.length === 3, JSON.stringify(data.byOperator));
-    const operatorA = data.byOperator.find((item) => item.operatorId === ids.operatorA);
-    const deletedOperator = data.byOperator.find(
-      (item) => item.operatorId === ids.deletedOperator,
-    );
-    const missingOperator = data.byOperator.find(
-      (item) => item.operatorId === ids.missingOperator,
-    );
-    assert(
-      operatorA?.operatorName === 'Day 40 Operator A' && operatorA.netRevenueVnd === 440_000,
-      `Operator A report drifted: ${JSON.stringify(operatorA)}`,
-    );
-    assert(
-      deletedOperator?.operatorName === 'Day 40 Deleted Operator' &&
-        deletedOperator.parcelRevenueVnd === -40_000 &&
-        deletedOperator.netRevenueVnd === 160_000,
-      `Deleted operator signed metrics drifted: ${JSON.stringify(deletedOperator)}`,
-    );
-    assert(
-      missingOperator?.operatorName === null &&
-        missingOperator.completedTripCount === 1 &&
-        missingOperator.netRevenueVnd === 0,
-      `Missing operator metrics drifted: ${JSON.stringify(missingOperator)}`,
-    );
-    assert(
-      data.byOperator.every(
-        (item, index) => index === 0 || data.byOperator[index - 1].netRevenueVnd >= item.netRevenueVnd,
-      ),
-      'Sort drifted',
-    );
-    mark('platform report');
-  });
+  await scenario(
+    11,
+    'Platform report aggregates boundaries, signed Parcel net, and names',
+    async () => {
+      const sourcePath = `?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
+      const sourceResponses = await Promise.all([
+        internalApi(urls.trip, `/internal/v1/reports/platform/trips${sourcePath}`),
+        internalApi(urls.parcel, `/internal/v1/reports/platform/parcels${sourcePath}`),
+        internalApi(urls.payment, `/internal/v1/reports/platform/ledger${sourcePath}`),
+      ]);
+      for (const [source, response] of [
+        ['Trip', sourceResponses[0]],
+        ['Parcel', sourceResponses[1]],
+        ['Payment', sourceResponses[2]],
+      ]) {
+        assert(
+          response.status === 200,
+          `${source} platform report source failed: ${response.text}`,
+        );
+      }
+      baselineReport = await api('GET', reportPath(range.from, range.to), {
+        token: state.tokens.systemAdmin,
+      });
+      assert(
+        baselineReport.status === 200,
+        `${baselineReport.text}\nPlatform sources: ${sourceResponses.map((response) => response.text).join(' | ')}`,
+      );
+      const data = baselineReport.json?.data;
+      assert(data?.period?.timezone === 'UTC', 'Report period timezone drifted');
+      assert(data.totals.completedBookingCount === 2, JSON.stringify(data.totals));
+      assert(data.totals.completedTripCount === 3, JSON.stringify(data.totals));
+      assert(data.totals.deliveredParcelCount === 2, JSON.stringify(data.totals));
+      assert(data.totals.bookingRevenueVnd === 500_000, JSON.stringify(data.totals));
+      assert(data.totals.parcelRevenueVnd === 100_000, JSON.stringify(data.totals));
+      assert(data.totals.netRevenueVnd === 600_000, JSON.stringify(data.totals));
+      assert(data.byOperator.length === 3, JSON.stringify(data.byOperator));
+      const operatorA = data.byOperator.find((item) => item.operatorId === ids.operatorA);
+      const deletedOperator = data.byOperator.find(
+        (item) => item.operatorId === ids.deletedOperator,
+      );
+      const missingOperator = data.byOperator.find(
+        (item) => item.operatorId === ids.missingOperator,
+      );
+      assert(
+        operatorA?.operatorName === 'Day 40 Operator A' && operatorA.netRevenueVnd === 440_000,
+        `Operator A report drifted: ${JSON.stringify(operatorA)}`,
+      );
+      assert(
+        deletedOperator?.operatorName === 'Day 40 Deleted Operator' &&
+          deletedOperator.parcelRevenueVnd === -40_000 &&
+          deletedOperator.netRevenueVnd === 160_000,
+        `Deleted operator signed metrics drifted: ${JSON.stringify(deletedOperator)}`,
+      );
+      assert(
+        missingOperator?.operatorName === null &&
+          missingOperator.completedTripCount === 1 &&
+          missingOperator.netRevenueVnd === 0,
+        `Missing operator metrics drifted: ${JSON.stringify(missingOperator)}`,
+      );
+      assert(
+        data.byOperator.every(
+          (item, index) =>
+            index === 0 || data.byOperator[index - 1].netRevenueVnd >= item.netRevenueVnd,
+        ),
+        'Sort drifted',
+      );
+      assert(clearPlatformReportCache() >= 1, 'Reconciled platform report was not cached');
+      bookingSql(`DELETE FROM platform_booking_stats WHERE booking_id='${ids.reportBookingA}';`);
+      const mismatch = await api('GET', reportPath(range.from, range.to), {
+        token: state.tokens.systemAdmin,
+      });
+      expectError(mismatch, 503, 'UPSTREAM_UNAVAILABLE');
+      assert(
+        clearPlatformReportCache() === 0,
+        'Unreconciled platform report was incorrectly promoted to cache',
+      );
+      bookingSql('SELECT rebuild_platform_booking_stats();');
+      baselineReport = await api('GET', reportPath(range.from, range.to), {
+        token: state.tokens.systemAdmin,
+      });
+      assert(
+        baselineReport.status === 200,
+        `Report did not recover after rebuild: ${baselineReport.text}`,
+      );
+      mark('platform report');
+      mark('platform report reconciliation');
+    },
+  );
 
   await scenario(12, 'Source and orchestrator overflow return REPORT_VALUE_OVERFLOW', async () => {
     const sourceOperator = id(80_001);
@@ -1530,6 +1703,7 @@ async function runAcceptance() {
         ('${sourceBookingA}','VR-D40-OVF-A','${ids.passenger}','${ids.completedTripA}','${sourceOperator}','${ids.primaryStation}','${ids.destinationStation}',9223372036854775807,0,9223372036854775807,'COMPLETED',now()),
         ('${sourceBookingB}','VR-D40-OVF-B','${ids.passenger}','${ids.completedTripA}','${sourceOperator}','${ids.primaryStation}','${ids.destinationStation}',9223372036854775807,0,9223372036854775807,'COMPLETED',now());
     `);
+    clearPlatformReportCache();
     const sourceOverflow = await api('GET', reportPath(range.from, range.to), {
       token: state.tokens.systemAdmin,
     });
@@ -1548,17 +1722,21 @@ async function runAcceptance() {
     parcelSql(`
       INSERT INTO parcels
         (id,parcel_code,sender_user_id,recipient_name,recipient_phone,operator_id,trip_id,
-         size_category,estimated_weight_kg,delivery_method,total_price_vnd,deposit_percent,
+         size_category,estimated_size_category,estimated_length_cm,estimated_width_cm,
+         estimated_height_cm,estimated_weight_kg,estimated_volume_m3,estimated_dim_weight_kg,
+         estimated_chargeable_weight_kg,delivery_method,total_price_vnd,deposit_percent,
          deposit_amount,original_deposit_amount,discount_amount,additional_amount,refund_amount,
          status,confirmed_at)
-      VALUES ('${localParcel}','VRP-D40-LOCAL-OVF','${ids.passenger}','Overflow Recipient','+84910040822','${localOperator}','${ids.completedTripA}','SMALL',1,'TERMINAL_PICKUP',1,100,1,1,0,0,0,'DELIVERY_CONFIRMED',now());
+      VALUES ('${localParcel}','VRP-D40-LOCAL-OVF','${ids.passenger}','Overflow Recipient','+84910040822','${localOperator}','${ids.completedTripA}','SMALL','SMALL',10,10,10,1,0.001,0.17,1,'TERMINAL_PICKUP',1,100,1,1,0,0,0,'DELIVERY_CONFIRMED',now());
     `);
+    clearPlatformReportCache();
     const localOverflow = await api('GET', reportPath(range.from, range.to), {
       token: state.tokens.systemAdmin,
     });
     expectError(localOverflow, 500, 'REPORT_VALUE_OVERFLOW');
     bookingSql(`DELETE FROM bookings WHERE id='${localBooking}';`);
     parcelSql(`DELETE FROM parcels WHERE id='${localParcel}';`);
+    clearPlatformReportCache();
     const recovered = await api('GET', reportPath(range.from, range.to), {
       token: state.tokens.systemAdmin,
     });
@@ -1577,11 +1755,9 @@ async function runAcceptance() {
       { token: state.tokens.systemAdmin },
     );
     expectError(offset, 422, 'VALIDATION_ERROR');
-    const tooWide = await api(
-      'GET',
-      reportPath('2025-01-01T00:00:00Z', '2026-07-01T00:00:00Z'),
-      { token: state.tokens.systemAdmin },
-    );
+    const tooWide = await api('GET', reportPath('2025-01-01T00:00:00Z', '2026-07-01T00:00:00Z'), {
+      token: state.tokens.systemAdmin,
+    });
     expectError(tooWide, 422, 'VALIDATION_ERROR');
     const forbidden = await api('GET', reportPath(range.from, range.to), {
       token: state.tokens.operatorAdmin,
@@ -1589,51 +1765,83 @@ async function runAcceptance() {
     expectError(forbidden, 403, 'FORBIDDEN');
   });
 
-  await scenario(14, 'Live Booking and Trip completion increments report exactly once', async () => {
-    assert(state.liveBookingId, 'Live booking was not created');
-    const before = baselineReport.json.data.totals;
-    tripSql(`
+  await scenario(
+    14,
+    'Live Booking and Trip completion increments report exactly once',
+    async () => {
+      const before = baselineReport.json.data.totals;
+      const liveBooking = await api('POST', '/v1/bookings', {
+        token: state.tokens.passenger,
+        key: idemKey('live-booking-report-reconciliation'),
+        body: {
+          tripId: ids.liveTrip,
+          pickup: { stationId: ids.primaryStation },
+          dropoff: { stationId: ids.destinationStation },
+          seats: [{ seatNumber: 'D02' }],
+          paymentMethod: 'WALLET',
+        },
+      });
+      assert(
+        liveBooking.status === 201,
+        `Live report Booking creation failed: ${liveBooking.text}`,
+      );
+      state.liveBookingId = liveBooking.json?.data?.bookingId;
+      assert(state.liveBookingId, 'Live report Booking id is missing');
+      tripSql(`
       UPDATE trips
       SET status='IN_PROGRESS',actual_departure_time=now()-interval '30 minutes',
           destination_arrived_at=now(),destination_arrived_by_user_id='${ids.driver}',updated_at=now()
       WHERE id='${ids.liveTrip}';
     `);
-    const key = idemKey('complete-live-trip');
-    const completed = await api('POST', `/v1/driver/trips/${ids.liveTrip}/complete`, {
-      token: state.tokens.driver,
-      key,
-    });
-    assert(completed.status === 200, `Live Trip completion failed: ${completed.text}`);
-    await poll(
-      () =>
-        scalar(
-          bookingSql(`SELECT status FROM bookings WHERE id='${state.liveBookingId}'`),
-        ) === 'COMPLETED',
-      'Booking completion consumer timeout',
-    );
-    const after = await api('GET', reportPath(range.from, range.to), {
-      token: state.tokens.systemAdmin,
-    });
-    assert(after.status === 200, after.text);
-    assert(
-      after.json.data.totals.completedBookingCount === before.completedBookingCount + 1 &&
-        after.json.data.totals.completedTripCount === before.completedTripCount + 1 &&
-        after.json.data.totals.bookingRevenueVnd === before.bookingRevenueVnd + 100_000,
-      `Live report increment drifted: ${JSON.stringify(after.json.data.totals)}`,
-    );
-    const replay = await api('POST', `/v1/driver/trips/${ids.liveTrip}/complete`, {
-      token: state.tokens.driver,
-      key,
-    });
-    assert(replay.status === 200 && replay.text === completed.text, 'Trip completion replay drifted');
-    const afterReplay = await api('GET', reportPath(range.from, range.to), {
-      token: state.tokens.systemAdmin,
-    });
-    assert(
-      JSON.stringify(afterReplay.json.data.totals) === JSON.stringify(after.json.data.totals),
-      'Completion replay double-counted report',
-    );
-  });
+      const key = idemKey('complete-live-trip');
+      const completed = await api('POST', `/v1/driver/trips/${ids.liveTrip}/complete`, {
+        token: state.tokens.driver,
+        key,
+      });
+      assert(completed.status === 200, `Live Trip completion failed: ${completed.text}`);
+      await poll(
+        () =>
+          scalar(bookingSql(`SELECT status FROM bookings WHERE id='${state.liveBookingId}'`)) ===
+          'COMPLETED',
+        'Booking completion consumer timeout',
+      );
+      await poll(
+        () =>
+          count(
+            paymentSql(
+              `SELECT count(*) FROM operator_ledger_entries WHERE reference_type='BOOKING' AND reference_id='${state.liveBookingId}' AND amount=100000`,
+            ),
+          ) === 1,
+        'Payment ledger reconciliation consumer timeout',
+      );
+      clearPlatformReportCache();
+      const after = await api('GET', reportPath(range.from, range.to), {
+        token: state.tokens.systemAdmin,
+      });
+      assert(after.status === 200, after.text);
+      assert(
+        after.json.data.totals.completedBookingCount === before.completedBookingCount + 1 &&
+          after.json.data.totals.completedTripCount === before.completedTripCount + 1 &&
+          after.json.data.totals.bookingRevenueVnd === before.bookingRevenueVnd + 100_000,
+        `Live report increment drifted: ${JSON.stringify(after.json.data.totals)}`,
+      );
+      const replay = await api('POST', `/v1/driver/trips/${ids.liveTrip}/complete`, {
+        token: state.tokens.driver,
+        key,
+      });
+      assert(
+        replay.status === 200 && replay.text === completed.text,
+        'Trip completion replay drifted',
+      );
+      const afterReplay = await api('GET', reportPath(range.from, range.to), {
+        token: state.tokens.systemAdmin,
+      });
+      assert(
+        JSON.stringify(afterReplay.json.data.totals) === JSON.stringify(after.json.data.totals),
+        'Completion replay double-counted report',
+      );
+    },
+  );
 
   await scenario(15, 'Parcel outage returns no partial report and restart recovers', async () => {
     if (useDev) {
@@ -1643,11 +1851,12 @@ async function runAcceptance() {
       assert(healthy.status === 200, healthy.text);
       return;
     }
+    clearPlatformReportCache();
     run('docker', ['stop', containers.parcel]);
     const unavailable = await api('GET', reportPath(range.from, range.to), {
       token: state.tokens.systemAdmin,
     });
-    expectError(unavailable, 502, 'UPSTREAM_UNAVAILABLE');
+    expectError(unavailable, 503, 'UPSTREAM_UNAVAILABLE');
     assert(unavailable.json?.data === undefined, 'Upstream failure returned partial data');
     composeRun(['--profile', 'app', 'up', '-d', '--no-deps', 'parcel']);
     await waitFor(`${urls.parcel}/health`);
@@ -1659,104 +1868,173 @@ async function runAcceptance() {
     mark('upstream failure');
   });
 
-  await scenario(16, 'Station event transport replay does not duplicate consumer effects', async () => {
-    const payloadText = scalar(
-      tripSql(
-        `SELECT payload::text FROM outbox_events WHERE event_type='trip.station.merged' AND payload->>'duplicateStationId'='${ids.duplicateStation}' LIMIT 1`,
-      ),
-    );
-    const payload = JSON.parse(payloadText);
-    const beforeRedirects = count(
-      bookingSql(
-        `SELECT count(*) FROM booking_station_redirects WHERE source_event_id='${payload.eventId}'`,
-      ),
-    );
-    const beforeAudits = count(
-      identitySql(`SELECT count(*) FROM activity_logs WHERE source_event_id='${payload.eventId}'`),
-    );
-    await publish('trip.station.merged', payload, randomUUID());
-    await sleep(1_500);
-    assert(
-      count(
+  await scenario(
+    16,
+    'Station event transport replay does not duplicate consumer effects',
+    async () => {
+      const payloadText = scalar(
+        tripSql(
+          `SELECT payload::text FROM outbox_events WHERE event_type='trip.station.merged' AND payload->>'duplicateStationId'='${ids.duplicateStation}' LIMIT 1`,
+        ),
+      );
+      const payload = JSON.parse(payloadText);
+      const beforeRedirects = count(
         bookingSql(
           `SELECT count(*) FROM booking_station_redirects WHERE source_event_id='${payload.eventId}'`,
         ),
-      ) === beforeRedirects &&
+      );
+      const beforeAudits = count(
+        identitySql(
+          `SELECT count(*) FROM activity_logs WHERE source_event_id='${payload.eventId}'`,
+        ),
+      );
+      await publish('trip.station.merged', payload);
+      await sleep(1_500);
+      assert(
+        count(
+          bookingSql(
+            `SELECT count(*) FROM booking_station_redirects WHERE source_event_id='${payload.eventId}'`,
+          ),
+        ) === beforeRedirects &&
+          count(
+            identitySql(
+              `SELECT count(*) FROM activity_logs WHERE source_event_id='${payload.eventId}'`,
+            ),
+          ) === beforeAudits,
+        'Transport replay duplicated consumer side effects',
+      );
+    },
+  );
+
+  await scenario(
+    17,
+    'Transient Station lock-plan drift rolls back then retries the true Inbox path',
+    async () => {
+      const transientEventId = id(30_903);
+      const driftEventId = id(30_904);
+      bookingSql(`
+        DELETE FROM booking_station_redirects
+        WHERE source_event_id IN ('${id(30_901)}','${id(30_902)}');
+      `);
+      const lock = startStationAdvisoryLock(ids.graphC);
+      await lock.ready;
+      await publish(
+        'trip.station.merged',
+        stationMergedPayload(transientEventId, ids.graphA, ids.graphC),
+      );
+      await poll(
+        () =>
+          count(
+            bookingSql(
+              "SELECT count(*) FROM pg_stat_activity WHERE datname='vietride_booking' AND wait_event='advisory' AND query LIKE '%pg_advisory_xact_lock%'",
+            ),
+          ) === 1,
+        'Booking consumer did not reach the Station advisory-lock barrier',
+        10_000,
+      );
+      bookingSql(`
+        INSERT INTO booking_station_redirects
+          (duplicate_station_id,canonical_station_id,source_event_id,occurred_at,created_at,updated_at)
+        VALUES ('${ids.graphA}','${ids.graphB}','${driftEventId}',now(),now(),now());
+      `);
+      await lock.done;
+      await poll(
+        () => rabbitReadyMessages('booking.station-merged.retry') === 1,
+        'Transient Station event was not placed in the delayed retry queue',
+        10_000,
+      );
+      assert(
+        count(
+          bookingSql(
+            `SELECT count(*) FROM booking_station_redirects WHERE source_event_id='${transientEventId}'`,
+          ),
+        ) === 0 &&
+          count(
+            bookingSql(
+              `SELECT count(*) FROM integration_inbox WHERE consumer_name='booking.station-merged' AND message_id='${transientEventId}'`,
+            ),
+          ) === 0,
+        'Transient Station event partially committed its domain write or Inbox marker',
+      );
+      bookingSql(`DELETE FROM booking_station_redirects WHERE source_event_id='${driftEventId}';`);
+      await poll(
+        () =>
+          count(
+            bookingSql(
+              `SELECT count(*) FROM booking_station_redirects WHERE source_event_id='${transientEventId}' AND duplicate_station_id='${ids.graphC}' AND canonical_station_id='${ids.graphA}'`,
+            ),
+          ) === 1 &&
+          count(
+            bookingSql(
+              `SELECT count(*) FROM integration_inbox WHERE consumer_name='booking.station-merged' AND message_id='${transientEventId}'`,
+            ),
+          ) === 1,
+        'Broker retry did not commit the Station redirect and Inbox marker together',
+        90_000,
+      );
+      mark('station inbox atomic retry');
+    },
+  );
+
+  await scenario(
+    18,
+    'Direct PostgreSQL, Redis, and RabbitMQ assertions prove side effects',
+    async () => {
+      assert(
+        count(identitySql(`SELECT count(*) FROM users WHERE id::text LIKE '40000000-%'`)) >= 9,
+        'Identity deterministic seed missing',
+      );
+      assert(
         count(
           identitySql(
-            `SELECT count(*) FROM activity_logs WHERE source_event_id='${payload.eventId}'`,
+            'SELECT count(*) FROM (SELECT source_event_id FROM activity_logs WHERE source_event_id IS NOT NULL GROUP BY source_event_id HAVING count(*) > 1) duplicate_events',
           ),
-        ) === beforeAudits,
-      'Transport replay duplicated consumer side effects',
-    );
-  });
-
-  await scenario(17, 'Cycle-poison Station event rolls back Booking marker and relink', async () => {
-    const cycleEventId = id(30_903);
-    await publish(
-      'trip.station.merged',
-      stationMergedPayload(cycleEventId, ids.graphA, ids.graphC),
-    );
-    await sleep(2_000);
-    assert(
-      count(
-        bookingSql(
-          `SELECT count(*) FROM booking_station_redirects WHERE source_event_id='${cycleEventId}' OR duplicate_station_id='${ids.graphC}'`,
-        ),
-      ) === 0,
-      'Cycle-poison event persisted a Booking redirect marker',
-    );
-  });
-
-  await scenario(18, 'Direct PostgreSQL, Redis, and RabbitMQ assertions prove side effects', async () => {
-    assert(
-      count(identitySql(`SELECT count(*) FROM users WHERE id::text LIKE '40000000-%'`)) >= 9,
-      'Identity deterministic seed missing',
-    );
-    assert(
-      count(
-        identitySql(
-          'SELECT count(*) FROM (SELECT source_event_id FROM activity_logs WHERE source_event_id IS NOT NULL GROUP BY source_event_id HAVING count(*) > 1) duplicate_events',
-        ),
-      ) === 0,
-      'Identity audit source_event_id duplicated',
-    );
-    assert(
-      count(
-        bookingSql(
-          'SELECT count(*) FROM (SELECT source_event_id FROM booking_station_redirects GROUP BY source_event_id HAVING count(*) > 1) duplicate_events',
-        ),
-      ) === 0,
-      'Booking redirect source_event_id duplicated',
-    );
-    assert(
-      count(
-        tripSql(
-          "SELECT count(*) FROM outbox_events WHERE event_type IN ('trip.station.normalized','trip.station.merged') AND status='PUBLISHED'",
-        ),
-      ) >= 2,
-      'Trip Outbox publish proof missing',
-    );
-    const redisKeys = redis('--scan', '--pattern', '*:idem:v2:response:*')
-      .split(/\r?\n/)
-      .filter(Boolean);
-    assert(redisKeys.length >= 3, 'Redis idempotency response keys missing');
-    for (const key of redisKeys) {
-      assert(Number(redis('TTL', key)) > 0, `Redis key has no TTL: ${key}`);
-    }
-    const exchanges = run('docker', [
-      'exec',
-      containers.rabbitmq,
-      'rabbitmqctl',
-      'list_exchanges',
-      '--quiet',
-      'name',
-      'type',
-    ]);
-    assert(exchanges.includes('vietride.events') && exchanges.includes('topic'), 'Rabbit exchange missing');
-    assert(rabbitQueues().includes('booking.station-merged'), 'Booking Station consumer queue missing');
-    mark('database assertions');
-  });
+        ) === 0,
+        'Identity audit source_event_id duplicated',
+      );
+      assert(
+        count(
+          bookingSql(
+            'SELECT count(*) FROM (SELECT source_event_id FROM booking_station_redirects GROUP BY source_event_id HAVING count(*) > 1) duplicate_events',
+          ),
+        ) === 0,
+        'Booking redirect source_event_id duplicated',
+      );
+      assert(
+        count(
+          tripSql(
+            "SELECT count(*) FROM outbox_events WHERE event_type IN ('trip.station.normalized','trip.station.merged') AND status='PUBLISHED'",
+          ),
+        ) >= 2,
+        'Trip Outbox publish proof missing',
+      );
+      const redisKeys = redis('--scan', '--pattern', '*:idem:v2:response:*')
+        .split(/\r?\n/)
+        .filter(Boolean);
+      assert(redisKeys.length >= 3, 'Redis idempotency response keys missing');
+      for (const key of redisKeys) {
+        assert(Number(redis('TTL', key)) > 0, `Redis key has no TTL: ${key}`);
+      }
+      const exchanges = run('docker', [
+        'exec',
+        containers.rabbitmq,
+        'rabbitmqctl',
+        'list_exchanges',
+        '--quiet',
+        'name',
+        'type',
+      ]);
+      assert(
+        exchanges.includes('vietride.events') && exchanges.includes('topic'),
+        'Rabbit exchange missing',
+      );
+      assert(
+        rabbitQueues().includes('booking.station-merged'),
+        'Booking Station consumer queue missing',
+      );
+      mark('database assertions');
+    },
+  );
 
   await scenario(19, 'Day 40 EF migrations rollback and reapply cleanly', async () => {
     await runMigrationGate();
@@ -1777,7 +2055,9 @@ async function runAcceptance() {
       'booking relink',
       'booking station race invariants',
       'audit consumers',
+      'station inbox atomic retry',
       'platform report',
+      'platform report reconciliation',
       'signed/overflow report',
       'upstream failure',
       'database assertions',
@@ -1812,7 +2092,9 @@ try {
 } finally {
   if (!useDev) {
     try {
-      composeRun(['--profile', 'infra', '--profile', 'app', 'down', '-v', '--remove-orphans']);
+      if (stackOwned) {
+        composeRun(['--profile', 'infra', '--profile', 'app', 'down', '-v', '--remove-orphans']);
+      }
       mark('cleanup');
     } catch (error) {
       failed ??= error;

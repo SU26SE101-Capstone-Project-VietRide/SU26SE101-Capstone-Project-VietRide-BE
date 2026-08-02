@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace VietRide.Trip.Application.Abstractions.ExternalClients;
 
 public interface IParcelImpactClient
@@ -12,5 +14,8 @@ public sealed record TripParcelCancellationImpactProjection(
     Guid TripId,
     IReadOnlyList<TripParcelCancellationImpactProjection.AffectedParcel> AffectedParcels)
 {
-    public sealed record AffectedParcel(Guid ParcelId, string Status, long RefundAmount);
+    public sealed record AffectedParcel(
+        Guid ParcelId,
+        string Status,
+        [property: JsonPropertyName("refundAmountVnd")] long RefundAmount);
 }

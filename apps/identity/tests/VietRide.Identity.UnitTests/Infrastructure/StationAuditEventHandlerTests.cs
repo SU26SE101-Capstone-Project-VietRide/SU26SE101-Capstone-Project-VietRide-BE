@@ -5,7 +5,6 @@ using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure.Messaging;
-using VietRide.Shared.Application.UnitOfWork;
 
 namespace VietRide.Identity.UnitTests.Infrastructure;
 
@@ -15,12 +14,11 @@ public sealed class StationAuditEventHandlerTests
     public async Task Merge_MapsActorActionSourceAndAuditColumns_WithoutMetadataOrPiiLogs()
     {
         var activityLogs = CreateActivityLogRepository();
-        var unitOfWork = Substitute.For<IUnitOfWork>();
         var logger = Substitute.For<ILogger<StationMergedIntegrationEventHandler>>();
         var integrationEvent = CreateMergedEvent(
             ipAddress: "203.0.113.10",
             userAgent: "private-user-agent");
-        var handler = new StationMergedIntegrationEventHandler(activityLogs, unitOfWork, logger);
+        var handler = new StationMergedIntegrationEventHandler(activityLogs, logger);
 
         await handler.HandleAsync(integrationEvent, CancellationToken.None);
 
@@ -33,8 +31,6 @@ public sealed class StationAuditEventHandlerTests
                 && log.UserAgent == integrationEvent.UserAgent
                 && log.Metadata == null),
             Arg.Any<CancellationToken>());
-        await unitOfWork.Received(1).BeginTransactionAsync(Arg.Any<CancellationToken>());
-        await unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
         LoggerArguments(logger).Should().NotContain(argument =>
             argument.Contains("203.0.113.10", StringComparison.Ordinal)
             || argument.Contains("private-user-agent", StringComparison.Ordinal)
@@ -45,10 +41,9 @@ public sealed class StationAuditEventHandlerTests
     public async Task Normalize_MapsActorActionSourceAndAuditColumns()
     {
         var activityLogs = CreateActivityLogRepository();
-        var unitOfWork = Substitute.For<IUnitOfWork>();
         var logger = Substitute.For<ILogger<StationNormalizedIntegrationEventHandler>>();
         var integrationEvent = CreateNormalizedEvent();
-        var handler = new StationNormalizedIntegrationEventHandler(activityLogs, unitOfWork, logger);
+        var handler = new StationNormalizedIntegrationEventHandler(activityLogs, logger);
 
         await handler.HandleAsync(integrationEvent, CancellationToken.None);
 
@@ -61,63 +56,52 @@ public sealed class StationAuditEventHandlerTests
                 && log.UserAgent == integrationEvent.UserAgent
                 && log.Metadata == null),
             Arg.Any<CancellationToken>());
-        await unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task Replay_CommitsNoOpAndDoesNotAddSecondLog()
+    public async Task Replay_IsNoOpAndDoesNotAddSecondLog()
     {
         var activityLogs = Substitute.For<IActivityLogRepository>();
         activityLogs.ExistsBySourceEventIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(true);
-        var unitOfWork = Substitute.For<IUnitOfWork>();
         var integrationEvent = CreateNormalizedEvent();
         var handler = new StationNormalizedIntegrationEventHandler(
             activityLogs,
-            unitOfWork,
             Substitute.For<ILogger<StationNormalizedIntegrationEventHandler>>());
 
         await handler.HandleAsync(integrationEvent, CancellationToken.None);
 
         await activityLogs.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
-        await unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
-        await unitOfWork.DidNotReceiveWithAnyArgs().RollbackAsync(default);
     }
 
     [Fact]
     public async Task MissingActor_ThrowsBeforeTransactionAndDoesNotCreateMarker()
     {
         var activityLogs = CreateActivityLogRepository();
-        var unitOfWork = Substitute.For<IUnitOfWork>();
         var invalidEvent = CreateMergedEvent(actorUserId: Guid.Empty);
         var handler = new StationMergedIntegrationEventHandler(
             activityLogs,
-            unitOfWork,
             Substitute.For<ILogger<StationMergedIntegrationEventHandler>>());
 
         var act = () => handler.HandleAsync(invalidEvent, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
         await activityLogs.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
-        await unitOfWork.DidNotReceiveWithAnyArgs().BeginTransactionAsync(default);
     }
 
     [Fact]
     public async Task SnapshotIdMismatch_ThrowsBeforeTransactionAndDoesNotCreateMarker()
     {
         var activityLogs = CreateActivityLogRepository();
-        var unitOfWork = Substitute.For<IUnitOfWork>();
         var invalidEvent = CreateNormalizedEvent(snapshotStationId: Guid.NewGuid());
         var handler = new StationNormalizedIntegrationEventHandler(
             activityLogs,
-            unitOfWork,
             Substitute.For<ILogger<StationNormalizedIntegrationEventHandler>>());
 
         var act = () => handler.HandleAsync(invalidEvent, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
         await activityLogs.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
-        await unitOfWork.DidNotReceiveWithAnyArgs().BeginTransactionAsync(default);
     }
 
     private static IActivityLogRepository CreateActivityLogRepository()
