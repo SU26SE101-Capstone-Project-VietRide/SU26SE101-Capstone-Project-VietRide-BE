@@ -17,6 +17,7 @@ using Npgsql;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure;
+using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Persistence;
 using VietRide.Shared.Web.Authentication;
 
@@ -268,6 +269,142 @@ public sealed class InternalOperatorsEndpointsTests
         }
     }
 
+    [Fact]
+    public async Task PendingPaymentEntitlement_IncrementUsage_UsesActivePlanInsteadOfLowerTargetPlan()
+    {
+        var factory = new DbBackedInternalOperatorsFactory();
+        try
+        {
+            await factory.InitializeAsync();
+            await factory.SeedOperatorSubscriptionAsync(
+                OperatorId,
+                currentDrivers: 3,
+                subscriptionStatus: SubscriptionStatus.PENDING_PAYMENT,
+                targetPlanMaxDrivers: 0);
+            using var client = factory.CreateIdempotentClient();
+            AddInternalJwt(client);
+
+            var response = await client.PostAsJsonAsync(
+                $"/internal/v1/operators/{OperatorId}/usage/increment",
+                new { resource = "DRIVERS", delta = 1 });
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            doc.RootElement.GetProperty("status").GetString().Should().Be(SubscriptionStatus.PENDING_PAYMENT.ToString());
+            doc.RootElement.GetProperty("plan").GetProperty("planId").GetGuid().Should().Be(SubscriptionPlan.StarterPlanId);
+            doc.RootElement.GetProperty("usage").GetProperty("currentDrivers").GetInt32().Should().Be(4);
+        }
+        finally
+        {
+            await factory.DropDatabaseAsync();
+            factory.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task PendingPaymentEntitlement_IncrementUsage_EnforcesActivePlanLimitInsteadOfHigherTargetPlan()
+    {
+        var factory = new DbBackedInternalOperatorsFactory();
+        try
+        {
+            await factory.InitializeAsync();
+            await factory.SeedOperatorSubscriptionAsync(
+                OperatorId,
+                currentDrivers: 5,
+                subscriptionStatus: SubscriptionStatus.PENDING_PAYMENT,
+                targetPlanMaxDrivers: 50);
+            using var client = factory.CreateIdempotentClient();
+            AddInternalJwt(client);
+
+            var response = await client.PostAsJsonAsync(
+                $"/internal/v1/operators/{OperatorId}/usage/increment",
+                new { resource = "DRIVERS", delta = 1 });
+
+            await AssertErrorCode(response, HttpStatusCode.UnprocessableEntity, "SUBSCRIPTION_LIMIT_EXCEEDED");
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var subscription = await db.OperatorSubscriptions.SingleAsync(s => s.OperatorId == OperatorId);
+            subscription.CurrentDrivers.Should().Be(5);
+        }
+        finally
+        {
+            await factory.DropDatabaseAsync();
+            factory.Dispose();
+        }
+    }
+
+    [Theory]
+    [InlineData(SubscriptionStatus.EXPIRED, HttpStatusCode.PaymentRequired, "SUBSCRIPTION_EXPIRED")]
+    [InlineData(SubscriptionStatus.CANCELLED, HttpStatusCode.UnprocessableEntity, "VALIDATION_ERROR")]
+    public async Task PendingPaymentEntitlement_TerminalSubscription_DoesNotIncrementUsage(
+        SubscriptionStatus status,
+        HttpStatusCode expectedStatus,
+        string expectedCode)
+    {
+        var factory = new DbBackedInternalOperatorsFactory();
+        try
+        {
+            await factory.InitializeAsync();
+            await factory.SeedOperatorSubscriptionAsync(OperatorId, subscriptionStatus: status);
+            using var client = factory.CreateIdempotentClient();
+            AddInternalJwt(client);
+
+            var response = await client.PostAsJsonAsync(
+                $"/internal/v1/operators/{OperatorId}/usage/increment",
+                new { resource = "DRIVERS", delta = 1 });
+
+            await AssertErrorCode(response, expectedStatus, expectedCode);
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var subscription = await db.OperatorSubscriptions.SingleAsync(s => s.OperatorId == OperatorId);
+            subscription.CurrentDrivers.Should().Be(0);
+        }
+        finally
+        {
+            await factory.DropDatabaseAsync();
+            factory.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task PendingPaymentEntitlement_ConcurrentRemainingCapacityOne_AllowsExactlyOneIncrement()
+    {
+        var factory = new DbBackedInternalOperatorsFactory();
+        try
+        {
+            await factory.InitializeAsync();
+            await factory.SeedOperatorSubscriptionAsync(
+                OperatorId,
+                currentDrivers: 4,
+                subscriptionStatus: SubscriptionStatus.PENDING_PAYMENT,
+                targetPlanMaxDrivers: 50);
+            using var clientOne = factory.CreateIdempotentClient();
+            using var clientTwo = factory.CreateIdempotentClient();
+            AddInternalJwt(clientOne);
+            AddInternalJwt(clientTwo);
+
+            var responses = await Task.WhenAll(
+                clientOne.PostAsJsonAsync(
+                    $"/internal/v1/operators/{OperatorId}/usage/increment",
+                    new { resource = "DRIVERS", delta = 1 }),
+                clientTwo.PostAsJsonAsync(
+                    $"/internal/v1/operators/{OperatorId}/usage/increment",
+                    new { resource = "DRIVERS", delta = 1 }));
+
+            responses.Count(response => response.StatusCode == HttpStatusCode.OK).Should().Be(1);
+            responses.Count(response => response.StatusCode == HttpStatusCode.UnprocessableEntity).Should().Be(1);
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var subscription = await db.OperatorSubscriptions.SingleAsync(s => s.OperatorId == OperatorId);
+            subscription.CurrentDrivers.Should().Be(5);
+        }
+        finally
+        {
+            await factory.DropDatabaseAsync();
+            factory.Dispose();
+        }
+    }
+
     private static void AddInternalJwt(HttpClient client)
     {
         client.DefaultRequestHeaders.TryAddWithoutValidation(
@@ -363,7 +500,8 @@ public sealed class InternalOperatorsEndpointsTests
             int currentOperatorUsers = 0,
             int currentRoutes = 0,
             int currentTripsThisMonth = 0,
-            SubscriptionStatus subscriptionStatus = SubscriptionStatus.ACTIVE)
+            SubscriptionStatus subscriptionStatus = SubscriptionStatus.ACTIVE,
+            int? targetPlanMaxDrivers = null)
         {
             await using var scope = Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -388,13 +526,50 @@ public sealed class InternalOperatorsEndpointsTests
             IncrementIfPositive(subscription, SubscriptionUsageResource.OPERATOR_USERS, currentOperatorUsers);
             IncrementIfPositive(subscription, SubscriptionUsageResource.ROUTES, currentRoutes);
             IncrementIfPositive(subscription, SubscriptionUsageResource.TRIPS_THIS_MONTH, currentTripsThisMonth);
-            if (subscriptionStatus == SubscriptionStatus.EXPIRED)
+            if (subscriptionStatus == SubscriptionStatus.PENDING_PAYMENT)
+            {
+                subscription.MoveToPendingPayment(SubscriptionPaymentMethod.VNPAY);
+            }
+            else if (subscriptionStatus == SubscriptionStatus.EXPIRED)
             {
                 subscription.MarkExpired(Now.AddDays(31));
+            }
+            else if (subscriptionStatus == SubscriptionStatus.CANCELLED)
+            {
+                SetProperty(subscription, nameof(OperatorSubscription.Status), SubscriptionStatus.CANCELLED);
             }
 
             await db.Operators.AddAsync(operatorEntity);
             await db.OperatorSubscriptions.AddAsync(subscription);
+            if (targetPlanMaxDrivers.HasValue)
+            {
+                var targetPlan = SubscriptionPlan.Create(
+                    "Pending target",
+                    "Must not grant entitlement before payment succeeds.",
+                    Money.FromRaw(500_000),
+                    Money.FromRaw(5_000_000),
+                    maxVehicles: 50,
+                    maxDrivers: targetPlanMaxDrivers.Value,
+                    maxAssistants: 50,
+                    maxOperatorUsers: 50,
+                    maxRoutes: 50,
+                    maxTripsPerMonth: 1_000,
+                    enableParcel: true,
+                    enableShuttle: true,
+                    enableRag: true);
+                var attempt = SubscriptionUpgradeAttempt.Create(
+                    subscription.Id,
+                    operatorId,
+                    targetPlan.Id,
+                    SubscriptionBillingPeriod.MONTHLY,
+                    Money.FromRaw(500_000),
+                    $"pending-entitlement-{Guid.NewGuid():N}",
+                    Now,
+                    Now.AddMinutes(15));
+                attempt.BindPendingPayment(Guid.NewGuid());
+                await db.SubscriptionPlans.AddAsync(targetPlan);
+                await db.SubscriptionUpgradeAttempts.AddAsync(attempt);
+            }
             await db.SaveChangesAsync();
         }
 

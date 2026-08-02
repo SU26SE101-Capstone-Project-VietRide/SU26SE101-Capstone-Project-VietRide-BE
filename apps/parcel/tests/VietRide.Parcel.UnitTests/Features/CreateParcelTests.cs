@@ -88,6 +88,76 @@ public sealed class CreateParcelTests
     }
 
     [Fact]
+    public async Task Create_WhenParcelEntitlementIsBlocked_PreservesCanonicalErrorBeforeSideEffects()
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
+            userRole: "PASSENGER",
+            userStatus: "ACTIVE",
+            tripStatus: "SCHEDULED",
+            hasBooking: false,
+            hasFare: true);
+        identity.GetSubscriptionWriteEligibilityAsync(
+                OperatorId,
+                requireParcelModule: true,
+                Arg.Any<CancellationToken>())
+            .Returns(SubscriptionWriteEligibilityOutcome.Rejected(
+                403,
+                "SUBSCRIPTION_MODULE_DISABLED",
+                "Parcel module is disabled for the operator subscription."));
+        var payment = CreatePaymentClient();
+        var outbox = Outbox();
+        var stats = Stats();
+        var handler = CreateHandler(
+            identity,
+            booking,
+            trip,
+            parcelRepo,
+            fareRepo,
+            uow,
+            payment,
+            outbox,
+            stats);
+
+        var exception = await Assert.ThrowsAsync<SubscriptionWriteBlockedException>(() =>
+            handler.Handle(BuildCommand(), CancellationToken.None));
+
+        exception.StatusCode.Should().Be(403);
+        exception.ErrorCode.Should().Be("SUBSCRIPTION_MODULE_DISABLED");
+        await identity.Received(1).GetSubscriptionWriteEligibilityAsync(
+            OperatorId,
+            requireParcelModule: true,
+            Arg.Any<CancellationToken>());
+        await parcelRepo.DidNotReceive().AddAsync(
+            Arg.Any<ParcelEntity>(),
+            Arg.Any<CancellationToken>());
+        await payment.DidNotReceive().ChargeParcelPaymentAsync(
+            Arg.Any<string>(),
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            Arg.Any<long>(),
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>(),
+            Arg.Any<PaymentContextSnapshot?>());
+        await outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+        await stats.DidNotReceive().UpsertIncrementAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<DateOnly>(),
+            Arg.Any<int>(),
+            Arg.Any<int>(),
+            Arg.Any<int>(),
+            Arg.Any<int>(),
+            Arg.Any<int>(),
+            Arg.Any<long>(),
+            Arg.Any<long>(),
+            Arg.Any<CancellationToken>());
+        await uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Create_ParcelOnly_NormalSize_ReturnsPendingPayment()
     {
         var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(

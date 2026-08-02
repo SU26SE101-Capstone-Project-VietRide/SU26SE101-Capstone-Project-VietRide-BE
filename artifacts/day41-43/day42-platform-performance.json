@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-30T09:06:24.318Z",
+  "generatedAt": "2026-08-02T05:19:49.503Z",
   "fixture": {
     "operators": 20,
     "bookings": 100000,
@@ -7,18 +7,18 @@
     "parcels": 50000,
     "trips": 10000
   },
-  "coldDurationMs": 106,
-  "warmDurationMs": 26,
+  "coldDurationMs": 126,
+  "warmDurationMs": 21,
   "threeMonthRange": {
-    "from": "2026-04-30T09:06:24Z",
-    "to": "2026-07-31T09:06:24Z",
+    "from": "2026-05-03T05:19:49Z",
+    "to": "2026-08-03T05:19:49Z",
     "timezone": "UTC"
   },
-  "threeMonthDurationMs": 70,
+  "threeMonthDurationMs": 69,
   "threeMonthStatus": 200,
   "sampledMemoryBytes": {
-    "booking": 180145357,
-    "payment": 152672666,
-    "parcel": 120586240
+    "booking": 185283379,
+    "payment": 148897792,
+    "parcel": 124361114
   }
 }

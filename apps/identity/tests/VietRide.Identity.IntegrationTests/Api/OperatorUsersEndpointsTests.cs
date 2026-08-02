@@ -333,6 +333,174 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
     }
 
     [Fact]
+    public async Task PendingPaymentEntitlement_CreateOperatorUser_UsesActivePlanInsteadOfLowerTargetPlan()
+    {
+        var dbFactory = new DbBackedOperatorUsersFactory();
+
+        try
+        {
+            await dbFactory.InitializeAsync();
+            await dbFactory.SeedCreateOperatorUserAsync(
+                OperatorId,
+                OperatorAdminId,
+                currentDrivers: 3,
+                subscriptionStatus: SubscriptionStatus.PENDING_PAYMENT,
+                targetPlanMaxDrivers: 0);
+            using var client = dbFactory.CreateIdempotentClient();
+            using var request = CreateCreateRequest(
+                UserRole.OPERATOR_ADMIN.ToString(),
+                OperatorId,
+                UniqueEmail("pending-active-plan"),
+                "+84906661001",
+                "Pending Driver",
+                UserRole.DRIVER.ToString());
+
+            var response = await client.SendAsync(request);
+
+            response.StatusCode.Should().Be(HttpStatusCode.Created);
+            await using var scope = dbFactory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var subscription = await db.OperatorSubscriptions.SingleAsync(s => s.OperatorId == OperatorId);
+            subscription.Status.Should().Be(SubscriptionStatus.PENDING_PAYMENT);
+            subscription.PlanId.Should().Be(SubscriptionPlan.StarterPlanId);
+            subscription.CurrentDrivers.Should().Be(4);
+            (await db.Users.CountAsync(user => user.OperatorId == OperatorId && user.Role == UserRole.DRIVER)).Should().Be(1);
+        }
+        finally
+        {
+            dbFactory.Dispose();
+            await dbFactory.DropDatabaseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task PendingPaymentEntitlement_CreateOperatorUser_EnforcesActivePlanLimitInsteadOfHigherTargetPlan()
+    {
+        var dbFactory = new DbBackedOperatorUsersFactory();
+
+        try
+        {
+            await dbFactory.InitializeAsync();
+            await dbFactory.SeedCreateOperatorUserAsync(
+                OperatorId,
+                OperatorAdminId,
+                currentDrivers: 5,
+                subscriptionStatus: SubscriptionStatus.PENDING_PAYMENT,
+                targetPlanMaxDrivers: 50);
+            using var client = dbFactory.CreateIdempotentClient();
+            using var request = CreateCreateRequest(
+                UserRole.OPERATOR_ADMIN.ToString(),
+                OperatorId,
+                UniqueEmail("pending-limit"),
+                "+84906661002",
+                "Pending Limit Driver",
+                UserRole.DRIVER.ToString());
+
+            var response = await client.SendAsync(request);
+
+            await AssertErrorCode(response, HttpStatusCode.UnprocessableEntity, "SUBSCRIPTION_LIMIT_EXCEEDED");
+            await using var scope = dbFactory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var subscription = await db.OperatorSubscriptions.SingleAsync(s => s.OperatorId == OperatorId);
+            subscription.CurrentDrivers.Should().Be(5);
+            (await db.Users.CountAsync(user => user.OperatorId == OperatorId && user.Role == UserRole.DRIVER)).Should().Be(0);
+        }
+        finally
+        {
+            dbFactory.Dispose();
+            await dbFactory.DropDatabaseAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData(SubscriptionStatus.EXPIRED)]
+    [InlineData(SubscriptionStatus.CANCELLED)]
+    public async Task PendingPaymentEntitlement_CreateOperatorUser_TerminalSubscriptionIsDenied(
+        SubscriptionStatus status)
+    {
+        var dbFactory = new DbBackedOperatorUsersFactory();
+
+        try
+        {
+            await dbFactory.InitializeAsync();
+            await dbFactory.SeedCreateOperatorUserAsync(
+                OperatorId,
+                OperatorAdminId,
+                subscriptionStatus: status);
+            using var client = dbFactory.CreateIdempotentClient();
+            using var request = CreateCreateRequest(
+                UserRole.OPERATOR_ADMIN.ToString(),
+                OperatorId,
+                UniqueEmail($"terminal-{status.ToString().ToLowerInvariant()}"),
+                status == SubscriptionStatus.EXPIRED ? "+84906661003" : "+84906661004",
+                "Terminal Subscription Driver",
+                UserRole.DRIVER.ToString());
+
+            var response = await client.SendAsync(request);
+
+            await AssertErrorCode(response, HttpStatusCode.UnprocessableEntity, "SUBSCRIPTION_LIMIT_EXCEEDED");
+            await using var scope = dbFactory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var subscription = await db.OperatorSubscriptions.SingleAsync(s => s.OperatorId == OperatorId);
+            subscription.CurrentDrivers.Should().Be(0);
+            (await db.Users.CountAsync(user => user.OperatorId == OperatorId && user.Role == UserRole.DRIVER)).Should().Be(0);
+        }
+        finally
+        {
+            dbFactory.Dispose();
+            await dbFactory.DropDatabaseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task PendingPaymentEntitlement_CreateOperatorUser_ConcurrentRemainingCapacityOneAllowsOneWinner()
+    {
+        var dbFactory = new DbBackedOperatorUsersFactory();
+
+        try
+        {
+            await dbFactory.InitializeAsync();
+            await dbFactory.SeedCreateOperatorUserAsync(
+                OperatorId,
+                OperatorAdminId,
+                currentDrivers: 4,
+                subscriptionStatus: SubscriptionStatus.PENDING_PAYMENT,
+                targetPlanMaxDrivers: 50);
+            using var client = dbFactory.CreateIdempotentClient();
+            using var firstRequest = CreateCreateRequest(
+                UserRole.OPERATOR_ADMIN.ToString(),
+                OperatorId,
+                UniqueEmail("pending-concurrent-a"),
+                "+84906661005",
+                "Pending Concurrent A",
+                UserRole.DRIVER.ToString());
+            using var secondRequest = CreateCreateRequest(
+                UserRole.OPERATOR_ADMIN.ToString(),
+                OperatorId,
+                UniqueEmail("pending-concurrent-b"),
+                "+84906661006",
+                "Pending Concurrent B",
+                UserRole.DRIVER.ToString());
+
+            var responses = await Task.WhenAll(client.SendAsync(firstRequest), client.SendAsync(secondRequest));
+
+            responses.Should().ContainSingle(response => response.StatusCode == HttpStatusCode.Created);
+            var failed = responses.Should().ContainSingle(response => response.StatusCode == HttpStatusCode.UnprocessableEntity).Subject;
+            await AssertErrorCode(failed, HttpStatusCode.UnprocessableEntity, "SUBSCRIPTION_LIMIT_EXCEEDED");
+            await using var scope = dbFactory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var subscription = await db.OperatorSubscriptions.SingleAsync(s => s.OperatorId == OperatorId);
+            subscription.CurrentDrivers.Should().Be(5);
+            (await db.Users.CountAsync(user => user.OperatorId == OperatorId && user.Role == UserRole.DRIVER)).Should().Be(1);
+        }
+        finally
+        {
+            dbFactory.Dispose();
+            await dbFactory.DropDatabaseAsync();
+        }
+    }
+
+    [Fact]
     public async Task ResendInitialPassword_HappyPath_UsesRealHandlerDbTransaction_AndPersistsTokenAndActivityLog()
     {
         var dbFactory = new DbBackedOperatorUsersFactory();
@@ -833,7 +1001,9 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
             int currentDrivers = 0,
             int currentAssistants = 0,
             int currentOperatorUsers = 1,
-            OperatorRegistrationStatus operatorStatus = OperatorRegistrationStatus.APPROVED)
+            OperatorRegistrationStatus operatorStatus = OperatorRegistrationStatus.APPROVED,
+            SubscriptionStatus subscriptionStatus = SubscriptionStatus.ACTIVE,
+            int? targetPlanMaxDrivers = null)
         {
             await using var scope = Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -855,10 +1025,52 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
                 subscription.IncrementUsage(SubscriptionUsageResource.ASSISTANTS, currentAssistants);
             if (currentOperatorUsers > 0)
                 subscription.IncrementUsage(SubscriptionUsageResource.OPERATOR_USERS, currentOperatorUsers);
+            if (subscriptionStatus == SubscriptionStatus.PENDING_PAYMENT)
+            {
+                subscription.MoveToPendingPayment(SubscriptionPaymentMethod.VNPAY);
+            }
+            else if (subscriptionStatus == SubscriptionStatus.EXPIRED)
+            {
+                subscription.MarkExpired(DateTimeOffset.UtcNow.AddDays(31));
+            }
+            else if (subscriptionStatus == SubscriptionStatus.CANCELLED)
+            {
+                SetPrivateProperty(subscription, nameof(OperatorSubscription.Status), SubscriptionStatus.CANCELLED);
+            }
 
             await db.Operators.AddAsync(operatorEntity);
             await db.Users.AddAsync(adminUser);
             await db.OperatorSubscriptions.AddAsync(subscription);
+            if (targetPlanMaxDrivers.HasValue)
+            {
+                var now = DateTimeOffset.UtcNow;
+                var targetPlan = SubscriptionPlan.Create(
+                    "Pending target",
+                    "Must not grant entitlement before payment succeeds.",
+                    Money.FromRaw(500_000),
+                    Money.FromRaw(5_000_000),
+                    maxVehicles: 50,
+                    maxDrivers: targetPlanMaxDrivers.Value,
+                    maxAssistants: 50,
+                    maxOperatorUsers: 50,
+                    maxRoutes: 50,
+                    maxTripsPerMonth: 1_000,
+                    enableParcel: true,
+                    enableShuttle: true,
+                    enableRag: true);
+                var attempt = SubscriptionUpgradeAttempt.Create(
+                    subscription.Id,
+                    operatorId,
+                    targetPlan.Id,
+                    SubscriptionBillingPeriod.MONTHLY,
+                    Money.FromRaw(500_000),
+                    $"pending-entitlement-{Guid.NewGuid():N}",
+                    now,
+                    now.AddMinutes(15));
+                attempt.BindPendingPayment(Guid.NewGuid());
+                await db.SubscriptionPlans.AddAsync(targetPlan);
+                await db.SubscriptionUpgradeAttempts.AddAsync(attempt);
+            }
             await db.SaveChangesAsync();
         }
 

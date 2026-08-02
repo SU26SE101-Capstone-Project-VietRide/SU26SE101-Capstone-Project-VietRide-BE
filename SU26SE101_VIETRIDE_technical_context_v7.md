@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-07-30 (Days 31/32/35 contract reconciliation)
+> **Cập nhật:** 2026-08-01 (Days 30–43 repair contract reconciliation)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -503,7 +503,7 @@ suspend phát Outbox revoke request để Identity gọi Firebase `RevokeRefresh
 - **Bấm "Đã đến [stop name]"** khi xe dừng tại mỗi điểm → set `TripStop.actualArrivalTime` + `TripStop.status = ARRIVED`. Nút chỉ enable khi Trip = IN_PROGRESS. Dùng để tính refund khoảng cách cho DISRUPTED trip và cập nhật trạng thái dừng trên app
 - Xem danh sách hàng ký gửi: cần nhận lên và cần giao tại điểm nào
 - Xác nhận hàng đã nhận lên xe (LOADED)
-- Xác nhận **dỡ hàng tại bến đích** (IN_TRANSIT → UNLOADED): yêu cầu QR scan parcel hoặc explicit confirm. Chỉ enable khi TripStop.status = ARRIVED tại destination stop
+- Xác nhận **dỡ hàng tại điểm trả** (IN_TRANSIT → UNLOADED): yêu cầu QR scan parcel hoặc explicit confirm và đọc synchronous Trip snapshot. Nếu `dropoffStopId != null`, TripStop khớp ID phải tồn tại, có `allowDropoff = true` và `status = ARRIVED`; nếu `dropoffStopId = null` (trả tại terminal), `destinationArrivedAt` phải non-null. Không suy diễn destination arrival từ stop trung gian cuối.
 - Xác nhận đã giao hàng (UNLOADED → DELIVERED_PENDING_CONFIRM) → trigger email xác nhận đến người nhận
 
 ### 4.3 Operator Web Dashboard
@@ -731,16 +731,12 @@ Cùng codebase NextJS với Operator Web, phân biệt qua role SYSTEM_ADMIN. Na
 
 **c.0) `maxTripsPerMonth` enforcement:**
 
-Counter `OperatorSubscription.currentTripsThisMonth` increment mỗi khi 1 Trip mới được tạo (manual hoặc auto-generate từ DriverSchedule). Hangfire reset counter về 0 vào ngày 1 hàng tháng 00:01 (`lastResetAt = now`).
+Counter `OperatorSubscription.currentTripsThisMonth` increment mỗi khi 1 Trip business mới được auto-generate từ DriverSchedule. Hangfire reset counter về 0 vào ngày 1 hàng tháng 00:01 (`lastResetAt = now`).
 
-**Manual create Trip vượt limit (operator click form trên dashboard):**
-- API `POST /v1/operator/trips` validate trước khi INSERT:
-  ```
-  IF currentTripsThisMonth >= maxTripsPerMonth AND Trip.source != VEHICLE_SUBSTITUTION:
-    return 409 SUBSCRIPTION_LIMIT_EXCEEDED
-      { detail: "Đã đạt giới hạn [N] chuyến/tháng của gói [planName]. Nâng cấp để tạo thêm." }
-  ```
-- Block thẳng — operator phải upgrade plan hoặc đợi tháng sau.
+**V1 scope boundary — manual Trip create deferred:** public API `POST /v1/operator/trips` không thuộc
+current v1, không được đăng ký trong API Contract hoặc Gateway inventory. Mọi reference `MANUAL`
+trong enum/schema chỉ giữ compatibility/readiness cho dữ liệu hiện hữu; không tạo callable write
+path. Quota check cho manual create được defer cùng endpoint, không được tự thêm controller/DTO.
 
 Khi `Trip.source = VEHICLE_SUBSTITUTION` (Trip_new tạo từ flow 6.12 sau Trip_old DISRUPTED), counter check `maxTripsPerMonth` được **SKIP**. Lý do: substitution là replacement trip để hoàn thành cam kết booking với passenger — không phải new business activity, không nên block. Counter `currentTripsThisMonth` cũng KHÔNG increment khi insert substitution trip (chỉ count "new business" trips). Thêm enum value `VEHICLE_SUBSTITUTION` vào `Trip.source` (cùng MANUAL, AUTO_FROM_SCHEDULE).
 
@@ -757,9 +753,9 @@ Khi `Trip.source = VEHICLE_SUBSTITUTION` (Trip_new tạo từ flow 6.12 sau Trip
       → INSERT Trip + increment currentTripsThisMonth atomically
   ```
 - Dashboard hiển thị banner "Đã skip [M] chuyến tự động trong tháng do giới hạn gói" với link "Nâng cấp gói".
-- Operator có thể manual create từng Trip cụ thể nếu cần (cùng error check), hoặc đợi sang tháng sau Hangfire re-run.
+- Operator phải đợi sang tháng sau để DriverSchedule generation chạy lại; manual Trip create không có trong current v1.
 
-**Entity bổ sung:** `TripGenerationSkipLog { id, operatorId, driverScheduleId UUID NOT NULL, skippedDate, reason enum SUBSCRIPTION_LIMIT_EXCEEDED|VEHICLE_CONFLICT|DRIVER_CONFLICT|OTHER, message text nullable, createdAt }` — thuộc Trip-Route-Vehicle Service. **`driverScheduleId` NOT NULL** vì entity này CHỈ dùng cho path Hangfire auto-generate from DriverSchedule. Manual create Trip vượt limit là synchronous error response (`SUBSCRIPTION_LIMIT_EXCEEDED`), không insert log. Dùng cho audit + dashboard reporting "đã skip X chuyến tháng này".
+**Entity bổ sung:** `TripGenerationSkipLog { id, operatorId, driverScheduleId UUID NOT NULL, skippedDate, reason enum SUBSCRIPTION_LIMIT_EXCEEDED|VEHICLE_CONFLICT|DRIVER_CONFLICT|OTHER, message text nullable, createdAt }` — thuộc Trip-Route-Vehicle Service. **`driverScheduleId` NOT NULL** vì entity này CHỈ dùng cho path Hangfire auto-generate from DriverSchedule. Dùng cho audit + dashboard reporting "đã skip X chuyến tháng này".
 
 **Entities:**
 
@@ -842,7 +838,9 @@ Operator chọn upgrade lên paid plan:
   → Tạo Payment session referenceType=SUBSCRIPTION, status=PENDING_REDIRECT
 
 Trong 15 phút:
-  - Login/read/write vẫn dùng limits và modules của activePlanId.
+  - Login/read/write, mọi quota allocation/increment và module gate (`enableParcel`, `enableShuttle`,
+    `enableRag`) vẫn dùng limits/modules của `activePlanId`; tuyệt đối không dùng target plan trước
+    khi Payment SUCCEEDED.
   - Cancel/failure/timeout chỉ đóng Payment session hiện tại; operator có thể retry bằng session mới,
     vnp_TxnRef mới; retry không kéo dài dueAt của attempt.
   - Payment SUCCEEDED trước dueAt phát `payment.subscription.payment_succeeded`; Identity đổi
@@ -869,7 +867,8 @@ Payment là nguồn sự thật duy nhất về trạng thái tiền. Return URL
 - Read actions (xem booking, xem báo cáo) vẫn cho phép — không block toàn diện để operator có data view khi đàm phán upgrade.
 - EXPIRED operator có doanh thu đã earned trước EXPIRED → `OperatorTripSettlement` cho các trip terminal trước EXPIRED vẫn được tạo và auto-settle bằng cách debit `PlatformWallet` + credit `OperatorWallet` theo cycle Monday weekly (Hangfire không filter theo subscription status). Operator nhận đủ tiền đã earned vào ví nội bộ. **Lý do:** earned revenue là tài sản của operator, không thể hold lại vì subscription expired (legal risk + bad faith). Xem 4.6.
 
-**Pre-expiry warning (thêm):** Hangfire `subscription-trial-expiring-warn` job (daily 09:00):
+**Pre-expiry warning (thêm):** Hangfire `subscription-trial-expiring-warn` job chạy daily 09:00 ICT
+(`SE Asia Standard Time`):
 ```
 SELECT OperatorSubscription WHERE status=ACTIVE
   AND expiresAt BETWEEN now + 2 days AND now + 4 days
@@ -1087,7 +1086,9 @@ netAmount = SUM(OperatorLedgerEntry.amount
 -- Late refunds sau khi đã SETTLED: KHÔNG re-settle; admin handle qua wallet ADJUSTMENT (debit)
 ```
 
-Nếu `netAmount <= 0` tại settle time (vd toàn bộ refund): SET settlement status = CANCELLED, không tạo WalletTransaction, không credit wallet. Log audit.
+Nếu `netAmount <= 0` tại settle time (vd toàn bộ refund): giữ đúng một settlement marker, SET
+settlement status = CANCELLED, không tạo WalletTransaction, không credit wallet và không publish
+settlement event. Log audit.
 
 **Flow tổng thể:**
 
@@ -1146,16 +1147,18 @@ Nếu `netAmount <= 0` tại settle time (vd toàn bộ refund): SET settlement 
 4. Trip terminal — settlement marker create:
    → Trip-Route-Vehicle publish `trip.trip.completed` HOẶC `trip.trip.disrupted`
    → Payment Service consume:
-       IF SUM(operator_ledger_entries.amount WHERE operator_id=X AND trip_id=Y) <= 0:
-         → SKIP — không tạo settlement marker (không có doanh thu net)
-       ELSE:
-         INSERT OperatorTripSettlement {
-           operatorId, tripId,
-           tripTerminalAt = Trip.completedAt or Trip.disruptedAt,
-           eligibleAt = tripTerminalAt + interval '7 days',
-           status = PENDING_HOLD,
-           netAmount = compute_now (snapshot — sẽ recompute khi settle để pickup late refunds)
-         }
+       INSERT/UPSERT đúng một OperatorTripSettlement {
+         operatorId, tripId,
+         tripTerminalAt = Trip.completedAt or Trip.disruptedAt,
+         eligibleAt = tripTerminalAt + interval '7 days',
+         status = PENDING_HOLD,
+         netAmount = compute_now (snapshot — sẽ recompute khi settle để pickup late refunds)
+       }
+       → Luôn có đúng một marker cho mỗi (operatorId, tripId).
+       → Nếu initial netAmount <= 0, terminal-event handler hoặc eligibility refresh có thể
+         terminalize marker ngay thành CANCELLED, không wallet movement/event.
+       → Nếu marker vẫn PENDING_HOLD/ELIGIBLE, manual/weekly settlement recompute ledger và có thể
+         chuyển marker thành CANCELLED theo cùng zero-net rule.
 
 5. Hangfire `trip-settlement-eligibility-flag` job (daily 02:00, Payment Service):
    SELECT OperatorTripSettlement WHERE status = PENDING_HOLD AND eligibleAt <= now
@@ -2697,7 +2700,7 @@ làm hỏng base history.
 
 **`estimatedPassengerLuggageKg` config hierarchy:**
 
-Giá trị `Trip.estimatedPassengerLuggageKg` được **tính snapshot khi Hangfire/manual generate Trip** theo công thức:
+Giá trị `Trip.estimatedPassengerLuggageKg` được **tính snapshot khi Hangfire generate Trip** theo công thức; legacy `MANUAL` rows giữ snapshot đã persist:
 
 ```
 kgPerSeat = VehicleType.estimatedPassengerLuggageKgPerSeat  // override per loại xe (nếu có)
@@ -2743,7 +2746,7 @@ VehicleType {
 Operator có thể tạo custom type (vd "Bus 45 chỗ VIP") nhưng KHÔNG xóa được 3 type system (`isSystemDefined=true` block delete).
 
 **Snapshot timing:**
-- Khi Hangfire `generate Trip từ DriverSchedule` HOẶC manual `POST /v1/operator/trips`:
+- Khi Hangfire generate Trip từ DriverSchedule:
   - Tính `Trip.estimatedPassengerLuggageKg` theo công thức trên + Vehicle gắn với Trip
   - Lưu vào Trip entity (snapshot immutable sau khi tạo Trip)
 - Nếu sau đó operator đổi `Operator.luggagePolicy` hoặc `VehicleType.estimatedPassengerLuggageKgPerSeat` → **Trip đã tồn tại giữ snapshot cũ**. Trip mới generate sau update dùng giá trị mới.
@@ -3063,9 +3066,10 @@ Khi Trip.status chuyển sang IN_PROGRESS (chuyến bắt đầu khởi hành):
 
 **IN_TRANSIT → UNLOADED trigger (dỡ hàng tại bến đích hoặc Stop dọc tuyến):**
 ```
-Precondition: TripStop.status = ARRIVED tại điểm xuống của parcel:
-  - Nếu Parcel.dropoffStopId IS NULL → check TripStop tại destination station (terminal)
-  - Nếu Parcel.dropoffStopId IS NOT NULL → check TripStop tại Stop đó
+Precondition được đọc đồng bộ qua raw `GET /internal/v1/trips/{tripId}` snapshot:
+  - Nếu Parcel.dropoffStopId IS NULL → require Trip.destinationArrivedAt non-null
+  - Nếu Parcel.dropoffStopId IS NOT NULL → require đúng TripStop có cùng stopId,
+    allowDropoff=true và status=ARRIVED
   (chỉ khi xe đã thực sự đến đúng stop mới enable nút dỡ hàng trong Driver App)
 
 Cơ chế chính — Assistant thao tác trong Driver App:
@@ -3082,6 +3086,10 @@ Operator override (exception handling only):
   → Hành động được ghi vào AuditLog: { userId: operatorId, action: PARCEL_UNLOAD_OVERRIDE,
       metadata: { parcelId, tripId, reason } }
   → Không dùng override cho bulk action — phải per-parcel
+
+Arrival Outbox facts không điều khiển Parcel state: `trip.stop.arrived` chỉ có Notification
+consumer; `trip.destination.arrived` không có Parcel consumer. Parcel không tạo arrival projection,
+không update từ event và không suy diễn destination từ stop trung gian cuối.
 ```
 
 **Parcel behavior khi Trip CANCELLED (SCHEDULED hoặc BOARDING):**
@@ -3929,7 +3937,7 @@ Edge case — đổi vehicleId trên DriverSchedule sau khi đã có Trip genera
 - Không cho phép 2 DriverSchedule active có cùng `driverId` + cùng `dayOfWeek` overlap + giờ chạy chồng chéo (validate khi tạo)
 - **Vehicle conflict check:** Không cho phép 2 DriverSchedule active có cùng `vehicleId` + cùng `dayOfWeek` + giờ chạy chồng chéo. Một xe không thể chạy 2 tuyến cùng lúc. Validate khi Operator tạo hoặc cập nhật DriverSchedule — return lỗi rõ ràng "Xe [licensePlate] đã được assign cho tuyến [route] vào [dayOfWeek] [time]".
 - Khi `isActive = false` hoặc qua `validUntil`: ngừng generate Trip mới, Trip đã generate vẫn giữ
-- Operator có thể manual tạo Trip bổ sung ngoài DriverSchedule (chuyến tăng cường lễ Tết)
+- Manual Trip create ngoài DriverSchedule được defer khỏi current v1; không expose `POST /v1/operator/trips`.
 
 > **Vehicle conflict khi Hangfire generate Trip:** Ngoài validate lúc tạo DriverSchedule, job generate Trip cũng check `vehicleId + departureDateTime` không trùng trước khi INSERT Trip mới — tránh race condition nếu 2 schedule tạo cùng lúc.
 
@@ -4673,7 +4681,7 @@ TripStatus:        SCHEDULED → BOARDING → IN_PROGRESS → COMPLETED
                        tài xế khẩn cấp. Trip.status=DISRUPTED, KHÔNG có BookingTransfer.
                        Auto-refund proportional theo distanceFromOriginKm (fallback: stop-order) — xem section 8 decisions.
                        cancellationReason=OPERATOR_DISRUPTED_IN_PROGRESS.
-                   Trip.source: MANUAL | AUTO_FROM_SCHEDULE | VEHICLE_SUBSTITUTION — phân biệt chuyến manual create vs Hangfire generate vs vehicle substitution. VEHICLE_SUBSTITUTION được set bởi 6.12 flow khi tạo Trip_new — exempt khỏi maxTripsPerMonth + không increment currentTripsThisMonth.
+                   Trip.source: MANUAL | AUTO_FROM_SCHEDULE | VEHICLE_SUBSTITUTION — `MANUAL` chỉ compatibility cho dữ liệu hiện hữu, không có create API trong current v1; `AUTO_FROM_SCHEDULE` là v1 business-create path; VEHICLE_SUBSTITUTION được set bởi 6.12 flow khi tạo Trip_new — exempt khỏi maxTripsPerMonth + không increment currentTripsThisMonth.
                    DELAYED là overlay flag (xe vẫn IN_PROGRESS nhưng trễ ETA), không phải status riêng
 
 BookingStatus:     PENDING_PAYMENT → CONFIRMED → COMPLETED
@@ -4843,8 +4851,8 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **Stop độc lập** | Một Stop có thể thuộc nhiều Route. Canonical disable là bodyless `DELETE /v1/operator/stops/{stopId}?replacedByStopId=` cho `OPERATOR_ADMIN`, required UUID-v4 `Idempotency-Key`; set `isActive=false`, giữ `deletedAt`, không xóa RouteStop, và publish `trip.stop.disabled`. `replacedByStopId` nullable self-FK phải active/cùng operator/non-self/cycle-free. Retained PATCH là details-update-only, không đổi `isActive`/`deletedAt` và không emit disable event. Async `booking.stop_disabled.affected` là sole impact source; không có synchronous count/warning seam. Auto-suggest geo proximity defer v2. |
 | **Trip cargo counters** | `Trip.totalLoadedWeightKg/VolumeM3` là cargo vật lý trên xe: Task load chuyển actual reservation → loaded cargo; unload/recovery release như flow hiện hữu. `Trip.reservedParcelWeightKg/VolumeM3` giữ mềm estimated cargo khi deposit payment bắt đầu, giữ qua `RESERVED`, rồi Task reweigh chuyển estimated → actual; payment/check-in/final-payment timeout hoặc terminal trước load release. **Available capacity = Vehicle max - estimated passenger luggage - reserved parcel cargo - loaded cargo**. Parcel/Trip dùng local transaction + CAS/idempotent internal mutation, không có cross-DB transaction. |
 | **TripStop** | `{tripId, stopId, orderIndex, estimatedArrivalTime (static planned baseline), actualArrivalTime nullable, actualDepartureTime nullable, status PENDING\|ARRIVED\|SKIPPED, distanceFromOriginKm nullable}`. `actualDepartureTime` is the durable Day-24 stop-departure anchor; arrival/status remain authoritative for no-show. Approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING` cascade có thể recompute baseline; GPS/Tracking dynamic ETA không bao giờ update field này. Copy `distanceFromOriginKm` từ RouteStop khi generate — dùng cho DISRUPTED refund mà không cần join ngược. |
-| **Trip.source** | `MANUAL \| AUTO_FROM_SCHEDULE \| VEHICLE_SUBSTITUTION`. Manual create: Operator nhập form → hệ thống generate TripSeat + TripStop; Day 22 không copy fare-template thành TripStopFare mới. Initial status: SCHEDULED nếu departure > 30 phút; BOARDING ngay nếu ≤ 30 phút (publish TripBoardingStarted ngay, không đợi Hangfire). Reject nếu departure trong quá khứ. **VEHICLE_SUBSTITUTION**: Trip_new tạo từ 6.12 Vehicle Substitution flow — Trip Service set source = VEHICLE_SUBSTITUTION explicitly khi INSERT; counter check `maxTripsPerMonth` skip + `currentTripsThisMonth` không increment (xem 4.5 c.0). |
-| **RouteStopFareTemplate** | `{routeId, stopId, fareFromThisStop BIGINT, effectiveFrom datetime, effectiveUntil datetime nullable}` — **Exception override** cho stop có giá khác `Route.baseFare`. Operator chỉ tạo entry cho stop muốn config giá riêng — stop không có entry dùng baseFare. Day 22 không tạo `TEMPLATE_SNAPSHOT` khi Hangfire/manual generate Trip; legacy snapshot chỉ còn readable ở request không có `pricingAt`. Chỉ explicit operator per-Trip fare override tạo `MANUAL_OVERRIDE`. Với một handler-start `pricingAt`, precedence là `MANUAL_OVERRIDE` → active template half-open window → `Trip.baseFare`. Trip DB dùng `btree_gist` exclusion guard để không có overlapping window cùng `(routeId,stopId)`. |
+| **Trip.source** | `MANUAL \| AUTO_FROM_SCHEDULE \| VEHICLE_SUBSTITUTION`. `MANUAL` chỉ giữ compatibility/readiness cho dữ liệu hiện hữu; current v1 không expose `POST /v1/operator/trips`. `AUTO_FROM_SCHEDULE` là v1 business-create path. **VEHICLE_SUBSTITUTION**: Trip_new tạo từ 6.12 Vehicle Substitution flow — Trip Service set source = VEHICLE_SUBSTITUTION explicitly khi INSERT; counter check `maxTripsPerMonth` skip + `currentTripsThisMonth` không increment (xem 4.5 c.0). |
+| **RouteStopFareTemplate** | `{routeId, stopId, fareFromThisStop BIGINT, effectiveFrom datetime, effectiveUntil datetime nullable}` — **Exception override** cho stop có giá khác `Route.baseFare`. Operator chỉ tạo entry cho stop muốn config giá riêng — stop không có entry dùng baseFare. Day 22 không tạo `TEMPLATE_SNAPSHOT` khi Hangfire generate Trip; legacy snapshot (including historical `MANUAL` Trips) chỉ còn readable ở request không có `pricingAt`. Chỉ explicit operator per-Trip fare override tạo `MANUAL_OVERRIDE`. Với một handler-start `pricingAt`, precedence là `MANUAL_OVERRIDE` → active template half-open window → `Trip.baseFare`. Trip DB dùng `btree_gist` exclusion guard để không có overlapping window cùng `(routeId,stopId)`. |
 | **Pricing config — future-dated + manual override** | `Route.baseFare` và `RouteStopFareTemplate` hỗ trợ nhiều effective window/future version. Ngoại lệ UI-gap: `ParcelRouteFare` chỉ giữ một current row theo physical key `(routeId,sizeCategory)`; batch sửa `effectiveFrom/effectiveUntil` trên chính row đó, không tạo parallel future version/history. Operator có thể **manual override** giá per trip tại thời điểm tạo/sửa trip (không bị khóa bởi schedule). KHÔNG hardcode pricing trong code. |
 | **Voucher** | Platform-wide. Fields: code, type, value, minOrderAmount, maxDiscountAmount, totalUsageLimit, perUserLimit, validFrom, validUntil, applicableOperatorIds, applicableRouteIds, isActive, **`fundingType` enum `VIETRIDE_FUNDED \| OPERATOR_FUNDED`**. `VoucherUsage` track per (voucherId, userId, bookingId, bookingGroupId, **`fundedBy` snapshot enum** = voucher.fundingType tại thời điểm apply — dùng cho settlement reconcile). DELETE khi CANCELLED/REFUNDED. Round-trip: 2 VoucherUsage records, limit check bằng `COUNT(DISTINCT bookingGroupId)`. **`OperatorVoucherConsent` entity**: track operator opt-in cho voucher OPERATOR_FUNDED — schema chi tiết ở Booking Service entity list (cùng service với Voucher để strict FK). Validation khi apply voucher: nếu `fundingType=OPERATOR_FUNDED` → check `OperatorVoucherConsent.status=ACCEPTED` cho `Trip.operatorId`; sai → error `VOUCHER_NOT_APPLICABLE`. |
 | **BookingPendingAction** | `{id, bookingId FK, reason (ROUTE_CHANGE\|SEAT_DOWNGRADE\|SCHEDULE_CHANGE\|PENDING_SEAT_ASSIGNMENT\|STOP_DISABLED), severity (nullable, dùng cho SCHEDULE_CHANGE: MEDIUM\|MAJOR — KHÔNG include MINOR vì MINOR không persist record), deadline, resolvedAt nullable, resolvedAction nullable, metadata JSONB, createdAt}`. Partial unique: `UNIQUE(bookingId) WHERE resolvedAt IS NULL` — chỉ 1 active per booking. Action mới phát sinh: close action cũ với `SUPERSEDED` trước khi INSERT mới. Schedule metadata freeze exact `sourceEventId`, `oldDeparture`, `newDeparture`, `severity`, `initialDeadline`, nullable `terminalDeadline`, `refundBasisAmount`, `refundPercent`, `refundAmount`; refund basis là immutable `Booking.totalAmount`, money BIGINT và phép chia làm tròn `MidpointRounding.AwayFromZero`. Xem flow theo từng reason tại section 6.4 (ROUTE_CHANGE), 6.4.1 (STOP_DISABLED), 6.12 (PENDING_SEAT_ASSIGNMENT), 6.13 (SCHEDULE_CHANGE). |
@@ -4873,8 +4881,8 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | Booking | Seat release tại authoritative Payment deadline · schedule-change auto-accept · PENDING_SEAT_ASSIGNMENT escalation (interval 15 phút) |
 | Trip-Route-Vehicle | Auto-BOARDING 30 phút trước departure · COMPLETED fallback +30 phút sau ETA · Generate Trip từ DriverSchedule (CN 23:00) |
 | Parcel | Undo-reject 15 phút · cancel EXTRA_LARGE review timeout 24h · reject/forfeit RESERVED quá `latestCheckInAt` · reject/forfeit PENDING_FINAL_PAYMENT quá `finalPaymentDeadline` (interval 5 phút) · PENDING_TRANSFER_CONFIRM escalation 30 phút · stale Day-32 cargo-recovery operation replay 5 phút · PENDING_OPERATOR_ACTION re-alert 2h |
-| Payment | PENDING_REDIRECT expired khi `dueAt ?? createdAt + 15 phút <= now` · TopUpRequest expired 15 phút · **Trip settlement eligibility flag (daily 02:00)** — set `OperatorTripSettlement.status=ELIGIBLE` khi `eligibleAt <= now` · **Trip settlement weekly auto-settle (Monday 09:00 weekly)** — debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE · Subscription trial expire check (daily 00:30) · Trial expiring T-3 days warn (daily 09:00) · Subscription upgrade attempt hết hạn sau 15 phút và reconciliation chạy mỗi phút · Subscription paid invoice generation post-payment-success (event-driven, không phải scheduled — nhưng retry via Hangfire nếu PDF gen fail) |
-| Identity | OTP expired cleanup (optional) · FCM token stale cleanup (weekly) |
+| Payment | PENDING_REDIRECT expired khi `dueAt ?? createdAt + 15 phút <= now` · TopUpRequest expired 15 phút · **Trip settlement eligibility flag (daily 02:00)** — set `OperatorTripSettlement.status=ELIGIBLE` khi `eligibleAt <= now` · **Trip settlement weekly auto-settle (Monday 09:00 weekly)** — debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE · Subscription paid invoice generation post-payment-success (event-driven, không phải scheduled — nhưng retry via Hangfire nếu PDF gen fail) |
+| Identity | OTP expired cleanup (optional) · FCM token stale cleanup (weekly) · Subscription trial expire check (daily 00:30 ICT) · Trial expiring T-3 days warn (daily 09:00 ICT, `SE Asia Standard Time`) · Subscription upgrade attempt hết hạn/reconciliation mỗi phút |
 
 **Redis namespace conventions (canonical — tránh conflict cross-service):**
 

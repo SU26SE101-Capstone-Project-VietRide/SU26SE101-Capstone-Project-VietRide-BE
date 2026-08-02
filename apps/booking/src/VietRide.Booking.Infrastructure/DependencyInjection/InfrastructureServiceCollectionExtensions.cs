@@ -196,6 +196,8 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "booking.station-merged";
                 options.BindingKeys = [StationMergedIntegrationEvent.EventType];
+                options.TransientRetryCount = 3;
+                options.TransientRetryDelay = TimeSpan.FromSeconds(10);
             });
             services.AddVietRideEventConsumer<IdentityUserDeletedIntegrationEvent, IdentityUserDeletedIntegrationEventHandler>(options =>
             {

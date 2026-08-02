@@ -9,6 +9,8 @@ import { RuntimeConfigService, RuntimeConfigSnapshot } from '../config/runtime-c
 import type { MessageFeedback, RagConversation, RagMessage } from '../generated/rag-prisma-client';
 import type { ChatCompletionProvider } from '../providers/chat-completion.provider';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
+import { IdentitySubscriptionEntitlementClient } from '../subscriptions/identity-subscription-entitlement.client';
+import { RagSubscriptionEntitlementGuard } from '../subscriptions/rag-subscription-entitlement.guard';
 import { ChatEmbeddingCacheService } from './chat-embedding-cache.service';
 import { ChatIntentService } from './chat-intent.service';
 import { ChatQueryRewriteService } from './chat-query-rewrite.service';
@@ -42,6 +44,7 @@ describe('ChatController (e2e)', () => {
   let chatProvider: jest.Mocked<ChatCompletionProvider>;
   let embeddingProvider: jest.Mocked<EmbeddingProvider>;
   let runtimeConfig: jest.Mocked<RuntimeConfigService>;
+  let subscriptionEntitlements: jest.Mocked<IdentitySubscriptionEntitlementClient>;
 
   beforeAll(async () => {
     repository = {
@@ -77,6 +80,9 @@ describe('ChatController (e2e)', () => {
     runtimeConfig = {
       getSnapshot: jest.fn().mockResolvedValue(makeRuntimeConfigSnapshot()),
     } as unknown as jest.Mocked<RuntimeConfigService>;
+    subscriptionEntitlements = {
+      get: jest.fn().mockResolvedValue({ enableRag: true }),
+    } as unknown as jest.Mocked<IdentitySubscriptionEntitlementClient>;
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       controllers: [ChatController, FeedbackController],
@@ -87,6 +93,11 @@ describe('ChatController (e2e)', () => {
         ChatQueryRewriteService,
         ChatSummaryService,
         InternalJwtAuthGuard,
+        RagSubscriptionEntitlementGuard,
+        {
+          provide: IdentitySubscriptionEntitlementClient,
+          useValue: subscriptionEntitlements,
+        },
         { provide: ChatRepository, useValue: repository },
         { provide: ChatEmbeddingCacheService, useValue: embeddingCache },
         { provide: ChatRateLimitService, useValue: rateLimit },
@@ -315,6 +326,17 @@ describe('ChatController (e2e)', () => {
 
     expect(response.status).toBe(403);
   });
+
+  it('GET /v1/rag/feedback keeps the existing admin-role rejection without an entitlement lookup', async () => {
+    const response = await fetch(`${baseUrl}/v1/rag/feedback`, {
+      headers: {
+        'X-Internal-Auth': await signInternalJwt(USER_ID, 'OPERATOR_ADMIN', OPERATOR_ID),
+      },
+    });
+
+    expect(response.status).toBe(403);
+    expect(subscriptionEntitlements.get).not.toHaveBeenCalled();
+  });
 });
 
 function makeEnv() {
@@ -367,8 +389,13 @@ function makeRuntimeConfigSnapshot(): RuntimeConfigSnapshot {
   );
 }
 
-async function signInternalJwt(sub: string, role: string): Promise<string> {
-  const token = await new SignJWT({ sub, role, reqId: 'req-rag-phase5' })
+async function signInternalJwt(sub: string, role: string, operatorId?: string): Promise<string> {
+  const token = await new SignJWT({
+    sub,
+    role,
+    reqId: 'req-rag-phase5',
+    ...(operatorId ? { operatorId } : {}),
+  })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuer(INTERNAL_JWT_ISSUER)
     .setAudience(INTERNAL_JWT_AUDIENCE)

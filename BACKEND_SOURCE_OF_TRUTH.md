@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.50.0
+> **Phiên bản:** 1.52.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-07-31
+> **Cập nhật lần cuối:** 2026-08-02
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1262,7 +1262,35 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 
 ### 5.6 Idempotency
 
-Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
+Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
+`Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
+endpoint có behavior-idempotent hay không, trừ đúng 17 action có metadata exemption được khóa ở
+bảng sau. Inventory executable phải giữ tổng `181 mutation surfaces / 164 required / 17 exempt`;
+thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
+
+**Canonical 17 exemptions (không yêu cầu `Idempotency-Key`):**
+
+| # | Endpoint | Lý do |
+|---:|---|---|
+| 1 | `POST /v1/auth/login` | Trả credentials; native authentication lockout bảo vệ request. |
+| 2 | `POST /v1/auth/google` | Trả credentials; provider-token validation bảo vệ request. |
+| 3 | `POST /v1/auth/refresh` | Refresh-token family replay detection sở hữu dedupe/rotation. |
+| 4 | `POST /v1/firebase/custom-token` | Trả credentials, không được cache response trong Redis. |
+| 5 | `POST /internal/v1/operators/summaries/batch` | Read-only bounded query. |
+| 6 | `POST /internal/v1/trips/summaries/batch` | Read-only bounded query. |
+| 7 | `POST /internal/v1/operators/vehicle-counts/batch` | Read-only bounded query. |
+| 8 | `POST /v1/operator/trips/{tripId}/cancel/preview` | Read-only cancellation preview. |
+| 9 | `POST /v1/operator/driver-schedules` | Day-9 create contract; no key, business conflict rules prevent duplicate active schedules. |
+| 10 | `PATCH /v1/operator/driver-schedules/{id}/activate` | Contractually behavior-idempotent activation. |
+| 11 | `POST /internal/v1/vouchers/validate` | Read-only validation; không tạo usage. |
+| 12 | `POST /internal/v1/payments/redirect-sessions/lookup` | Read-only redirect lookup. |
+| 13 | `POST /v1/payments/vnpay-ipn` | Provider HMAC + transaction reference dedupe. |
+| 14 | `POST /v1/payments/vnpay-topup-ipn` | Provider HMAC + transaction reference dedupe. |
+| 15 | `POST /v1/payments/subscription-vnpay-ipn` | Provider HMAC + transaction reference dedupe. |
+| 16 | `POST /v1/assistant/trips/{tripId}/parcels/qr-scan` | Read-only QR resolution. |
+| 17 | `POST /v1/admin/rag-config/reload` | Chỉ invalidates in-memory cache và naturally repeatable. |
+
+Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable là nguồn exhaustive):
 
 | # | Endpoint | Service |
 |---|---|---|
@@ -1322,6 +1350,10 @@ Các mutation endpoints sau yêu cầu `Idempotency-Key: <uuid>` header:
 | 39 | `DELETE /v1/operator/policies/{policyId}` | RAG |
 | 40 | `PUT /v1/operator/parcel-route-fares/{routeId}/batch` | Parcel |
 | 41 | `POST /v1/operator/trips/{tripId}/disrupt-no-substitution` | Trip |
+
+`POST /v1/operator/trips` is deferred outside current v1 and MUST remain absent from the public
+API and Gateway inventories. `Trip.source=MANUAL` is compatibility/readiness only; it does not
+authorize a controller, DTO, route, or quota writer.
 
 Day-24 mutations use the same v2 fingerprint/replay contract: UUID-v4 key, actor/method/path/
 canonical-query/raw-body fingerprint, byte-identical replay before current-state lookup, and
@@ -1854,6 +1886,11 @@ role=OPERATOR_*:       socket.join(`operator:${operatorId}`)
 
 **Day-6 reject subscription rule (Identity):** when System Admin rejects a PENDING operator, Identity sets `Operator.registrationStatus=REJECTED` and sets the matching PENDING_APPROVAL `OperatorSubscription.status=CANCELLED`. `operator_subscriptions` has no `deleted_at` column and is not soft-deletable, so implementations MUST NOT set a subscription `deletedAt` value for reject.
 
+**Day-37 pending-payment entitlement rule (Identity and consumers):** while
+`OperatorSubscription.status=PENDING_PAYMENT`, `activePlanId` remains the sole entitlement source
+for quota allocation/increment and module flags (`enableParcel`, `enableShuttle`, `enableRag`). The
+target plan in `SubscriptionUpgradeAttempt` grants no entitlement before Payment succeeds.
+
 ### 6.7 Account status enums
 
 **`User.status`:**
@@ -2143,8 +2180,8 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `booking.booking.route_change_auto_fallback_applied` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, bookingId, tripId, userId, pendingActionId, originalStopId, fallbackDestinationStationId, shuttleRequired, resolvedAction }`; `shuttleRequired=true`, `resolvedAction=AUTO_FALLBACK_DESTINATION`; one fact per timed-out ROUTE_CHANGE action. |
 | `booking.booking.passenger_no_show_marked` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, bookingId, tripId, userId, bookingStatus, newlyNoShowPassengerIds[], triggerType, pickupStopId? }`; status `NO_SHOW|PARTIAL_NO_SHOW`, trigger `ALONG_ROUTE|TERMINAL`; one fact per Booking transition. |
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
-| `trip.stop.arrived` | Trip | Parcel, Notification | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, actorUserId, actualArrivalTime }`; Trip và TripStop lock theo thứ tự, `PENDING -> ARRIVED`, static ETA không đổi, business row + Outbox commit atomic |
-| `trip.destination.arrived` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ |
+| `trip.stop.arrived` | Trip | Notification | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, actorUserId, actualArrivalTime }`; Trip và TripStop lock theo thứ tự, `PENDING -> ARRIVED`, static ETA không đổi, business row + Outbox commit atomic; Parcel reads the Trip snapshot synchronously and has no arrival projection |
+| `trip.destination.arrived` | Trip | — (no v1 consumer) | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ; event does not drive Parcel state |
 | `trip.trip.delayed` | Tracking | Notification | `{ eventId, occurredAt, tripId, stopId, stopName, delayMinutes, etaNew }`; Notification resolves active passengers and operator admins |
 | `trip.incident.reported` | Trip | Notification | `{ eventId, occurredAt, incidentId, tripId, operatorId, reporterUserId, category, description?, photoUrls?, latitude?, longitude?, reportedAt }`; optional fields được omit khi null; Notification resolve active `OPERATOR_ADMIN` theo `operatorId` |
 | `trip.cargo.threshold_crossed` | Trip | Notification | Exact `{ eventId, occurredAt, tripId, operatorId, loadedWeightKg, maxCargoWeightKg, percentFull }`; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
@@ -2751,6 +2788,9 @@ PENDING_OPERATOR_ACTION ──→ pendingActionResumeStatus | RETURNED
 
 **Canonical two-step delivery (Day 39):**
 
+- `POST /v1/assistant/parcels/{parcelId}/unload` performs a synchronous Internal-JWT read of
+  `GET /internal/v1/trips/{tripId}`. Parcel owns no consumer/projection for
+  `trip.stop.arrived` or `trip.destination.arrived`; those facts never drive Parcel state.
 - Unload chỉ cho phép `IN_TRANSIT -> UNLOADED`. Parcel có `dropoffStopId` phải dùng đúng TripStop
   khớp ID, `allowDropoff=true` và `status=ARRIVED`. Parcel có `dropoffStopId=null` chỉ dùng
   `destinationArrivedAt`; không suy diễn từ stop trung gian cuối. Express Trip không có TripStop vẫn
@@ -3221,7 +3261,7 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 | `OtpCleanupJob` | Recurring | Daily 03:00 ICT | DELETE EmailVerificationToken expired > 7 ngày (optional cleanup) |
 | `StaleFcmTokenCleanupJob` | Recurring | Weekly Sun 04:00 ICT | UPDATE UserDevice SET isActive=false WHERE lastActiveAt < now - 90 days |
 | `SubscriptionTrialExpireCheckJob` | Recurring | Daily 00:30 ICT | Identity sets overdue ACTIVE subscriptions to EXPIRED; read access remains available |
-| `SubscriptionTrialExpiringWarnJob` | Recurring | Daily 09:00 ICT | Identity sends one T-3 expiry warning per subscription |
+| `SubscriptionTrialExpiringWarnJob` | Recurring | Daily 09:00 ICT (`SE Asia Standard Time`) | Identity sends one T-3 expiry warning per subscription |
 | `SubscriptionPaymentPendingWarnJob` | Recurring | Hourly | Identity warns when a subscription upgrade attempt has been pending for 24 hours |
 | `SubscriptionAutoRevertJob` | Recurring | Daily 02:00 ICT | Identity expires the pending Payment via internal API, then restores previous plan or Starter after seven days |
 | `SubscriptionTripUsageProjectionJob` | Recurring | Day 1, 00:01 ICT | Refreshes current-month trip usage projection; source of truth is departure-month allocation |
@@ -3736,6 +3776,9 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.52.1** | 2026-08-02 | BE lead (Vũ) | **PATCH** — Reconciles the v1.54 Shuttle pickup merge with the system-wide idempotency inventory: `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup` is UUID-v4-required, raising the executable baseline to 181 HTTP mutation surfaces / 164 required / exactly 17 exemptions. Runtime metadata and API Contract were already required; no dependency, schema, migration or additional endpoint change. |
+| **1.52.0** | 2026-08-02 | BE lead (Vũ) | **MINOR** — Freezes the Day-43 system-wide idempotency convention at 180 HTTP mutation surfaces: 163 UUID-v4-required actions and exactly 17 named exemptions. Reconciles the two post-merge read-only Trip batch POSTs and the higher-contract no-key DriverSchedule create/activate actions with auditable runtime metadata; preserves v2 replay/mismatch/pending/5xx semantics and does not rewrite historical Git metadata. No dependency, schema, migration or public endpoint change. |
+| **1.51.0** | 2026-08-01 | BE lead (Vũ) | **MINOR** — Reconciles the Days 30–43 repair boundary: defers the unregistered manual Trip-create API; keeps `activePlanId` entitlements during `PENDING_PAYMENT`; fixes the trial warning at daily 09:00 ICT; preserves one zero-net settlement marker that terminates `CANCELLED` without wallet/event side effects; and makes Day-39 Parcel unload depend on a synchronous Trip snapshot with no Parcel arrival consumer/projection. No endpoint implementation, event payload, schema or migration change. |
 | **1.50.0** | 2026-07-31 | BE lead (Vũ) | **MINOR** — Ratifies exact Booking refund correlation and zero-net group reconciliation: `payment.wallet.credited.paymentId?` is Booking-refund-only and backward-compatible, captured-payment retry rows use `BOOKING_REFUND_PAYMENT` with `referenceId=paymentId` and may carry amount zero, and Shared.Messaging transient retries are explicit, durable, TTL/header bounded, mandatory, and publisher-confirmed. No physical schema migration or index. |
 | **1.49.0** | 2026-07-31 | BE lead (Vũ) | **MINOR** — Reopens Day 36/43 and ratifies the payment/history/auth repair contract: Booking VNPay deadlines follow Trip seat-lock expiry, legacy null `DueAt` falls back to 15 minutes, late capture never resurrects an expired Booking and uses idempotent allocation refund, `booking.payment_refund.requested` and `PAYMENT_DEADLINE_PASSED` are registered, internal latest-attempt redirect lookup is strict/no-store, Booking and Passenger history gain fail-open `paymentRedirectUrl`, and Google login returns stored avatar without provider overwrite. No schema migration or index. |
 | **1.48.0** | 2026-07-31 | Codex | **MINOR** — Freeze the backend UI-gap ownership, compatibility, projection/backfill, Policy audit, Parcel history, Dashboard and Revenue semantics; remove stale Admin Operator, Trip code/index and fare-history scope; correct Platform Report ownership to Booking. |

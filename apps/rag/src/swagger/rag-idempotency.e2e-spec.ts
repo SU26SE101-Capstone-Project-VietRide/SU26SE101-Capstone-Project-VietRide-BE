@@ -9,6 +9,8 @@ import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
 import { ChatController } from '../chat/chat.controller';
 import { ChatService } from '../chat/chat.service';
 import { RagPrismaService } from '../prisma/rag-prisma.service';
+import { IdentitySubscriptionEntitlementClient } from '../subscriptions/identity-subscription-entitlement.client';
+import { RagSubscriptionEntitlementGuard } from '../subscriptions/rag-subscription-entitlement.guard';
 import { RagIdempotencyInterceptor } from './rag-idempotency.interceptor';
 import { RagIdempotencyService } from './rag-idempotency.service';
 
@@ -47,6 +49,11 @@ describe('RAG chat idempotency replay (e2e)', () => {
       controllers: [ChatController],
       providers: [
         InternalJwtAuthGuard,
+        RagSubscriptionEntitlementGuard,
+        {
+          provide: IdentitySubscriptionEntitlementClient,
+          useValue: { get: jest.fn().mockResolvedValue({ enableRag: true }) },
+        },
         RagIdempotencyService,
         { provide: ChatService, useValue: chatService },
         { provide: RedisService, useValue: { getClient: () => client } },

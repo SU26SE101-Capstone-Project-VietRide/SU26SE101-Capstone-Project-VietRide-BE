@@ -158,11 +158,6 @@ public sealed class SubstituteVehicleCommandHandler
                 replacementVehicle.MaxCargoVolumeM3,
                 oldTrip.EstimatedPassengerLuggageKg,
                 notes: oldTrip.Notes);
-            newTrip.UpdateCargoCounters(
-                oldTrip.ReservedParcelWeightKg,
-                oldTrip.ReservedParcelVolumeM3,
-                oldTrip.TotalLoadedWeightKg,
-                oldTrip.TotalLoadedVolumeM3);
             newTrip.MarkBoarding(disruptedAt);
             await trips.AddAsync(newTrip, cancellationToken);
 

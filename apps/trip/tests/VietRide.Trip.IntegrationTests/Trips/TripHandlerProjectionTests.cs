@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
 using VietRide.Shared.Application.Repositories;
@@ -11,6 +13,7 @@ using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
 using VietRide.Trip.Application.Features.Trips.SearchTrips;
 using VietRide.Trip.Application.Features.Vehicles;
 using VietRide.Trip.Domain.Entities;
+using VietRide.Trip.Infrastructure.Http;
 using DomainTrip = VietRide.Trip.Domain.Entities.Trip;
 using Route = VietRide.Trip.Domain.Entities.Route;
 
@@ -48,6 +51,41 @@ public sealed class TripHandlerProjectionTests
         result.AffectedParcelIds.Should().Equal(parcelId);
         result.RefundTotalParcel.Should().Be(75_000);
         result.GrandTotal.Should().Be(325_000);
+    }
+
+    [Fact]
+    public async Task CancelPreview_CanonicalParcelWireRefundContributesExactTotal()
+    {
+        var operatorId = Guid.NewGuid();
+        var trip = CreateTrip(operatorId, Guid.NewGuid(), DateTimeOffset.UtcNow.AddDays(1));
+        var parcelId = Guid.NewGuid();
+        using var httpClient = new HttpClient(new ParcelImpactResponseHandler(new
+        {
+            tripId = trip.Id,
+            affectedParcels = new[]
+            {
+                new { parcelId, status = "RESERVED", refundAmountVnd = 135_000L },
+            },
+        }))
+        {
+            BaseAddress = new Uri("http://parcel"),
+        };
+        var parcelClient = new ParcelImpactClient(httpClient);
+        var handler = new CancelTripPreviewQueryHandler(
+            new InMemoryTripRepository([trip]),
+            new FakeBookingImpactClient(new TripBookingImpactProjection(
+                trip.Id,
+                0,
+                [])),
+            parcelClient);
+
+        var result = await handler.Handle(
+            new CancelTripPreviewQuery(trip.Id, operatorId),
+            CancellationToken.None);
+
+        result.AffectedParcelIds.Should().Equal(parcelId);
+        result.RefundTotalParcel.Should().Be(135_000);
+        result.GrandTotal.Should().Be(135_000);
     }
 
     [Fact]
@@ -333,6 +371,19 @@ public sealed class TripHandlerProjectionTests
             Guid operatorId,
             CancellationToken cancellationToken) =>
             Task.FromResult(projection);
+    }
+
+    private sealed class ParcelImpactResponseHandler(object response) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(response),
+            });
+        }
     }
 
     private abstract class InMemoryRepository<TEntity, TId> : IRepository<TEntity, TId>

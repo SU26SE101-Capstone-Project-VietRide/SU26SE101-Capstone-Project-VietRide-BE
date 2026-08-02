@@ -953,6 +953,24 @@ function main() {
     results.push([serviceName, result]);
   }
 
+  const summary = results.reduce(
+    (total, [, result]) => {
+      const exemptions = result.exemptions ?? result.mutations - result.required;
+      total.mutationSurfaces += result.mutations;
+      total.exemptions += exemptions;
+      total.required += result.mutations - exemptions;
+      return total;
+    },
+    { mutationSurfaces: 0, required: 0, exemptions: 0 },
+  );
+  for (const field of ['mutationSurfaces', 'required', 'exemptions']) {
+    if (inventory.expectedSummary?.[field] !== summary[field]) {
+      fail(
+        `inventory ${field} drift: expected ${inventory.expectedSummary?.[field]}, found ${summary[field]}`,
+      );
+    }
+  }
+
   validateSocketOperations(inventory.socketOperations);
   validateCrossSystemCoverage(inventory.coverage ?? {});
 
@@ -981,7 +999,9 @@ function main() {
       `${coverage.dotnetOutboundHttpCallsites} outbound HTTP callsites`,
       `${coverage.dotnetOutboundHttpExemptions.length} outbound exemptions`,
     ].join('/');
-    console.log(`idempotency inventory PASS (${details}; ${crossSystem})`);
+    console.log(
+      `idempotency inventory PASS (${summary.mutationSurfaces} mutation surfaces/${summary.required} required/${summary.exemptions} exemptions; ${details}; ${crossSystem})`,
+    );
   }
 }
 

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -11,12 +12,13 @@ using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure;
 using VietRide.Identity.Infrastructure.Messaging;
 using VietRide.Identity.IntegrationTests.Api;
-using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Application.Inbox;
 using VietRide.Shared.Kernel.ValueObjects;
+using VietRide.Shared.Persistence.Inbox;
 
 namespace VietRide.Identity.IntegrationTests;
 
-public sealed class StationAuditConsumerTests
+public sealed class StationMergedInboxAtomicityTests
 {
     private const string PreviousMigration = "20260716132910_AddImmutableActivityLogReadModel";
 
@@ -47,6 +49,13 @@ public sealed class StationAuditConsumerTests
             var invalidPayload = () => HandleNormalizedAsync(factory, invalidPayloadEvent);
             await invalidPayload.Should().ThrowAsync<InvalidOperationException>();
 
+            var failureAfterHandlerEvent = CreateMergedEvent(actorId, null, null);
+            var failureAfterHandler = () => HandleMergedAsync(
+                factory,
+                failureAfterHandlerEvent,
+                failAfterHandler: true);
+            await failureAfterHandler.Should().ThrowAsync<InvalidOperationException>();
+
             await AssertPersistedLogsAsync(
                 factory,
                 actorId,
@@ -54,7 +63,8 @@ public sealed class StationAuditConsumerTests
                 normalizedEvent,
                 concurrentEvent,
                 missingActorEvent,
-                invalidPayloadEvent);
+                invalidPayloadEvent,
+                failureAfterHandlerEvent);
         }
         finally
         {
@@ -122,14 +132,24 @@ public sealed class StationAuditConsumerTests
 
     private static async Task HandleMergedAsync(
         AdminUsersEndpointsTests.DbBackedAdminUsersFactory factory,
-        StationMergedIntegrationEvent integrationEvent)
+        StationMergedIntegrationEvent integrationEvent,
+        bool failAfterHandler = false)
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var handler = new StationMergedIntegrationEventHandler(
             scope.ServiceProvider.GetRequiredService<IActivityLogRepository>(),
-            scope.ServiceProvider.GetRequiredService<IUnitOfWork>(),
             NullLogger<StationMergedIntegrationEventHandler>.Instance);
-        await handler.HandleAsync(integrationEvent, CancellationToken.None);
+        await scope.ServiceProvider.GetRequiredService<IIntegrationEventInbox>().ExecuteAsync(
+            "identity.station-merged",
+            integrationEvent.EventId,
+            PayloadHash(integrationEvent.EventId),
+            async cancellationToken =>
+            {
+                await handler.HandleAsync(integrationEvent, cancellationToken);
+                if (failAfterHandler)
+                    throw new InvalidOperationException("Injected failure after Station audit handler.");
+            },
+            CancellationToken.None);
     }
 
     private static async Task HandleNormalizedAsync(
@@ -139,9 +159,13 @@ public sealed class StationAuditConsumerTests
         await using var scope = factory.Services.CreateAsyncScope();
         var handler = new StationNormalizedIntegrationEventHandler(
             scope.ServiceProvider.GetRequiredService<IActivityLogRepository>(),
-            scope.ServiceProvider.GetRequiredService<IUnitOfWork>(),
             NullLogger<StationNormalizedIntegrationEventHandler>.Instance);
-        await handler.HandleAsync(integrationEvent, CancellationToken.None);
+        await scope.ServiceProvider.GetRequiredService<IIntegrationEventInbox>().ExecuteAsync(
+            "identity.station-normalized",
+            integrationEvent.EventId,
+            PayloadHash(integrationEvent.EventId),
+            cancellationToken => handler.HandleAsync(integrationEvent, cancellationToken),
+            CancellationToken.None);
     }
 
     private static async Task HandleConcurrentReplayAsync(
@@ -159,18 +183,35 @@ public sealed class StationAuditConsumerTests
             gate);
         var firstHandler = new StationNormalizedIntegrationEventHandler(
             firstRepository,
-            firstScope.ServiceProvider.GetRequiredService<IUnitOfWork>(),
             NullLogger<StationNormalizedIntegrationEventHandler>.Instance);
         var secondHandler = new StationNormalizedIntegrationEventHandler(
             secondRepository,
-            secondScope.ServiceProvider.GetRequiredService<IUnitOfWork>(),
             NullLogger<StationNormalizedIntegrationEventHandler>.Instance);
 
-        await Task.WhenAll(
-            firstHandler.HandleAsync(integrationEvent, CancellationToken.None),
-            secondHandler.HandleAsync(integrationEvent, CancellationToken.None))
+        var firstAttempt = firstScope.ServiceProvider.GetRequiredService<IIntegrationEventInbox>()
+            .ExecuteAsync(
+                "identity.station-normalized",
+                integrationEvent.EventId,
+                PayloadHash(integrationEvent.EventId),
+                cancellationToken => firstHandler.HandleAsync(integrationEvent, cancellationToken),
+                CancellationToken.None);
+        var secondAttempt = secondScope.ServiceProvider.GetRequiredService<IIntegrationEventInbox>()
+            .ExecuteAsync(
+                "identity.station-normalized",
+                integrationEvent.EventId,
+                PayloadHash(integrationEvent.EventId),
+                cancellationToken => secondHandler.HandleAsync(integrationEvent, cancellationToken),
+                CancellationToken.None);
+
+        var concurrent = () => Task.WhenAll(firstAttempt, secondAttempt)
             .WaitAsync(TimeSpan.FromSeconds(15));
+        await concurrent.Should().ThrowAsync<DbUpdateException>();
+
+        await HandleNormalizedAsync(factory, integrationEvent);
     }
+
+    private static string PayloadHash(Guid eventId)
+        => Convert.ToHexString(SHA256.HashData(eventId.ToByteArray()));
 
     private static async Task AssertPersistedLogsAsync(
         AdminUsersEndpointsTests.DbBackedAdminUsersFactory factory,
@@ -179,7 +220,8 @@ public sealed class StationAuditConsumerTests
         StationNormalizedIntegrationEvent normalizedEvent,
         StationNormalizedIntegrationEvent concurrentEvent,
         StationMergedIntegrationEvent missingActorEvent,
-        StationNormalizedIntegrationEvent invalidPayloadEvent)
+        StationNormalizedIntegrationEvent invalidPayloadEvent,
+        StationMergedIntegrationEvent failureAfterHandlerEvent)
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -188,7 +230,20 @@ public sealed class StationAuditConsumerTests
                 || log.SourceEventId == normalizedEvent.EventId
                 || log.SourceEventId == concurrentEvent.EventId
                 || log.SourceEventId == missingActorEvent.EventId
-                || log.SourceEventId == invalidPayloadEvent.EventId)
+                || log.SourceEventId == invalidPayloadEvent.EventId
+                || log.SourceEventId == failureAfterHandlerEvent.EventId)
+            .ToListAsync();
+        var messageIds = new[]
+        {
+            mergeEvent.EventId,
+            normalizedEvent.EventId,
+            concurrentEvent.EventId,
+            missingActorEvent.EventId,
+            invalidPayloadEvent.EventId,
+            failureAfterHandlerEvent.EventId,
+        };
+        var inboxRecords = await db.Set<IntegrationInboxRecord>().AsNoTracking()
+            .Where(record => messageIds.Contains(record.MessageId))
             .ToListAsync();
 
         logs.Should().HaveCount(3);
@@ -206,7 +261,11 @@ public sealed class StationAuditConsumerTests
             && log.Action == ActivityLogAction.STATION_NORMALIZED);
         logs.Should().NotContain(log =>
             log.SourceEventId == missingActorEvent.EventId
-            || log.SourceEventId == invalidPayloadEvent.EventId);
+            || log.SourceEventId == invalidPayloadEvent.EventId
+            || log.SourceEventId == failureAfterHandlerEvent.EventId);
+        inboxRecords.Should().HaveCount(3);
+        inboxRecords.Select(record => record.MessageId).Should().BeEquivalentTo(
+            [mergeEvent.EventId, normalizedEvent.EventId, concurrentEvent.EventId]);
     }
 
     private static StationMergedIntegrationEvent CreateMergedEvent(

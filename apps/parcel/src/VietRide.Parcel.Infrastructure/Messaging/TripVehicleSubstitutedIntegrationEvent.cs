@@ -11,7 +11,7 @@ public sealed record TripVehicleSubstitutedIntegrationEvent : IIntegrationEvent
     [JsonRequired]
     public Guid EventId { get; init; }
     [JsonRequired]
-    public DateTime OccurredAt { get; init; }
+    public DateTimeOffset OccurredAt { get; init; }
     [JsonRequired]
     public Guid SubstitutionId { get; init; }
     [JsonRequired]
@@ -46,4 +46,7 @@ public sealed record TripVehicleSubstitutedIntegrationEvent : IIntegrationEvent
 
     [JsonIgnore]
     string IIntegrationEvent.EventType => EventType;
+
+    [JsonIgnore]
+    DateTime IIntegrationEvent.OccurredAt => OccurredAt.UtcDateTime;
 }

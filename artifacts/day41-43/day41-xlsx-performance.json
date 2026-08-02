@@ -1,47 +1,47 @@
 {
-  "generatedAt": "2026-07-19T03:57:36.308Z",
+  "generatedAt": "2026-08-02T05:18:30.867Z",
   "reports": [
     {
       "report": "bookings",
       "service": "booking",
-      "durationMs": 12308,
-      "fileBytes": 873585,
-      "sampledPeakMemoryBytes": 457388851
+      "durationMs": 6035,
+      "fileBytes": 738599,
+      "sampledPeakMemoryBytes": 478570086
     },
     {
       "report": "parcels",
       "service": "parcel",
-      "durationMs": 12197,
-      "fileBytes": 523520,
-      "sampledPeakMemoryBytes": 330825728
+      "durationMs": 4188,
+      "fileBytes": 436695,
+      "sampledPeakMemoryBytes": 380003942
     },
     {
       "report": "revenue",
       "service": "payment",
-      "durationMs": 12325,
-      "fileBytes": 1587025,
-      "sampledPeakMemoryBytes": 394474291
+      "durationMs": 8071,
+      "fileBytes": 1754114,
+      "sampledPeakMemoryBytes": 506881638
     },
     {
       "report": "occupancy",
       "service": "trip",
-      "durationMs": 10247,
-      "fileBytes": 333974,
-      "sampledPeakMemoryBytes": 327994573
+      "durationMs": 6065,
+      "fileBytes": 334471,
+      "sampledPeakMemoryBytes": 353474970
     },
     {
       "report": "cancellation",
       "service": "booking",
-      "durationMs": 4092,
+      "durationMs": 3965,
       "fileBytes": 310307,
-      "sampledPeakMemoryBytes": 470391194
+      "sampledPeakMemoryBytes": 537395200
     },
     {
       "report": "refunds",
       "service": "payment",
-      "durationMs": 4005,
-      "fileBytes": 572786,
-      "sampledPeakMemoryBytes": 508454502
+      "durationMs": 4050,
+      "fileBytes": 570624,
+      "sampledPeakMemoryBytes": 570530202
     }
   ]
 }

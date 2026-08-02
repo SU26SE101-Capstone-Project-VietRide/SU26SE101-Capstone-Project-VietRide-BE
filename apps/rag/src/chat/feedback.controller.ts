@@ -25,6 +25,14 @@ import {
   pagedDataSchema,
 } from '../swagger/api-response.schemas';
 import { ApiIdempotencyRequired } from '../swagger/idempotency.swagger';
+import { RagSubscriptionEntitlementGuard } from '../subscriptions/rag-subscription-entitlement.guard';
+
+const ragFeedbackForbiddenSchema = {
+  oneOf: [
+    errorEnvelopeSchema(403, 'RAG_FEEDBACK_FORBIDDEN', 'Caller cannot feedback this message'),
+    errorEnvelopeSchema(403, 'SUBSCRIPTION_MODULE_DISABLED', 'RAG module is disabled'),
+  ],
+};
 
 @ApiTags('RAG Feedback')
 @ApiBearerAuth()
@@ -34,6 +42,7 @@ export class FeedbackController {
   constructor(private readonly feedbackService: FeedbackService) {}
 
   @Post('messages/:messageId/feedback')
+  @UseGuards(RagSubscriptionEntitlementGuard)
   @ApiIdempotencyRequired()
   @ApiOperation({ summary: 'Create or update feedback for an assistant RAG message' })
   @ApiParam({ name: 'messageId', format: 'uuid', description: 'Assistant message ID' })
@@ -49,10 +58,11 @@ export class FeedbackController {
   @ApiResponse({ status: 201, description: 'Feedback recorded', schema: successEnvelopeSchema(201, { type: 'object', properties: { rating: { type: 'integer', example: 1 } } }) })
   @ApiResponse({ status: 400, description: 'Invalid payload', schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Invalid payload', { fields: true }) })
   @ApiResponse({ status: 401, description: 'Missing or invalid access token', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token') })
-  @ApiResponse({ status: 403, description: 'Caller cannot feedback this message', schema: errorEnvelopeSchema(403, 'RAG_FEEDBACK_FORBIDDEN', 'Caller cannot feedback this message') })
+  @ApiResponse({ status: 403, description: 'Caller cannot feedback this message or the module is disabled', schema: ragFeedbackForbiddenSchema })
   @ApiResponse({ status: 404, description: 'Message not found', schema: errorEnvelopeSchema(404, 'RAG_MESSAGE_NOT_FOUND', 'Message not found') })
   @ApiResponse({ status: 422, description: 'Feedback target is not an assistant message', schema: errorEnvelopeSchema(422, 'RAG_FEEDBACK_ASSISTANT_ONLY', 'Feedback target is not an assistant message') })
   @ApiResponse({ status: 500, description: 'Unexpected error', schema: errorEnvelopeSchema(500, 'INTERNAL_ERROR', 'Unexpected error') })
+  @ApiResponse({ status: 503, description: 'Identity subscription lookup is unavailable', schema: errorEnvelopeSchema(503, 'UPSTREAM_UNAVAILABLE', 'Identity subscription is unavailable') })
   async create(
     @Param('messageId', new ZodValidationPipe(MessageIdParamSchema)) messageId: MessageIdParamDto,
     @Body(new ZodValidationPipe(CreateFeedbackSchema)) dto: CreateFeedbackDto,

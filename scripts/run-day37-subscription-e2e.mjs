@@ -1,20 +1,25 @@
 import { createHmac } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { SignJWT, importPKCS8 } from 'jose';
 
 const root = process.cwd();
 const useDevelopmentStack = process.env.DAY37_E2E_USE_DEV_STACK === '1';
-const manageIsolatedStack =
-  !useDevelopmentStack && process.env.DAY37_E2E_SKIP_COMPOSE !== '1';
-const gatewayBaseUrl =
-  process.env.DAY37_GATEWAY_BASE_URL ||
-  (useDevelopmentStack ? 'http://localhost:3000' : 'http://localhost:55300');
+const manageIsolatedStack = !useDevelopmentStack && process.env.DAY37_E2E_SKIP_COMPOSE !== '1';
+const invocationId = `${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
+const composeProject = `day37-e2e-${invocationId}`;
+const containerPrefix = composeProject;
+let gatewayBaseUrl = process.env.DAY37_GATEWAY_BASE_URL || 'http://localhost:3000';
+let identityBaseUrl = process.env.DAY37_IDENTITY_BASE_URL || 'http://localhost:5001';
+let ragBaseUrl = process.env.DAY37_RAG_BASE_URL || 'http://localhost:3003';
 const compose = [
   'compose',
   '--env-file',
   '.env',
+  '-p',
+  composeProject,
   '-f',
   'infra/docker/docker-compose.yml',
   '-f',
@@ -22,29 +27,79 @@ const compose = [
   '--profile',
   'app',
 ];
-const e2eEnv = useDevelopmentStack
-  ? {}
-  : {
-      POSTGRES_PORT: '55437',
-      REDIS_PORT: '56379',
-      RABBITMQ_PORT: '55672',
-      RABBITMQ_MGMT_PORT: '55673',
-      IDENTITY_PORT: '55001',
-      TRIP_PORT: '55002',
-      BOOKING_PORT: '55003',
-      PAYMENT_PORT: '55004',
-      PARCEL_PORT: '55005',
-      GATEWAY_PORT: '55300',
-      VNPAY_HASH_SECRET: 'day37-e2e-vnpay-hash-secret-not-for-production',
-    };
-const postgresContainer =
-  process.env.DAY37_POSTGRES_CONTAINER ||
-  (useDevelopmentStack ? 'vietride_postgres' : 'day37-e2e-postgres');
+let e2eEnv = {};
+let postgresContainer = process.env.DAY37_POSTGRES_CONTAINER || 'vietride_postgres';
 const operatorId = '37000000-0000-4000-8000-000000000001';
 const starterPlanId = '37000000-0000-4000-8000-000000000011';
 const premiumPlanId = '37000000-0000-4000-8000-000000000012';
 const subscriptionId = '37000000-0000-4000-8000-000000000021';
+const passengerId = '37000000-0000-4000-8000-000000000032';
+const driverId = '37000000-0000-4000-8000-000000000033';
+const originStationId = '37000000-0000-4000-8000-000000000041';
+const destinationStationId = '37000000-0000-4000-8000-000000000042';
+const vehicleTypeId = '37000000-0000-4000-8000-000000000043';
+const vehicleId = '37000000-0000-4000-8000-000000000044';
+const routeId = '37000000-0000-4000-8000-000000000045';
+const tripId = '37000000-0000-4000-8000-000000000046';
 const results = [];
+
+function localEnvValue(name) {
+  const envPath = path.join(root, '.env');
+  if (!fs.existsSync(envPath)) return undefined;
+  const line = fs
+    .readFileSync(envPath, 'utf8')
+    .split(/\r?\n/)
+    .find((candidate) => candidate.startsWith(`${name}=`));
+  if (!line) return undefined;
+  return line
+    .slice(name.length + 1)
+    .trim()
+    .replace(/^(["'])(.*)\1$/, '$2');
+}
+
+async function allocatePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Could not allocate an isolated host port.')));
+        return;
+      }
+      server.close((error) => (error ? reject(error) : resolve(address.port)));
+    });
+  });
+}
+
+async function configureRuntime() {
+  if (useDevelopmentStack || !manageIsolatedStack) return;
+
+  const names = [
+    'POSTGRES_PORT',
+    'REDIS_PORT',
+    'RABBITMQ_PORT',
+    'RABBITMQ_MGMT_PORT',
+    'IDENTITY_PORT',
+    'TRIP_PORT',
+    'BOOKING_PORT',
+    'PAYMENT_PORT',
+    'PARCEL_PORT',
+    'GATEWAY_PORT',
+    'RAG_PORT',
+  ];
+  const ports = await Promise.all(names.map(() => allocatePort()));
+  e2eEnv = Object.fromEntries(names.map((name, index) => [name, String(ports[index])]));
+  Object.assign(e2eEnv, {
+    DAY37_CONTAINER_PREFIX: containerPrefix,
+    VNPAY_HASH_SECRET: 'day37-e2e-vnpay-hash-secret-not-for-production',
+  });
+  postgresContainer = `${containerPrefix}-postgres`;
+  gatewayBaseUrl = `http://localhost:${e2eEnv.GATEWAY_PORT}`;
+  identityBaseUrl = `http://localhost:${e2eEnv.IDENTITY_PORT}`;
+  ragBaseUrl = `http://localhost:${e2eEnv.RAG_PORT}`;
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -94,7 +149,7 @@ function sql(statement, database = 'vietride_identity') {
     '-d',
     database,
     '-Atc',
-    `SET search_path TO ${database === 'vietride_identity' ? 'vietride_identity' : 'vietride_payment'},public; ${statement}`,
+    `SET search_path TO ${database},public; ${statement}`,
   ]);
 }
 
@@ -123,12 +178,13 @@ function seedIdentity() {
        max_assistants, max_operator_users, max_routes, max_trips_per_month,
        enable_parcel, enable_shuttle, enable_rag, is_active)
     VALUES
-      ('${starterPlanId}', 'Day 37 E2E Starter', 'Isolated Day 37 starter fixture', 0, 0, 2, 2, 2, 2, 2, 80, false, true, false, true),
-      ('${premiumPlanId}', 'Day 37 E2E Premium', 'Isolated Day 37 paid fixture', 120000, 1200000, 10, 10, 10, 10, 10, 1000, true, true, false, true)
+      ('${starterPlanId}', 'Day 37 E2E Starter', 'Isolated Day 37 starter fixture', 0, 0, 2, 2, 2, 2, 2, 80, true, true, true, true),
+      ('${premiumPlanId}', 'Day 37 E2E Premium', 'Isolated Day 37 paid fixture', 120000, 1200000, 10, 10, 10, 10, 10, 1000, true, true, true, true)
     ON CONFLICT (id) DO UPDATE SET
       name = EXCLUDED.name, price_per_month = EXCLUDED.price_per_month,
       price_per_year = EXCLUDED.price_per_year, enable_parcel = EXCLUDED.enable_parcel,
-      enable_shuttle = EXCLUDED.enable_shuttle, is_active = EXCLUDED.is_active;
+      enable_shuttle = EXCLUDED.enable_shuttle, enable_rag = EXCLUDED.enable_rag,
+      max_vehicles = EXCLUDED.max_vehicles, is_active = EXCLUDED.is_active;
 
     INSERT INTO operators
       (id, name, business_registration_number, tax_code, contact_email, contact_phone,
@@ -148,7 +204,52 @@ function seedIdentity() {
       started_at = EXCLUDED.started_at, expires_at = EXCLUDED.expires_at,
       current_vehicles = 0, current_routes = 0, current_trips_this_month = 0,
       updated_at = now();
+
+    INSERT INTO users (id,email,phone,display_name,role,status,operator_id)
+    VALUES
+      ('${passengerId}','passenger-day37@example.test','+84910000038','Day 37 Passenger','PASSENGER','ACTIVE',NULL),
+      ('${driverId}','driver-day37@example.test','+84910000039','Day 37 Driver','DRIVER','ACTIVE','${operatorId}')
+    ON CONFLICT (id) DO UPDATE SET status='ACTIVE', deleted_at=NULL;
   `);
+
+  sql(
+    `
+    INSERT INTO stations (id,name,slug,city,province,is_active)
+    VALUES
+      ('${originStationId}','Day 37 Origin','day37-origin','Ho Chi Minh','Ho Chi Minh',true),
+      ('${destinationStationId}','Day 37 Destination','day37-destination','Da Nang','Da Nang',true)
+    ON CONFLICT (id) DO UPDATE SET is_active=true, deleted_at=NULL;
+    INSERT INTO vehicle_types
+      (id,code,display_name,default_seat_count,is_system_defined,is_active)
+    VALUES ('${vehicleTypeId}','D37_E2E','Day 37 Vehicle',20,false,true)
+    ON CONFLICT (id) DO UPDATE SET is_active=true;
+    INSERT INTO vehicles
+      (id,operator_id,vehicle_type_id,license_plate,seat_layout_json,total_seats,
+       max_cargo_weight_kg,max_cargo_volume_m3,status,is_active)
+    VALUES
+      ('${vehicleId}','${operatorId}','${vehicleTypeId}','D37E2E',
+       '{"version":1,"totalSeats":20,"rows":5,"cols":4,"decks":1,"aisles":[],"seats":[]}',
+       20,100,10,'ACTIVE',true)
+    ON CONFLICT (id) DO UPDATE SET status='ACTIVE', is_active=true, deleted_at=NULL;
+    INSERT INTO routes
+      (id,operator_id,name,origin_station_id,destination_station_id,base_fare,
+       estimated_duration_minutes,is_active)
+    VALUES
+      ('${routeId}','${operatorId}','Day 37 Route','${originStationId}',
+       '${destinationStationId}',150000,480,true)
+    ON CONFLICT (id) DO UPDATE SET is_active=true, deleted_at=NULL;
+    INSERT INTO trips
+      (id,operator_id,route_id,vehicle_id,driver_user_id,departure_date_time,estimated_arrival_time,
+       status,source,base_fare,max_cargo_weight_kg,max_cargo_volume_m3,
+       estimated_passenger_luggage_kg,reserved_parcel_weight_kg,
+       reserved_parcel_volume_m3,total_loaded_weight_kg,total_loaded_volume_m3)
+    VALUES
+      ('${tripId}','${operatorId}','${routeId}','${vehicleId}','${driverId}',now()+interval '1 day',
+       now()+interval '1 day 8 hours','SCHEDULED','MANUAL',150000,100,10,0,0,0,0,0)
+    ON CONFLICT (id) DO UPDATE SET status='SCHEDULED';
+  `,
+    'vietride_trip',
+  );
 }
 
 async function operatorToken() {
@@ -177,11 +278,33 @@ async function operatorToken() {
     .sign(key);
 }
 
-async function api(method, pathname, token, body, idempotencyKey) {
-  const response = await fetch(`${gatewayBaseUrl}${pathname}`, {
+async function passengerToken() {
+  const app = JSON.parse(
+    fs.readFileSync(
+      path.join(root, 'apps/identity/src/VietRide.Identity.Api/appsettings.Development.json'),
+      'utf8',
+    ),
+  );
+  const key = await importPKCS8(
+    process.env.USER_JWT_PRIVATE_KEY || app.IdentityJwt.PrivateKey,
+    'RS256',
+  );
+  return new SignJWT({ role: 'PASSENGER', email: 'passenger-day37@example.test', hasPhone: 'true' })
+    .setProtectedHeader({ alg: 'RS256', kid: process.env.USER_JWT_KID || app.IdentityJwt.Kid })
+    .setIssuer('vietride-identity')
+    .setAudience('vietride-api')
+    .setSubject(passengerId)
+    .setIssuedAt()
+    .setExpirationTime('15m')
+    .sign(key);
+}
+
+async function apiAt(baseUrl, method, pathname, token, body, idempotencyKey, internalToken) {
+  const response = await fetch(`${baseUrl}${pathname}`, {
     method,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(internalToken ? { 'X-Internal-Auth': `Bearer ${internalToken}` } : {}),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     },
@@ -196,14 +319,30 @@ async function api(method, pathname, token, body, idempotencyKey) {
   return { status: response.status, json };
 }
 
+function api(method, pathname, token, body, idempotencyKey) {
+  return apiAt(gatewayBaseUrl, method, pathname, token, body, idempotencyKey);
+}
+
+async function internalToken() {
+  const secret = process.env.INTERNAL_JWT_SECRET || localEnvValue('INTERNAL_JWT_SECRET');
+  assert(secret && secret.length >= 32, 'INTERNAL_JWT_SECRET >=32 chars is required');
+  return new SignJWT({ callerService: 'day37-e2e' })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setSubject('day37-e2e')
+    .setIssuer('vietride-gateway')
+    .setAudience('vietride-internal')
+    .setIssuedAt()
+    .setExpirationTime('2m')
+    .sign(new TextEncoder().encode(secret));
+}
+
 function signVnPay(parameters) {
   const canonical = Object.entries(parameters)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join('&');
   const secret = process.env.VNPAY_HASH_SECRET || e2eEnv.VNPAY_HASH_SECRET;
-  if (!secret)
-    throw new Error('VNPAY_HASH_SECRET is required for the VNPay E2E harness.');
+  if (!secret) throw new Error('VNPAY_HASH_SECRET is required for the VNPay E2E harness.');
   return createHmac('sha512', secret).update(canonical).digest('hex');
 }
 
@@ -231,14 +370,16 @@ async function sendSubscriptionIpn(paymentRedirectUrl, responseCode, transaction
 }
 
 async function runHarness() {
+  await configureRuntime();
   if (manageIsolatedStack) {
-    run('docker', [...compose, 'down', '-v', '--remove-orphans'], { env: e2eEnv });
-    run('docker', [...compose, '--parallel', '1', 'up', '-d', '--build', 'gateway'], {
+    run('docker', [...compose, '--parallel', '1', 'up', '-d', '--build', 'gateway', 'rag'], {
       env: e2eEnv,
     });
   }
   waitFor(`${gatewayBaseUrl}/health`);
   waitFor(`${gatewayBaseUrl}/ready`);
+  waitFor(`${ragBaseUrl}/health`);
+  waitFor(`${ragBaseUrl}/ready`);
   record(
     useDevelopmentStack
       ? 'development compose health'
@@ -251,12 +392,32 @@ async function runHarness() {
 
   seedIdentity();
   const token = await operatorToken();
+  const serviceToken = await internalToken();
   const current = await api('GET', '/v1/operator/subscription', token);
   assert(
-    current.status === 200 && current.json?.data?.status === 'ACTIVE',
+    current.status === 200 &&
+      current.json?.data?.status === 'ACTIVE' &&
+      current.json?.data?.plan?.modules?.enableParcel === true &&
+      current.json?.data?.plan?.modules?.enableRag === true,
     `subscription read failed: ${JSON.stringify(current)}`,
   );
-  record('trial approval fixture is readable', true, `plan=${current.json.data.planId}`);
+  const activeRag = await api('GET', '/v1/operator/policies?page=1&pageSize=1', token);
+  assert(activeRag.status === 200, `ACTIVE RAG access failed: ${JSON.stringify(activeRag)}`);
+  const activeQuota = await apiAt(
+    identityBaseUrl,
+    'POST',
+    `/internal/v1/operators/${operatorId}/usage/increment`,
+    undefined,
+    { resource: 'VEHICLES', delta: 1 },
+    crypto.randomUUID(),
+    serviceToken,
+  );
+  assert(
+    activeQuota.status === 200 && activeQuota.json?.usage?.currentVehicles === 1,
+    `ACTIVE quota increment failed: ${JSON.stringify(activeQuota)}`,
+  );
+  record('ACTIVE plan modules are usable', true, `plan=${current.json.data.plan.planId}`);
+  record('ACTIVE quota uses active plan', true, 'VEHICLES=1/2');
 
   const idempotencyKey = crypto.randomUUID();
   const upgradeRequest = {
@@ -291,11 +452,7 @@ async function runHarness() {
   record('upgrade idempotency', true, `payment=${firstUpgrade.json.data.paymentId}`);
 
   const upgradeAttemptId = firstUpgrade.json.data.upgradeAttemptId;
-  await sendSubscriptionIpn(
-    firstUpgrade.json.data.paymentRedirectUrl,
-    '24',
-    '3700000001',
-  );
+  await sendSubscriptionIpn(firstUpgrade.json.data.paymentRedirectUrl, '24', '3700000001');
   poll(
     'Identity payment-failed event consumption',
     () =>
@@ -408,6 +565,153 @@ async function runHarness() {
     true,
     `paymentRows=${paymentCount.split('\n').at(-1)} outbox=${outboxCount.split('\n').at(-1)}`,
   );
+
+  sql(`
+    UPDATE operator_subscriptions
+    SET active_plan_id='${starterPlanId}', status='PENDING_PAYMENT',
+        current_vehicles=0, updated_at=now()
+    WHERE id='${subscriptionId}';
+    UPDATE subscription_plans
+    SET enable_parcel=true, enable_rag=true, max_vehicles=2, updated_at=now()
+    WHERE id='${starterPlanId}';
+  `);
+  const pendingSubscription = await apiAt(
+    identityBaseUrl,
+    'GET',
+    `/internal/v1/operators/${operatorId}/subscription`,
+    undefined,
+    undefined,
+    undefined,
+    serviceToken,
+  );
+  assert(
+    pendingSubscription.status === 200 &&
+      pendingSubscription.json?.status === 'PENDING_PAYMENT' &&
+      pendingSubscription.json?.plan?.modules?.enableParcel === true &&
+      pendingSubscription.json?.plan?.modules?.enableRag === true,
+    `PENDING_PAYMENT active-plan modules drifted: ${JSON.stringify(pendingSubscription)}`,
+  );
+  record('PENDING_PAYMENT keeps active Parcel/RAG modules', true, `plan=${starterPlanId}`);
+
+  const quotaIncrement = await apiAt(
+    identityBaseUrl,
+    'POST',
+    `/internal/v1/operators/${operatorId}/usage/increment`,
+    undefined,
+    { resource: 'VEHICLES', delta: 1 },
+    crypto.randomUUID(),
+    serviceToken,
+  );
+  assert(
+    quotaIncrement.status === 200 && quotaIncrement.json?.usage?.currentVehicles === 1,
+    `PENDING_PAYMENT quota increment failed: ${JSON.stringify(quotaIncrement)}`,
+  );
+  record('PENDING_PAYMENT quota uses active plan', true, 'VEHICLES=1/2');
+
+  const quotaAtCapacity = await apiAt(
+    identityBaseUrl,
+    'POST',
+    `/internal/v1/operators/${operatorId}/usage/increment`,
+    undefined,
+    { resource: 'VEHICLES', delta: 1 },
+    crypto.randomUUID(),
+    serviceToken,
+  );
+  assert(
+    quotaAtCapacity.status === 200 && quotaAtCapacity.json?.usage?.currentVehicles === 2,
+    `PENDING_PAYMENT quota did not reach active-plan capacity: ${JSON.stringify(quotaAtCapacity)}`,
+  );
+  const quotaExceeded = await apiAt(
+    identityBaseUrl,
+    'POST',
+    `/internal/v1/operators/${operatorId}/usage/increment`,
+    undefined,
+    { resource: 'VEHICLES', delta: 1 },
+    crypto.randomUUID(),
+    serviceToken,
+  );
+  const quotaAfterRejection = await apiAt(
+    identityBaseUrl,
+    'GET',
+    `/internal/v1/operators/${operatorId}/subscription`,
+    undefined,
+    undefined,
+    undefined,
+    serviceToken,
+  );
+  assert(
+    quotaExceeded.status === 422 &&
+      quotaExceeded.json?.error?.code === 'SUBSCRIPTION_LIMIT_EXCEEDED' &&
+      quotaAfterRejection.json?.usage?.currentVehicles === 2,
+    `PENDING_PAYMENT quota hard limit drifted: ${JSON.stringify({ quotaExceeded, quotaAfterRejection })}`,
+  );
+  record('PENDING_PAYMENT active-plan hard limit', true, 'VEHICLES=2/2; rejected=422');
+
+  const ragAllowed = await api('GET', '/v1/operator/policies?page=1&pageSize=1', token);
+  assert(
+    ragAllowed.status === 200,
+    `PENDING_PAYMENT RAG access failed: ${JSON.stringify(ragAllowed)}`,
+  );
+  sql(
+    `UPDATE subscription_plans SET enable_parcel=false, enable_rag=false, updated_at=now() WHERE id='${starterPlanId}'`,
+  );
+  const ragDisabled = await api('GET', '/v1/operator/policies?page=1&pageSize=1', token);
+  assert(
+    ragDisabled.status === 403 && ragDisabled.json?.error?.code === 'SUBSCRIPTION_MODULE_DISABLED',
+    `Disabled RAG module contract drifted: ${JSON.stringify(ragDisabled)}`,
+  );
+  const disabledModules = await apiAt(
+    identityBaseUrl,
+    'GET',
+    `/internal/v1/operators/${operatorId}/subscription`,
+    undefined,
+    undefined,
+    undefined,
+    serviceToken,
+  );
+  assert(
+    disabledModules.status === 200 &&
+      disabledModules.json?.plan?.modules?.enableParcel === false &&
+      disabledModules.json?.plan?.modules?.enableRag === false,
+    `Disabled active-plan modules drifted: ${JSON.stringify(disabledModules)}`,
+  );
+  const passenger = await passengerToken();
+  const parcelCountBefore = Number(scalar(sql('SELECT count(*) FROM parcels', 'vietride_parcel')));
+  const blockedParcel = await api(
+    'POST',
+    '/v1/parcels',
+    passenger,
+    {
+      tripId,
+      dropoffStopId: null,
+      bookingId: null,
+      itemName: 'Day 37 blocked parcel',
+      description: 'Module guard acceptance probe',
+      sizeCategory: 'SMALL',
+      lengthCm: 20,
+      widthCm: 20,
+      heightCm: 20,
+      estimatedWeightKg: 1,
+      photoUrl: null,
+      recipient: {
+        fullName: 'Day 37 Recipient',
+        phoneNumber: '0912345678',
+        email: 'recipient-day37@example.test',
+      },
+      deliveryMethod: 'TERMINAL_PICKUP',
+      paymentMethod: 'WALLET',
+      voucherCode: null,
+    },
+    crypto.randomUUID(),
+  );
+  const parcelCountAfter = Number(scalar(sql('SELECT count(*) FROM parcels', 'vietride_parcel')));
+  assert(
+    blockedParcel.status === 403 &&
+      blockedParcel.json?.error?.code === 'SUBSCRIPTION_MODULE_DISABLED' &&
+      parcelCountAfter === parcelCountBefore,
+    `Parcel module guard allowed a write or drifted: ${JSON.stringify({ blockedParcel, parcelCountBefore, parcelCountAfter })}`,
+  );
+  record('disabled Parcel/RAG flags stay enforced', true, 'RAG=403; Parcel=403/no-write');
 }
 
 let failed;

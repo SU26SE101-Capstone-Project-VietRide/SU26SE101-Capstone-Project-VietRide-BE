@@ -21,7 +21,7 @@ export const REQUIRED_OUTBOX = Object.freeze([
   'trip.trip.completed',
 ]);
 export const TRIP_STATES = Object.freeze(['SCHEDULED', 'BOARDING', 'IN_PROGRESS', 'COMPLETED']);
-export const PARCEL_STATES = Object.freeze(['PENDING', 'LOADED', 'IN_TRANSIT', 'UNLOADED']);
+export const PARCEL_STATES = Object.freeze(['READY_TO_LOAD', 'LOADED', 'IN_TRANSIT', 'UNLOADED']);
 
 const root = process.cwd();
 const evidencePath = path.join(root, 'docs/handoff/day-30-sprint4-evidence.md');
@@ -178,8 +178,41 @@ export function buildRedactedSummary({
 function redact(text) {
   return String(text)
     .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]')
-    .replace(/-----BEGIN[\s\S]*?PRIVATE KEY-----/gi, '[PRIVATE KEY REDACTED]')
-    .replace(/Idempotency-Key\s*[:=]\s*\S+/gi, 'Idempotency-Key=[REDACTED]');
+    .replace(
+      /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)* PRIVATE KEY-----/gi,
+      '[PRIVATE KEY REDACTED]',
+    )
+    .replace(/Idempotency-Key\s*[:=]\s*\S+/gi, 'Idempotency-Key=[REDACTED]')
+    .replace(
+      /\b(password|secret|token|credential)\b\s*([:=])\s*(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/gi,
+      '$1$2[REDACTED]',
+    )
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[JWT REDACTED]');
+}
+
+const SENSITIVE_FIELD_NAME =
+  /(?:authorization|credential|idempotency.?key|password|private.?key|secret|token)/i;
+
+function redactDiagnosticValue(value, fieldName) {
+  if (fieldName && SENSITIVE_FIELD_NAME.test(fieldName)) return '[REDACTED]';
+  if (typeof value === 'string') return redact(value);
+  if (Array.isArray(value)) return value.map((item) => redactDiagnosticValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactDiagnosticValue(item, key)]),
+    );
+  }
+  return value;
+}
+
+export function buildApiFailureDiagnostic(result, expectedStatus, label) {
+  const error = result?.body?.error;
+  const safeError = {
+    code: redactDiagnosticValue(error?.code),
+    message: redactDiagnosticValue(error?.message),
+    fields: redactDiagnosticValue(error?.fields),
+  };
+  return `${redact(label)}: expected HTTP ${expectedStatus}, got ${result?.status}; error=${JSON.stringify(safeError)}`;
 }
 
 function psql(database, sql, label) {
@@ -308,7 +341,7 @@ function newKey(prefix) {
 function expectApi(result, expectedStatus, label) {
   assert(
     result.status === expectedStatus,
-    `${label}: expected HTTP ${expectedStatus}, got ${result.status}`,
+    buildApiFailureDiagnostic(result, expectedStatus, label),
   );
   assert(result.body?.success === true, `${label}: success envelope missing`);
   assert(result.body?.statusCode === expectedStatus, `${label}: envelope status mismatch`);
@@ -512,14 +545,22 @@ async function awaitAutoBoarding(fixtureNow) {
   );
 }
 
-function attachPendingParcel() {
+function attachReadyToLoadParcel() {
   psql(
     'vietride_parcel',
     `INSERT INTO vietride_parcel.parcels
-      (id,parcel_code,sender_user_id,recipient_user_id,recipient_name,recipient_phone,operator_id,trip_id,dropoff_stop_id,size_category,estimated_length_cm,estimated_width_cm,estimated_height_cm,estimated_weight_kg,estimated_volume_m3,estimated_dim_weight_kg,estimated_chargeable_weight_kg,total_price_vnd,deposit_amount,original_deposit_amount,status)
+      (id,parcel_code,sender_user_id,recipient_user_id,recipient_name,recipient_phone,operator_id,trip_id,dropoff_stop_id,
+       size_category,estimated_size_category,actual_size_category,
+       estimated_length_cm,estimated_width_cm,estimated_height_cm,estimated_weight_kg,estimated_volume_m3,estimated_dim_weight_kg,estimated_chargeable_weight_kg,
+       actual_length_cm,actual_width_cm,actual_height_cm,actual_weight_kg,actual_volume_m3,actual_dim_weight_kg,actual_chargeable_weight_kg,
+       total_price_vnd,deposit_amount,original_deposit_amount,
+       estimated_gross_price_vnd,final_gross_price_vnd,estimated_total_price_vnd,final_total_price_vnd,deposit_required_vnd,deposit_paid_vnd,
+       checked_in_at,reweighed_at,status)
     VALUES
-      ('${ids.parcel}','${parcelCode}','${ids.sender}','${ids.recipient}','Day30 Recipient','${phones.recipient}','${ids.operator}','${generatedTripId}','${ids.stop}','SMALL',1,1,1,1,0.001,0.01,0.01,10000,10000,10000,'PENDING')`,
-    'attach PENDING Parcel fixture',
+      ('${ids.parcel}','${parcelCode}','${ids.sender}','${ids.recipient}','Day30 Recipient','${phones.recipient}','${ids.operator}','${generatedTripId}','${ids.stop}',
+       'SMALL','SMALL','SMALL',1,1,1,1,0.001,0.01,1,1,1,1,1,0.001,0.01,1,
+       10000,10000,10000,10000,10000,10000,10000,10000,10000,now(),now(),'READY_TO_LOAD')`,
+    'attach READY_TO_LOAD Parcel fixture',
   );
   psql(
     'vietride_trip',
@@ -534,19 +575,28 @@ function attachPendingParcel() {
     COMMIT;`,
     'attach Parcel cargo fixture',
   );
+  const parcelProof = psql(
+    'vietride_parcel',
+    `SELECT count(*) FROM vietride_parcel.parcels
+      WHERE id='${ids.parcel}' AND status='READY_TO_LOAD'
+        AND estimated_size_category='SMALL' AND actual_size_category='SMALL'
+        AND deposit_paid_vnd=deposit_required_vnd AND final_total_price_vnd=10000`,
+    'READY_TO_LOAD Parcel settlement proof',
+  );
   const proof = psql(
     'vietride_trip',
     `SELECT
       (SELECT count(*) FROM vietride_trip.trips WHERE id='${generatedTripId}' AND status='BOARDING' AND reserved_parcel_weight_kg=1) || '|' ||
       (SELECT count(*) FROM vietride_trip.trip_cargo_parcels WHERE trip_id='${generatedTripId}' AND parcel_id='${ids.parcel}' AND state='RESERVED')`,
-    'PENDING Parcel fixture proof',
+    'READY_TO_LOAD Parcel fixture proof',
   );
-  assert(proof === '1|1', 'PENDING Parcel fixture/cargo reservation mismatch');
-  console.log('PASS | one isolated PENDING Parcel attached to generated Trip');
+  assert(parcelProof === '1', 'READY_TO_LOAD Parcel settlement fixture mismatch');
+  assert(proof === '1|1', 'READY_TO_LOAD Parcel fixture/cargo reservation mismatch');
+  console.log('PASS | one isolated READY_TO_LOAD Parcel attached to generated Trip');
 }
 
 async function runLifecycle(tokens) {
-  attachPendingParcel();
+  attachReadyToLoadParcel();
   const loadKey = newKey('parcel');
   const loaded = await post(`/v1/assistant/parcels/${ids.parcel}/load`, tokens.assistant, {
     key: loadKey,
@@ -759,9 +809,17 @@ function cleanupPass(eventRows) {
   );
   psql(
     'vietride_parcel',
-    `DELETE FROM vietride_parcel.outbox_events
+    `BEGIN;
+    SET LOCAL session_replication_role = replica;
+    DELETE FROM vietride_parcel.outbox_events
       WHERE ${tripPayloadPredicate()} OR payload->>'parcelId'='${ids.parcel}';
-    DELETE FROM vietride_parcel.parcels WHERE id='${ids.parcel}';`,
+    DELETE FROM vietride_parcel.parcel_delivery_tokens WHERE parcel_id='${ids.parcel}';
+    DELETE FROM vietride_parcel.parcel_cargo_recovery_operations WHERE parcel_id='${ids.parcel}';
+    DELETE FROM vietride_parcel.platform_parcel_stats WHERE parcel_id='${ids.parcel}';
+    DELETE FROM vietride_parcel.parcel_status_history WHERE parcel_id='${ids.parcel}';
+    DELETE FROM vietride_parcel.parcels WHERE id='${ids.parcel}';
+    DELETE FROM vietride_parcel.parcel_stats WHERE operator_id='${ids.operator}';
+    COMMIT;`,
     'cleanup Parcel artifacts',
   );
   psql(
@@ -841,7 +899,12 @@ async function cleanupAndVerify() {
         'vietride_parcel',
         `SELECT
           (SELECT count(*) FROM vietride_parcel.parcels WHERE id='${ids.parcel}') +
-          (SELECT count(*) FROM vietride_parcel.outbox_events WHERE ${tripPayloadPredicate()} OR payload->>'parcelId'='${ids.parcel}')`,
+          (SELECT count(*) FROM vietride_parcel.outbox_events WHERE ${tripPayloadPredicate()} OR payload->>'parcelId'='${ids.parcel}') +
+          (SELECT count(*) FROM vietride_parcel.parcel_delivery_tokens WHERE parcel_id='${ids.parcel}') +
+          (SELECT count(*) FROM vietride_parcel.parcel_cargo_recovery_operations WHERE parcel_id='${ids.parcel}') +
+          (SELECT count(*) FROM vietride_parcel.platform_parcel_stats WHERE parcel_id='${ids.parcel}') +
+          (SELECT count(*) FROM vietride_parcel.parcel_status_history WHERE parcel_id='${ids.parcel}') +
+          (SELECT count(*) FROM vietride_parcel.parcel_stats WHERE operator_id='${ids.operator}')`,
         'verify Parcel cleanup',
       ),
     ),
@@ -865,6 +928,12 @@ async function cleanupAndVerify() {
   const redisResidue = redisKeys.length ? Number(redis('EXISTS', ...redisKeys)) : 0;
   const total = residue + redisResidue;
   assert(total === 0, `Cleanup verified residue must be zero, got ${total}`);
+  const historyTrigger = psql(
+    'vietride_parcel',
+    `SELECT tgenabled FROM pg_trigger WHERE tgname='trg_parcel_status_history_immutable'`,
+    'verify Parcel status-history trigger',
+  );
+  assert(historyTrigger === 'O', 'Parcel status-history immutability trigger was not restored');
   console.log('PASS | Cleanup verified for exact generated IDs and event/idempotency artifacts');
   return total;
 }
@@ -902,7 +971,7 @@ function writeEvidence(summary, failureInjection) {
     'AUTO_FROM_SCHEDULE generated-Trip proof completed before fixture adjustment.',
     'Fixture-only time advance changed only the generated Trip departure timestamp.',
     'Trip state evidence: SCHEDULED -> BOARDING -> IN_PROGRESS -> COMPLETED.',
-    'Parcel state evidence: PENDING -> LOADED -> IN_TRANSIT -> UNLOADED.',
+    'Parcel state evidence: READY_TO_LOAD -> LOADED -> IN_TRANSIT -> UNLOADED.',
     'Required Outbox evidence: trip.trip.boarding_started, trip.trip.started, parcel.parcel.loaded, trip.stop.arrived, parcel.parcel.unloaded, trip.trip.completed.',
     'completion replay verified with the same runtime UUID-v4 key.',
     'Cleanup verified after both paths; credentials and raw idempotency keys are excluded.',

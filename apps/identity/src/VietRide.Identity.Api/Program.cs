@@ -95,26 +95,26 @@ if (registerRecurringJobs)
 {
     using var scope = app.Services.CreateScope();
     var recurringJobs = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
-    var ict = TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
+    var ict = TimeZoneInfo.FindSystemTimeZoneById(SubscriptionRecurringJobSchedules.IctTimeZoneId);
     recurringJobs.AddOrUpdate<SubscriptionLifecycleJob>(
         SubscriptionLifecycleJob.ExpiryJobId,
         job => job.ExpireActiveAsync(CancellationToken.None),
-        "30 0 * * *",
+        SubscriptionRecurringJobSchedules.ExpiryCron,
         new RecurringJobOptions { TimeZone = ict });
     recurringJobs.AddOrUpdate<SubscriptionLifecycleJob>(
         SubscriptionLifecycleJob.WarningJobId,
         job => job.SendWarningsAsync(CancellationToken.None),
-        "0 * * * *",
+        SubscriptionRecurringJobSchedules.WarningCron,
         new RecurringJobOptions { TimeZone = ict });
     recurringJobs.AddOrUpdate<SubscriptionLifecycleJob>(
         SubscriptionLifecycleJob.RevertJobId,
         job => job.AutoRevertAsync(CancellationToken.None),
-        Cron.Minutely(),
+        SubscriptionRecurringJobSchedules.RevertCron,
         new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<SubscriptionLifecycleJob>(
         SubscriptionLifecycleJob.MonthlyResetJobId,
         job => job.ResetMonthlyTripUsageAsync(CancellationToken.None),
-        "1 0 1 * *",
+        SubscriptionRecurringJobSchedules.MonthlyResetCron,
         new RecurringJobOptions { TimeZone = ict });
     recurringJobs.AddOrUpdate<OperatorWalletBackfillJob>(
         OperatorWalletBackfillJob.RecurringJobId,

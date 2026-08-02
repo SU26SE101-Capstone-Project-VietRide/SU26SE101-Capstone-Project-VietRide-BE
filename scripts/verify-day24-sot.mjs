@@ -25,13 +25,14 @@ function requiredEverywhere(documents, needle, label, files = CONTRACT_FILES) {
   for (const file of files) required(documents[file], needle, `${label} (${file})`);
 }
 
-function requiredErrorRegistryRow(errorRegistry, code, httpStatus) {
+function requiredErrorRegistryRow(errorRegistry, code, allowedHttpStatuses) {
   const rows = errorRegistry
     .split(/\r?\n/)
     .filter((line) => line.startsWith('|') && line.includes(`| \`${code}\` |`));
-  const expected = `| \`${code}\` | ${httpStatus} |`;
-  if (rows.length !== 1 || !rows[0].includes(expected)) {
-    fail(`BSOT error registry ${code}: expected exactly one row with HTTP ${httpStatus}`);
+  const allowed = Array.isArray(allowedHttpStatuses) ? allowedHttpStatuses : [allowedHttpStatuses];
+  const registeredStatus = rows[0]?.split('|')[3]?.trim();
+  if (rows.length !== 1 || !registeredStatus || !allowed.includes(registeredStatus)) {
+    fail(`BSOT error registry ${code}: expected exactly one row with HTTP ${allowed.join(' or ')}`);
   }
 }
 
@@ -139,7 +140,7 @@ export function verifyDay24Sot(root = process.cwd(), options = {}) {
     ['STOP_ALREADY_DISABLED', '409'],
     ['TRIP_STOP_NOT_ARRIVED', '422'],
     ['TRIP_STOP_ALREADY_DEPARTED', '409'],
-    ['UPSTREAM_UNAVAILABLE', '502'],
+    ['UPSTREAM_UNAVAILABLE', ['502', '503', '502 or 503 by boundary']],
   ]) {
     requiredErrorRegistryRow(errorRegistry, code, httpStatus);
   }
@@ -214,14 +215,14 @@ export function verifyDay24Sot(root = process.cwd(), options = {}) {
   required(api, 'STOP_DISABLED_REFUSED', 'refusal reason');
   required(api, 'refundAmount:100% of totalAmount', '100% refusal refund');
   required(bsot, 'BOOKING_PENDING_ACTION_ALREADY_RESOLVED', 'terminal action conflict');
-  required(api, 'Day-23 `SCHEDULE_CHANGE` resolver/body is unchanged', 'resolver non-broadening');
+  required(api, 'Day-23 `SCHEDULE_CHANGE` resolver/body is unchanged', 'resolver compatibility');
   const day23Resolver = sectionBetween(
     api,
     '### POST `/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve`',
     'Day-23 resolver',
   );
-  required(day23Resolver, 'resolves only\na persisted `SCHEDULE_CHANGE`', 'Day-23 resolver reason');
-  assertJsonKeys(day23Resolver, ['action', 'note'], 'Day-23 resolver body');
+  required(day23Resolver, 'persisted `SCHEDULE_CHANGE` or `ROUTE_CHANGE`', 'pending-action resolver reasons');
+  assertJsonKeys(day23Resolver, ['action', 'selectedStopId', 'selectedStationId', 'note'], 'pending-action resolver body');
   forbidden(day23Resolver, /reason\s*[=:]\s*STOP_DISABLED/i, 'broadened Day-23 resolver reason');
   forbidden(day23Resolver, /accept-fallback/i, 'fallback alias inside Day-23 resolver');
 

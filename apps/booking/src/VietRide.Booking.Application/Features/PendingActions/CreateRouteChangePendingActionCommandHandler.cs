@@ -44,6 +44,28 @@ public sealed class CreateRouteChangePendingActionCommandHandler(
                     continue;
                 }
 
+                var pickupStopRemainsOnRoute = booking.PickupStopId.HasValue
+                    && affected.CandidateStops.Any(candidate =>
+                        candidate.StopId == booking.PickupStopId.Value);
+                var requiresPickupSelection = booking.PickupStopId.HasValue
+                    && !pickupStopRemainsOnRoute;
+                if (!requiresPickupSelection)
+                {
+                    var unaffectedActive = await pendingActions.GetActiveByBookingIdAsync(
+                        booking.Id,
+                        cancellationToken);
+                    if (unaffectedActive?.Reason == BookingPendingActionReason.ROUTE_CHANGE)
+                    {
+                        unaffectedActive.Resolve(
+                            BookingPendingActionResolved.SUPERSEDED,
+                            request.OccurredAt);
+                        pendingActions.Update(unaffectedActive);
+                        await unitOfWork.SaveChangesAsync(cancellationToken);
+                    }
+
+                    continue;
+                }
+
                 var replay = await pendingActions.GetByBookingAndSourceEventAsync(
                     booking.Id,
                     request.EventId,

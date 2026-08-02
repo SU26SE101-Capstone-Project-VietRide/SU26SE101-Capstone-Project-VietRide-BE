@@ -89,22 +89,32 @@ public sealed class TripSettlementService
             }
 
             var now = _clock.UtcNow;
+            if (method == OperatorTripSettlementMethod.AUTO_WEEKLY
+                && settlement.Status != OperatorTripSettlementStatus.ELIGIBLE)
+            {
+                throw new ConflictException(
+                    "TRIP_SETTLEMENT_NOT_ELIGIBLE",
+                    "Settlement hold period has not elapsed.");
+            }
+
             var netAmount = await _ledger.SumTripNetAmountAsync(
                 settlement.OperatorId,
                 settlement.TripId,
                 cancellationToken);
-            settlement.RefreshEligibility(netAmount, now);
-            if (settlement.Status == OperatorTripSettlementStatus.CANCELLED)
+            if (netAmount <= 0)
             {
-                if (settledBy is not null)
-                    settlement.SetSettledBySnapshot(settledBy);
+                settlement.MarkCancelled(netAmount, method, now, settledBy);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 await _unitOfWork.CommitAsync(cancellationToken);
                 transactionCompleted = true;
                 return ToResult(settlement);
             }
 
-            if (settlement.Status != OperatorTripSettlementStatus.ELIGIBLE)
+            settlement.RefreshEligibility(netAmount, now);
+            var canSettle = settlement.Status == OperatorTripSettlementStatus.ELIGIBLE
+                || method == OperatorTripSettlementMethod.ADMIN_MANUAL
+                    && settlement.Status == OperatorTripSettlementStatus.PENDING_HOLD;
+            if (!canSettle)
                 throw new ConflictException("TRIP_SETTLEMENT_NOT_ELIGIBLE", "Settlement hold period has not elapsed.");
 
             try
@@ -120,10 +130,14 @@ public sealed class TripSettlementService
             }
             catch (InvalidOperationException exception)
             {
-                settlement.RecordFailure("PLATFORM_WALLET_INSUFFICIENT_BALANCE", now);
-                await _unitOfWork.SaveChangesAsync(cancellationToken);
-                await _unitOfWork.CommitAsync(cancellationToken);
-                transactionCompleted = true;
+                if (settlement.Status == OperatorTripSettlementStatus.ELIGIBLE)
+                {
+                    settlement.RecordFailure("PLATFORM_WALLET_INSUFFICIENT_BALANCE", now);
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    transactionCompleted = true;
+                }
+
                 throw new PlatformWalletInsufficientBalanceException(exception.Message);
             }
 

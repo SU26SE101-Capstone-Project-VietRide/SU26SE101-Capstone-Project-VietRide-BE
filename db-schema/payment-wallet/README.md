@@ -102,13 +102,14 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
   deletion wins every race and replay remains idempotent.
 - **Lifecycle:**
   ```
-  Trip terminal (COMPLETED / DISRUPTED) + SUM(ledger entries for trip) > 0
-    → INSERT settlement { status: PENDING_HOLD, eligible_at = terminal + 7 days }
+  Trip terminal (COMPLETED / DISRUPTED)
+    → INSERT/UPSERT exactly one settlement { status: PENDING_HOLD, eligible_at = terminal + 7 days }
 
   Hangfire daily 02:00: PENDING_HOLD + eligible_at <= now → ELIGIBLE
   Hangfire Monday 09:00: ELIGIBLE → SETTLED (atomic with PlatformWallet DEBIT + OperatorWallet CREDIT + INSERT both transaction records)
   Admin manual `POST /v1/admin/trip-settlements/{id}/settle`: PENDING_HOLD or ELIGIBLE → SETTLED (override 7d hold)
-  At settle time: if recomputed netAmount <= 0 (all refunded) → CANCELLED instead of SETTLED
+  At settle time: if recomputed netAmount <= 0 (all refunded) → keep the marker and set CANCELLED;
+  create no PlatformWallet/OperatorWallet movement and publish no settlement event
   ```
 - **CHECK constraint** `chk_operator_trip_settlements_settled_consistency`: enforce `(status PENDING_HOLD/ELIGIBLE ↔ settled_at NULL)` và `(status SETTLED/CANCELLED ↔ settled_at + settlement_method NOT NULL)`.
 - **`row_version` optimistic lock** trên status transition — chống race: Monday auto-job + admin manual cùng lúc settle 1 record. Pattern: `UPDATE ... WHERE id=:id AND status=:expected AND row_version=:original`.
@@ -204,7 +205,13 @@ amount dương. Đây là contract logic trên schema hiện có, không thêm m
 - **Tool:** EF Core Migrations.
 - **Bootstrap order:** Sau Identity, Trip-Route-Vehicle. Seed fixed singleton `platform_wallets { id='00000000-0000-0000-0000-000000000001', balance=0 }`. Khi operator được APPROVED, atomic event handler INSERT 1 row `operator_wallets { operator_id, balance=0 }` (UPSERT).
 - **Operator legacy backfill:** Identity persist `operator_wallet_backfill_markers(operator_id PK,event_id UNIQUE)` và approval Outbox cùng transaction. Payload carries stable `eventId`; Payment durable inbox dedupes theo eventId. Money mutations may lazy-create balance-0 wallet with insert-on-conflict; reads never create rows.
-- **Trip terminal handler:** Payment Service consume `trip.trip.completed` hoặc `trip.trip.disrupted` event → IF SUM(ledger entries cho trip) > 0 → INSERT `operator_trip_settlements { status: PENDING_HOLD, eligible_at = trip_terminal_at + 7 days }`. Pattern UPSERT trên `(operator_id, trip_id)` để idempotent với event redelivery.
+- **Trip terminal handler:** Payment Service consume `trip.trip.completed` hoặc `trip.trip.disrupted`
+  event → INSERT/UPSERT `operator_trip_settlements { status: PENDING_HOLD, eligible_at =
+  trip_terminal_at + 7 days }` regardless of the initial ledger sum. Exactly one marker always
+  exists per `(operator_id, trip_id)`, with UPSERT idempotency for event redelivery. Initial
+  zero-net may terminalize that marker immediately during terminal-event handling/eligibility
+  refresh. A marker still `PENDING_HOLD|ELIGIBLE` is recomputed and may become `CANCELLED` during
+  manual or weekly settlement; every zero-net path creates no wallet movement or settlement event.
 - **Optimistic lock pattern:** EF Core `[ConcurrencyCheck]` hoặc `[Timestamp]` attribute trên `row_version` cho `wallets`, `platform_wallets`, `operator_wallets`, `operator_trip_settlements`.
 - **Day-37 upgrade:** Phase A additive migration + dual-write context; valid legacy VNPay callback with `{}` context still settles existing money path and marks reconciliation. Backfill context through authenticated internal HTTP, then backfill missing ledger/Invoice without repeating PlatformWallet movement. Phase B enables `PaymentContext:Required`, terminal consumers and Invoice reconciliation only after readiness has no untreated legacy rows; failures are quarantined with runbook. Rollback disables gates/consumers, never drops migrated data.
 

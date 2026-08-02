@@ -467,6 +467,32 @@ public sealed class SubstituteVehicleEndpointTests
             return client.SendAsync(request);
         }
 
+        public async Task<HttpResponseMessage> SendCargoTransferAsync(
+            Guid sourceTripId,
+            Guid parcelId,
+            Guid targetTripId,
+            Guid idempotencyKey)
+        {
+            using var client = factory.CreateClient();
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"/internal/v1/trips/{sourceTripId:D}/cargo/transfer");
+            request.Headers.TryAddWithoutValidation(
+                "X-Internal-Auth",
+                $"Bearer {CreateInternalJwt(OperatorId, ActorId)}");
+            request.Headers.TryAddWithoutValidation(
+                "Idempotency-Key",
+                idempotencyKey.ToString("D"));
+            request.Content = JsonContent.Create(new
+            {
+                parcelId,
+                targetTripId,
+                targetState = TripCargoParcel.LoadedState,
+                allowCapacityOverflow = true,
+            });
+            return await client.SendAsync(request);
+        }
+
         public Task<HttpResponseMessage> SendDisruptRawAsync(string body)
         {
             var client = factory.CreateClient();

@@ -18,7 +18,7 @@ after(() => {
   // Node 24 defaults to the spec reporter, while the ratified Day-24 PowerShell helper parses
   // TAP counters. Native test failures still set a non-zero exit code; these compatibility lines
   // make a successful run reporter-independent for the helper's non-zero selection gate.
-  process.stdout.write('# pass 20\n# fail 0\n# cancelled 0\n# todo 0\n');
+  process.stdout.write('# pass 23\n# fail 0\n# cancelled 0\n# todo 0\n');
 });
 
 function fixture() {
@@ -40,6 +40,16 @@ function removeBsotRegistryRow(fixtureRoot, code) {
   fs.writeFileSync(file, lines.join('\n'));
 }
 
+function replaceInSection(text, heading, current, replacement) {
+  const start = text.indexOf(heading);
+  assert.notEqual(start, -1, `fixture heading missing: ${heading}`);
+  const nextHeadingOffset = text.slice(start + heading.length).search(/\n#{1,3} /);
+  const end = nextHeadingOffset < 0 ? text.length : start + heading.length + nextHeadingOffset;
+  const section = text.slice(start, end);
+  assert.ok(section.includes(current), `fixture section ${heading} missing: ${current}`);
+  return text.slice(0, start) + section.replace(current, replacement) + text.slice(end);
+}
+
 test('Day 24 SOT gate: canonical documents pass all contract assertions', () => {
   const result = verifyDay24Sot(root, { changedPaths: [] });
   assert.equal(result.checkedFiles.length, 5);
@@ -59,6 +69,24 @@ for (const code of ['STOP_ALREADY_DISABLED', 'TRIP_STOP_NOT_ARRIVED', 'TRIP_STOP
     assert.throws(() => verifyDay24Sot(fixtureRoot, { changedPaths: [] }), new RegExp(`BSOT error registry ${code}`));
   });
 }
+
+for (const status of ['502', '503']) {
+  test(`Day 24 SOT gate: generic UPSTREAM_UNAVAILABLE registry accepts HTTP ${status}`, () => {
+    const fixtureRoot = fixture();
+    const file = path.join(fixtureRoot, 'BACKEND_SOURCE_OF_TRUTH.md');
+    const current = fs.readFileSync(file, 'utf8');
+    fs.writeFileSync(file, current.replace('| | `UPSTREAM_UNAVAILABLE` | 502 or 503 by boundary |', `| | \`UPSTREAM_UNAVAILABLE\` | ${status} |`));
+    assert.doesNotThrow(() => verifyDay24Sot(fixtureRoot, { changedPaths: [] }));
+  });
+}
+
+test('Day 24 SOT gate: exact-502 departure endpoint rejects HTTP 503', () => {
+  const fixtureRoot = fixture();
+  const file = path.join(fixtureRoot, 'VietRide_API_Contract_v1.md');
+  const current = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(file, replaceInSection(current, '### POST `/v1/driver/trips/{tripId}/stops/{stopId}/depart`', '`502 UPSTREAM_UNAVAILABLE`', '`503 UPSTREAM_UNAVAILABLE`'));
+  assert.throws(() => verifyDay24Sot(fixtureRoot, { changedPaths: [] }), /API stop departure error UPSTREAM_UNAVAILABLE/);
+});
 
 test('Day 24 SOT gate: deleting only the Day-24 changelog row is rejected', () => {
   const fixtureRoot = fixture();
@@ -133,12 +161,12 @@ test('Day 24 SOT gate: omitted D24-6 event fields are rejected', () => {
   assert.throws(() => verifyDay24Sot(fixtureRoot, { changedPaths: [] }), /event registry trip\.stop\.disabled/);
 });
 
-test('Day 24 SOT gate: broadened Day-23 resolver body is rejected', () => {
+test('Day 24 SOT gate: unexpected pending-action resolver field is rejected', () => {
   const fixtureRoot = fixture();
   const file = path.join(fixtureRoot, 'VietRide_API_Contract_v1.md');
   const current = fs.readFileSync(file, 'utf8');
-  fs.writeFileSync(file, current.replace('"note": "optional"\n}', '"note": "optional",\n  "selectedStopId": "uuid"\n}'));
-  assert.throws(() => verifyDay24Sot(fixtureRoot, { changedPaths: [] }), /Day-23 resolver body/);
+  fs.writeFileSync(file, current.replace('"note": "optional"\n}', '"note": "optional",\n  "unexpected": "value"\n}'));
+  assert.throws(() => verifyDay24Sot(fixtureRoot, { changedPaths: [] }), /pending-action resolver body/);
 });
 
 test('Day 24 SOT gate: alternate depart route is rejected', () => {

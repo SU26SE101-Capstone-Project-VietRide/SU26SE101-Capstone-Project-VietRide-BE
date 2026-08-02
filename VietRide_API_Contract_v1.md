@@ -2377,6 +2377,11 @@ Errors: `401 AUTH_TOKEN_INVALID`, `404 TRIP_NOT_FOUND`, `404 PARCEL_CARGO_NOT_FO
 `409 TRIP_CARGO_TRANSFER_CONFLICT`, `422 TRIP_CARGO_CAPACITY_EXCEEDED`, and
 `422 VALIDATION_ERROR`.
 
+**Current-v1 Trip creation boundary:** `POST /v1/operator/trips` is deferred and intentionally
+absent from the public API and Gateway inventories. Existing Trip write APIs below mutate Trips
+created by DriverSchedule generation or the documented vehicle-substitution flow; this note does
+not reserve a callable base-path POST.
+
 ### POST `/v1/operator/trips/{id}/cancel/preview`
 
 Auth: `OPERATOR_ADMIN` for the Trip's operator. This read-only preview does not require an
@@ -3394,6 +3399,26 @@ Errors:
 - `422 IDEMPOTENCY_KEY_MISMATCH` for same-key/different-payload reuse under the shared idempotency
   contract.
 
+### POST `/v1/assistant/parcels/{parcelId}/unload`
+
+Auth: assigned `ASSISTANT` under the Parcel operator. Idempotency: required. Body is empty.
+
+Parcel synchronously reads the raw `GET /internal/v1/trips/{tripId}` snapshot before mutation.
+For `dropoffStopId != null`, the matching TripStop must exist, have `allowDropoff=true`, and have
+`status=ARRIVED`. For terminal-bound `dropoffStopId=null`, `destinationArrivedAt` must be non-null;
+the last intermediate stop is never treated as destination arrival. No Parcel arrival
+event-consumer or local arrival projection is used.
+
+Only `IN_TRANSIT` may transition to `UNLOADED`. The winning CAS persists `unloadedAt`, releases the
+Trip-owned cargo exactly once using the same idempotency identity, and enqueues one
+`parcel.parcel.unloaded` fact. Response `200` data is
+`{ "parcelId": "uuid", "parcelCode": "VR-PCL-20260722-ABCDEFGH", "status": "UNLOADED" }`.
+
+Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN` (including a missing/hidden Trip snapshot);
+`404 PARCEL_NOT_FOUND`; `409 INVALID_STATUS|IDEMPOTENCY_REQUEST_PENDING`;
+`422 DROP_OFF_STOP_NOT_FOUND|DROP_OFF_STOP_NOT_ALLOWED|DROP_OFF_STOP_NOT_ARRIVED|DESTINATION_TERMINAL_NOT_ARRIVED|IDEMPOTENCY_KEY_REQUIRED|IDEMPOTENCY_KEY_MISMATCH`;
+`503 TRIP_SERVICE_UNAVAILABLE`.
+
 ### POST `/v1/assistant/parcels/{parcelId}/deliver`
 
 Auth: assigned `ASSISTANT` under the Parcel operator. Idempotency: required. Request body is
@@ -4408,7 +4433,10 @@ Response `200`:
 }
 ```
 
-`PENDING_PAYMENT` and `EXPIRED` are valid readable states. Errors: `403 FORBIDDEN`, `404 RESOURCE_NOT_FOUND`.
+`PENDING_PAYMENT` and `EXPIRED` are valid readable states. While status is `PENDING_PAYMENT`,
+`plan`/`activePlan` remains the sole entitlement source: quota allocation/increment and module
+gates such as `enableParcel`, `enableShuttle`, and `enableRag` must not use the pending target plan.
+Errors: `403 FORBIDDEN`, `404 RESOURCE_NOT_FOUND`.
 
 ### GET `/v1/operator/subscription-plans`
 
@@ -4576,6 +4604,11 @@ Auth: `SYSTEM_ADMIN`. Query: operator filters plus `operatorId?`, `stuckOnly?`, 
 ### POST `/v1/admin/trip-settlements/{settlementId}/settle`
 
 Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Body is empty. Only `PENDING_HOLD|ELIGIBLE` can settle. Response `200` data contains `settlementId`, `tripId`, `operatorId`, `netAmount`, `status`, `settlementMethod: "ADMIN_MANUAL"`, `settledAt`.
+
+The settlement marker remains the single per-Trip/per-operator row. If recomputed
+`netAmount <= 0`, this request returns that row with `status: "CANCELLED"` and
+`settlementMethod: "ADMIN_MANUAL"`; it creates no PlatformWallet/OperatorWallet movement and
+publishes no settlement event.
 
 Errors: `404 TRIP_SETTLEMENT_NOT_FOUND`; `409 TRIP_SETTLEMENT_ALREADY_SETTLED`; `500 PLATFORM_WALLET_INSUFFICIENT_BALANCE`; idempotency errors. Same-key replay returns the original result; a different manual key losing a concurrent manual/weekly race returns `409 TRIP_SETTLEMENT_ALREADY_SETTLED`.
 
@@ -6159,7 +6192,9 @@ AlternativeRoute active limit exceeded:
 All public responses use the ADR 0004 `ApiResponse<T>` envelope. Success responses include `{ success, statusCode, data, meta }`; errors include `{ success: false, statusCode, error: { code, message, fields? }, meta }`.
 
 Original Day-9 Vehicle/DriverSchedule create and activate writes do not require
-`Idempotency-Key`. The Day-22 full DriverSchedule PATCH and its deprecated `/crew` alias explicitly
+`Idempotency-Key`. They are two explicit members of the canonical 17-route system-wide exemption
+inventory and carry auditable runtime exemption metadata; callers must not add a key as a hidden
+precondition. The Day-22 full DriverSchedule PATCH and its deprecated `/crew` alias explicitly
 require a UUID-v4 key as documented below.
 
 Vehicle and DriverSchedule writes require the caller operator to be `APPROVED` and active. A non-APPROVED or inactive operator receives `403 FORBIDDEN`.
@@ -7323,7 +7358,8 @@ Notification resolve active `OPERATOR_ADMIN` theo `operatorId`.
 
 ### `trip.stop.arrived`
 
-Producer: Trip. Consumers: Parcel, Notification. Exchange: `vietride.events`.
+Producer: Trip. Consumer: Notification. Exchange: `vietride.events`. Parcel does not consume this
+fact; unload eligibility is read synchronously from the Trip snapshot.
 
 ```json
 {
@@ -7343,7 +7379,9 @@ Producer: Trip. Consumers: Parcel, Notification. Exchange: `vietride.events`.
 
 ### `trip.destination.arrived`
 
-Producer: Trip. Consumer: Parcel. Exchange: `vietride.events`.
+Producer: Trip. No v1 consumer. Exchange: `vietride.events`. Parcel does not consume this fact or
+maintain an arrival projection; terminal unload reads `destinationArrivedAt` synchronously from
+the Trip snapshot.
 
 ```json
 {

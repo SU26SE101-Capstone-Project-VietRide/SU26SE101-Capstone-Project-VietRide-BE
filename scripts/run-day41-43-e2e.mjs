@@ -71,12 +71,23 @@ const operatorAdminB = '41430000-0000-4000-8000-000000000012';
 const passenger = '41430000-0000-4000-8000-000000000013';
 const driverA = '41430000-0000-4000-8000-000000000014';
 const driverB = '41430000-0000-4000-8000-000000000015';
+const driverTenantB = '41430000-0000-4000-8030-000000000000';
 const stationOrigin = '41430000-0000-4000-8000-000000000101';
 const stationDestination = '41430000-0000-4000-8000-000000000102';
 const routeId = '41430000-0000-4000-8000-000000000103';
 const vehicleTypeId = '41430000-0000-4000-8000-000000000104';
 const vehicleId = '41430000-0000-4000-8000-000000000105';
 const baseTrip = '41430000-0000-4000-8000-000000000106';
+const routeB = '41430000-0000-4000-8030-000000000001';
+const vehicleB = '41430000-0000-4000-8030-000000000002';
+const tripB = '41430000-0000-4000-8030-000000000003';
+const bookingB = '41430000-0000-4000-8030-000000000004';
+const cancellationB = '41430000-0000-4000-8030-000000000005';
+const parcelB = '41430000-0000-4000-8030-000000000006';
+const bookingRevenueB = '41430000-0000-4000-8030-000000000007';
+const parcelRevenueB = '41430000-0000-4000-8030-000000000008';
+const refundB = '41430000-0000-4000-8030-000000000009';
+const cancellationRevenueB = '41430000-0000-4000-8030-000000000013';
 const ids = { operatorA, operatorB, systemAdmin, operatorAdminA, operatorAdminB, passenger };
 const tokens = {};
 let stackStarted = false;
@@ -363,8 +374,7 @@ function expectError(result, statuses, code) {
   assert(errorCode(result) === code, `Expected ${code}, got ${errorCode(result)}: ${result.text}`);
 }
 
-function reportDateRange(daysBack) {
-  const now = Date.now();
+function reportDateRange(daysBack, now = Date.now()) {
   return {
     from: new Date(now - daysBack * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
     to: new Date(now + 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
@@ -440,6 +450,19 @@ function inspectWorkbook(buffer, sheetName, headers, minimumDataRows = 0) {
   return { rows, bytes: buffer.length, xml };
 }
 
+function assertExactTenantWorkbook(workbook, reportName, expectedIds, forbiddenIdentifiers) {
+  assert(
+    workbook.rows === expectedIds.length + 1,
+    `${reportName} tenant B row count drifted: expected ${expectedIds.length}, got ${workbook.rows - 1}`,
+  );
+  for (const id of expectedIds) {
+    assert(workbook.xml.includes(id), `${reportName} tenant B workbook is missing ${id}`);
+  }
+  for (const identifier of forbiddenIdentifiers) {
+    assert(!workbook.xml.includes(identifier), `${reportName} leaked tenant A aggregate ${identifier}`);
+  }
+}
+
 function seed() {
   identitySql(`
     INSERT INTO operators (id,name,business_registration_number,tax_code,contact_email,contact_phone,registration_status,approved_at,is_active,deleted_at)
@@ -466,16 +489,22 @@ function seed() {
       ('${stationDestination}','Day 41-43 Destination','day4143-destination','Destination address','HCM','HCM',10.7800,106.7100,false,true,NULL)
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO routes (id,operator_id,name,origin_station_id,destination_station_id,base_fare,is_active)
-    VALUES ('${routeId}','${operatorA}','Day 41-43 route','${stationOrigin}','${stationDestination}',100000,true)
+    VALUES
+      ('${routeId}','${operatorA}','Day 41-43 route','${stationOrigin}','${stationDestination}',100000,true),
+      ('${routeB}','${operatorB}','Day 41 tenant B route','${stationOrigin}','${stationDestination}',100000,true)
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO vehicle_types (id,code,display_name,default_seat_count,is_active)
     VALUES ('${vehicleTypeId}','DAY4143','Day 41-43 vehicle',2,true)
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO vehicles (id,operator_id,vehicle_type_id,license_plate,seat_layout_json,total_seats,status,is_active)
-    VALUES ('${vehicleId}','${operatorA}','${vehicleTypeId}','51B-4143','{}',2,'ACTIVE',true)
+    VALUES
+      ('${vehicleId}','${operatorA}','${vehicleTypeId}','51B-4143','{}',2,'ACTIVE',true),
+      ('${vehicleB}','${operatorB}','${vehicleTypeId}','51B-4143B','{}',2,'ACTIVE',true)
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO trips (id,operator_id,route_id,vehicle_id,driver_user_id,departure_date_time,estimated_arrival_time,completed_at,status,source,base_fare)
-    VALUES ('${baseTrip}','${operatorA}','${routeId}','${vehicleId}','${driverA}',now()-interval '4 hours',now()-interval '3 hours',now()-interval '3 hours','COMPLETED','MANUAL',100000)
+    VALUES
+      ('${baseTrip}','${operatorA}','${routeId}','${vehicleId}','${driverA}',now()-interval '4 hours',now()-interval '3 hours',now()-interval '3 hours','COMPLETED','MANUAL',100000),
+      ('${tripB}','${operatorB}','${routeB}','${vehicleB}','${driverTenantB}',now()-interval '2 hours',now()-interval '1 hour',now()-interval '1 hour','COMPLETED','MANUAL',100000)
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO trips (id,operator_id,route_id,vehicle_id,driver_user_id,departure_date_time,estimated_arrival_time,completed_at,status,source,base_fare)
     SELECT ('41430000-0000-4000-8001-' || lpad(g::text,12,'0'))::uuid,
@@ -492,6 +521,11 @@ function seed() {
     CROSS JOIN (VALUES ('D01','BOOKED'),('D02','AVAILABLE')) AS seat(seat_number,status)
     WHERE t.operator_id='${operatorA}' AND t.id::text LIKE '41430000-0000-4000-8001-%'
     ON CONFLICT (trip_id,seat_number) DO NOTHING;
+    INSERT INTO trip_seats (id,trip_id,seat_number,seat_type,status)
+    VALUES
+      (gen_random_uuid(),'${tripB}','B01','STANDARD','BOOKED'),
+      (gen_random_uuid(),'${tripB}','B02','STANDARD','AVAILABLE')
+    ON CONFLICT (trip_id,seat_number) DO NOTHING;
   `);
 
   bookingSql(`
@@ -503,7 +537,7 @@ function seed() {
     INSERT INTO bookings (id,booking_code,passenger_user_id,trip_id,operator_id,pickup_station_id,dropoff_station_id,base_fare,discount_amount,total_amount,status,confirmed_at,completed_at,created_at,updated_at)
     SELECT ('41430000-0000-4000-8020-' || lpad(g::text,12,'0'))::uuid,
            'VR-20260718-' || lpad((g + 100000)::text,8,'0'),'${passenger}','${baseTrip}',
-           ('41430000-0000-4000-8000-' || lpad(((g - 1) % 20 + 1)::text,12,'0'))::uuid,
+           ('41430000-0000-4000-8000-' || lpad(((g - 1) % 18 + 3)::text,12,'0'))::uuid,
            '${stationOrigin}','${stationDestination}',100000,0,100000,'COMPLETED',
            now()-interval '90 minutes',now()-interval '30 minutes',now()-interval '1 hour',now()
     FROM generate_series(1,90000) AS g
@@ -520,6 +554,12 @@ function seed() {
       cancelled_at=EXCLUDED.cancelled_at,
       created_at=EXCLUDED.created_at,
       updated_at=EXCLUDED.updated_at;
+    INSERT INTO bookings (id,booking_code,passenger_user_id,trip_id,operator_id,pickup_station_id,dropoff_station_id,base_fare,discount_amount,total_amount,status,confirmed_at,completed_at,created_at,updated_at)
+    VALUES ('${bookingB}','VR-DAY41-B-COMPLETED','${passenger}','${tripB}','${operatorB}','${stationOrigin}','${stationDestination}',100000,0,100000,'COMPLETED',now()-interval '90 minutes',now()-interval '30 minutes',now()-interval '2 hours',now())
+    ON CONFLICT (id) DO UPDATE SET operator_id=EXCLUDED.operator_id,trip_id=EXCLUDED.trip_id,status=EXCLUDED.status,created_at=EXCLUDED.created_at,completed_at=EXCLUDED.completed_at,updated_at=EXCLUDED.updated_at;
+    INSERT INTO bookings (id,booking_code,passenger_user_id,trip_id,operator_id,pickup_station_id,dropoff_station_id,base_fare,discount_amount,total_amount,status,cancellation_reason,confirmed_at,cancelled_at,created_at,updated_at)
+    VALUES ('${cancellationB}','VR-DAY41-B-CANCELLED','${passenger}','${tripB}','${operatorB}','${stationOrigin}','${stationDestination}',100000,0,100000,'CANCELLED','USER_INITIATED',now()-interval '90 minutes',now()-interval '30 minutes',now()-interval '2 hours',now())
+    ON CONFLICT (id) DO UPDATE SET operator_id=EXCLUDED.operator_id,trip_id=EXCLUDED.trip_id,status=EXCLUDED.status,cancellation_reason=EXCLUDED.cancellation_reason,created_at=EXCLUDED.created_at,cancelled_at=EXCLUDED.cancelled_at,updated_at=EXCLUDED.updated_at;
     INSERT INTO passengers (id,booking_id,seat_number,boarding_status)
     SELECT gen_random_uuid(), b.id, 'D01', 'PENDING'
     FROM bookings b
@@ -534,9 +574,12 @@ function seed() {
     FROM generate_series(1,10000) AS g
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO parcels (id,parcel_code,sender_user_id,recipient_name,recipient_phone,operator_id,trip_id,size_category,estimated_size_category,estimated_weight_kg,delivery_method,total_price_vnd,deposit_percent,deposit_amount,original_deposit_amount,discount_amount,additional_amount,refund_amount,status,confirmed_at,created_at,updated_at)
+    VALUES ('${parcelB}','VRP-DAY41-B','${passenger}','Tenant B Recipient','+84910041432','${operatorB}','${tripB}','SMALL','SMALL',1,'TERMINAL_PICKUP',60000,100,60000,60000,0,0,0,'DELIVERY_CONFIRMED',now()-interval '45 minutes',now()-interval '1 hour',now())
+    ON CONFLICT (id) DO UPDATE SET operator_id=EXCLUDED.operator_id,trip_id=EXCLUDED.trip_id,status=EXCLUDED.status,created_at=EXCLUDED.created_at,confirmed_at=EXCLUDED.confirmed_at,updated_at=EXCLUDED.updated_at;
+    INSERT INTO parcels (id,parcel_code,sender_user_id,recipient_name,recipient_phone,operator_id,trip_id,size_category,estimated_size_category,estimated_weight_kg,delivery_method,total_price_vnd,deposit_percent,deposit_amount,original_deposit_amount,discount_amount,additional_amount,refund_amount,status,confirmed_at,created_at,updated_at)
     SELECT ('41430000-0000-4000-8021-' || lpad(g::text,12,'0'))::uuid,
            'VRP4143-BM-' || lpad(g::text,6,'0'),'${passenger}','Benchmark Recipient ' || g,'+84910041430',
-           ('41430000-0000-4000-8000-' || lpad(((g - 1) % 20 + 1)::text,12,'0'))::uuid,
+           ('41430000-0000-4000-8000-' || lpad(((g - 1) % 18 + 3)::text,12,'0'))::uuid,
            '${baseTrip}','SMALL','SMALL',1,'TERMINAL_PICKUP',60000,100,60000,60000,0,0,0,
            'DELIVERY_CONFIRMED',now()-interval '45 minutes',now()-interval '1 hour',now()
     FROM generate_series(1,40000) AS g
@@ -555,8 +598,15 @@ function seed() {
     FROM generate_series(1,10000) AS g
     ON CONFLICT (source_event_id,entry_type,reference_id) DO NOTHING;
     INSERT INTO operator_ledger_entries (id,operator_id,trip_id,entry_type,amount,reference_type,reference_id,source_event_id,note,created_at)
+    VALUES
+      ('${bookingRevenueB}','${operatorB}','${tripB}','BOOKING_REVENUE',100000,'BOOKING','${bookingB}','41430000-0000-4000-8030-000000000010','Day 41 tenant B booking revenue',now()-interval '30 minutes'),
+      ('${parcelRevenueB}','${operatorB}','${tripB}','PARCEL_REVENUE',60000,'PARCEL','${parcelB}','41430000-0000-4000-8030-000000000011','Day 41 tenant B parcel revenue',now()-interval '29 minutes'),
+      ('${cancellationRevenueB}','${operatorB}','${tripB}','BOOKING_REVENUE',100000,'BOOKING','${cancellationB}','41430000-0000-4000-8030-000000000014','Day 41 tenant B cancelled-booking revenue',now()-interval '31 days 1 minute'),
+      ('${refundB}','${operatorB}','${tripB}','BOOKING_REFUND',-100000,'BOOKING','${cancellationB}','41430000-0000-4000-8030-000000000012','Day 41 tenant B booking refund',now()-interval '31 days')
+    ON CONFLICT (source_event_id,entry_type,reference_id) DO UPDATE SET operator_id=EXCLUDED.operator_id,trip_id=EXCLUDED.trip_id,amount=EXCLUDED.amount,created_at=EXCLUDED.created_at;
+    INSERT INTO operator_ledger_entries (id,operator_id,trip_id,entry_type,amount,reference_type,reference_id,source_event_id,note,created_at)
     SELECT gen_random_uuid(),
-           ('41430000-0000-4000-8000-' || lpad(((g - 1) % 20 + 1)::text,12,'0'))::uuid,
+           ('41430000-0000-4000-8000-' || lpad(((g - 1) % 18 + 3)::text,12,'0'))::uuid,
            '${baseTrip}','BOOKING_REVENUE',100000,'BOOKING',
            ('41430000-0000-4000-8020-' || lpad(g::text,12,'0'))::uuid,
            ('41430000-0000-4000-8022-' || lpad(g::text,12,'0'))::uuid,
@@ -569,7 +619,7 @@ function seed() {
     ON CONFLICT (source_event_id,entry_type,reference_id) DO NOTHING;
     INSERT INTO operator_ledger_entries (id,operator_id,trip_id,entry_type,amount,reference_type,reference_id,source_event_id,note,created_at)
     SELECT gen_random_uuid(),
-           ('41430000-0000-4000-8000-' || lpad(((g - 1) % 20 + 1)::text,12,'0'))::uuid,
+           ('41430000-0000-4000-8000-' || lpad(((g - 1) % 18 + 3)::text,12,'0'))::uuid,
            '${baseTrip}','PARCEL_REVENUE',60000,'PARCEL',
            ('41430000-0000-4000-8021-' || lpad(g::text,12,'0'))::uuid,
            ('41430000-0000-4000-8023-' || lpad(g::text,12,'0'))::uuid,
@@ -610,14 +660,15 @@ function seed() {
 async function runExcelScenario() {
   const range = reportDateRange(32);
   const reports = [
-    ['bookings', 'booking', 'Bookings', ['booking_id', 'booking_code', 'trip_id', 'status'], 10000],
-    ['parcels', 'parcel', 'Parcels', ['parcel_id', 'parcel_code', 'trip_id', 'status'], 10000],
-    ['revenue', 'payment', 'Revenue', ['entry_id', 'entry_type', 'reference_type', 'amount_vnd'], 10000],
-    ['occupancy', 'trip', 'Occupancy', ['trip_id', 'route_id', 'status', 'occupancy_percent'], 10000],
-    ['cancellation', 'booking', 'Cancellations', ['booking_id', 'booking_code', 'cancelled_at'], 10000],
-    ['refunds', 'payment', 'Refunds', ['entry_id', 'entry_type', 'reference_type', 'amount_vnd'], 10000],
+    ['bookings', 'booking', 'Bookings', ['booking_id', 'booking_code', 'trip_id', 'status'], 10000, [bookingB, cancellationB]],
+    ['parcels', 'parcel', 'Parcels', ['parcel_id', 'parcel_code', 'trip_id', 'status'], 10000, [parcelB]],
+    ['revenue', 'payment', 'Revenue', ['entry_id', 'entry_type', 'reference_type', 'amount_vnd'], 10000, [bookingRevenueB, parcelRevenueB, cancellationRevenueB]],
+    ['occupancy', 'trip', 'Occupancy', ['trip_id', 'route_id', 'status', 'occupancy_percent'], 10000, [tripB]],
+    ['cancellation', 'booking', 'Cancellations', ['booking_id', 'booking_code', 'cancelled_at'], 10000, [cancellationB]],
+    ['refunds', 'payment', 'Refunds', ['entry_id', 'entry_type', 'reference_type', 'amount_vnd'], 10000, [refundB]],
   ];
-  for (const [name, service, sheet, headers, minimumRows] of reports) {
+  const tenantAIdentifiers = [operatorA, routeId, baseTrip, '41430000-0000-4000-8001-', '41430000-0000-4000-8002-', '41430000-0000-4000-8003-', '41430000-0000-4000-8004-'];
+  for (const [name, service, sheet, headers, minimumRows, tenantBIds] of reports) {
     const result = await measureReport(
       name,
       service,
@@ -631,7 +682,7 @@ async function runExcelScenario() {
     const tenantB = await api('GET', reportPath(name, range), { token: tokens.operatorB });
     assert(tenantB.response.ok, `${name} tenant B export failed: ${tenantB.text}`);
     const tenantWorkbook = inspectWorkbook(tenantB.buffer, sheet, headers, 0);
-    assert(!tenantWorkbook.xml.includes(operatorA), `${name} leaked operator A tenant id`);
+    assertExactTenantWorkbook(tenantWorkbook, name, tenantBIds, tenantAIdentifiers);
     assert(reportTempFileCount(service) === 0, `${name} left a report temp file after response disposal`);
   }
   const empty = await api('GET', `/v1/operator/reports/bookings/export?from=2030-01-01&to=2030-01-01`, { token: tokens.operatorA });
@@ -668,7 +719,14 @@ async function runExcelScenario() {
 }
 
 async function runPlatformScenario() {
-  const range = reportDateRange(29);
+  const platformNow = Date.now();
+  const range = reportDateRange(28, platformNow);
+  const expectedFrom = new Date(platformNow - 28 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const expectedTo = new Date(platformNow + 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  assert(range.from === expectedFrom, `29-day platform from boundary drifted: ${range.from}`);
+  assert(range.to === expectedTo, `29-day platform exclusive to boundary drifted: ${range.to}`);
+  const rangeDurationDays = (Date.parse(range.to) - Date.parse(range.from)) / (24 * 60 * 60 * 1000);
+  assert(rangeDurationDays === 29, `29-day platform range drifted: ${rangeDurationDays} days`);
   const pathname = `/v1/admin/reports/platform?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
   assert(count(bookingSql("SELECT count(*) FROM bookings WHERE status='COMPLETED';")) >= 100000, 'Day 42 booking benchmark fixture is incomplete');
   assert(count(paymentSql("SELECT count(*) FROM payments WHERE status='SUCCEEDED';")) >= 100000, 'Day 42 payment benchmark fixture is incomplete');
@@ -701,7 +759,7 @@ async function runPlatformScenario() {
   assert(first.response.status === 200 && first.json?.success === true, `Platform report failed: ${first.text}`);
   assertPlatformReportPeriod(first, range, 'Cold 29-day platform report');
   assert(first.json.data.byOperator.length === 20, `Platform benchmark operator union drifted: ${first.text}`);
-  assert(first.json.data.totals.netRevenueVnd === 13_000_000_000, `Ledger total mismatch: ${first.text}`);
+  assert(first.json.data.totals.netRevenueVnd === 13_000_160_000, `Ledger total mismatch: ${first.text}`);
   assert(coldDurationMs < 2000, `Cold platform report exceeded 2s SLO: ${coldDurationMs}ms`);
   const keys = redis('--scan', '--pattern', 'platform-report:v1:*').split(/\r?\n/).filter(Boolean);
   assert(keys.length > 0, 'Platform cache key missing');
@@ -821,12 +879,12 @@ async function runPlatformScenario() {
     `Three-month platform operator union drifted: ${threeMonth.text}`,
   );
   const expectedThreeMonthTotals = {
-    completedBookingCount: 100_000,
-    completedTripCount: 10_001,
-    deliveredParcelCount: 50_000,
-    bookingRevenueVnd: 10_000_000_000,
-    parcelRevenueVnd: 3_000_000_000,
-    netRevenueVnd: 13_000_000_000,
+    completedBookingCount: 100_001,
+    completedTripCount: 10_002,
+    deliveredParcelCount: 50_001,
+    bookingRevenueVnd: 10_000_100_000,
+    parcelRevenueVnd: 3_000_060_000,
+    netRevenueVnd: 13_000_160_000,
   };
   for (const [metric, expected] of Object.entries(expectedThreeMonthTotals)) {
     assert(

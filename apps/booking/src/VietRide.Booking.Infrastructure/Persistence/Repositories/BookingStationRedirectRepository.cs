@@ -3,6 +3,7 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Infrastructure.Services;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Messaging.Abstractions;
 
 namespace VietRide.Booking.Infrastructure.Persistence.Repositories;
 
@@ -31,14 +32,15 @@ internal sealed class BookingStationRedirectRepository : IBookingStationRedirect
         CancellationToken cancellationToken = default)
     {
         ValidateInput(sourceEventId, primaryStationId, duplicateStationId);
-        if (_db.Database.CurrentTransaction is not null)
-            throw new InvalidOperationException("Station merge consumer cannot run inside an ambient transaction.");
+        var ownsTransaction = _db.Database.CurrentTransaction is null;
 
         var graphRows = await LoadGraphAsync(cancellationToken);
         for (var attempt = 1; attempt <= MaximumLockSetAttempts; attempt++)
         {
             var preLockPlan = BuildLockPlan(graphRows, primaryStationId, duplicateStationId);
-            await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+            await using var transaction = ownsTransaction
+                ? await _db.Database.BeginTransactionAsync(cancellationToken)
+                : null;
             try
             {
                 foreach (var stationId in preLockPlan.RequiredLockIds)
@@ -48,7 +50,13 @@ internal sealed class BookingStationRedirectRepository : IBookingStationRedirect
                 var lockedPlan = BuildLockPlan(lockedGraphRows, primaryStationId, duplicateStationId);
                 if (lockedPlan.RequiredLockIds.Any(stationId => !preLockPlan.RequiredLockIds.Contains(stationId)))
                 {
-                    await transaction.RollbackAsync(cancellationToken);
+                    if (!ownsTransaction)
+                    {
+                        throw new TransientIntegrationEventException(
+                            "Booking Station redirect graph changed while joining the Inbox transaction.");
+                    }
+
+                    await transaction!.RollbackAsync(cancellationToken);
                     _db.ChangeTracker.Clear();
                     graphRows = lockedGraphRows;
                     continue;
@@ -64,7 +72,8 @@ internal sealed class BookingStationRedirectRepository : IBookingStationRedirect
                             "Station merge event id was replayed with a different payload.");
                     }
 
-                    await transaction.CommitAsync(cancellationToken);
+                    if (ownsTransaction)
+                        await transaction!.CommitAsync(cancellationToken);
                     return BookingStationMergeApplicationResult.Replay(replay.CanonicalStationId);
                 }
 
@@ -106,7 +115,8 @@ internal sealed class BookingStationRedirectRepository : IBookingStationRedirect
                     now,
                     cancellationToken);
                 await _db.SaveChangesAsync(cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
+                if (ownsTransaction)
+                    await transaction!.CommitAsync(cancellationToken);
 
                 return new BookingStationMergeApplicationResult(
                     true,
@@ -116,8 +126,11 @@ internal sealed class BookingStationRedirectRepository : IBookingStationRedirect
             }
             catch
             {
-                await transaction.RollbackAsync(cancellationToken);
-                _db.ChangeTracker.Clear();
+                if (ownsTransaction)
+                {
+                    await transaction!.RollbackAsync(cancellationToken);
+                    _db.ChangeTracker.Clear();
+                }
                 throw;
             }
         }

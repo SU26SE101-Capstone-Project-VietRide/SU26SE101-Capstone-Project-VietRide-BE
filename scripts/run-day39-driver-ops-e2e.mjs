@@ -7,6 +7,12 @@ import { importPKCS8, SignJWT } from 'jose';
 
 const root = process.cwd();
 const useDev = process.env.DAY39_E2E_USE_DEV_STACK === '1';
+const invocationId = `${process.pid}-${randomUUID().slice(0, 8)}`;
+const composeProject = `day39-e2e-${invocationId}`;
+const containerPrefix = composeProject;
+const firebaseBucket = useDev
+  ? process.env.FIREBASE_WEB_STORAGE_BUCKET
+  : 'day39-e2e.firebasestorage.app';
 const gateway =
   process.env.DAY39_GATEWAY_BASE_URL ||
   (useDev ? 'http://localhost:3000' : 'http://localhost:58300');
@@ -32,6 +38,8 @@ const compose = [
   'infra/docker/docker-compose.yml',
   '-f',
   'infra/docker/docker-compose.day39-e2e.yml',
+  '-p',
+  composeProject,
 ];
 const e2eEnv = useDev
   ? {}
@@ -49,6 +57,8 @@ const e2eEnv = useDev
       PARCEL_PORT: '58005',
       NOTIFICATION_PORT: '58012',
       GATEWAY_PORT: '58300',
+      DAY39_COMPOSE_PROJECT: composeProject,
+      DAY39_CONTAINER_PREFIX: containerPrefix,
       INTERNAL_JWT_SECRET: 'day39-e2e-internal-jwt-secret-32-bytes-minimum',
       GOOGLE_OAUTH_CLIENT_ID: '',
       GOOGLE_OAUTH_CLIENT_SECRET: '',
@@ -64,14 +74,14 @@ const rabbitPassword = useDev
   ? process.env.RABBITMQ_PASSWORD || 'vietride_dev'
   : e2eEnv.RABBITMQ_PASSWORD;
 const containers = {
-  postgres: useDev ? 'vietride_postgres' : 'day39-e2e-postgres',
-  redis: useDev ? 'vietride_redis' : 'day39-e2e-redis',
-  rabbitmq: useDev ? 'vietride_rabbitmq' : 'day39-e2e-rabbitmq',
-  identity: useDev ? 'vietride_identity' : 'day39-e2e-identity',
-  trip: useDev ? 'vietride_trip' : 'day39-e2e-trip',
-  parcel: useDev ? 'vietride_parcel' : 'day39-e2e-parcel',
-  notification: useDev ? 'vietride_notification' : 'day39-e2e-notification',
-  gateway: useDev ? 'vietride_gateway' : 'day39-e2e-gateway',
+  postgres: useDev ? 'vietride_postgres' : `${containerPrefix}-postgres`,
+  redis: useDev ? 'vietride_redis' : `${containerPrefix}-redis`,
+  rabbitmq: useDev ? 'vietride_rabbitmq' : `${containerPrefix}-rabbitmq`,
+  identity: useDev ? 'vietride_identity' : `${containerPrefix}-identity`,
+  trip: useDev ? 'vietride_trip' : `${containerPrefix}-trip`,
+  parcel: useDev ? 'vietride_parcel' : `${containerPrefix}-parcel`,
+  notification: useDev ? 'vietride_notification' : `${containerPrefix}-notification`,
+  gateway: useDev ? 'vietride_gateway' : `${containerPrefix}-gateway`,
 };
 const id = (suffix) => `39000000-0000-4000-8000-${String(suffix).padStart(12, '0')}`;
 const ids = {
@@ -125,6 +135,7 @@ const ids = {
 };
 const results = [];
 const state = { tokens: {} };
+let stackOwned = false;
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -325,6 +336,12 @@ function idemKey(label) {
 
 function idemHash(key) {
   return createHash('sha256').update(key).digest('hex').toUpperCase();
+}
+
+function incidentPhotoUrl(reporterUserId, fileName) {
+  assert(firebaseBucket, 'FIREBASE_WEB_STORAGE_BUCKET is required with DAY39_E2E_USE_DEV_STACK=1');
+  const objectPath = encodeURIComponent(`incidents/${ids.operatorA}/${reporterUserId}/${fileName}`);
+  return `https://firebasestorage.googleapis.com/v0/b/${firebaseBucket}/o/${objectPath}?alt=media`;
 }
 
 async function publish(routingKey, payload, transportId = randomUUID()) {
@@ -571,13 +588,26 @@ function seedPrerequisites() {
     recipient_email: 'recipient@day39.test',
     operator_id: ids.operatorA,
     size_category: 'MEDIUM',
+    estimated_size_category: 'MEDIUM',
+    estimated_length_cm: 100,
+    estimated_width_cm: 50,
+    estimated_height_cm: 10,
     estimated_weight_kg: 10,
-    estimated_volume_m3: 0.5,
+    estimated_volume_m3: 0.05,
+    estimated_dim_weight_kg: 8.33,
+    estimated_chargeable_weight_kg: 10,
+    delivery_method: 'TERMINAL_PICKUP',
+    total_price_vnd: 100000,
+    deposit_percent: 100,
     deposit_amount: 100000,
+    original_deposit_amount: 100000,
+    estimated_gross_price_vnd: 100000,
+    final_gross_price_vnd: 100000,
+    estimated_total_price_vnd: 100000,
+    final_total_price_vnd: 100000,
+    deposit_required_vnd: 100000,
+    deposit_paid_vnd: 100000,
     total_amount: 100000,
-    delivery_token: null,
-    delivery_token_expires_at: null,
-    delivery_token_revoked_at: null,
     delivered_pending_confirm_at: null,
     confirmed_at: null,
     unloaded_at: null,
@@ -631,9 +661,9 @@ function seedPrerequisites() {
     state: 'LOADED',
     status: 'LOADED',
     weight_kg: 10,
-    volume_m3: 0.5,
+    volume_m3: 0.05,
     actual_weight_kg: 10,
-    actual_volume_m3: 0.5,
+    actual_volume_m3: 0.05,
     loaded_at: before(20),
   });
   insertCompatible('vietride_trip', 'vietride_trip', 'trip_cargo_parcels', {
@@ -643,15 +673,15 @@ function seedPrerequisites() {
     state: 'LOADED',
     status: 'LOADED',
     weight_kg: 10,
-    volume_m3: 0.5,
+    volume_m3: 0.05,
     actual_weight_kg: 10,
-    actual_volume_m3: 0.5,
+    actual_volume_m3: 0.05,
     loaded_at: before(20),
   });
   for (const tripId of [ids.parcelStopTrip, ids.parcelExpressTrip]) {
     updateCompatible('vietride_trip', 'vietride_trip', 'trips', 'id', tripId, {
       total_loaded_weight_kg: 10,
-      total_loaded_volume_m3: 0.5,
+      total_loaded_volume_m3: 0.05,
     });
   }
 }
@@ -766,7 +796,7 @@ async function runMigrationGate() {
 
 async function runAcceptance() {
   if (!useDev) {
-    composeRun(['--profile', 'infra', '--profile', 'app', 'down', '-v', '--remove-orphans']);
+    stackOwned = true;
     composeRun(['--profile', 'infra', 'up', '-d', '--wait', 'postgres', 'redis', 'rabbitmq']);
     composeRun([
       '--profile',
@@ -806,7 +836,7 @@ async function runAcceptance() {
   const incidentBody = {
     category: 'VEHICLE_BREAKDOWN',
     description: '  Engine temperature exceeded the operating limit.  ',
-    photoUrls: ['https://assets.day39.test/incidents/engine.jpg'],
+    photoUrls: [incidentPhotoUrl(ids.driver, 'engine.jpg')],
     latitude: 10.7765,
     longitude: 106.7009,
   };
@@ -825,6 +855,7 @@ async function runAcceptance() {
         ...incidentBody,
         category: 'OTHER',
         description: 'Passenger requested operational support.',
+        photoUrls: [incidentPhotoUrl(ids.assistant, 'support.jpg')],
       },
     });
     assert(
@@ -1165,6 +1196,19 @@ async function runAcceptance() {
     8,
     'Driver and Assistant arrive pending TripStops once without changing ETA',
     async () => {
+      assert(
+        scalar(
+          tripSql(
+            `SELECT driver_user_id||':'||assistant_user_id FROM trips WHERE id='${ids.stopTrip}'`,
+          ),
+        ) === `${ids.driver}:${ids.assistant}` &&
+          scalar(
+            tripSql(
+              `SELECT driver_user_id||':'||assistant_user_id FROM trips WHERE id='${ids.assistantStopTrip}'`,
+            ),
+          ) === `${ids.driver}:${ids.assistant}`,
+        'Arrival fixtures are not assigned to the expected DRIVER and ASSISTANT',
+      );
       const eta = scalar(
         tripSql(
           `SELECT estimated_arrival_time FROM trip_stops WHERE trip_id='${ids.stopTrip}' AND stop_id='${ids.stopTripStop}'`,
@@ -1265,10 +1309,30 @@ async function runAcceptance() {
           await api(
             'POST',
             `/v1/driver/trips/${ids.stopRaceTrip}/stops/${ids.stopRaceTripStop}/arrive`,
+            { token: state.tokens.unassignedAssistant, key: randomUUID() },
+          )
+        ).status === 403,
+        'Unassigned Assistant stop arrival was not forbidden',
+      );
+      assert(
+        (
+          await api(
+            'POST',
+            `/v1/driver/trips/${ids.stopRaceTrip}/stops/${ids.stopRaceTripStop}/arrive`,
             { token: state.tokens.crossDriver, key: randomUUID() },
           )
         ).status === 403,
         'Cross-tenant stop arrival was not forbidden',
+      );
+      assert(
+        (
+          await api(
+            'POST',
+            `/v1/driver/trips/${ids.stopRaceTrip}/stops/${ids.stopRaceTripStop}/arrive`,
+            { token: state.tokens.crossAssistant, key: randomUUID() },
+          )
+        ).status === 403,
+        'Cross-tenant Assistant stop arrival was not forbidden',
       );
       expectError(
         await api('POST', `/v1/driver/trips/${id(999998)}/stops/${ids.stopRaceTripStop}/arrive`, {
@@ -1497,10 +1561,10 @@ async function runAcceptance() {
         );
         const row = scalar(
           parcelSql(
-            `SELECT status||':'||(unloaded_at IS NOT NULL)::int||':'||(delivery_token IS NULL)::int||':'||(delivered_pending_confirm_at IS NULL)::int FROM parcels WHERE id='${parcelId}'`,
+            `SELECT p.status||':'||(p.unloaded_at IS NOT NULL)::int||':'||(p.delivered_pending_confirm_at IS NULL)::int||':'||(SELECT count(*) FROM parcel_delivery_tokens t WHERE t.parcel_id=p.id AND t.revoked_at IS NULL) FROM parcels p WHERE p.id='${parcelId}'`,
           ),
         );
-        assert(row === 'UNLOADED:1:1:1', `Unload persistence invalid: ${row}`);
+        assert(row === 'UNLOADED:1:1:0', `Unload persistence invalid: ${row}`);
         assert(
           count(
             parcelSql(
@@ -1528,17 +1592,22 @@ async function runAcceptance() {
           ),
         );
         assert(cargo === 'RELEASED', `Cargo ledger was not released: ${cargo}`);
-        const loaded = Number(
-          scalar(tripSql(`SELECT total_loaded_weight_kg FROM trips WHERE id='${tripId}'`)),
+        const [loadedWeight, loadedVolume] = tripSql(
+          `SELECT total_loaded_weight_kg,total_loaded_volume_m3 FROM trips WHERE id='${tripId}'`,
+        )
+          .split('|')
+          .map(Number);
+        assert(
+          loadedWeight === 0 && loadedVolume === 0,
+          `Loaded counters were not decremented exactly once: weight=${loadedWeight}, volume=${loadedVolume}`,
         );
-        assert(loaded === 0, `Loaded counter was not decremented exactly once: ${loaded}`);
       }
     },
   );
 
   await scenario(
     13,
-    'Deliver creates one 48h token without releasing cargo again and confirm remains usable',
+    'Deliver creates one hashed 48h token without releasing cargo again',
     async () => {
       const key = idemKey('deliver-existing-unloaded');
       const response = await api('POST', `/v1/assistant/parcels/${ids.deliverParcel}/deliver`, {
@@ -1550,10 +1619,10 @@ async function runAcceptance() {
         `Deliver failed: ${JSON.stringify(response)}`,
       );
       const persisted = parcelSql(
-        `SELECT status||':'||(delivery_token IS NOT NULL)::int||':'||(delivery_token_expires_at BETWEEN now()+interval '47 hours' AND now()+interval '49 hours')::int||':'||(delivered_pending_confirm_at IS NOT NULL)::int FROM parcels WHERE id='${ids.deliverParcel}'`,
+        `SELECT p.status||':'||(p.delivered_pending_confirm_at IS NOT NULL)::int||':'||(SELECT count(*) FROM parcel_delivery_tokens t WHERE t.parcel_id=p.id AND t.revoked_at IS NULL AND t.issue_reason='INITIAL_DELIVERY' AND t.expires_at BETWEEN now()+interval '47 hours' AND now()+interval '49 hours' AND t.token_hash ~ '^[0-9a-f]{64}$') FROM parcels p WHERE p.id='${ids.deliverParcel}'`,
       );
       assert(
-        scalar(persisted) === 'DELIVERED_PENDING_CONFIRM:1:1:1',
+        scalar(persisted) === 'DELIVERED_PENDING_CONFIRM:1:1',
         `Deliver persistence invalid: ${persisted}`,
       );
       assert(
@@ -1641,21 +1710,13 @@ async function runAcceptance() {
         'Pending-confirm delivery is not exactly one SENT row',
       );
 
-      const token = scalar(
-        parcelSql(`SELECT delivery_token FROM parcels WHERE id='${ids.deliverParcel}'`),
-      );
-      const confirm = await api('POST', '/v1/parcels/delivery/confirm', {
-        key: idemKey('confirm-existing-deliver'),
-        body: { token, action: 'ACCEPT' },
-      });
       assert(
-        confirm.status === 200,
-        `Existing recipient confirmation failed after deliver: ${JSON.stringify(confirm)}`,
-      );
-      assert(
-        scalar(parcelSql(`SELECT status FROM parcels WHERE id='${ids.deliverParcel}'`)) ===
-          'DELIVERY_CONFIRMED',
-        'Recipient confirm did not continue from pending-confirm',
+        count(
+          parcelSql(
+            `SELECT count(*) FROM parcel_delivery_tokens WHERE parcel_id='${ids.deliverParcel}' AND revoked_at IS NULL`,
+          ),
+        ) === 1,
+        'Deliver replay changed the active hashed-token cardinality',
       );
     },
   );
@@ -1768,7 +1829,9 @@ try {
 } finally {
   if (!useDev) {
     try {
-      composeRun(['--profile', 'infra', '--profile', 'app', 'down', '-v', '--remove-orphans']);
+      if (stackOwned) {
+        composeRun(['--profile', 'infra', '--profile', 'app', 'down', '-v', '--remove-orphans']);
+      }
       console.log('cleanup PASS');
     } catch (error) {
       failed ??= error;

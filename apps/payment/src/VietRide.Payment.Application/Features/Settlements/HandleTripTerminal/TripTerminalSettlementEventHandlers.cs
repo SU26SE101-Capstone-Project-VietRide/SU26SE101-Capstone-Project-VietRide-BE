@@ -37,14 +37,10 @@ public sealed class TripTerminalSettlementService
         DateTimeOffset terminalAt,
         CancellationToken cancellationToken)
     {
-        await _unitOfWork.BeginTransactionAsync(cancellationToken);
-        try
+        await _unitOfWork.ExecuteInTransactionAsync(async () =>
         {
             if (await _processed.ExistsAsync(ConsumerName, eventId, cancellationToken))
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                return;
-            }
+                return false;
 
             var settlement = await _settlements.FindByOperatorTripAsync(
                 operatorId,
@@ -64,14 +60,8 @@ public sealed class TripTerminalSettlementService
             await _processed.AddAsync(
                 ProcessedIntegrationEvent.Create(ConsumerName, eventId, _clock.UtcNow),
                 cancellationToken);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            await _unitOfWork.CommitAsync(cancellationToken);
-        }
-        catch
-        {
-            await _unitOfWork.RollbackAsync(cancellationToken);
-            throw;
-        }
+            return true;
+        }, cancellationToken);
     }
 }
 

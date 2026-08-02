@@ -9102,17 +9102,8 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/operator/trips/{{day33CancelTripId}}/cancel/preview",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "operator",
-                "trips",
-                "{{day33CancelTripId}}",
-                "cancel",
-                "preview"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "trips", "{{day33CancelTripId}}", "cancel", "preview"]
             }
           }
         },
@@ -9157,16 +9148,8 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/operator/trips/{{day33CancelTripId}}/cancel",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "operator",
-                "trips",
-                "{{day33CancelTripId}}",
-                "cancel"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "trips", "{{day33CancelTripId}}", "cancel"]
             }
           }
         },
@@ -9184,9 +9167,15 @@
                   "  pm.expect(body.success).to.equal(true);",
                   "  pm.expect(body.data.tripId).to.equal(pm.variables.get('day33RouteTripId'));",
                   "  pm.expect(body.data.alternativeRouteId).to.equal(pm.variables.get('day33AlternativeRouteId'));",
-                  "  pm.expect(body.data.affectedBookings).to.be.an('array').with.lengthOf(1);",
-                  "  pm.expect(body.data.affectedBookings[0].bookingId).to.equal(pm.variables.get('day33RouteBookingId'));",
-                  "  pm.expect(body.data.affectedBookings[0].candidateStops).to.be.an('array').that.is.not.empty;",
+                  "  pm.expect(body.data.affectedBookings).to.be.an('array').with.lengthOf(3);",
+                  "  const bookingIds = body.data.affectedBookings.map((booking) => booking.bookingId);",
+                  "  pm.expect(bookingIds).to.have.members([",
+                  "    pm.variables.get('day33RouteBookingId'),",
+                  "    pm.variables.get('day33RetainedRouteBookingId'),",
+                  "    pm.variables.get('day33TerminalRouteBookingId'),",
+                  "  ]);",
+                  "  const removed = body.data.affectedBookings.find((booking) => booking.bookingId === pm.variables.get('day33RouteBookingId'));",
+                  "  pm.expect(removed.candidateStops).to.be.an('array').that.is.not.empty;",
                   "});"
                 ]
               }
@@ -9214,16 +9203,8 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/operator/trips/{{day33RouteTripId}}/change-route",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "operator",
-                "trips",
-                "{{day33RouteTripId}}",
-                "change-route"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "trips", "{{day33RouteTripId}}", "change-route"]
             }
           }
         },
@@ -9267,16 +9248,8 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/operator/trips/{{day33RouteTripId}}/change-route",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "operator",
-                "trips",
-                "{{day33RouteTripId}}",
-                "change-route"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "trips", "{{day33RouteTripId}}", "change-route"]
             }
           }
         }
@@ -9331,16 +9304,8 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/operator/trips/{{day34OldTripId}}/substitute-vehicle",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "operator",
-                "trips",
-                "{{day34OldTripId}}",
-                "substitute-vehicle"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "trips", "{{day34OldTripId}}", "substitute-vehicle"]
             }
           }
         },
@@ -9384,16 +9349,8 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/operator/trips/{{day34OldTripId}}/substitute-vehicle",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "operator",
-                "trips",
-                "{{day34OldTripId}}",
-                "substitute-vehicle"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "trips", "{{day34OldTripId}}", "substitute-vehicle"]
             }
           }
         },
@@ -9437,16 +9394,8 @@
             },
             "url": {
               "raw": "{{baseUrl}}/v1/operator/trips/{{day34OldTripId}}/substitute-vehicle",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "operator",
-                "trips",
-                "{{day34OldTripId}}",
-                "substitute-vehicle"
-              ]
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "operator", "trips", "{{day34OldTripId}}", "substitute-vehicle"]
             }
           }
         },
@@ -9457,9 +9406,7 @@
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
-                "exec": [
-                  "setTimeout(() => {}, 7000);"
-                ]
+                "exec": ["setTimeout(() => {}, 7000);"]
               }
             },
             {
@@ -9491,9 +9438,7 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day34NewTripId}}/transfers/passengers/{{day34PassengerId1}}/confirm",
-              "host": [
-                "{{baseUrl}}"
-              ],
+              "host": ["{{baseUrl}}"],
               "path": [
                 "v1",
                 "bookings",
@@ -9539,9 +9484,7 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day34NewTripId}}/transfers/passengers/{{day34PassengerId2}}/confirm",
-              "host": [
-                "{{baseUrl}}"
-              ],
+              "host": ["{{baseUrl}}"],
               "path": [
                 "v1",
                 "bookings",
@@ -9587,9 +9530,7 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day34NewTripId}}/transfers/passengers/{{day34PassengerId3}}/confirm",
-              "host": [
-                "{{baseUrl}}"
-              ],
+              "host": ["{{baseUrl}}"],
               "path": [
                 "v1",
                 "bookings",
@@ -9635,9 +9576,7 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/v1/bookings/trips/{{day34NewTripId}}/transfers/passengers/{{day34PassengerId1}}/confirm",
-              "host": [
-                "{{baseUrl}}"
-              ],
+              "host": ["{{baseUrl}}"],
               "path": [
                 "v1",
                 "bookings",
@@ -9648,6 +9587,85 @@
                 "{{day34PassengerId1}}",
                 "confirm"
               ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Day35 - Parcel cargo transfer conservation",
+      "item": [
+        {
+          "name": "1. Driver confirms Parcel cargo transfer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Parcel transfer is confirmed onto the replacement Trip', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.data.parcelId).to.equal(pm.variables.get('day35ConfirmedParcelId'));",
+                  "  pm.expect(body.data.tripId).to.equal(pm.variables.get('day34NewTripId'));",
+                  "  pm.expect(body.data.status).to.equal('LOADED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day34DriverToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day35ConfirmKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"parcelCode\":\"{{day35ConfirmedParcelCode}}\"}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/crew/parcels/{{day35ConfirmedParcelId}}/confirm-transfer",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "crew", "parcels", "{{day35ConfirmedParcelId}}", "confirm-transfer"]
+            }
+          }
+        },
+        {
+          "name": "2. Replay Parcel cargo transfer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Parcel transfer replay preserves the terminal result', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.data.parcelId).to.equal(pm.variables.get('day35ConfirmedParcelId'));",
+                  "  pm.expect(body.data.tripId).to.equal(pm.variables.get('day34NewTripId'));",
+                  "  pm.expect(body.data.status).to.equal('LOADED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{day34DriverToken}}" },
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{day35ConfirmKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"parcelCode\":\"{{day35ConfirmedParcelCode}}\"}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/crew/parcels/{{day35ConfirmedParcelId}}/confirm-transfer",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "crew", "parcels", "{{day35ConfirmedParcelId}}", "confirm-transfer"]
             }
           }
         }

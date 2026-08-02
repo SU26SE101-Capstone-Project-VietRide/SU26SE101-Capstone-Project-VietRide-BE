@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ProvidersModule } from '../providers/providers.module';
+import { RagSubscriptionEntitlementModule } from '../subscriptions/rag-subscription-entitlement.module';
 import { ChatEmbeddingCacheService } from './chat-embedding-cache.service';
 import { ChatIntentService } from './chat-intent.service';
 import { ChatQueryRewriteService } from './chat-query-rewrite.service';
@@ -13,7 +14,7 @@ import { FeedbackController } from './feedback.controller';
 import { FeedbackService } from './feedback.service';
 
 @Module({
-  imports: [ProvidersModule],
+  imports: [ProvidersModule, RagSubscriptionEntitlementModule],
   controllers: [ChatController, FeedbackController],
   providers: [
     ChatRepository,
