@@ -39,7 +39,7 @@ Mỗi phase phải test được bằng e2e/unit theo hướng production. Nếu
 - [x] Phase 9 — Trip/Booking/Parcel Authorization Providers
 - [x] Phase 10 — Hardening Và Final Acceptance
 - [x] Phase 11 — Shuttle GPS Và Google Routes ETA
-- [ ] Phase 12 — Public Tracking Map Context
+- [x] Phase 12 — Public Tracking Map Context
 
 ---
 

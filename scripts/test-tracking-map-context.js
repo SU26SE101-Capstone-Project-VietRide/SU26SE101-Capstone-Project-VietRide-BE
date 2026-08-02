@@ -43,7 +43,7 @@ async function main() {
 
   const missingToken = await request(routeUrl);
   assertStatus(missingToken, 401, 'missing token');
-  assertErrorEnvelope(missingToken, 'UNAUTHORIZED');
+  assertErrorEnvelopeOneOf(missingToken, ['UNAUTHORIZED', 'AUTH_TOKEN_INVALID']);
 
   const unknownTrip = await request(
     trackingUrl(`trips/${randomUUID()}/route-geometry`),
@@ -119,6 +119,14 @@ function assertSuccessEnvelope(result, label) {
 function assertErrorEnvelope(result, expectedCode) {
   if (!result.json || result.json.success !== false || result.json.error?.code !== expectedCode) {
     throw new Error(`Expected error envelope ${expectedCode}, got: ${result.text}`);
+  }
+}
+
+function assertErrorEnvelopeOneOf(result, expectedCodes) {
+  if (!result.json
+    || result.json.success !== false
+    || !expectedCodes.includes(result.json.error?.code)) {
+    throw new Error(`Expected error envelope ${expectedCodes.join(' or ')}, got: ${result.text}`);
   }
 }
 

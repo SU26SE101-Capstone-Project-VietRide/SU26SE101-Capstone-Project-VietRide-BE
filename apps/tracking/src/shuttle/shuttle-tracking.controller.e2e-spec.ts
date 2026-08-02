@@ -29,22 +29,35 @@ describe('ShuttleTrackingController passenger context (e2e)', () => {
   let getEta: jest.MockedFunction<ShuttleService['getEta']>;
 
   beforeAll(async () => {
-    getContext = jest.fn(async (_user: TrackingUser, _shuttleTripId: string) => createContext());
-    getPassengerContext = jest.fn(async (_context: ShuttleTrackingContext) => ({
-      shuttleTripId: SHUTTLE_ID,
-      mainTripId: MAIN_TRIP_ID,
-      ownPickups: [{
-        bookingId: '44444444-4444-4444-8444-444444444444',
-        pickupOrder: 3,
-        latitude: 10.7,
-        longitude: 106.7,
-        status: 'PENDING' as const,
-        stopsBeforePickup: 2,
-      }],
-      station: null,
-    }));
-    getLatest = jest.fn(async (_shuttleTripId: string) => ({ shuttleTripId: SHUTTLE_ID }));
-    getEta = jest.fn(async (_shuttleTripId: string) => ({ nextPickupOrder: 3 }));
+    getContext = jest.fn(async (user: TrackingUser, shuttleTripId: string) => {
+      void user;
+      void shuttleTripId;
+      return createContext();
+    });
+    getPassengerContext = jest.fn(async (context: ShuttleTrackingContext) => {
+      void context;
+      return {
+        shuttleTripId: SHUTTLE_ID,
+        mainTripId: MAIN_TRIP_ID,
+        ownPickups: [{
+          bookingId: '44444444-4444-4444-8444-444444444444',
+          pickupOrder: 3,
+          latitude: 10.7,
+          longitude: 106.7,
+          status: 'PENDING' as const,
+          stopsBeforePickup: 2,
+        }],
+        station: null,
+      };
+    });
+    getLatest = jest.fn(async (shuttleTripId: string) => {
+      void shuttleTripId;
+      return { shuttleTripId: SHUTTLE_ID };
+    });
+    getEta = jest.fn(async (shuttleTripId: string) => {
+      void shuttleTripId;
+      return { nextPickupOrder: 3 };
+    });
     const jwtVerifier: UserJwtVerifier = {
       verify: async (token: string): Promise<TrackingUser> => {
         if (token === 'passenger-token') {

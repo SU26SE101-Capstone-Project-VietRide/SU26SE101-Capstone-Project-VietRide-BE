@@ -114,19 +114,22 @@ describe('TrackingDataController REST fallback (e2e)', () => {
       return trailRows.length;
     });
 
-    routeContextGet = jest.fn(async (_tripId: string) => ({
-      etag: '"route-context-etag"',
-      data: {
-        tripId: TEST_TRIP_ID,
-        geometry: {
-          source: 'ROUTE_POLYLINE' as const,
-          points: [{ latitude: 10, longitude: 106 }, { latitude: 10.1, longitude: 106.1 }],
+    routeContextGet = jest.fn(async (tripId: string) => {
+      void tripId;
+      return {
+        etag: '"route-context-etag"',
+        data: {
+          tripId: TEST_TRIP_ID,
+          geometry: {
+            source: 'ROUTE_POLYLINE' as const,
+            points: [{ latitude: 10, longitude: 106 }, { latitude: 10.1, longitude: 106.1 }],
+          },
+          originStation: null,
+          intermediateStops: [],
+          destinationStation: null,
         },
-        originStation: null,
-        intermediateStops: [],
-        destinationStation: null,
-      },
-    }));
+      };
+    });
 
     const moduleRef = await Test.createTestingModule({
       controllers: [TrackingDataController],
