@@ -6,15 +6,19 @@ import {
 import { HttpTrackingAuthorizationAdapter } from '../authorization/http-tracking-authorization.adapter';
 import { TrackingInternalJwtSigner } from '../authorization/tracking-internal-jwt.signer';
 import { JoseUserJwtVerifier } from '../auth/user-jwt.verifier';
+import { OffRouteModule } from '../off-route/off-route.module';
 import { TrackingDataAuthGuard } from './tracking-data-auth.guard';
 import { TrackingDataController } from './tracking-data.controller';
 import { TrackingDataRepository } from './tracking-data.repository';
 import { TrackingDataService } from './tracking-data.service';
+import { TripRouteContextService } from './trip-route-context.service';
 
 @Module({
+  imports: [OffRouteModule],
   controllers: [TrackingDataController],
   providers: [
     TrackingDataService,
+    TripRouteContextService,
     TrackingDataRepository,
     TrackingDataAuthGuard,
     TrackingInternalJwtSigner,

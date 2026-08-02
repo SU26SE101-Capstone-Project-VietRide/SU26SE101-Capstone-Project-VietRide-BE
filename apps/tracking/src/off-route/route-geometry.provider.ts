@@ -3,15 +3,45 @@ export interface RouteGeometryPoint {
   longitude: number;
 }
 
+export interface RouteGeometryStation {
+  stationId: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface RouteGeometryIntermediateStop {
+  stopId: string;
+  name: string;
+  sequence: number;
+  latitude: number;
+  longitude: number;
+}
+
+export type RouteGeometrySource = 'ROUTE_POLYLINE' | 'STOPS_ONLY';
+
 export interface RouteGeometrySnapshot {
   tripId: string;
   points: RouteGeometryPoint[];
   alertRecipientUserIds?: string[];
+  geometrySource?: RouteGeometrySource;
+  originStation?: RouteGeometryStation | null;
+  intermediateStops?: RouteGeometryIntermediateStop[];
+  destinationStation?: RouteGeometryStation | null;
 }
+
+export type RouteGeometryFetchResult =
+  | { kind: 'ok'; snapshot: RouteGeometrySnapshot }
+  | { kind: 'not_found' }
+  | { kind: 'unavailable' };
 
 export interface RouteGeometryProvider {
   peekCachedRouteGeometry(tripId: string): RouteGeometrySnapshot | null;
   getRouteGeometry(tripId: string): Promise<RouteGeometrySnapshot | null>;
+}
+
+export interface DetailedRouteGeometryProvider extends RouteGeometryProvider {
+  getDetailedRouteGeometry(tripId: string): Promise<RouteGeometryFetchResult>;
 }
 
 export interface RouteProjection {

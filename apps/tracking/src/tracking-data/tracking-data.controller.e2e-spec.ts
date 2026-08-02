@@ -1,5 +1,6 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
 import {
   ApiResponseExceptionFilter,
@@ -25,6 +26,7 @@ import { TrackingDataController } from './tracking-data.controller';
 import { TrackingDataRepository } from './tracking-data.repository';
 import { TrackingDataAuthGuard } from './tracking-data-auth.guard';
 import { TrackingDataService } from './tracking-data.service';
+import { TripRouteContextService } from './trip-route-context.service';
 
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const TEST_STOP_ID = '22222222-2222-4222-8222-222222222222';
@@ -50,6 +52,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
   let redisGet: jest.MockedFunction<(key: string) => Promise<string | null>>;
   let prismaFindMany: jest.MockedFunction<(args: unknown) => Promise<unknown[]>>;
   let prismaCount: jest.MockedFunction<(args: unknown) => Promise<number>>;
+  let routeContextGet: jest.MockedFunction<TripRouteContextService['getRouteContext']>;
 
   beforeAll(async () => {
     const generated = await generateKeyPair('RS256');
@@ -111,10 +114,28 @@ describe('TrackingDataController REST fallback (e2e)', () => {
       return trailRows.length;
     });
 
+    routeContextGet = jest.fn(async (_tripId: string) => ({
+      etag: '"route-context-etag"',
+      data: {
+        tripId: TEST_TRIP_ID,
+        geometry: {
+          source: 'ROUTE_POLYLINE' as const,
+          points: [{ latitude: 10, longitude: 106 }, { latitude: 10.1, longitude: 106.1 }],
+        },
+        originStation: null,
+        intermediateStops: [],
+        destinationStation: null,
+      },
+    }));
+
     const moduleRef = await Test.createTestingModule({
       controllers: [TrackingDataController],
       providers: [
         TrackingDataService,
+        {
+          provide: TripRouteContextService,
+          useValue: { getRouteContext: routeContextGet },
+        },
         TrackingDataRepository,
         TrackingDataAuthGuard,
         { provide: ENV_TOKEN, useValue: createTestEnv(publicKeyPem) },
@@ -197,6 +218,100 @@ describe('TrackingDataController REST fallback (e2e)', () => {
         tripId: TEST_TRIP_ID,
         latitude: 10.762622,
       }),
+    );
+  });
+
+  it('returns authorized route context with private cache headers and strong ETag', async () => {
+    const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
+    const response = await fetch(`http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = (await response.json()) as ApiEnvelope<{
+      geometry: { source: string; points: unknown[] };
+    }>;
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('private, max-age=600');
+    expect(response.headers.get('vary')).toBe('Authorization');
+    expect(response.headers.get('etag')).toBe('"route-context-etag"');
+    expect(body.data?.geometry.source).toBe('ROUTE_POLYLINE');
+    expect(JSON.stringify(body)).not.toContain('alertRecipientUserIds');
+  });
+
+  it('runs authorization before returning an empty 304 route response', async () => {
+    const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
+    const response = await fetch(`http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'If-None-Match': '"route-context-etag"',
+      },
+    });
+
+    expect(response.status).toBe(304);
+    expect(await response.text()).toBe('');
+    expect(response.headers.get('etag')).toBe('"route-context-etag"');
+
+    const deniedToken = await signIdentityToken('PASSENGER', UNAUTHORIZED_USER_ID);
+    const denied = await fetch(`http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`, {
+      headers: {
+        Authorization: `Bearer ${deniedToken}`,
+        'If-None-Match': '"route-context-etag"',
+      },
+    });
+    expect(denied.status).toBe(403);
+  });
+
+  it('returns 200 with null geometry and preserved markers when no route polyline exists', async () => {
+    routeContextGet.mockResolvedValueOnce({
+      etag: '"stops-only-etag"',
+      data: {
+        tripId: TEST_TRIP_ID,
+        geometry: null,
+        originStation: {
+          stationId: '77777777-7777-4777-8777-777777777777',
+          name: 'Origin',
+          latitude: 10,
+          longitude: 106,
+        },
+        intermediateStops: [],
+        destinationStation: null,
+      },
+    });
+    const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
+    const response = await getJson<ApiEnvelope<{
+      geometry: null;
+      originStation: { stationId: string };
+    }>>(`/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`, token);
+
+    expect(response.status).toBe(200);
+    expect(response.body.data?.geometry).toBeNull();
+    expect(response.body.data?.originStation.stationId).toBe('77777777-7777-4777-8777-777777777777');
+  });
+
+  it.each([
+    [new NotFoundException({ errorCode: 'TRIP_NOT_FOUND', detail: 'Trip not found' }), 404, 'TRIP_NOT_FOUND'],
+    [new ServiceUnavailableException({
+      errorCode: 'TRACKING_ROUTE_CONTEXT_UNAVAILABLE',
+      detail: 'Route provider unavailable',
+    }), 503, 'TRACKING_ROUTE_CONTEXT_UNAVAILABLE'],
+  ])('returns the route context error envelope', async (error, status, errorCode) => {
+    routeContextGet.mockRejectedValueOnce(error);
+    const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
+    const response = await getJson<ApiEnvelope<unknown>>(
+      `/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`,
+      token,
+    );
+
+    expect(response.status).toBe(status);
+    expect(response.body.error?.code).toBe(errorCode);
+  });
+
+  it('documents every public route context response status in Swagger metadata', () => {
+    const document = SwaggerModule.createDocument(app, new DocumentBuilder().build());
+    const responses = document.paths[`/v1/tracking/trips/{tripId}/route-geometry`]?.get?.responses;
+
+    expect(Object.keys(responses ?? {})).toEqual(
+      expect.arrayContaining(['200', '304', '400', '401', '403', '404', '503']),
     );
   });
 
@@ -364,7 +479,10 @@ function createTestEnv(publicKeyPem: string): Env {
 }
 
 function readListeningPort(app: INestApplication): number {
-  const address = app.getHttpServer().address();
+  const server = app.getHttpServer() as {
+    address(): string | { port: number } | null;
+  };
+  const address = server.address();
   if (typeof address === 'object' && address !== null) {
     return address.port;
   }
