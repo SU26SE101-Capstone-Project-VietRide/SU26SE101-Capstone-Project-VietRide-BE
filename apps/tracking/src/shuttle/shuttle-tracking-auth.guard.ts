@@ -14,7 +14,12 @@ import { TRACKING_JWT_VERIFIER } from '../app/tokens';
 import type { TrackingUser } from '../auth/tracking-user.types';
 import type { UserJwtVerifier } from '../auth/user-jwt.verifier';
 import { ShuttleTripIdParamSchema } from './shuttle.dto';
-import { ShuttleService } from './shuttle.service';
+import { ShuttleService, type ShuttleTrackingContext } from './shuttle.service';
+
+export interface AuthorizedShuttleTrackingRequest extends Request {
+  trackingUser?: TrackingUser;
+  shuttleTrackingContext?: ShuttleTrackingContext;
+}
 
 @Injectable()
 export class ShuttleTrackingAuthGuard implements CanActivate {
@@ -24,7 +29,7 @@ export class ShuttleTrackingAuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest<Request>();
+    const request = context.switchToHttp().getRequest<AuthorizedShuttleTrackingRequest>();
     const token = this.readBearerToken(request.headers.authorization);
     if (!token) {
       throw new UnauthorizedException({
@@ -55,8 +60,9 @@ export class ShuttleTrackingAuthGuard implements CanActivate {
       });
     }
 
+    let authorization: ShuttleTrackingContext;
     try {
-      const authorization = await this.shuttleService.getContext(user, parsed.data.shuttleTripId);
+      authorization = await this.shuttleService.getContext(user, parsed.data.shuttleTripId);
       if (!authorization.allowed) {
         throw new ForbiddenException({
           errorCode: 'TRACKING_ACCESS_DENIED',
@@ -71,13 +77,20 @@ export class ShuttleTrackingAuthGuard implements CanActivate {
           detail: `Shuttle trip ${parsed.data.shuttleTripId} was not found`,
         });
       }
+      if ((error as Error).message === 'TRACKING_CONTEXT_UNAVAILABLE') {
+        throw new ServiceUnavailableException({
+          errorCode: 'TRACKING_CONTEXT_UNAVAILABLE',
+          detail: 'Shuttle tracking context is unavailable',
+        });
+      }
       throw new ServiceUnavailableException({
         errorCode: 'TRACKING_AUTH_UNAVAILABLE',
         detail: 'Shuttle tracking authorization provider is unavailable',
       });
     }
 
-    (request as unknown as Record<string, unknown>).user = user;
+    request.trackingUser = user;
+    request.shuttleTrackingContext = authorization;
     return true;
   }
 

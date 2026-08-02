@@ -1,9 +1,16 @@
 import { RedisService } from '@vietride/nest-redis';
 import type { Env } from '../config/env.schema';
 import type { TrackingInternalJwtSigner } from '../authorization/tracking-internal-jwt.signer';
-import { ShuttleService } from './shuttle.service';
+import type { ShuttleGpsUpdateDto } from './shuttle.dto';
+import { ShuttleService, type ShuttleTrackingContext } from './shuttle.service';
 
 describe('ShuttleService', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
   it('writes only shuttle Redis keys without calculating ETA on the live GPS path', async () => {
     const client = {
       eval: jest.fn(async () => 1),
@@ -68,14 +75,198 @@ describe('ShuttleService', () => {
       'GPS_OPERATION_PAYLOAD_MISMATCH',
     );
   });
+
+  it('returns only own eligible pickups and counts unique pending orders from ETA state', async () => {
+    const service = createPassengerContextService(JSON.stringify({ order: 2 }));
+    const context = createTrackingContext([
+      createStop(2, 'PENDING', false, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+      createStop(3, 'PENDING', false, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'),
+      createStop(3, 'PENDING', false, 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'),
+      createStop(4, 'CANCELLED', false, 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'),
+      createStop(5, 'PENDING', true, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'),
+    ]);
+
+    const result = await service.getPassengerContext(context);
+
+    expect(result.ownPickups).toEqual([{
+      bookingId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      pickupOrder: 5,
+      latitude: 10.5,
+      longitude: 106.5,
+      status: 'PENDING',
+      stopsBeforePickup: 2,
+    }]);
+    expect(JSON.stringify(result)).not.toContain('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(JSON.stringify(result)).not.toContain('"latitude":10.2');
+    expect(result.station?.stationId).toBe('66666666-6666-4666-8666-666666666666');
+  });
+
+  it('falls back to the first non-terminal manifest order and returns PICKED_UP as zero', async () => {
+    const service = createPassengerContextService(null);
+    const context = createTrackingContext([
+      createStop(1, 'PENDING', false, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+      createStop(2, 'PENDING', false, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'),
+      createStop(2, 'PENDING', false, 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'),
+      createStop(3, 'PENDING', true, 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'),
+      createStop(4, 'PICKED_UP', true, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'),
+    ]);
+
+    const result = await service.getPassengerContext(context);
+
+    expect(result.ownPickups).toEqual([
+      expect.objectContaining({ pickupOrder: 3, stopsBeforePickup: 2 }),
+      expect.objectContaining({ pickupOrder: 4, stopsBeforePickup: 0 }),
+    ]);
+  });
+
+  it('returns null station for missing coordinates without exposing full stops', async () => {
+    const service = createPassengerContextService(null);
+    const context = createTrackingContext([
+      createStop(1, 'PENDING', true, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+    ]);
+    context.station = {
+      stationId: '66666666-6666-4666-8666-666666666666',
+      name: 'Station',
+      latitude: null,
+      longitude: null,
+      pickupOrder: 2,
+    };
+
+    const result = await service.getPassengerContext(context);
+
+    expect(result.station).toBeNull();
+    expect(result).not.toHaveProperty('stops');
+  });
+
+  it('fails closed when own pickup or station metadata is incomplete', async () => {
+    const service = createPassengerContextService(null);
+    const invalidPickup = createTrackingContext([
+      { ...createStop(1, 'PENDING', true, null), latitude: 91 },
+    ]);
+    const missingStation = createTrackingContext([
+      createStop(1, 'PENDING', true, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+    ]);
+    delete missingStation.station;
+
+    await expect(service.getPassengerContext(invalidPickup)).rejects.toMatchObject({
+      status: 503,
+      response: { errorCode: 'TRACKING_CONTEXT_UNAVAILABLE' },
+    });
+    await expect(service.getPassengerContext(missingStation)).rejects.toMatchObject({
+      status: 503,
+      response: { errorCode: 'TRACKING_CONTEXT_UNAVAILABLE' },
+    });
+  });
+
+  it('parses additive own-pickup and nullable station metadata from Trip context', async () => {
+    const context = createTrackingContext([
+      createStop(1, 'PICKED_UP', true, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+    ]);
+    context.station = {
+      stationId: '66666666-6666-4666-8666-666666666666',
+      name: 'Station',
+      latitude: null,
+      longitude: null,
+      pickupOrder: 6,
+    };
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => context,
+    } as Response)) as typeof fetch;
+    const signer = { sign: jest.fn(async () => 'internal-token') } as unknown as TrackingInternalJwtSigner;
+    const service = new ShuttleService(
+      { getClient: jest.fn() } as unknown as RedisService,
+      signer,
+      {
+        TRIP_SERVICE_BASE_URL: 'http://trip.test',
+        TRACKING_AUTH_HTTP_TIMEOUT_MS: 1_000,
+      } as Env,
+    );
+
+    const result = await service.getContext(
+      { userId: '22222222-2222-4222-8222-222222222222', role: 'PASSENGER' },
+      context.shuttleTripId,
+    );
+
+    expect(result.stops[0]?.isOwnPickup).toBe(true);
+    expect(result.station?.latitude).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects malformed Trip context with TRACKING_CONTEXT_UNAVAILABLE', async () => {
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: { shuttleTripId: 'invalid' } }),
+    } as Response)) as typeof fetch;
+    const service = new ShuttleService(
+      { getClient: jest.fn() } as unknown as RedisService,
+      { sign: jest.fn(async () => 'internal-token') } as unknown as TrackingInternalJwtSigner,
+      {
+        TRIP_SERVICE_BASE_URL: 'http://trip.test',
+        TRACKING_AUTH_HTTP_TIMEOUT_MS: 1_000,
+      } as Env,
+    );
+
+    await expect(service.getContext(
+      { userId: '22222222-2222-4222-8222-222222222222', role: 'PASSENGER' },
+      '36000000-0000-4000-8000-000000000001',
+    )).rejects.toThrow('TRACKING_CONTEXT_UNAVAILABLE');
+  });
 });
 
-function createGpsUpdate() {
+function createGpsUpdate(): ShuttleGpsUpdateDto {
   return {
     shuttleTripId: '36000000-0000-4000-8000-000000000001',
     latitude: 10.77,
     longitude: 106.7,
     speedKmh: 30,
     recordedAt: '2026-07-13T01:00:00.000Z',
+  };
+}
+
+function createPassengerContextService(etaState: string | null): ShuttleService {
+  const client = { get: jest.fn(async () => etaState) };
+  return new ShuttleService(
+    { getClient: jest.fn(() => client) } as unknown as RedisService,
+    { sign: jest.fn() } as unknown as TrackingInternalJwtSigner,
+    {} as Env,
+  );
+}
+
+function createTrackingContext(stops: ShuttleTrackingContext['stops']): ShuttleTrackingContext {
+  return {
+    shuttleTripId: '36000000-0000-4000-8000-000000000001',
+    mainTripId: '11111111-1111-4111-8111-111111111111',
+    operatorId: '22222222-2222-4222-8222-222222222222',
+    driverUserId: '33333333-3333-4333-8333-333333333333',
+    allowed: true,
+    scope: 'PASSENGER',
+    stops,
+    station: {
+      stationId: '66666666-6666-4666-8666-666666666666',
+      name: 'Station',
+      latitude: 10.8,
+      longitude: 106.8,
+      pickupOrder: 6,
+    },
+  };
+}
+
+function createStop(
+  pickupOrder: number,
+  status: string,
+  isOwnPickup: boolean,
+  bookingId: string | null,
+): ShuttleTrackingContext['stops'][number] {
+  return {
+    pickupOrder,
+    bookingId,
+    latitude: 10 + pickupOrder / 10,
+    longitude: 106 + pickupOrder / 10,
+    status,
+    isStation: false,
+    isOwnPickup,
   };
 }
