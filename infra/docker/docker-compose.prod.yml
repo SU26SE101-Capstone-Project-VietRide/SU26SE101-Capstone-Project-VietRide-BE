@@ -193,11 +193,13 @@ services:
       RabbitMq__ExchangeName: ${RABBITMQ_EXCHANGE:-vietride.events}
       TRIP_SERVICE_BASE_URL: http://trip:5002
       PAYMENT_SERVICE_BASE_URL: http://payment:5004
+      PARCEL_SERVICE_BASE_URL: http://parcel:5005
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
       # appsettings.json carries localhost defaults for running outside Docker. Override the
       # hierarchical keys too because IConfiguration resolves them before the env fallbacks.
       Trip__BaseUrl: http://trip:5002
       Payment__BaseUrl: http://payment:5004
+      Parcel__BaseUrl: http://parcel:5005
       Identity__BaseUrl: http://identity:5001
     healthcheck:
       test:
