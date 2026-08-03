@@ -2172,8 +2172,12 @@ Notes:
   input falls back to the stop-order formula. When those inputs are present but
   `totalDistanceKm - pickupDistance <= 0`, the explicit Technical Context edge rule wins:
   `traveledRatio = 0`; this case does not enter the order fallback.
-- The same serialized response fields are returned whether `pricingAt` is present or omitted;
-  only fare selection changes.
+- The legacy fields above are returned whether `pricingAt` is present or omitted. When
+  `pricingAt` is present, the response additionally includes `originalBaseFare`,
+  `surchargePercent`, `surchargeAmount`, nullable `surchargePeriodId` /
+  `surchargePeriodName`, and the corresponding original/surcharge breakdown on each stop.
+  These additive pricing fields are omitted when `pricingAt` is absent so existing operational
+  snapshot callers keep the legacy wire shape.
 - With `pricingAt`, Trip resolves each pickup fare in this exact order: persisted
   `TripStopFare.source=MANUAL_OVERRIDE`; otherwise the active `RouteStopFareTemplate` whose
   half-open window satisfies `effectiveFrom <= pricingAt < effectiveUntil` (or has no upper

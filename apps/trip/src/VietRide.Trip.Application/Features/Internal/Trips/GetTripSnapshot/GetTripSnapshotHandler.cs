@@ -71,7 +71,7 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
                 var adjustment = originalFare.HasValue
                     ? ApplySurcharge(originalFare.Value, surchargeRule)
                     : null;
-                return new InternalTripStopSnapshotDto(
+                var snapshot = new InternalTripStopSnapshotDto(
                 stop.StopId,
                 stop.OrderIndex,
                 stop.AllowPickup,
@@ -81,12 +81,16 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
                 adjustment?.EffectiveFare,
                 stop.Status.ToString(),
                 stop.ActualArrivalTime,
-                activeStops.GetValueOrDefault(stop.StopId))
-                {
-                    OriginalFareFromThisStop = originalFare,
-                    SurchargePercent = adjustment?.SurchargePercent ?? 0,
-                    SurchargeAmount = adjustment?.SurchargeAmount ?? 0,
-                };
+                activeStops.GetValueOrDefault(stop.StopId));
+
+                return request.PricingAt.HasValue
+                    ? snapshot with
+                    {
+                        OriginalFareFromThisStop = originalFare,
+                        SurchargePercent = adjustment?.SurchargePercent ?? 0,
+                        SurchargeAmount = adjustment?.SurchargeAmount ?? 0,
+                    }
+                    : snapshot;
             })
             .ToArray();
         var seats = tripSeatRepository.QueryNoTracking().Where(seat => seat.TripId == trip.Id).ToArray();
@@ -121,16 +125,18 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
             trip.AssistantUserId,
             trip.DestinationArrivedAt,
             trip.ActualDepartureTime,
-            route.TotalDistanceKm.HasValue ? (double)route.TotalDistanceKm.Value : null)
-        {
-            OriginalBaseFare = trip.BaseFare.Amount,
-            SurchargePercent = baseFareAdjustment.SurchargePercent,
-            SurchargeAmount = baseFareAdjustment.SurchargeAmount,
-            SurchargePeriodId = baseFareAdjustment.SurchargePeriodId,
-            SurchargePeriodName = baseFareAdjustment.SurchargePeriodName,
-        };
+            route.TotalDistanceKm.HasValue ? (double)route.TotalDistanceKm.Value : null);
 
-        return dto;
+        return request.PricingAt.HasValue
+            ? dto with
+            {
+                OriginalBaseFare = trip.BaseFare.Amount,
+                SurchargePercent = baseFareAdjustment.SurchargePercent,
+                SurchargeAmount = baseFareAdjustment.SurchargeAmount,
+                SurchargePeriodId = baseFareAdjustment.SurchargePeriodId,
+                SurchargePeriodName = baseFareAdjustment.SurchargePeriodName,
+            }
+            : dto;
     }
 
     private async Task<IReadOnlyDictionary<Guid, long>> ResolveFaresAsync(

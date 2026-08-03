@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 
 public sealed record InternalTripSnapshotDto(
@@ -20,9 +22,18 @@ public sealed record InternalTripSnapshotDto(
     DateTimeOffset? ActualDepartureTime = null,
     double? TotalDistanceKm = null)
 {
-    public long OriginalBaseFare { get; init; } = BaseFare;
-    public int SurchargePercent { get; init; }
-    public long SurchargeAmount { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? OriginalBaseFare { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SurchargePercent { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? SurchargeAmount { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? SurchargePeriodId { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? SurchargePeriodName { get; init; }
 }

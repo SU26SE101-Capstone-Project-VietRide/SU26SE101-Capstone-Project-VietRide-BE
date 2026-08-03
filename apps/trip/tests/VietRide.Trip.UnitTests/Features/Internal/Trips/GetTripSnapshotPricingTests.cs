@@ -187,7 +187,12 @@ public sealed class GetTripSnapshotPricingTests
             CancellationToken.None);
 
         result.BaseFare.Should().Be(250000);
-        result.SurchargePercent.Should().Be(0);
+        result.OriginalBaseFare.Should().BeNull();
+        result.SurchargePercent.Should().BeNull();
+        result.SurchargeAmount.Should().BeNull();
+        result.Stops.Should().ContainSingle().Which.OriginalFareFromThisStop.Should().BeNull();
+        result.Stops.Should().ContainSingle().Which.SurchargePercent.Should().BeNull();
+        result.Stops.Should().ContainSingle().Which.SurchargeAmount.Should().BeNull();
         surcharge.ResolveCount.Should().Be(0);
     }
 
