@@ -1,4 +1,5 @@
 import { ServiceUnavailableException } from '@nestjs/common';
+import { RabbitMqTopologyHealth } from '@vietride/nest-rabbitmq';
 import type { RedisService } from '@vietride/nest-redis';
 import type { ChannelModel } from 'amqplib';
 import type { Env } from '../config/env.schema';
@@ -26,8 +27,11 @@ describe('ReadinessService', () => {
     probe: jest.fn(),
   } as unknown as jest.Mocked<EmbeddingDimensionProbeService>;
 
+  let topologyHealth: RabbitMqTopologyHealth;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    topologyHealth = new RabbitMqTopologyHealth();
     prisma.$queryRaw.mockResolvedValue([{ '?column?': 1 }]);
     redisClient.ping.mockResolvedValue('PONG');
     rabbit.createChannel.mockResolvedValue(channel as never);
@@ -36,7 +40,7 @@ describe('ReadinessService', () => {
   });
 
   it('returns ok when all dependencies are ready', async () => {
-    const service = new ReadinessService(prisma, redis, embeddingProbe, makeEnv(), rabbit);
+    const service = new ReadinessService(prisma, redis, embeddingProbe, makeEnv(), rabbit, topologyHealth);
 
     await expect(service.check()).resolves.toEqual({
       status: 'ok',
@@ -53,9 +57,26 @@ describe('ReadinessService', () => {
 
   it('returns controlled 503 when a dependency fails', async () => {
     embeddingProbe.probe.mockRejectedValue(new Error('provider down'));
-    const service = new ReadinessService(prisma, redis, embeddingProbe, makeEnv(), rabbit);
+    const service = new ReadinessService(prisma, redis, embeddingProbe, makeEnv(), rabbit, topologyHealth);
 
     await expect(service.check()).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('fails readiness and names the queue when a consumer failed topology assertion', async () => {
+    topologyHealth.record({
+      queue: 'rag:document-ingested',
+      routingKey: 'rag.document.ingested',
+      error: "PRECONDITION_FAILED - inequivalent arg 'x-dead-letter-routing-key'",
+    });
+    const service = new ReadinessService(prisma, redis, embeddingProbe, makeEnv(), rabbit, topologyHealth);
+
+    await expect(service.check()).rejects.toMatchObject({
+      response: expect.objectContaining({
+        errorCode: 'RAG_DEPENDENCY_UNAVAILABLE',
+        detail: '1 RabbitMQ consumer(s) failed topology assertion',
+        failedConsumers: [{ queue: 'rag:document-ingested', routingKey: 'rag.document.ingested' }],
+      }),
+    });
   });
 });
 

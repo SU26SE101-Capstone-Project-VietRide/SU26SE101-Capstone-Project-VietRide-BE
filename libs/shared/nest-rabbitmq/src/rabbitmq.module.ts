@@ -4,6 +4,7 @@ import type { ChannelModel } from 'amqplib';
 import { RabbitMqConsumer } from './rabbitmq.consumer';
 import { RabbitMqPublisher } from './rabbitmq.publisher';
 import { RABBITMQ_CONNECTION, RABBITMQ_OPTIONS, type NestRabbitMqOptions } from './rabbitmq.tokens';
+import { RabbitMqTopologyHealth } from './rabbitmq.topology-health';
 
 @Global()
 @Module({})
@@ -22,8 +23,20 @@ export class NestRabbitMqModule {
     const optionsProvider: Provider = { provide: RABBITMQ_OPTIONS, useValue: opts };
     return {
       module: NestRabbitMqModule,
-      providers: [optionsProvider, connectionProvider, RabbitMqPublisher, RabbitMqConsumer],
-      exports: [optionsProvider, connectionProvider, RabbitMqPublisher, RabbitMqConsumer],
+      providers: [
+        optionsProvider,
+        connectionProvider,
+        RabbitMqTopologyHealth,
+        RabbitMqPublisher,
+        RabbitMqConsumer,
+      ],
+      exports: [
+        optionsProvider,
+        connectionProvider,
+        RabbitMqTopologyHealth,
+        RabbitMqPublisher,
+        RabbitMqConsumer,
+      ],
     };
   }
 }
