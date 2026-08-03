@@ -96,6 +96,20 @@ describe('TripShareAccessService', () => {
     });
   });
 
+  it('uses the socket limiter for an initial socket authorization', async () => {
+    await service.authorizeSocket(TOKEN, NOW);
+
+    expect(rateLimiter.consume).toHaveBeenCalledWith('socket', TOKEN);
+  });
+
+  it('revalidates without consuming any rate limiter quota', async () => {
+    await service.revalidate(TOKEN, NOW);
+
+    expect(rateLimiter.consume).not.toHaveBeenCalled();
+    expect(repository.findById).toHaveBeenCalledWith(GRANT_ID);
+    expect(tripProvider.getTrip).toHaveBeenCalledWith(TRIP_ID);
+  });
+
   it('maps revoked grants to 410 without consulting Trip', async () => {
     repository.findById.mockResolvedValueOnce(createGrant({ revokedAt: NOW, revokeReason: 'USER_REVOKED' }));
     await expectUnavailable();

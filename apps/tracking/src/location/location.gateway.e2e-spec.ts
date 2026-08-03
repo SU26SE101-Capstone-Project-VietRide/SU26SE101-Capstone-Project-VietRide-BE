@@ -15,6 +15,7 @@ import { ShuttleService } from '../shuttle/shuttle.service';
 import { ShuttleEtaService } from '../shuttle/shuttle-eta.service';
 import type { ShuttleEtaEvent } from '../shuttle/shuttle-eta.service';
 import { TripDelayService, type TripDelayEtaUpdate } from '../trip-delay/trip-delay.service';
+import { TripShareRealtimePublisher } from '../trip-sharing/trip-share-realtime.publisher';
 import { LocationGateway } from './location.gateway';
 import {
   TRACKING_SOCKET_PATH,
@@ -62,6 +63,9 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   let shuttleGetContext: jest.Mock;
   let shuttleRecordLocation: jest.Mock;
   let shuttleEtaHandleGpsUpdate: jest.Mock;
+  let sharedPublishGps: jest.Mock;
+  let sharedPublishEta: jest.Mock;
+  let sharedPublishStatus: jest.Mock;
 
   beforeAll(async () => {
     const generated = await generateKeyPair('RS256');
@@ -89,6 +93,9 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     shuttleGetContext = jest.fn();
     shuttleRecordLocation = jest.fn();
     shuttleEtaHandleGpsUpdate = jest.fn(async () => undefined);
+    sharedPublishGps = jest.fn();
+    sharedPublishEta = jest.fn();
+    sharedPublishStatus = jest.fn();
     const redisService = {
       getClient: jest.fn(() => ({
         eval: redisEval,
@@ -149,6 +156,14 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
           provide: ShuttleEtaService,
           useValue: { handleGpsUpdate: shuttleEtaHandleGpsUpdate },
         },
+        {
+          provide: TripShareRealtimePublisher,
+          useValue: {
+            publishGps: sharedPublishGps,
+            publishEta: sharedPublishEta,
+            publishStatus: sharedPublishStatus,
+          },
+        },
       ],
     }).compile();
 
@@ -177,6 +192,9 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     shuttleRecordLocation.mockReset();
     shuttleEtaHandleGpsUpdate.mockReset();
     shuttleEtaHandleGpsUpdate.mockResolvedValue(undefined);
+    sharedPublishGps.mockReset();
+    sharedPublishEta.mockReset();
+    sharedPublishStatus.mockReset();
   });
 
   afterAll(async () => {
@@ -195,6 +213,10 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
 
   it('rejects an invalid access token with UNAUTHORIZED', async () => {
     await expect(connectSocket('not-a-jwt')).rejects.toThrow('UNAUTHORIZED');
+  });
+
+  it('does not accept a share token as authentication on the default namespace', async () => {
+    await expect(connectWithAuth({ shareToken: 'v1.share.signature' })).rejects.toThrow('UNAUTHORIZED');
   });
 
   it('allows a valid passenger token to join trip tracking', async () => {
@@ -255,6 +277,15 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     expect(etaHandleGpsUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ tripId: TEST_TRIP_ID }),
     );
+    expect(sharedPublishGps).toHaveBeenCalledTimes(1);
+    expect(sharedPublishGps).toHaveBeenCalledWith(expect.objectContaining({
+      tripId: TEST_TRIP_ID,
+      latitude: payload.latitude,
+      longitude: payload.longitude,
+      speedKmh: payload.speedKmh,
+      headingDeg: payload.headingDeg,
+      recordedAt: payload.recordedAt,
+    }));
     expect(approachingHandleEtaUpdate).not.toHaveBeenCalled();
     socket.disconnect();
   });
@@ -423,6 +454,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     expect(ack).toEqual({ success: false, error: 'TRACKING_UNAVAILABLE' });
     expect(offRouteHandleGpsUpdate).not.toHaveBeenCalled();
     expect(etaHandleGpsUpdate).not.toHaveBeenCalled();
+    expect(sharedPublishGps).not.toHaveBeenCalled();
     socket.disconnect();
   });
 
@@ -442,6 +474,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     expect(redisEval).toHaveBeenCalledTimes(2);
     expect(offRouteHandleGpsUpdate).toHaveBeenCalledTimes(1);
     expect(etaHandleGpsUpdate).toHaveBeenCalledTimes(1);
+    expect(sharedPublishGps).toHaveBeenCalledTimes(1);
     socket.disconnect();
   });
 
@@ -481,6 +514,8 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     expect(ack).toEqual({ success: true });
     expect(receivedEta).toEqual({ ...etaUpdate, delayed: false });
     expect(approachingHandleEtaUpdate).toHaveBeenCalledWith({ ...etaUpdate, delayed: false });
+    expect(sharedPublishEta).toHaveBeenCalledWith({ ...etaUpdate, delayed: false });
+    expect(sharedPublishStatus).not.toHaveBeenCalled();
     socket.disconnect();
   });
 
@@ -522,6 +557,28 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       updatedAt: etaUpdate.updatedAt,
     });
     expect(approachingHandleEtaUpdate).toHaveBeenCalledWith(delayedEtaUpdate);
+    expect(sharedPublishEta).toHaveBeenCalledWith(delayedEtaUpdate);
+    expect(sharedPublishStatus).toHaveBeenCalledWith({
+      tripId: TEST_TRIP_ID,
+      status: 'DELAYED',
+      delayMinutes: 35,
+      updatedAt: etaUpdate.updatedAt,
+    });
+    socket.disconnect();
+  });
+
+  it('keeps the private GPS ack and detection flow successful when public broadcasting throws', async () => {
+    const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
+    const socket = await connectSocket(token);
+    sharedPublishGps.mockImplementationOnce(() => {
+      throw new Error('shared namespace unavailable');
+    });
+
+    const ack = await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
+
+    expect(ack).toEqual({ success: true });
+    await waitForCondition(() => etaHandleGpsUpdate.mock.calls.length === 1);
+    expect(offRouteHandleGpsUpdate).toHaveBeenCalledTimes(1);
     socket.disconnect();
   });
 
@@ -542,10 +599,14 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   }
 
   function connectSocket(token: string): Promise<Socket> {
+    return connectWithAuth({ token });
+  }
+
+  function connectWithAuth(auth: Record<string, string>): Promise<Socket> {
     return new Promise((resolve, reject) => {
       const socket = io(`http://127.0.0.1:${port}`, {
         path: TRACKING_SOCKET_PATH,
-        auth: { token },
+        auth,
         transports: ['websocket'],
         forceNew: true,
         reconnection: false,

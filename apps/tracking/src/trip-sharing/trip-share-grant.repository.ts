@@ -52,6 +52,19 @@ export class TripShareGrantRepository {
     return result.count;
   }
 
+  async revokeOwnActiveGrantById(
+    id: string,
+    tripId: string,
+    createdByUserId: string,
+    now: Date,
+  ): Promise<boolean> {
+    const result = await this.prisma.tripShareGrant.updateMany({
+      where: { id, tripId, createdByUserId, revokedAt: null },
+      data: { revokedAt: now, revokeReason: 'USER_REVOKED' },
+    });
+    return result.count === 1;
+  }
+
   async revokeGrantById(
     id: string,
     reason: TripShareGrantRevokeReason,

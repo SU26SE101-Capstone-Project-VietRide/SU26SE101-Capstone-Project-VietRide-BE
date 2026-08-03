@@ -20,6 +20,8 @@ import { TripShareTokenGuard } from './trip-share-token.guard';
 import { TripShareTokenCodec } from './trip-share-token.codec';
 import { TripShareTrackingStateRepository } from './trip-share-tracking-state.repository';
 import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provider';
+import { TripShareGateway } from './trip-share.gateway';
+import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
 
 @Module({
   imports: [OffRouteModule],
@@ -41,7 +43,10 @@ import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provid
     TripShareTokenGuard,
     TripShareOwnerJwtGuard,
     TripShareOwnerService,
+    TripShareRealtimePublisher,
+    TripShareGateway,
     { provide: TRACKING_JWT_VERIFIER, useClass: JoseUserJwtVerifier },
   ],
+  exports: [TripShareRealtimePublisher],
 })
 export class TripSharingModule {}

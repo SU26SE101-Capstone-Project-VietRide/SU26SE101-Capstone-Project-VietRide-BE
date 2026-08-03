@@ -64,6 +64,34 @@ describe('TripShareGrantRepository', () => {
     });
   });
 
+  it('conditionally revokes only the exact active grant previously read for the owner and trip', async () => {
+    prisma.tripShareGrant.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      repository.revokeOwnActiveGrantById(GRANT_ID, TRIP_ID, USER_ID, NOW),
+    ).resolves.toBe(true);
+    expect(prisma.tripShareGrant.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: GRANT_ID,
+        tripId: TRIP_ID,
+        createdByUserId: USER_ID,
+        revokedAt: null,
+      },
+      data: { revokedAt: NOW, revokeReason: 'USER_REVOKED' },
+    });
+  });
+
+  it('reports a lost replacement race without revoking a broader owner-trip row', async () => {
+    prisma.tripShareGrant.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      repository.revokeOwnActiveGrantById(GRANT_ID, TRIP_ID, USER_ID, NOW),
+    ).resolves.toBe(false);
+    expect(prisma.tripShareGrant.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: GRANT_ID }),
+    }));
+  });
+
   it('revokes one grant by id with the supplied reason', async () => {
     prisma.tripShareGrant.updateMany.mockResolvedValue({ count: 1 });
 
@@ -188,6 +216,7 @@ function createRepositoryMock(): jest.Mocked<TripShareGrantRepository> {
     findById: jest.fn(),
     create: jest.fn(),
     revokeOwnActiveGrant: jest.fn(),
+    revokeOwnActiveGrantById: jest.fn(),
     revokeGrantById: jest.fn(),
     revokeAllActiveForTrip: jest.fn(),
   } as unknown as jest.Mocked<TripShareGrantRepository>;

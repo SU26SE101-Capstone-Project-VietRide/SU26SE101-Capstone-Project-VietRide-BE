@@ -13,6 +13,7 @@ import type {
 } from './trip-share-owner.dto';
 import { TripShareTokenCodec } from './trip-share-token.codec';
 import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provider';
+import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
 
 const HTTP_CLIENT_ERROR_MIN = 400;
 const HTTP_CLIENT_ERROR_MAX_EXCLUSIVE = 500;
@@ -27,6 +28,7 @@ export class TripShareOwnerService {
     private readonly idempotency: TripShareIdempotencyService,
     private readonly tokenCodec: TripShareTokenCodec,
     @Inject(ENV_TOKEN) private readonly env: Env,
+    private readonly realtime: TripShareRealtimePublisher,
   ) {}
 
   async ensureShareLink(
@@ -75,7 +77,14 @@ export class TripShareOwnerService {
     if (begin.state === 'replay') return this.replayRevokeOutcome(begin.outcome);
 
     try {
-      await this.grantRepository.revokeOwnActiveGrant(tripId, userId, new Date());
+      const now = new Date();
+      const active = await this.grantRepository.findActiveByOwnerTrip(tripId, userId, now);
+      const revoked = active
+        ? await this.grantRepository.revokeOwnActiveGrantById(active.id, tripId, userId, now)
+        : false;
+      if (active && revoked) {
+        void this.realtime.revokeGrant(active.id, 'REVOKED').catch(() => undefined);
+      }
       const outcome = { kind: 'REVOKED', revoked: true } as const;
       await this.idempotency.complete(begin.ownerToken, outcome);
       return { revoked: true };

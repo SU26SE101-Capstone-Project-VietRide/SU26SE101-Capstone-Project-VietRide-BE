@@ -20,6 +20,7 @@ import { TripShareOwnerJwtGuard } from './trip-share-owner-jwt.guard';
 import { TripShareOwnerService } from './trip-share-owner.service';
 import { TripShareTokenCodec } from './trip-share-token.codec';
 import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provider';
+import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const USER_ID = '22222222-2222-4222-8222-222222222222';
@@ -43,7 +44,13 @@ describe('TripShareOwnerController (e2e)', () => {
   const booking = { requireBookingOwner: jest.fn() };
   const trips = { getTrip: jest.fn() };
   const grants = { ensureActive: jest.fn() };
-  const repository = { revokeGrantById: jest.fn(), revokeOwnActiveGrant: jest.fn() };
+  const repository = {
+    findActiveByOwnerTrip: jest.fn(),
+    revokeGrantById: jest.fn(),
+    revokeOwnActiveGrant: jest.fn(),
+    revokeOwnActiveGrantById: jest.fn(),
+  };
+  const realtime = { revokeGrant: jest.fn() };
   const idempotency = { begin: jest.fn(), complete: jest.fn(), abandon: jest.fn() };
 
   beforeAll(async () => {
@@ -64,6 +71,7 @@ describe('TripShareOwnerController (e2e)', () => {
         { provide: TripShareGrantService, useValue: grants },
         { provide: TripShareGrantRepository, useValue: repository },
         { provide: TripShareIdempotencyService, useValue: idempotency },
+        { provide: TripShareRealtimePublisher, useValue: realtime },
         { provide: APP_FILTER, useValue: new ApiResponseExceptionFilter() },
         { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
       ],
@@ -83,6 +91,9 @@ describe('TripShareOwnerController (e2e)', () => {
     });
     repository.revokeGrantById.mockResolvedValue(1);
     repository.revokeOwnActiveGrant.mockResolvedValue(1);
+    repository.revokeOwnActiveGrantById.mockResolvedValue(true);
+    repository.findActiveByOwnerTrip.mockResolvedValue({ id: GRANT_ID });
+    realtime.revokeGrant.mockResolvedValue(undefined);
     idempotency.begin.mockResolvedValue({ state: 'acquired', ownerToken: 'owner-lock' });
     idempotency.complete.mockResolvedValue(undefined);
     idempotency.abandon.mockResolvedValue(undefined);
@@ -161,8 +172,14 @@ describe('TripShareOwnerController (e2e)', () => {
     const replay = await request<{ revoked: true }>('DELETE', TRIP_ID, token, IDEMPOTENCY_KEY);
     expect(first.status).toBe(200);
     expect(replay.body.data).toEqual({ revoked: true });
-    expect(repository.revokeOwnActiveGrant).toHaveBeenCalledTimes(1);
-    expect(repository.revokeOwnActiveGrant).toHaveBeenCalledWith(TRIP_ID, USER_ID, expect.any(Date));
+    expect(repository.revokeOwnActiveGrantById).toHaveBeenCalledTimes(1);
+    expect(repository.revokeOwnActiveGrantById).toHaveBeenCalledWith(
+      GRANT_ID,
+      TRIP_ID,
+      USER_ID,
+      expect.any(Date),
+    );
+    expect(repository.revokeOwnActiveGrant).not.toHaveBeenCalled();
     expect(booking.requireBookingOwner).not.toHaveBeenCalled();
     expect(trips.getTrip).not.toHaveBeenCalled();
   });

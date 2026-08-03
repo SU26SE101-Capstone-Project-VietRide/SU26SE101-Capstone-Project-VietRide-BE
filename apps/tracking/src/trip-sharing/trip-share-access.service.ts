@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { timingSafeEqual } from 'node:crypto';
 import { TripShareGrantRepository } from './trip-share-grant.repository';
-import { TripShareRateLimiter } from './trip-share-rate-limiter';
+import { TripShareRateLimiter, type TripShareRateLimitSurface } from './trip-share-rate-limiter';
 import { TripShareTokenCodec } from './trip-share-token.codec';
 import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provider';
 
@@ -29,16 +29,44 @@ export class TripShareAccessService {
   ) {}
 
   async authorize(rawToken: string | undefined, now: Date = new Date()): Promise<TripShareAccessContext> {
-    if (!rawToken) this.invalidToken();
-    await this.rateLimiter.consume('context', rawToken);
+    return this.authorizeWithSurface(rawToken, 'context', now);
+  }
 
+  async authorizeSocket(
+    rawToken: string | undefined,
+    now: Date = new Date(),
+  ): Promise<TripShareAccessContext> {
+    return this.authorizeWithSurface(rawToken, 'socket', now);
+  }
+
+  async revalidate(rawToken: string | undefined, now: Date = new Date()): Promise<TripShareAccessContext> {
+    if (!rawToken) this.invalidToken();
+    return this.validate(rawToken, now);
+  }
+
+  private async authorizeWithSurface(
+    rawToken: string | undefined,
+    surface: TripShareRateLimitSurface,
+    now: Date,
+  ): Promise<TripShareAccessContext> {
+    if (!rawToken) this.invalidToken();
+    await this.rateLimiter.consume(surface, rawToken);
+    return this.validate(rawToken, now);
+  }
+
+  private async validate(rawToken: string, now: Date): Promise<TripShareAccessContext> {
     const verified = this.tokenCodec.verify(rawToken);
     const grant = await this.grants.findById(verified.grantId);
     if (!grant || !this.hashesMatch(verified.tokenHash, grant.tokenHash)) this.invalidToken();
-    if (grant.revokedAt) this.unavailable();
+    if (grant.revokedAt) {
+      const reason = grant.revokeReason === 'TRIP_TERMINATED' || grant.revokeReason === 'CREATION_ROLLBACK'
+        ? 'TRIP_ENDED'
+        : 'REVOKED';
+      this.unavailable(reason);
+    }
     if (grant.expiresAt.getTime() <= now.getTime()) {
       await this.grants.revokeGrantById(grant.id, 'EXPIRED', now);
-      this.unavailable();
+      this.unavailable('REVOKED');
     }
 
     let snapshot: Awaited<ReturnType<TripShareTripSnapshotProvider['getTrip']>>;
@@ -47,12 +75,12 @@ export class TripShareAccessService {
     } catch (error) {
       if (!(error instanceof NotFoundException)) throw error;
       await this.grants.revokeGrantById(grant.id, 'TRIP_TERMINATED', now);
-      this.unavailable();
+      this.unavailable('TRIP_ENDED');
     }
 
     if (snapshot.status !== 'IN_PROGRESS') {
       await this.grants.revokeGrantById(grant.id, 'TRIP_TERMINATED', now);
-      this.unavailable();
+      this.unavailable('TRIP_ENDED');
     }
 
     return {
@@ -81,10 +109,10 @@ export class TripShareAccessService {
     });
   }
 
-  private unavailable(): never {
+  private unavailable(reason: 'REVOKED' | 'TRIP_ENDED'): never {
     throw new GoneException({
       errorCode: 'TRACKING_SHARE_LINK_UNAVAILABLE',
       detail: 'The trip share link is no longer available',
-    });
+    }, { cause: reason });
   }
 }

@@ -12,6 +12,7 @@ import { BookingOwnerAuthorizationProvider } from './booking-owner-authorization
 import { TripShareOwnerService } from './trip-share-owner.service';
 import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provider';
 import { TripShareTokenCodec } from './trip-share-token.codec';
+import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const USER_ID = '22222222-2222-4222-8222-222222222222';
@@ -26,6 +27,7 @@ describe('TripShareOwnerService', () => {
   let grants: jest.Mocked<TripShareGrantService>;
   let repository: jest.Mocked<TripShareGrantRepository>;
   let idempotency: jest.Mocked<TripShareIdempotencyService>;
+  let realtime: jest.Mocked<TripShareRealtimePublisher>;
   let service: TripShareOwnerService;
 
   beforeEach(() => {
@@ -49,14 +51,19 @@ describe('TripShareOwnerService', () => {
       }),
     } as unknown as jest.Mocked<TripShareGrantService>;
     repository = {
+      findActiveByOwnerTrip: jest.fn().mockResolvedValue({ id: GRANT_ID }),
       revokeGrantById: jest.fn().mockResolvedValue(1),
       revokeOwnActiveGrant: jest.fn().mockResolvedValue(1),
+      revokeOwnActiveGrantById: jest.fn().mockResolvedValue(true),
     } as unknown as jest.Mocked<TripShareGrantRepository>;
     idempotency = {
       begin: jest.fn().mockResolvedValue({ state: 'acquired', ownerToken: 'lock-owner' }),
       complete: jest.fn().mockResolvedValue(undefined),
       abandon: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<TripShareIdempotencyService>;
+    realtime = {
+      revokeGrant: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<TripShareRealtimePublisher>;
     const env = {
       TRACKING_SHARE_PAGE_URL: 'https://app.vietride.vn/trip-sharing',
     } as Env;
@@ -71,6 +78,7 @@ describe('TripShareOwnerService', () => {
       idempotency,
       codec,
       env,
+      realtime,
     );
   });
 
@@ -181,15 +189,48 @@ describe('TripShareOwnerService', () => {
     expect(idempotency.complete).not.toHaveBeenCalled();
   });
 
-  it('revokes only the JWT owner grant without calling Booking or Trip and replays idempotently', async () => {
+  it('revokes the exact active JWT owner grant without calling Booking or Trip and replays idempotently', async () => {
     const first = await service.revokeShareLink(USER_ID, TRIP_ID, IDEMPOTENCY_KEY, OWNER_PATH);
     idempotency.begin.mockResolvedValueOnce({ state: 'replay', outcome: { kind: 'REVOKED', revoked: true } });
     const replay = await service.revokeShareLink(USER_ID, TRIP_ID, IDEMPOTENCY_KEY, OWNER_PATH);
 
     expect(first).toEqual({ revoked: true });
     expect(replay).toEqual(first);
-    expect(repository.revokeOwnActiveGrant).toHaveBeenCalledWith(TRIP_ID, USER_ID, expect.any(Date));
+    expect(repository.revokeOwnActiveGrantById).toHaveBeenCalledWith(
+      GRANT_ID,
+      TRIP_ID,
+      USER_ID,
+      expect.any(Date),
+    );
+    expect(repository.revokeOwnActiveGrant).not.toHaveBeenCalled();
+    expect(realtime.revokeGrant).toHaveBeenCalledWith(GRANT_ID, 'REVOKED');
     expect(booking.requireBookingOwner).not.toHaveBeenCalled();
     expect(trips.getTrip).not.toHaveBeenCalled();
+  });
+
+  it('does not revoke or emit for a replacement grant when the previously read grant loses the race', async () => {
+    repository.revokeOwnActiveGrantById.mockResolvedValueOnce(false);
+
+    await expect(service.revokeShareLink(USER_ID, TRIP_ID, IDEMPOTENCY_KEY, OWNER_PATH))
+      .resolves.toEqual({ revoked: true });
+
+    expect(repository.revokeOwnActiveGrantById).toHaveBeenCalledWith(
+      GRANT_ID,
+      TRIP_ID,
+      USER_ID,
+      expect.any(Date),
+    );
+    expect(repository.revokeOwnActiveGrant).not.toHaveBeenCalled();
+    expect(realtime.revokeGrant).not.toHaveBeenCalled();
+  });
+
+  it('keeps DELETE successful when realtime revocation fails after the database commit', async () => {
+    realtime.revokeGrant.mockRejectedValueOnce(new Error('socket unavailable'));
+
+    await expect(service.revokeShareLink(USER_ID, TRIP_ID, IDEMPOTENCY_KEY, OWNER_PATH))
+      .resolves.toEqual({ revoked: true });
+    await Promise.resolve();
+
+    expect(repository.revokeOwnActiveGrantById).toHaveBeenCalledTimes(1);
   });
 });
