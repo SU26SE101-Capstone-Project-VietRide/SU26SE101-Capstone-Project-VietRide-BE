@@ -14,7 +14,7 @@ public sealed class GetPlatformReportQueryHandlerTests
 {
     private const string From = "2026-07-01T00:00:00Z";
     private const string To = "2026-08-01T00:00:00Z";
-    private const string CacheKey = "platform-report:v1:2026-07-01T00:00:00.0000000Z:2026-08-01T00:00:00.0000000Z";
+    private const string CacheKey = "platform-report:v2:2026-07-01T00:00:00.0000000Z:2026-08-01T00:00:00.0000000Z";
 
     [Fact]
     public async Task Handle_CacheHit_ReturnsCachedValueWithoutCallingUpstream()
@@ -70,17 +70,185 @@ public sealed class GetPlatformReportQueryHandlerTests
     }
 
     [Fact]
-    public async Task Handle_LedgerMismatch_ThrowsAndDoesNotPromoteCache()
+    public async Task Handle_LedgerRevenue_IsAuthoritativeAndPromotesCache()
     {
         var cache = new FakeCache();
         var handler = CreateHandler(new FakeClient(), cache, ledgerBookingRevenue: 99_000);
+
+        var result = await handler.Handle(
+            new GetPlatformReportQuery(From, To),
+            CancellationToken.None);
+
+        result.Totals.Should().Be(new PlatformReportTotals(1, 1, 1, 99_000, 50_000, 149_000));
+        cache.SetCalls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Handle_SourceOnly_UsesSourceCountsAndZeroRevenue()
+    {
+        var cache = new FakeCache();
+        var handler = CreateHandler(new FakeClient(), cache, ledgerRows: []);
+
+        var result = await handler.Handle(
+            new GetPlatformReportQuery(From, To),
+            CancellationToken.None);
+
+        result.Totals.Should().Be(new PlatformReportTotals(1, 1, 1, 0, 0, 0));
+        cache.SetCalls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Handle_LedgerOnlyNonzero_UsesZeroCountsAndLoadsIdentity()
+    {
+        var cache = new FakeCache();
+        var operatorId = Guid.Parse("41000000-0000-4000-8000-000000000002");
+        var identity = Substitute.For<IIdentityPlatformReportClient>();
+        identity.GetAsync(Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<OperatorSummaryItem>>(
+                [new OperatorSummaryItem(operatorId, "Ledger Operator")]);
+        var handler = CreateHandler(
+            new FakeClient { Value = [] },
+            cache,
+            bookingRows: [],
+            parcelRows: [],
+            ledgerRows: [new PlatformLedgerReportItem(operatorId, 450_000, 0)],
+            identityRows: [new OperatorSummaryItem(operatorId, "Ledger Operator")],
+            identityClient: identity);
+
+        var result = await handler.Handle(
+            new GetPlatformReportQuery(From, To),
+            CancellationToken.None);
+
+        result.Totals.Should().Be(new PlatformReportTotals(0, 0, 0, 450_000, 0, 450_000));
+        result.ByOperator.Should().ContainSingle().Which.OperatorName.Should().Be("Ledger Operator");
+        await identity.Received(1).GetAsync(
+            Arg.Is<IReadOnlyList<Guid>>(ids => ids.Count == 1 && ids[0] == operatorId),
+            Arg.Any<CancellationToken>());
+        cache.SetCalls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Handle_AllZeroLedgerOnly_OmitsRowWithoutIdentityLookup()
+    {
+        var cache = new FakeCache();
+        var identity = Substitute.For<IIdentityPlatformReportClient>();
+        var operatorId = Guid.Parse("41000000-0000-4000-8000-000000000003");
+        var handler = CreateHandler(
+            new FakeClient { Value = [] },
+            cache,
+            bookingRows: [],
+            parcelRows: [],
+            ledgerRows: [new PlatformLedgerReportItem(operatorId, 0, 0)],
+            identityRows: [],
+            identityClient: identity);
+
+        var result = await handler.Handle(
+            new GetPlatformReportQuery(From, To),
+            CancellationToken.None);
+
+        result.ByOperator.Should().BeEmpty();
+        await identity.DidNotReceiveWithAnyArgs().GetAsync(default!, default);
+        cache.SetCalls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Handle_LedgerOnlyWithoutIdentitySummary_ReturnsNullOperatorName()
+    {
+        var cache = new FakeCache();
+        var operatorId = Guid.Parse("41000000-0000-4000-8000-000000000004");
+        var handler = CreateHandler(
+            new FakeClient { Value = [] },
+            cache,
+            bookingRows: [],
+            parcelRows: [],
+            ledgerRows: [new PlatformLedgerReportItem(operatorId, 450_000, 0)],
+            identityRows: []);
+
+        var result = await handler.Handle(
+            new GetPlatformReportQuery(From, To),
+            CancellationToken.None);
+
+        result.ByOperator.Should().ContainSingle().Which.OperatorName.Should().BeNull();
+        cache.SetCalls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Handle_NegativeLedgerRevenue_IsAcceptedAndUsesCheckedNetSum()
+    {
+        var cache = new FakeCache();
+        var operatorId = Guid.Parse("41000000-0000-4000-8000-000000000005");
+        var handler = CreateHandler(
+            new FakeClient { Value = [] },
+            cache,
+            bookingRows: [],
+            parcelRows: [],
+            ledgerRows: [new PlatformLedgerReportItem(operatorId, -450_000, 50_000)],
+            identityRows: []);
+
+        var result = await handler.Handle(
+            new GetPlatformReportQuery(From, To),
+            CancellationToken.None);
+
+        result.Totals.Should().Be(new PlatformReportTotals(0, 0, 0, -450_000, 50_000, -400_000));
+        cache.SetCalls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Handle_LedgerOnlyRevenueSumOverflow_ThrowsAndDoesNotPromoteCache()
+    {
+        var cache = new FakeCache();
+        var operatorId = Guid.Parse("41000000-0000-4000-8000-000000000006");
+        var handler = CreateHandler(
+            new FakeClient { Value = [] },
+            cache,
+            bookingRows: [],
+            parcelRows: [],
+            ledgerRows: [new PlatformLedgerReportItem(operatorId, long.MaxValue, 1)],
+            identityRows: []);
 
         var action = () => handler.Handle(
             new GetPlatformReportQuery(From, To),
             CancellationToken.None);
 
-        var exception = await action.Should().ThrowAsync<PlatformReportUnavailableException>();
-        exception.Which.StatusCode.Should().Be(503);
+        await action.Should().ThrowAsync<PlatformReportValueOverflowException>();
+        cache.SetCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_DuplicateLedgerRows_ThrowsAndDoesNotPromoteCache()
+    {
+        var cache = new FakeCache();
+        var handler = CreateHandler(
+            new FakeClient(),
+            cache,
+            ledgerRows:
+            [
+                new PlatformLedgerReportItem(OperatorId, 100_000, 0),
+                new PlatformLedgerReportItem(OperatorId, 100_000, 0),
+            ]);
+
+        var action = () => handler.Handle(
+            new GetPlatformReportQuery(From, To),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<PlatformReportUnavailableException>();
+        cache.SetCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_EmptyLedgerOperatorId_ThrowsAndDoesNotPromoteCache()
+    {
+        var cache = new FakeCache();
+        var handler = CreateHandler(
+            new FakeClient(),
+            cache,
+            ledgerRows: [new PlatformLedgerReportItem(Guid.Empty, 0, 0)]);
+
+        var action = () => handler.Handle(
+            new GetPlatformReportQuery(From, To),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<PlatformReportUnavailableException>();
         cache.SetCalls.Should().BeEmpty();
     }
 
@@ -166,7 +334,12 @@ public sealed class GetPlatformReportQueryHandlerTests
     private static GetPlatformReportQueryHandler CreateHandler(
         ITripPlatformReportClient client,
         IPlatformReportCache cache,
-        long ledgerBookingRevenue = 100_000)
+        long ledgerBookingRevenue = 100_000,
+        IReadOnlyList<PlatformBookingReportItem>? bookingRows = null,
+        IReadOnlyList<ParcelPlatformReportItem>? parcelRows = null,
+        IReadOnlyList<PlatformLedgerReportItem>? ledgerRows = null,
+        IReadOnlyList<OperatorSummaryItem>? identityRows = null,
+        IIdentityPlatformReportClient? identityClient = null)
     {
         var bookings = Substitute.For<IBookingRepository>();
         bookings.GetPlatformBookingMetricsAsync(
@@ -174,25 +347,25 @@ public sealed class GetPlatformReportQueryHandlerTests
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
             .Returns<IReadOnlyList<PlatformBookingReportItem>>(
-                [new(OperatorId, 1, 100_000)]);
+                bookingRows ?? [new(OperatorId, 1, 100_000)]);
         var parcels = Substitute.For<IParcelPlatformReportClient>();
         parcels.GetAsync(
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
             .Returns<IReadOnlyList<ParcelPlatformReportItem>>(
-                [new(OperatorId, 1, 50_000)]);
+                parcelRows ?? [new(OperatorId, 1, 50_000)]);
         var ledger = Substitute.For<IPaymentPlatformLedgerClient>();
         ledger.GetAsync(
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
             .Returns<IReadOnlyList<PlatformLedgerReportItem>>(
-                [new(OperatorId, ledgerBookingRevenue, 50_000)]);
-        var identity = Substitute.For<IIdentityPlatformReportClient>();
+                ledgerRows ?? [new(OperatorId, ledgerBookingRevenue, 50_000)]);
+        var identity = identityClient ?? Substitute.For<IIdentityPlatformReportClient>();
         identity.GetAsync(Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<CancellationToken>())
             .Returns<IReadOnlyList<OperatorSummaryItem>>(
-                [new(OperatorId, "Operator A")]);
+                identityRows ?? [new(OperatorId, "Operator A")]);
         return new GetPlatformReportQueryHandler(
             bookings,
             client,

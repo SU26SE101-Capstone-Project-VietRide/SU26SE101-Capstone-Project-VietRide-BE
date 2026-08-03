@@ -226,6 +226,12 @@ const parcelSql = (statement) => sql('vietride_parcel', 'vietride_parcel', state
 const trackingSql = (statement) => sql('vietride_tracking', 'vietride_tracking', statement);
 const redis = (...args) => run('docker', ['exec', containers.redis, 'redis-cli', ...args]);
 
+function clearPlatformReportCache() {
+  const keys = redis('--scan', '--pattern', 'platform-report:*').split(/\r?\n/).filter(Boolean);
+  if (keys.length > 0) redis('DEL', ...keys);
+  return keys.length;
+}
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -749,7 +755,7 @@ async function runPlatformScenario() {
     { from: range.from, to: warmupTo },
     'Platform report warm-up',
   );
-  for (const key of redis('--scan', '--pattern', 'platform-report:v1:*').split(/\r?\n/).filter(Boolean)) {
+  for (const key of redis('--scan', '--pattern', 'platform-report:*').split(/\r?\n/).filter(Boolean)) {
     redis('DEL', key);
   }
 
@@ -761,7 +767,7 @@ async function runPlatformScenario() {
   assert(first.json.data.byOperator.length === 20, `Platform benchmark operator union drifted: ${first.text}`);
   assert(first.json.data.totals.netRevenueVnd === 13_000_160_000, `Ledger total mismatch: ${first.text}`);
   assert(coldDurationMs < 2000, `Cold platform report exceeded 2s SLO: ${coldDurationMs}ms`);
-  const keys = redis('--scan', '--pattern', 'platform-report:v1:*').split(/\r?\n/).filter(Boolean);
+  const keys = redis('--scan', '--pattern', 'platform-report:v2:*').split(/\r?\n/).filter(Boolean);
   assert(keys.length > 0, 'Platform cache key missing');
   assert(keys.some((key) => Number(redis('TTL', key)) > 0 && Number(redis('TTL', key)) <= 300), 'Platform cache TTL missing');
   const warmStartedAt = performance.now();
@@ -770,29 +776,50 @@ async function runPlatformScenario() {
   assert(cached.response.status === 200, `Warm platform cache failed: ${cached.text}`);
   assertPlatformReportPeriod(cached, range, 'Warm 29-day platform report');
   assert(warmDurationMs < 2000, `Warm platform report exceeded 2s SLO: ${warmDurationMs}ms`);
-  composeRun(['--profile', 'app', 'stop', 'parcel']);
-  const warm = await api('GET', pathname, { token: tokens.systemAdmin });
-  assert(warm.response.status === 200, `Warm cache did not survive parcel outage: ${warm.text}`);
-  assertPlatformReportPeriod(warm, range, 'Warm outage 29-day platform report');
-  for (const key of keys) redis('DEL', key);
-  const cold = await api('GET', pathname, { token: tokens.systemAdmin });
-  expectError(cold, [503], 'UPSTREAM_UNAVAILABLE');
-  composeRun(['--profile', 'app', 'up', '-d', '--no-deps', 'parcel']);
-  await waitFor(`${urls.parcel}/ready`);
+  let parcelStopped = false;
+  try {
+    parcelStopped = true;
+    composeRun(['--profile', 'app', 'stop', 'parcel']);
+    const warm = await api('GET', pathname, { token: tokens.systemAdmin });
+    assert(warm.response.status === 200, `Warm cache did not survive parcel outage: ${warm.text}`);
+    assertPlatformReportPeriod(warm, range, 'Warm outage 29-day platform report');
+    for (const key of keys) redis('DEL', key);
+    const cold = await api('GET', pathname, { token: tokens.systemAdmin });
+    expectError(cold, [503], 'UPSTREAM_UNAVAILABLE');
+  } finally {
+    if (parcelStopped) {
+      composeRun(['--profile', 'app', 'up', '-d', '--no-deps', 'parcel']);
+      await waitFor(`${urls.parcel}/ready`);
+    }
+  }
 
-  const mismatchEventId = '41430000-0000-4000-8026-000000000001';
-  paymentSql(`
-    INSERT INTO operator_ledger_entries (id,operator_id,trip_id,entry_type,amount,reference_type,reference_id,source_event_id,note,created_at)
-    VALUES (gen_random_uuid(),'${operatorA}','${baseTrip}','ADJUSTMENT',1000,'BOOKING','${baseTrip}','${mismatchEventId}','Day 42 mismatch probe',now())
-    ON CONFLICT (source_event_id,entry_type,reference_id) DO NOTHING;
-  `);
-  const mismatch = await api('GET', pathname, { token: tokens.systemAdmin });
-  expectError(mismatch, [503], 'UPSTREAM_UNAVAILABLE');
-  assert(redis('--scan', '--pattern', 'platform-report:v1:*').trim() === '', 'Reconciliation mismatch was cached');
-  paymentSql(`DELETE FROM operator_ledger_entries WHERE source_event_id='${mismatchEventId}';`);
+  const ledgerOnlyEventId = '41430000-0000-4000-8026-000000000001';
+  try {
+    paymentSql(`
+      INSERT INTO operator_ledger_entries (id,operator_id,trip_id,entry_type,amount,reference_type,reference_id,source_event_id,note,created_at)
+      VALUES (gen_random_uuid(),'${operatorA}','${baseTrip}','ADJUSTMENT',1000,'BOOKING','${baseTrip}','${ledgerOnlyEventId}','Day 42 ledger-only revenue probe',now())
+      ON CONFLICT (source_event_id,entry_type,reference_id) DO NOTHING;
+    `);
+    const ledgerOnly = await api('GET', pathname, { token: tokens.systemAdmin });
+    assert(ledgerOnly.response.status === 200, `Ledger-only revenue was rejected: ${ledgerOnly.text}`);
+    assert(
+      ledgerOnly.json?.data?.totals?.netRevenueVnd === 13_000_161_000,
+      `Ledger-only revenue total drifted: ${ledgerOnly.text}`,
+    );
+  } finally {
+    try {
+      clearPlatformReportCache();
+    } finally {
+      paymentSql(`DELETE FROM operator_ledger_entries WHERE source_event_id='${ledgerOnlyEventId}';`);
+    }
+  }
   const recovered = await api('GET', pathname, { token: tokens.systemAdmin });
   assert(recovered.response.status === 200, `Platform report did not recover after reconciliation repair: ${recovered.text}`);
   assertPlatformReportPeriod(recovered, range, 'Recovered 29-day platform report');
+  assert(
+    recovered.json?.data?.totals?.netRevenueVnd === 13_000_160_000,
+    `Platform report did not recover the ledger-only total: ${recovered.text}`,
+  );
 
   const projectionChecks = [
     {
@@ -824,14 +851,14 @@ async function runPlatformScenario() {
     },
   ];
   for (const check of projectionChecks) {
-    for (const key of redis('--scan', '--pattern', 'platform-report:v1:*').split(/\r?\n/).filter(Boolean)) {
+    for (const key of redis('--scan', '--pattern', 'platform-report:*').split(/\r?\n/).filter(Boolean)) {
       redis('DEL', key);
     }
     check.sql(check.deleteSql);
     const projectionMismatch = await api('GET', pathname, { token: tokens.systemAdmin });
     expectError(projectionMismatch, [503], 'UPSTREAM_UNAVAILABLE');
     assert(
-      redis('--scan', '--pattern', 'platform-report:v1:*').trim() === '',
+      redis('--scan', '--pattern', 'platform-report:*').trim() === '',
       `${check.service} projection mismatch was cached`,
     );
     check.sql(check.rebuildSql);
@@ -850,7 +877,7 @@ async function runPlatformScenario() {
     );
   }
 
-  for (const key of redis('--scan', '--pattern', 'platform-report:v1:*').split(/\r?\n/).filter(Boolean)) {
+  for (const key of redis('--scan', '--pattern', 'platform-report:*').split(/\r?\n/).filter(Boolean)) {
     redis('DEL', key);
   }
   const threeMonthRange = reportDateRange(91);

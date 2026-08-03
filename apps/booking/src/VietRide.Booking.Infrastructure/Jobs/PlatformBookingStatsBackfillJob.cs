@@ -40,7 +40,7 @@ public sealed class PlatformBookingStatsBackfillJob
             foreach (var endpoint in _redis.GetEndPoints())
             {
                 var keys = _redis.GetServer(endpoint)
-                    .Keys(pattern: "platform-report:v1:*", pageSize: 1000)
+                    .Keys(pattern: "platform-report:*", pageSize: 1000)
                     .ToArray();
                 if (keys.Length > 0)
                 {
