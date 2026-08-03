@@ -204,6 +204,52 @@ COMMENT ON COLUMN routes.path_polyline IS
     'Google encoded polyline, precision 5. Nullable until operator confirms route geometry.';
 
 -- -----------------------------------------------------------------------------
+-- operator_fare_surcharge_settings (logical operator FK; missing row = disabled)
+-- -----------------------------------------------------------------------------
+CREATE TABLE operator_fare_surcharge_settings (
+    operator_id UUID PRIMARY KEY,
+    is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- -----------------------------------------------------------------------------
+-- operator_fare_surcharge_periods (inclusive ICT holiday dates)
+-- -----------------------------------------------------------------------------
+CREATE TABLE operator_fare_surcharge_periods (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    operator_id UUID NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    surcharge_percent SMALLINT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    deleted_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_operator_fare_surcharge_periods_name_not_blank
+        CHECK (length(btrim(name)) BETWEEN 1 AND 120),
+    CONSTRAINT chk_operator_fare_surcharge_periods_date_order
+        CHECK (start_date <= end_date),
+    CONSTRAINT chk_operator_fare_surcharge_periods_percent
+        CHECK (surcharge_percent BETWEEN 1 AND 100),
+    CONSTRAINT ex_operator_fare_surcharge_periods_no_active_overlap
+        EXCLUDE USING gist (
+            operator_id WITH =,
+            daterange(start_date, end_date + 1, '[)') WITH &&
+        ) WHERE (is_active = TRUE AND deleted_at IS NULL)
+);
+
+CREATE INDEX idx_operator_fare_surcharge_periods_operator_start
+    ON operator_fare_surcharge_periods (operator_id, start_date, id)
+    WHERE deleted_at IS NULL;
+
+COMMENT ON TABLE operator_fare_surcharge_settings IS
+    'Trip-owned operator holiday-fare switch. operator_id is a logical FK to Identity; missing row means disabled.';
+COMMENT ON TABLE operator_fare_surcharge_periods IS
+    'Named holiday surcharge windows using inclusive ICT calendar dates. Active windows cannot overlap per operator.';
+
+-- -----------------------------------------------------------------------------
 -- route_stops (junction: only intermediate stops; not origin/destination Station)
 -- -----------------------------------------------------------------------------
 CREATE TABLE route_stops (
@@ -854,6 +900,10 @@ CREATE TRIGGER trg_operator_stations_updated_at BEFORE UPDATE ON operator_statio
 CREATE TRIGGER trg_stops_updated_at BEFORE UPDATE ON stops
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_routes_updated_at BEFORE UPDATE ON routes
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_operator_fare_surcharge_settings_updated_at BEFORE UPDATE ON operator_fare_surcharge_settings
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_operator_fare_surcharge_periods_updated_at BEFORE UPDATE ON operator_fare_surcharge_periods
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_route_stops_updated_at BEFORE UPDATE ON route_stops
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();

@@ -2,8 +2,8 @@
   "version": 3,
   "policy": "system-wide-idempotency-contract",
   "expectedSummary": {
-    "mutationSurfaces": 181,
-    "required": 164,
+    "mutationSurfaces": 185,
+    "required": 168,
     "exemptions": 17
   },
   "services": {
@@ -199,7 +199,7 @@
       "stack": "dotnet",
       "servicePrefix": "trip",
       "requireAllMutations": true,
-      "expectedMutationCount": 57,
+      "expectedMutationCount": 61,
       "endpoints": [
         {
           "method": "POST",
@@ -378,6 +378,26 @@
         {
           "method": "PATCH",
           "path": "/v1/operator/driver-schedules/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/operator/fare-surcharges/settings",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/fare-surcharges/periods",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
+          "path": "/v1/operator/fare-surcharges/periods/{periodId:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/operator/fare-surcharges/periods/{periodId:guid}",
           "policy": "required"
         },
         {

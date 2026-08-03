@@ -20,6 +20,7 @@
 | Trip-Route-Vehicle | `OperatorStation.operator_id` | `identity.operators.id` | N:1 | HTTP validate at OperatorStation create |
 | Trip-Route-Vehicle | `Stop.operator_id` | `identity.operators.id` | N:1 | HTTP validate at Stop create |
 | Trip-Route-Vehicle | `Route.operator_id` | `identity.operators.id` | N:1 | HTTP validate; tenant filter |
+| Trip-Route-Vehicle | `OperatorFareSurchargeSetting.operator_id` / `OperatorFareSurchargePeriod.operator_id` | `identity.operators.id` | N:1 | JWT tenant scope; no cross-DB FK |
 | Trip-Route-Vehicle | `Vehicle.operator_id` | `identity.operators.id` | N:1 | HTTP validate; tenant filter |
 | Trip-Route-Vehicle | `DriverSchedule.operator_id` | `identity.operators.id` | N:1 | HTTP validate; tenant filter |
 | Trip-Route-Vehicle | `DriverSchedule.driver_user_id` | `identity.users.id` (role=DRIVER) | N:1 | HTTP validate role+operator |

@@ -114,21 +114,23 @@ public class CreateRoundTripBookingCommandHandlerTests
     private static CreateRoundTripBookingCommand BuildCommand(
         string paymentMethod = "WALLET",
         string? voucherCode = null,
-        bool withShuttle = false) => new(
+        bool withShuttle = false,
+        Guid? outboundPickupStopId = null,
+        Guid? returnPickupStopId = null) => new(
         PassengerUserId,
         "round-trip-idempotency-key",
         new CreateRoundTripBookingCommand.RoundTripBookingLegCommand(
             OutboundTripId,
-            StationId,
-            null,
+            outboundPickupStopId.HasValue ? null : StationId,
+            outboundPickupStopId,
             null,
             null,
             [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01")],
             withShuttle ? new CreateRoundTripBookingCommand.RoundTripShuttlePickupCommand("12 Nguyen Hue", 10.7731m, 106.7032m) : null),
         new CreateRoundTripBookingCommand.RoundTripBookingLegCommand(
             ReturnTripId,
-            StationId,
-            null,
+            returnPickupStopId.HasValue ? null : StationId,
+            returnPickupStopId,
             null,
             null,
             [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01")],
@@ -241,6 +243,55 @@ public class CreateRoundTripBookingCommandHandlerTests
             ReturnTripId,
             now,
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_PickupStops_SnapshotsEachLegEffectiveStopFare()
+    {
+        var now = new DateTimeOffset(2026, 7, 11, 2, 3, 4, TimeSpan.Zero);
+        var outboundPickupStopId = Guid.NewGuid();
+        var returnPickupStopId = Guid.NewGuid();
+        var outbound = OutboundTrip with
+        {
+            Stops =
+            [
+                new TripStopSnapshot(
+                    outboundPickupStopId, 1, true, true, OutboundTrip.DepartureDateTime, 10, 260_000, true),
+            ],
+        };
+        var inbound = ReturnTrip with
+        {
+            Stops =
+            [
+                new TripStopSnapshot(
+                    returnPickupStopId, 1, true, true, ReturnTrip.DepartureDateTime, 10, 210_000, true),
+            ],
+        };
+        _clock.UtcNow.Returns(now);
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(outbound);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+            .Returns(inbound);
+        _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<BookingEntity>());
+        _paymentClient.BatchChargeAsync(default, default!, default!, default!, default)
+            .ReturnsForAnyArgs(call => CreateSuccessfulBatchCharge(call.Arg<IReadOnlyList<BatchChargeItem>>()));
+        _tripClient.BookSeatsAsync(default, default, default, default!, default)
+            .ReturnsForAnyArgs(true);
+
+        var result = await BuildSut().Handle(
+            BuildCommand(
+                outboundPickupStopId: outboundPickupStopId,
+                returnPickupStopId: returnPickupStopId),
+            CancellationToken.None);
+
+        result.Outbound.TotalAmount.Should().Be(260_000);
+        result.Return.TotalAmount.Should().Be(210_000);
+        result.GrandTotal.Should().Be(470_000);
+        result.Outbound.Tickets.Should().ContainSingle().Which.FareAmount.Should().Be(260_000);
+        result.Return.Tickets.Should().ContainSingle().Which.FareAmount.Should().Be(210_000);
     }
 
     [Fact]

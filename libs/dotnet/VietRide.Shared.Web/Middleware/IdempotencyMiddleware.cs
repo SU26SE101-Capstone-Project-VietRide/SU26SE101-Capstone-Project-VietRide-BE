@@ -328,7 +328,11 @@ public sealed class IdempotencyMiddleware
         if (context.Response.StatusCode >= StatusCodes.Status500InternalServerError)
         {
             await ReleaseProcessingAsync(database, processingKey, processingPayload, ownerToken);
-            await context.Response.Body.WriteAsync(responseBytes, context.RequestAborted);
+            if (CanWriteResponseBody(context))
+            {
+                await context.Response.Body.WriteAsync(responseBytes, context.RequestAborted);
+            }
+
             return;
         }
 
@@ -352,7 +356,10 @@ public sealed class IdempotencyMiddleware
             _logger.LogWarning("Idempotency processing lock was not owned during response finalization.");
         }
 
-        await context.Response.Body.WriteAsync(responseBytes, context.RequestAborted);
+        if (CanWriteResponseBody(context))
+        {
+            await context.Response.Body.WriteAsync(responseBytes, context.RequestAborted);
+        }
     }
 
     private static async Task<bool> TryReplayResponseAsync(
@@ -402,10 +409,23 @@ public sealed class IdempotencyMiddleware
             context.Response.ContentType = entry.ContentType;
         }
 
-        await context.Response.Body.WriteAsync(
-            responseBytes,
-            context.RequestAborted);
+        if (CanWriteResponseBody(context))
+        {
+            await context.Response.Body.WriteAsync(
+                responseBytes,
+                context.RequestAborted);
+        }
+
         return true;
+    }
+
+    private static bool CanWriteResponseBody(HttpContext context)
+    {
+        var statusCode = context.Response.StatusCode;
+        return !HttpMethods.IsHead(context.Request.Method)
+            && statusCode is < 100 or >= 200
+            && statusCode != StatusCodes.Status204NoContent
+            && statusCode != StatusCodes.Status304NotModified;
     }
 
     private static Task<bool> TryAcquireProcessingAsync(

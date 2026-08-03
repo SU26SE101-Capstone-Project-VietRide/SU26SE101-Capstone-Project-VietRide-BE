@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Domain.Entities;
 using Route = VietRide.Trip.Domain.Entities.Route;
 
@@ -16,6 +17,7 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
     private readonly ITripSeatRepository tripSeatRepository;
     private readonly ITripStopFareRepository tripStopFareRepository;
     private readonly ITripStopRepository tripStopRepository;
+    private readonly IFareSurchargeService? fareSurchargeService;
 
     public GetTripSnapshotHandler(
         ITripRepository tripRepository,
@@ -25,7 +27,8 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
         IStopRepository stopRepository,
         ITripSeatRepository tripSeatRepository,
         ITripStopRepository tripStopRepository,
-        ITripStopFareRepository tripStopFareRepository)
+        ITripStopFareRepository tripStopFareRepository,
+        IFareSurchargeService? fareSurchargeService = null)
     {
         this.tripRepository = tripRepository;
         this.routeRepository = routeRepository;
@@ -35,6 +38,7 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
         this.tripSeatRepository = tripSeatRepository;
         this.tripStopRepository = tripStopRepository;
         this.tripStopFareRepository = tripStopFareRepository;
+        this.fareSurchargeService = fareSurchargeService;
     }
 
     public async Task<InternalTripSnapshotDto> Handle(GetTripSnapshotQuery request, CancellationToken cancellationToken)
@@ -46,6 +50,10 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
         var originStation = GetStation(route.OriginStationId);
         var destinationStation = GetStation(route.DestinationStationId);
         var fares = await ResolveFaresAsync(trip, request.PricingAt, cancellationToken);
+        var surchargeRule = request.PricingAt.HasValue && fareSurchargeService is not null
+            ? await fareSurchargeService.ResolveAsync(trip.OperatorId, trip.DepartureDateTime, cancellationToken)
+            : null;
+        var baseFareAdjustment = ApplySurcharge(trip.BaseFare.Amount, surchargeRule);
         var tripStops = tripStopRepository.QueryNoTracking()
             .Where(stop => stop.TripId == trip.Id)
             .OrderBy(stop => stop.OrderIndex)
@@ -55,19 +63,31 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
             .Where(stop => stopIds.Contains(stop.Id))
             .ToDictionary(stop => stop.Id, stop => stop.IsActive && stop.DeletedAt == null);
         var stops = tripStops
-            .Select(stop => new InternalTripStopSnapshotDto(
+            .Select(stop =>
+            {
+                var originalFare = fares.TryGetValue(stop.StopId, out var fare)
+                    ? fare
+                    : request.PricingAt.HasValue ? trip.BaseFare.Amount : (long?)null;
+                var adjustment = originalFare.HasValue
+                    ? ApplySurcharge(originalFare.Value, surchargeRule)
+                    : null;
+                return new InternalTripStopSnapshotDto(
                 stop.StopId,
                 stop.OrderIndex,
                 stop.AllowPickup,
                 stop.AllowDropoff,
                 stop.EstimatedArrivalTime,
                 stop.DistanceFromOriginKm.HasValue ? (double)stop.DistanceFromOriginKm.Value : null,
-                fares.TryGetValue(stop.StopId, out var fare)
-                    ? fare
-                    : request.PricingAt.HasValue ? trip.BaseFare.Amount : null,
+                adjustment?.EffectiveFare,
                 stop.Status.ToString(),
                 stop.ActualArrivalTime,
-                activeStops.GetValueOrDefault(stop.StopId)))
+                activeStops.GetValueOrDefault(stop.StopId))
+                {
+                    OriginalFareFromThisStop = originalFare,
+                    SurchargePercent = adjustment?.SurchargePercent ?? 0,
+                    SurchargeAmount = adjustment?.SurchargeAmount ?? 0,
+                };
+            })
             .ToArray();
         var seats = tripSeatRepository.QueryNoTracking().Where(seat => seat.TripId == trip.Id).ToArray();
 
@@ -79,7 +99,7 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
             trip.Status.ToString(),
             trip.DepartureDateTime,
             trip.EstimatedArrivalTime,
-            trip.BaseFare.Amount,
+            baseFareAdjustment.EffectiveFare,
             new InternalTripStationSnapshotDto(
                 originStation.Id,
                 originStation.Name,
@@ -101,7 +121,14 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
             trip.AssistantUserId,
             trip.DestinationArrivedAt,
             trip.ActualDepartureTime,
-            route.TotalDistanceKm.HasValue ? (double)route.TotalDistanceKm.Value : null);
+            route.TotalDistanceKm.HasValue ? (double)route.TotalDistanceKm.Value : null)
+        {
+            OriginalBaseFare = trip.BaseFare.Amount,
+            SurchargePercent = baseFareAdjustment.SurchargePercent,
+            SurchargeAmount = baseFareAdjustment.SurchargeAmount,
+            SurchargePeriodId = baseFareAdjustment.SurchargePeriodId,
+            SurchargePeriodName = baseFareAdjustment.SurchargePeriodName,
+        };
 
         return dto;
     }
@@ -137,6 +164,10 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
 
         return resolved;
     }
+
+    private FareSurchargeAdjustment ApplySurcharge(long fare, FareSurchargeRule? rule)
+        => fareSurchargeService?.Apply(fare, rule)
+            ?? new FareSurchargeAdjustment(fare, 0, 0, fare, null, null);
 
     private Station GetStation(Guid stationId) =>
         stationRepository.QueryNoTracking().FirstOrDefault(station => station.Id == stationId)

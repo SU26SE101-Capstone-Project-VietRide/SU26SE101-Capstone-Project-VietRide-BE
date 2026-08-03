@@ -184,7 +184,7 @@ public sealed class CreateBookingCommandHandler
         //    before any booking row exists; seats are locked but a cleanup job handles orphaned locks.
         // -----------------------------------------------------------------------
         var seatCount = request.Seats.Count;
-        var perSeatFare = Money.FromRaw(trip.BaseFare);
+        var perSeatFare = Money.FromRaw(ResolvePerSeatFare(trip, request.PickupStopId));
         var baseFare = Money.FromRaw(perSeatFare.Amount * seatCount);
 
         Money discountAmount = Money.Zero;
@@ -582,6 +582,15 @@ public sealed class CreateBookingCommandHandler
         {
             throw new CodedValidationException("STOP_NOT_DROPOFF_ALLOWED", "Dropoff stop must be after pickup stop.");
         }
+    }
+
+    private static long ResolvePerSeatFare(TripSnapshot trip, Guid? pickupStopId)
+    {
+        if (!pickupStopId.HasValue)
+            return trip.BaseFare;
+
+        return trip.Stops.First(stop => stop.StopId == pickupStopId.Value).FareFromThisStop
+            ?? trip.BaseFare;
     }
 
     private static void ValidateShuttleRequest(

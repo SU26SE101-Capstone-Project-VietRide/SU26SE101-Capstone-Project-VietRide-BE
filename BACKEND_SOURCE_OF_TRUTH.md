@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.52.0
+> **Phiên bản:** 1.53.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-02
+> **Cập nhật lần cuối:** 2026-08-03
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -85,7 +85,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 |---|---|---|---|---|---|---|
 | 0 | **API Gateway** | NestJS | — (stateless) | — | — | JWT validate (RS256 JWKS), Internal JWT sign (HS256 120s), reverse proxy, rate limit, phone-completion gate |
 | 1 | **Identity & User** | .NET 8 + EF Core 8 | `vietride_identity` | ✓ | — | Auth (OAuth/email/OTP), RBAC, User/Operator profile, refresh token rotation, SubscriptionPlan + OperatorSubscription, ActivityLog, UserDevice (FCM token) |
-| 2 | **Trip-Route-Vehicle** | .NET 8 + EF Core 8 | `vietride_trip` | ✓ | — | Station/Stop/Route/RouteStop, Vehicle + VehicleType, Trip + TripSeat + TripStop + TripStopFare, DriverSchedule + Hangfire generate, AlternativeRoute, ShuttleTrip, Incident |
+| 2 | **Trip-Route-Vehicle** | .NET 8 + EF Core 8 | `vietride_trip` | ✓ | — | Station/Stop/Route/RouteStop, Vehicle + VehicleType, Trip + TripSeat + TripStop + TripStopFare, operator holiday fare surcharge, DriverSchedule + Hangfire generate, AlternativeRoute, ShuttleTrip, Incident |
 | 3 | **Booking** | .NET 8 + EF Core 8 | `vietride_booking` | ✓ | — | Booking order + per-seat Ticket + Passenger boarding record + BookingTransfer, BookingPendingAction, Voucher + VoucherUsage + OperatorVoucherConsent, BookingStats, seat lock TTL (Redis) |
 | 4 | **Payment & Wallet** | .NET 8 + EF Core 8 | `vietride_payment` | ✓ | — | Payment (BOOKING/PARCEL/TOP_UP/SUBSCRIPTION), Wallet + WalletTransaction (passenger), PlatformWallet + OperatorWallet + OperatorLedgerEntry + OperatorTripSettlement, Invoice + PDF, VNPay integration, RefundFailureLog |
 | 5 | **Parcel** | .NET 8 + EF Core 8 | `vietride_parcel` | ✓ | — | Parcel lifecycle, ParcelRouteFare, hashed delivery-token history, transfer/return flows, ParcelStats |
@@ -1077,7 +1077,7 @@ Idempotent: chạy migration 2 lần không lỗi (EF Core / Prisma migrations h
 
 `Location` is the admin-managed public origin/destination catalog used by FE trip search; `Station.locationId` and `Stop.locationId` are nullable links to this catalog.
 
-`Station` · `OperatorStation` · `Stop` · `Route` · `RouteStop` · `RouteStopFareTemplate` · `AlternativeRoute` · `AlternativeRouteStop` · `VehicleType` · `Vehicle` · `Trip` · `TripSeat` · `TripStop` · `TripStopFare` · `DriverSchedule` · `TripGenerationSkipLog` · `TripAuditLog` · `DriverScheduleAuditLog` · `ShuttleTrip` · `ShuttlePassenger` · `Incident` · `OutboxEvent`
+`Station` · `OperatorStation` · `Stop` · `Route` · `RouteStop` · `RouteStopFareTemplate` · `OperatorFareSurchargeSetting` · `OperatorFareSurchargePeriod` · `AlternativeRoute` · `AlternativeRouteStop` · `VehicleType` · `Vehicle` · `Trip` · `TripSeat` · `TripStop` · `TripStopFare` · `DriverSchedule` · `TripGenerationSkipLog` · `TripAuditLog` · `DriverScheduleAuditLog` · `ShuttleTrip` · `ShuttlePassenger` · `Incident` · `OutboxEvent`
 
 #### Booking (`vietride_booking`)
 
@@ -1265,7 +1265,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
 endpoint có behavior-idempotent hay không, trừ đúng 17 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `181 mutation surfaces / 164 required / 17 exempt`;
+bảng sau. Inventory executable phải giữ tổng `185 mutation surfaces / 168 required / 17 exempt`;
 thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
 
 **Canonical 17 exemptions (không yêu cầu `Idempotency-Key`):**
@@ -1569,6 +1569,8 @@ updates the column.
 | | `WALLET_TOP_UP_FAILED` | 502 | TopUp VNPay failed |
 | | `WALLET_TOP_UP_AMOUNT_TOO_LOW` | 422 | < 10,000 VND |
 | **Trip** | `TRIP_NOT_FOUND` | 404 | |
+| | `FARE_SURCHARGE_PERIOD_NOT_FOUND` | 404 | Holiday surcharge period không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
+| | `FARE_SURCHARGE_PERIOD_OVERLAP` | 422 | Active holiday surcharge period overlap một active non-deleted period của cùng operator |
 | | `TRIP_INVALID_TRANSITION` | 409 | Day-21 start/complete lifecycle precondition fails; do not introduce or use `INVALID_TRIP_STATUS` |
 | | `TRIP_NOT_IN_PROGRESS` | 422 | Incident/arrival chỉ hợp lệ khi Trip đang `IN_PROGRESS` |
 | | `TRIP_NOT_SUBSTITUTABLE` | 409 | Vehicle substitution requires an `IN_PROGRESS` old Trip |
@@ -2057,7 +2059,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`; omitted preserves persisted legacy snapshot semantics. No event/projection is added. |
+| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves ordinary Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`, then applies the matching active operator holiday surcharge by the Trip departure ICT date. Omitted preserves persisted legacy snapshot semantics and applies no new surcharge. No event/projection is added. |
 | `POST /internal/v1/trips/summaries/batch` | Parcel | Read-only `{ tripIds }`, 1..100 distinct UUIDs; one Trip query returns route/station/vehicle/crew/timing summaries; missing IDs are omitted |
 | `POST /internal/v1/operators/vehicle-counts/batch` | Payment | Read-only `{ operatorIds }`, 1..100 distinct UUIDs; raw current vehicle counts by operator |
 | `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Payment | Raw ICT-month trip/completed-trip aggregates grouped by route for the explicit operator tenant |
@@ -3776,6 +3778,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.53.0** | 2026-08-03 | Codex | **MINOR** — Add System-Admin operator detail projection and Trip-owned operator holiday fare surcharge settings/periods. Inclusive ICT departure dates, active-window overlap protection, pre-voucher nearest-VND adjustment, additive search/detail breakdown and Booking-time snapshot semantics are canonical. Adds four UUID-v4-required mutation surfaces, raising the inventory to 185/168/17; no dependency, integration event or background job. |
 | **1.52.1** | 2026-08-02 | BE lead (Vũ) | **PATCH** — Reconciles the v1.54 Shuttle pickup merge with the system-wide idempotency inventory: `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup` is UUID-v4-required, raising the executable baseline to 181 HTTP mutation surfaces / 164 required / exactly 17 exemptions. Runtime metadata and API Contract were already required; no dependency, schema, migration or additional endpoint change. |
 | **1.52.0** | 2026-08-02 | BE lead (Vũ) | **MINOR** — Freezes the Day-43 system-wide idempotency convention at 180 HTTP mutation surfaces: 163 UUID-v4-required actions and exactly 17 named exemptions. Reconciles the two post-merge read-only Trip batch POSTs and the higher-contract no-key DriverSchedule create/activate actions with auditable runtime metadata; preserves v2 replay/mismatch/pending/5xx semantics and does not rewrite historical Git metadata. No dependency, schema, migration or public endpoint change. |
 | **1.51.0** | 2026-08-01 | BE lead (Vũ) | **MINOR** — Reconciles the Days 30–43 repair boundary: defers the unregistered manual Trip-create API; keeps `activePlanId` entitlements during `PENDING_PAYMENT`; fixes the trial warning at daily 09:00 ICT; preserves one zero-net settlement marker that terminates `CANCELLED` without wallet/event side effects; and makes Day-39 Parcel unload depend on a synchronous Trip snapshot with no Parcel arrival consumer/projection. No endpoint implementation, event payload, schema or migration change. |

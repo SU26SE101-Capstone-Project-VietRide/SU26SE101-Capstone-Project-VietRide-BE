@@ -2,6 +2,7 @@ using MediatR;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Trips;
 using VietRide.Trip.Domain.Entities;
 using Route = VietRide.Trip.Domain.Entities.Route;
@@ -20,6 +21,7 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
     private readonly ITripRepository tripRepository;
     private readonly ITripSeatRepository tripSeatRepository;
     private readonly ITripStopRepository tripStopRepository;
+    private readonly IFareSurchargeService? fareSurchargeService;
 
     public SearchTripsHandler(
         ITripRepository tripRepository,
@@ -28,7 +30,8 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         ITripSeatRepository tripSeatRepository,
         ITripStopRepository tripStopRepository,
         ILocationRepository locationRepository,
-        IIdentityInternalClient identityInternalClient)
+        IIdentityInternalClient identityInternalClient,
+        IFareSurchargeService? fareSurchargeService = null)
     {
         this.tripRepository = tripRepository;
         this.routeRepository = routeRepository;
@@ -37,6 +40,7 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         this.tripStopRepository = tripStopRepository;
         this.locationRepository = locationRepository;
         this.identityInternalClient = identityInternalClient;
+        this.fareSurchargeService = fareSurchargeService;
     }
 
     public SearchTripsHandler(
@@ -131,18 +135,36 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         var operatorNames = await GetOperatorNamesAsync(
             pageItems.Select(item => item.Trip.OperatorId).Distinct().ToArray(),
             cancellationToken);
-        var items = pageItems
-            .Select(item => TripProjectionMapper.ToSearchTripItem(
+        var projectedItems = new List<SearchTripItem>(pageItems.Count);
+        foreach (var item in pageItems)
+        {
+            var adjustment = await ResolveFareAdjustmentAsync(item.Trip, cancellationToken);
+            projectedItems.Add(TripProjectionMapper.ToSearchTripItem(
                 item.Trip,
                 routes[item.Trip.RouteId],
                 operatorNames[item.Trip.OperatorId],
                 stationsById[routes[item.Trip.RouteId].OriginStationId],
                 stationsById[routes[item.Trip.RouteId].DestinationStationId],
                 item.Seats,
-                item.Stops))
-            .ToList();
+                item.Stops,
+                adjustment));
+        }
 
-        return SearchTripsResult.Create(items, Page, PageSize, filtered.Count);
+        return SearchTripsResult.Create(projectedItems, Page, PageSize, filtered.Count);
+    }
+
+    private async Task<FareSurchargeAdjustment> ResolveFareAdjustmentAsync(
+        Domain.Entities.Trip trip,
+        CancellationToken cancellationToken)
+    {
+        if (fareSurchargeService is null)
+            return new FareSurchargeAdjustment(trip.BaseFare.Amount, 0, 0, trip.BaseFare.Amount, null, null);
+
+        var rule = await fareSurchargeService.ResolveAsync(
+            trip.OperatorId,
+            trip.DepartureDateTime,
+            cancellationToken);
+        return fareSurchargeService.Apply(trip.BaseFare.Amount, rule);
     }
 
     private async Task<IReadOnlyDictionary<Guid, string>> GetOperatorNamesAsync(

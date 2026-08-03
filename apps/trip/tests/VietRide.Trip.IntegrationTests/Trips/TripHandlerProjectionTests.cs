@@ -3,10 +3,12 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
 using VietRide.Shared.Application.Repositories;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Trips;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
 using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
@@ -117,6 +119,28 @@ public sealed class TripHandlerProjectionTests
 
         result.Items.Should().ContainSingle()
             .Which.OperatorName.Should().Be("Saigon Express Limousine");
+    }
+
+    [Fact]
+    public async Task Search_ProjectsOriginalAndEffectiveFareBreakdown()
+    {
+        var fixture = SearchFixture.Create(fareSurchargeService: new FixedFareSurchargeService(25));
+        var trip = CreateTrip(
+            fixture.OperatorId,
+            fixture.Route.Id,
+            DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"));
+        fixture.Trips.Add(trip);
+        fixture.Seats.Add(TripSeat.Create(trip.Id, "A01"));
+
+        var result = await fixture.Handler.Handle(fixture.Query, CancellationToken.None);
+
+        result.Items.Should().ContainSingle().Which.Should().Match<SearchTripItem>(item =>
+            item.BaseFare == 400_000
+            && item.SurchargePercent == 25
+            && item.SurchargeAmount == 100_000
+            && item.EffectiveFare == 500_000
+            && item.SurchargePeriodId.HasValue
+            && item.SurchargePeriodName == "Holiday");
     }
 
     [Fact]
@@ -245,6 +269,89 @@ public sealed class TripHandlerProjectionTests
         result.Stops[2].ActualArrivalTime.Should().BeNull();
     }
 
+    [Fact]
+    public async Task GetDetail_AppliesSameSurchargeToBaseAndStopOverride()
+    {
+        var operatorId = Guid.NewGuid();
+        var origin = Station.Create("Origin", "origin", "HCM", "HCM");
+        var destination = Station.Create("Destination", "destination", "Da Lat", "Lam Dong");
+        var route = Route.Create(
+            operatorId, "HCM - Da Lat", origin.Id, destination.Id, Money.FromRaw(400_000), 310m, 420);
+        var trip = CreateTrip(operatorId, route.Id, DateTimeOffset.Parse("2026-07-21T01:00:00Z"));
+        var stop = Stop.Create(operatorId, "Pickup", 10.1m, 106.1m);
+        var tripStop = TripStop.Create(
+            trip.Id, stop.Id, 1, trip.DepartureDateTime.AddHours(1), true, true, 40m);
+        var stopFare = TripStopFare.Create(
+            trip.Id, stop.Id, Money.FromRaw(300_000), TripStopFareSource.MANUAL_OVERRIDE);
+        var handler = new GetTripDetailHandler(
+            new InMemoryTripRepository([trip]),
+            new InMemoryRouteRepository([route]),
+            new InMemoryStationRepository([origin, destination]),
+            new InMemoryStopRepository([stop]),
+            new InMemoryTripSeatRepository([]),
+            new InMemoryTripStopRepository([tripStop]),
+            new InMemoryTripStopFareRepository([stopFare]),
+            new FixedFareSurchargeService(25));
+
+        var result = await handler.Handle(new GetTripDetailQuery(trip.Id), CancellationToken.None);
+
+        result.BaseFare.Should().Be(400_000);
+        result.EffectiveFare.Should().Be(500_000);
+        result.FareBreakdown.EffectiveBaseFare.Should().Be(500_000);
+        result.Stops.Should().ContainSingle().Which.Should().Match<TripStopDto>(item =>
+            item.FareFromThisStop == 300_000
+            && item.SurchargePercent == 25
+            && item.SurchargeAmount == 75_000
+            && item.EffectiveFare == 375_000);
+        result.FareBreakdown.Stops.Should().ContainSingle().Which.EffectiveFareFromThisStop.Should().Be(375_000);
+    }
+
+    [Fact]
+    public async Task GetDetail_ResolvesManualOverrideThenActiveTemplateThenBaseFare()
+    {
+        var now = DateTimeOffset.Parse("2026-07-20T01:00:00Z");
+        var operatorId = Guid.NewGuid();
+        var origin = Station.Create("Origin", "origin", "HCM", "HCM");
+        var destination = Station.Create("Destination", "destination", "Da Lat", "Lam Dong");
+        var route = Route.Create(
+            operatorId, "HCM - Da Lat", origin.Id, destination.Id, Money.FromRaw(400_000), 310m, 420);
+        var trip = CreateTrip(operatorId, route.Id, DateTimeOffset.Parse("2026-07-21T01:00:00Z"));
+        var manualStop = Stop.Create(operatorId, "Manual", 10.1m, 106.1m);
+        var templateStop = Stop.Create(operatorId, "Template", 10.2m, 106.2m);
+        var baseStop = Stop.Create(operatorId, "Base", 10.3m, 106.3m);
+        var tripStops = new[]
+        {
+            TripStop.Create(trip.Id, manualStop.Id, 1, trip.DepartureDateTime.AddHours(1), true, true, 40m),
+            TripStop.Create(trip.Id, templateStop.Id, 2, trip.DepartureDateTime.AddHours(2), true, true, 80m),
+            TripStop.Create(trip.Id, baseStop.Id, 3, trip.DepartureDateTime.AddHours(3), true, true, 120m),
+        };
+        var manualFare = TripStopFare.Create(
+            trip.Id, manualStop.Id, Money.FromRaw(350_000), TripStopFareSource.MANUAL_OVERRIDE);
+        var templates = new[]
+        {
+            RouteStopFareTemplate.Create(
+                route.Id, manualStop.Id, Money.FromRaw(300_000), now.AddDays(-1), now.AddDays(1)),
+            RouteStopFareTemplate.Create(
+                route.Id, templateStop.Id, Money.FromRaw(280_000), now.AddDays(-1), now.AddDays(1)),
+        };
+        var handler = new GetTripDetailHandler(
+            new InMemoryTripRepository([trip]),
+            new InMemoryRouteRepository([route]),
+            new InMemoryStationRepository([origin, destination]),
+            new InMemoryStopRepository([manualStop, templateStop, baseStop]),
+            new InMemoryTripSeatRepository([]),
+            new InMemoryTripStopRepository([.. tripStops]),
+            new InMemoryTripStopFareRepository([manualFare]),
+            null,
+            new InMemoryRouteStopFareTemplateRepository([.. templates]),
+            new FrozenClock(now));
+
+        var result = await handler.Handle(new GetTripDetailQuery(trip.Id), CancellationToken.None);
+
+        result.Stops.Select(stop => stop.EffectiveFare).Should().Equal(350_000, 280_000, 400_000);
+        result.Stops.Select(stop => stop.FareFromThisStop).Should().Equal(350_000, 280_000, null);
+    }
+
     private static DomainTrip CreateTrip(Guid operatorId, Guid routeId, DateTimeOffset departure)
     {
         return DomainTrip.Create(
@@ -264,7 +371,7 @@ public sealed class TripHandlerProjectionTests
 
     private sealed class SearchFixture
     {
-        private SearchFixture(string operatorName)
+        private SearchFixture(string operatorName, IFareSurchargeService? fareSurchargeService)
         {
             OperatorId = Guid.NewGuid();
             OriginLocation = Location.Create("HCM", "Ho Chi Minh City", Location.MunicipalityType, 5);
@@ -310,7 +417,8 @@ public sealed class TripHandlerProjectionTests
                 new InMemoryTripSeatRepository(Seats),
                 new InMemoryTripStopRepository(Stops),
                 new InMemoryLocationRepository(Locations),
-                Identity);
+                Identity,
+                fareSurchargeService);
             Query = new SearchTripsQuery(OriginStation.Id, DestinationStation.Id, new DateOnly(2026, 5, 18), 1, false);
         }
 
@@ -329,7 +437,42 @@ public sealed class TripHandlerProjectionTests
         public SearchTripsHandler Handler { get; }
         public SearchTripsQuery Query { get; }
 
-        public static SearchFixture Create(string operatorName = "VietRide Express") => new(operatorName);
+        public static SearchFixture Create(
+            string operatorName = "VietRide Express",
+            IFareSurchargeService? fareSurchargeService = null) => new(operatorName, fareSurchargeService);
+    }
+
+    private sealed class FixedFareSurchargeService(int percent) : IFareSurchargeService
+    {
+        private readonly FareSurchargeRule rule = new(Guid.NewGuid(), "Holiday", percent);
+
+        public Task<FareSurchargeRule?> ResolveAsync(
+            Guid operatorId,
+            DateTimeOffset departureDateTime,
+            CancellationToken cancellationToken = default) => Task.FromResult<FareSurchargeRule?>(rule);
+
+        public FareSurchargeAdjustment Apply(long originalFare, FareSurchargeRule? surchargeRule)
+        {
+            if (surchargeRule is null)
+                return new(originalFare, 0, 0, originalFare, null, null);
+
+            var effectiveFare = checked((long)decimal.Round(
+                originalFare * (100m + surchargeRule.Percent) / 100m,
+                0,
+                MidpointRounding.AwayFromZero));
+            return new(
+                originalFare,
+                surchargeRule.Percent,
+                effectiveFare - originalFare,
+                effectiveFare,
+                surchargeRule.PeriodId,
+                surchargeRule.PeriodName);
+        }
+    }
+
+    private sealed class FrozenClock(DateTimeOffset now) : IClock
+    {
+        public DateTimeOffset UtcNow => now;
     }
 
     private sealed class FakeIdentityInternalClient : IIdentityInternalClient
@@ -526,6 +669,36 @@ public sealed class TripHandlerProjectionTests
     {
         public InMemoryTripStopFareRepository(List<TripStopFare> fares)
             : base(fares, fare => (fare.TripId, fare.StopId)) { }
+    }
+
+    private sealed class InMemoryRouteStopFareTemplateRepository
+        : InMemoryRepository<RouteStopFareTemplate, Guid>, IRouteStopFareTemplateRepository
+    {
+        public InMemoryRouteStopFareTemplateRepository(List<RouteStopFareTemplate> templates)
+            : base(templates, template => template.Id) { }
+
+        public Task<bool> ExistsOverlappingAsync(
+            Guid routeId,
+            Guid stopId,
+            DateTimeOffset effectiveFrom,
+            DateTimeOffset? effectiveUntil,
+            CancellationToken cancellationToken) => Task.FromResult(false);
+
+        public Task<IReadOnlyList<RouteStopFareTemplate>> ListByRouteAsync(
+            Guid routeId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<RouteStopFareTemplate>>(
+                Query().Where(template => template.RouteId == routeId).ToArray());
+
+        public Task<IReadOnlyList<RouteStopFareTemplate>> ListActiveByRouteAsync(
+            Guid routeId,
+            DateTimeOffset pricingAt,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<RouteStopFareTemplate>>(Query()
+                .Where(template => template.RouteId == routeId
+                    && template.EffectiveFrom <= pricingAt
+                    && (!template.EffectiveUntil.HasValue || pricingAt < template.EffectiveUntil.Value))
+                .ToArray());
     }
 
     private sealed class InMemoryVehicleRepository : InMemoryRepository<Vehicle, Guid>, IVehicleRepository

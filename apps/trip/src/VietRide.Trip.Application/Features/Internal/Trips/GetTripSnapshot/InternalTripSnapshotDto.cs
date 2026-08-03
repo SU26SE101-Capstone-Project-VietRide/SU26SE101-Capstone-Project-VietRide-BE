@@ -18,4 +18,11 @@ public sealed record InternalTripSnapshotDto(
     Guid? AssistantUserId,
     DateTimeOffset? DestinationArrivedAt = null,
     DateTimeOffset? ActualDepartureTime = null,
-    double? TotalDistanceKm = null);
+    double? TotalDistanceKm = null)
+{
+    public long OriginalBaseFare { get; init; } = BaseFare;
+    public int SurchargePercent { get; init; }
+    public long SurchargeAmount { get; init; }
+    public Guid? SurchargePeriodId { get; init; }
+    public string? SurchargePeriodName { get; init; }
+}

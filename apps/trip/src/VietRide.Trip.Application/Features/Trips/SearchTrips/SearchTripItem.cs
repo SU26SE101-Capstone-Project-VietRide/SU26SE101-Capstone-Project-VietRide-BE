@@ -12,4 +12,11 @@ public sealed record SearchTripItem(
     int AvailableSeats,
     long BaseFare,
     bool AllowAlongRoutePickup,
-    bool AllowAlongRouteDropoff);
+    bool AllowAlongRouteDropoff)
+{
+    public int SurchargePercent { get; init; }
+    public long SurchargeAmount { get; init; }
+    public long EffectiveFare { get; init; } = BaseFare;
+    public Guid? SurchargePeriodId { get; init; }
+    public string? SurchargePeriodName { get; init; }
+}

@@ -10,4 +10,9 @@ public sealed record InternalTripStopSnapshotDto(
     long? FareFromThisStop,
     string Status,
     DateTimeOffset? ActualArrivalTime,
-    bool IsActive = true);
+    bool IsActive = true)
+{
+    public long? OriginalFareFromThisStop { get; init; }
+    public int SurchargePercent { get; init; }
+    public long SurchargeAmount { get; init; }
+}
