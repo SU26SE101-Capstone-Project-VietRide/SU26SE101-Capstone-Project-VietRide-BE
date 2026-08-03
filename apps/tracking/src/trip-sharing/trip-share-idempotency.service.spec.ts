@@ -141,6 +141,24 @@ describe('TripShareIdempotencyRepository', () => {
     expect(completeCall[6]).toBe(86_400);
     expect(String(completeCall[5])).not.toContain('must-not-persist');
   });
+
+  it('persists only safe replay metadata for a business error', async () => {
+    const harness = createRedisHarness();
+    const repository = new TripShareIdempotencyRepository(harness.redis as unknown as RedisService);
+    await repository.complete(
+      repository.operationHash(KEY),
+      `${FINGERPRINT}:owner`,
+      FINGERPRINT,
+      { kind: 'ERROR', statusCode: 403, errorCode: 'ACCESS_DENIED', detail: 'Denied' },
+    );
+    const persisted = String(harness.client.eval.mock.calls[0]?.[5]);
+    expect(JSON.parse(persisted)).toEqual({
+      fingerprint: FINGERPRINT,
+      outcome: { kind: 'ERROR', statusCode: 403, errorCode: 'ACCESS_DENIED', detail: 'Denied' },
+    });
+    expect(persisted).not.toContain('token');
+    expect(persisted).not.toContain('shareUrl');
+  });
 });
 
 const TRIP_ID = '33333333-3333-4333-8333-333333333333';

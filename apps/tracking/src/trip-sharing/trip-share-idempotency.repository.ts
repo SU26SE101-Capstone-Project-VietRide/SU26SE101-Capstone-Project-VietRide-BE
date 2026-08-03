@@ -20,7 +20,8 @@ return 1
 
 export type TripShareIdempotencyOutcome =
   | { kind: 'SHARE_GRANT'; grantId: string; expiresAt: string }
-  | { kind: 'REVOKED'; revoked: true };
+  | { kind: 'REVOKED'; revoked: true }
+  | { kind: 'ERROR'; statusCode: number; errorCode: string; detail: string };
 
 export interface TripShareIdempotencyStoredResult {
   fingerprint: string;
@@ -100,7 +101,13 @@ export class TripShareIdempotencyRepository {
     if (outcome.kind === 'SHARE_GRANT') {
       return { kind: 'SHARE_GRANT', grantId: outcome.grantId, expiresAt: outcome.expiresAt };
     }
-    return { kind: 'REVOKED', revoked: true };
+    if (outcome.kind === 'REVOKED') return { kind: 'REVOKED', revoked: true };
+    return {
+      kind: 'ERROR',
+      statusCode: outcome.statusCode,
+      errorCode: outcome.errorCode,
+      detail: outcome.detail,
+    };
   }
 
   private parseStoredResult(value: string): TripShareIdempotencyStoredResult {
@@ -127,6 +134,24 @@ export class TripShareIdempotencyRepository {
     }
     if (record['kind'] === 'REVOKED' && record['revoked'] === true) {
       return { fingerprint, outcome: { kind: 'REVOKED', revoked: true } };
+    }
+    if (
+      record['kind'] === 'ERROR' &&
+      typeof record['statusCode'] === 'number' &&
+      record['statusCode'] >= 400 &&
+      record['statusCode'] < 500 &&
+      typeof record['errorCode'] === 'string' &&
+      typeof record['detail'] === 'string'
+    ) {
+      return {
+        fingerprint,
+        outcome: {
+          kind: 'ERROR',
+          statusCode: record['statusCode'],
+          errorCode: record['errorCode'],
+          detail: record['detail'],
+        },
+      };
     }
     throw new Error('TRACKING_SHARE_IDEMPOTENCY_RESULT_INVALID');
   }
