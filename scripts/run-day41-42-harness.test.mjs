@@ -79,6 +79,24 @@ test('Day 42 uses exact [now-28d, now+1d) boundaries and retains the 92-day case
   assert.match(harness, /threeMonthRangeDays === 92/);
 });
 
+test('Day 42 platform report uses ledger-owned money and v2 cache semantics', () => {
+  assert.match(harness, /platform-report:\*/);
+  assert.match(harness, /platform-report:v2:\*/);
+  assert.match(harness, /const ledgerOnlyEventId =/);
+  assert.match(harness, /ledgerOnly\.response\.status === 200/);
+  assert.match(harness, /13_000_161_000/);
+  assert.match(harness, /Platform report did not recover the ledger-only total/);
+  assert.match(harness, /expectError\(projectionMismatch, \[503\], 'UPSTREAM_UNAVAILABLE'\)/);
+  assert.match(
+    harness,
+    /let parcelStopped = false;[\s\S]*?composeRun\(\['--profile', 'app', 'stop', 'parcel'\]\)[\s\S]*?finally \{[\s\S]*?composeRun\(\['--profile', 'app', 'up', '-d', '--no-deps', 'parcel'\]\)/,
+  );
+  assert.match(
+    harness,
+    /const ledgerOnlyEventId =[\s\S]*?try \{[\s\S]*?ledgerOnlyEventId[\s\S]*?finally \{[\s\S]*?clearPlatformReportCache\(\)[\s\S]*?paymentSql\(`DELETE FROM operator_ledger_entries WHERE source_event_id='\$\{ledgerOnlyEventId\}';`\);/,
+  );
+});
+
 test('Day 42 obsolete Payment aggregate seam has zero contract, registry, DI, and caller inventory', () => {
   const registeredSurfaces = [
     'VietRide_API_Contract_v1.md',

@@ -4703,9 +4703,9 @@ Errors: `404 TRIP_SETTLEMENT_NOT_FOUND`; `409 TRIP_SETTLEMENT_ALREADY_SETTLED`; 
 
 ### GET `/v1/admin/reports/platform?from={from}&to={to}`
 
-Auth: `SYSTEM_ADMIN`. Booking owns the public facade and orchestration; Gateway only proxies and no
-service reads another service's database. Booking reads its local earned source and calls the raw
-Trip, Parcel, Payment-ledger and Identity endpoints below through Internal JWT.
+Xác thực: `SYSTEM_ADMIN`. Booking sở hữu facade và orchestration; Gateway chỉ proxy và không service
+nào đọc database của service khác. Booking lấy các chỉ số vận hành từ Booking/Trip/Parcel, lấy doanh
+thu cuối cùng từ Payment ledger, rồi gọi các endpoint raw và Identity bên dưới bằng Internal JWT.
 
 `from` and `to` are both required RFC 3339 timestamps with UTC offset `Z`; `from < to`; maximum
 range is 366 days. Metrics use half-open UTC interval `[from,to)`.
@@ -4746,14 +4746,17 @@ Response `200`:
 }
 ```
 
-`byOperator` is the union of IDs returned by Booking/Trip/Parcel, sorted by `netRevenueVnd DESC`
-then operator ID. Missing Identity summaries remain with `operatorName=null`. Totals must equal the
-checked sum of every breakdown row. Parcel and net revenue are signed and may be negative.
+`byOperator` là hợp của operator ID từ Booking/Trip/Parcel và Payment ledger, sort theo
+`netRevenueVnd DESC` rồi operator ID. Counts vận hành do Booking/Trip/Parcel sở hữu; Payment ledger
+sở hữu `bookingRevenueVnd` và `parcelRevenueVnd` cuối cùng. Một booking đã thanh toán ở trạng thái
+`NO_SHOW` vẫn có thể cộng doanh thu ledger nhưng không cộng `completedBookingCount`. DTO public không
+đổi shape. Summary Identity bị thiếu vẫn giữ `operatorName=null`; totals phải bằng checked sum của
+mọi breakdown row. Parcel và net revenue là signed và có thể âm.
 
-Errors: `403 FORBIDDEN`, `422 VALIDATION_ERROR`, `500 REPORT_VALUE_OVERFLOW`,
-`503 UPSTREAM_UNAVAILABLE`. A canonical upstream `REPORT_VALUE_OVERFLOW` is propagated as the same
-500; timeout, other 5xx, unusable payloads and reconciliation mismatches map to 503. No partial or
-stale response is permitted.
+Lỗi: `403 FORBIDDEN`, `422 VALIDATION_ERROR`, `500 REPORT_VALUE_OVERFLOW`, `503
+UPSTREAM_UNAVAILABLE`. Overflow upstream được propagate cùng HTTP 500; timeout, source unavailable,
+payload không dùng được, ledger malformed/duplicate và source-local live/projection mismatch đều trả
+503. Ledger-only revenue không phải là mismatch. Không trả partial hoặc stale response.
 
 ### GET `/internal/v1/reports/platform/bookings?from={from}&to={to}`
 
@@ -4769,7 +4772,8 @@ Auth: Internal JWT only. Raw success payload:
 }
 ```
 
-Only Booking rows with `status=COMPLETED` and `completedAt` in UTC `[from,to)` contribute.
+Chỉ Booking rows có `status=COMPLETED` và `completedAt` trong UTC `[from,to)` đóng góp vào
+`completedBookingCount`; revenue trong raw Booking payload không thay thế Payment ledger.
 
 ### GET `/internal/v1/reports/platform/trips?from={from}&to={to}`
 
@@ -4781,7 +4785,8 @@ Auth: Internal JWT only. Raw success payload:
 }
 ```
 
-Only Trip rows with `status=COMPLETED` and `completedAt` in UTC `[from,to)` contribute.
+Chỉ Trip rows có `status=COMPLETED` và `completedAt` trong UTC `[from,to)` đóng góp vào
+`completedTripCount`.
 
 ### GET `/internal/v1/reports/platform/parcels?from={from}&to={to}`
 
@@ -4797,8 +4802,10 @@ Auth: Internal JWT only. Raw success payload:
 }
 ```
 
-Only Parcel rows with `status=DELIVERY_CONFIRMED` and `confirmedAt` in UTC `[from,to)` contribute.
-Parcel collected amount is signed `depositPaidVnd + balancePaidVnd - refundedAmountVnd` and is never clamped. `forfeitedDepositVnd` is reported separately and is not added a second time.
+Chỉ Parcel rows có `status=DELIVERY_CONFIRMED` và `confirmedAt` trong UTC `[from,to)` đóng góp vào
+`deliveredParcelCount`; revenue cuối cùng vẫn lấy từ Payment ledger. Parcel collected amount là
+signed `depositPaidVnd + balancePaidVnd - refundedAmountVnd` và không bao giờ clamp.
+`forfeitedDepositVnd` được báo cáo riêng và không cộng lần hai.
 
 All three source endpoints validate RFC 3339 UTC half-open ranges. PostgreSQL `SUM(BIGINT)` is
 read as NUMERIC and checked per group and total before mapping to Int64. Overflow returns an ADR
@@ -7796,29 +7803,32 @@ list.
 
 ### Platform report stabilization
 
-`GET /v1/admin/reports/platform?from=&to=` remains the public route and keeps its UTC `[from,to)`
-metric anchors. Booking owns the public facade from Day 42. Booking may call only internal raw
-source endpoints; each source reads its own database. Payment remains the authoritative ledger
-source for revenue reconciliation. Redis read-through cache keys are
-`platform-report:v1:{fromUtc}:{toUtc}` with a 5-minute TTL and exact UTC boundaries.
+`GET /v1/admin/reports/platform?from=&to=` vẫn là public route với anchor UTC `[from,to)`. Từ Day
+42, Booking sở hữu facade và chỉ gọi internal raw source; mỗi source đọc database của chính mình.
+Booking/Trip/Parcel sở hữu các count vận hành. Payment ledger là nguồn authoritative cho
+`bookingRevenueVnd` và `parcelRevenueVnd` cuối cùng; paid `NO_SHOW` có thể tạo revenue mà không tạo
+completed booking count. Redis read-through cache dùng key
+`platform-report:v2:{fromUtc}:{toUtc}`, TTL 5 phút và boundary UTC chính xác.
 
-The facade performs reconciliation before promoting Stats/cache data. A mismatch, downstream
-timeout, unavailable source or malformed payload fails the whole request with `503
-UPSTREAM_UNAVAILABLE`; no partial or stale totals are returned. Cache entries must include the
-contract version and exact range.
+Facade chỉ reconciliation dữ liệu live/projection trong từng source vận hành trước khi promote
+Stats/cache. Source-local mismatch, downstream timeout, source unavailable, payload malformed,
+ledger malformed hoặc duplicate đều trả `503 UPSTREAM_UNAVAILABLE`; không trả partial hay stale
+totals. Chênh lệch giữa operational amount và Payment ledger không phải lỗi reconciliation vì
+Payment ledger là authority cuối cùng. Cache entry phải có contract version và exact range.
 
 Booking, Trip and Parcel each maintain a per-earned-record projection named respectively
 `platform_booking_stats`, `platform_trip_stats` and `platform_parcel_stats`. A source-row trigger
 updates the projection in the same local transaction, while a five-minute recurring backfill
-rebuilds it idempotently from live rows. Every raw internal source request compares projection and
-live aggregates for every operator in the exact UTC range. Any count/revenue mismatch returns
-`503 UPSTREAM_UNAVAILABLE`; a recent projection timestamp alone never bypasses reconciliation.
+rebuilds it idempotently from live rows. Mỗi raw internal source request đối chiếu projection với
+live operational aggregates của chính source đó cho từng operator trong exact UTC range. Mọi
+source-local count hoặc field vận hành mismatch trả `503 UPSTREAM_UNAVAILABLE`; projected timestamp
+mới không được dùng để bypass reconciliation.
 
-`GET /internal/v1/reports/platform/ledger?from=&to=` is Internal-JWT-only and returns the raw
-Payment-owned payload `{ "items": [{ "operatorId", "bookingRevenueVnd", "parcelRevenueVnd" }] }`.
-It reads immutable `OperatorLedgerEntry` rows in UTC `[from,to)`, uses checked BIGINT aggregation,
-and never calls another service. Booking compares every operator revenue pair with the earned live
-Booking/Parcel sources before it publishes or caches the composite report.
+`GET /internal/v1/reports/platform/ledger?from=&to=` chỉ dành cho Internal JWT và trả raw payload do
+Payment sở hữu `{ "items": [{ "operatorId", "bookingRevenueVnd", "parcelRevenueVnd" }] }`.
+Payment đọc immutable `OperatorLedgerEntry` trong UTC `[from,to)`, checked BIGINT aggregation và
+không gọi service khác. Ledger malformed/duplicate hoặc unavailable là `503`; Booking không so
+revenue ledger với operational amount để bác bỏ ledger-only revenue trước khi publish/cache report.
 
 ### Outbox DLQ review
 

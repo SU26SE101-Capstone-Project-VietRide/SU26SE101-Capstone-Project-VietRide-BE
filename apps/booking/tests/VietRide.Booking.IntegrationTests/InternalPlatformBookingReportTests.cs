@@ -52,6 +52,7 @@ public sealed class InternalPlatformBookingReportTests
         var operatorB = Guid.Parse("40000000-0000-0000-0000-000000000002");
         await _factory.SeedBookingAsync(operatorA, BookingStatus.COMPLETED, From, 100_000);
         await _factory.SeedBookingAsync(operatorA, BookingStatus.COMPLETED, From.AddDays(4), 250_000);
+        await _factory.SeedBookingAsync(operatorA, BookingStatus.NO_SHOW, From.AddDays(5), 777_000);
         await _factory.SeedBookingAsync(operatorA, BookingStatus.COMPLETED, To, 900_000);
         await _factory.SeedBookingAsync(operatorA, BookingStatus.CONFIRMED, From.AddDays(2), 800_000);
         await _factory.SeedBookingAsync(operatorB, BookingStatus.COMPLETED, From.AddDays(8), 500_000);

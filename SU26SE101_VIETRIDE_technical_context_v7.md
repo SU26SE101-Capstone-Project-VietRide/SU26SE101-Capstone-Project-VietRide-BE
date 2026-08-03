@@ -4613,22 +4613,26 @@ IP/user-agent ở cột audit; missing actor retry/DLQ, không tạo fake User.
 `GET /v1/admin/reports/platform` do Booking orchestration, `SYSTEM_ADMIN` only, bắt buộc RFC3339 UTC
 `from/to`, half-open `[from,to)`, tối đa 366 ngày. Payment không đọc foreign DB:
 
-- Booking source: `COMPLETED`, anchor `completedAt`, count + `SUM(totalAmount)`.
+- Booking source: `COMPLETED`, anchor `completedAt`, count; doanh thu cuối cùng lấy từ Payment
+  ledger.
 - Trip source: `COMPLETED`, anchor `completedAt`, count.
-- Parcel source: `DELIVERY_CONFIRMED`, anchor `confirmedAt`, count + signed
-  `SUM(depositPaidVnd + balancePaidVnd - refundedAmountVnd)`; forfeited deposit được báo cáo riêng và không cộng hai lần.
+- Parcel source: `DELIVERY_CONFIRMED`, anchor `confirmedAt`, count; doanh thu cuối cùng lấy từ
+  Payment ledger. `forfeitedDepositVnd` được báo cáo riêng và không cộng hai lần.
 
 Booking local cùng ba HTTP source Trip, Parcel và Payment ledger chạy song song, timeout 5 giây;
-Identity lookup chỉ chạy sau khi Booking có union operator IDs. `SUM(BIGINT)` PostgreSQL là NUMERIC
-và phải checked-convert group/total về Int64; Booking kiểm tra mọi phép cộng và reconciliation.
-Overflow trả `REPORT_VALUE_OVERFLOW`, không wrap/saturate/partial. Missing operator summary giữ tên
-null. `byOperator` sort net revenue giảm dần rồi ID; totals bằng sum breakdown; Parcel/net revenue có
-thể âm. Timeout, upstream 5xx, payload invalid hoặc ledger mismatch trả
-`503 UPSTREAM_UNAVAILABLE`. Chỉ Booking ghi cache composite sau reconciliation; Payment không ghi DB
-hoặc cache composite report.
+Identity lookup chỉ chạy sau khi Booking có union operator IDs từ cả source vận hành và ledger.
+`SUM(BIGINT)` PostgreSQL là NUMERIC và phải checked-convert group/total về Int64; Booking kiểm tra
+mọi phép cộng và source-local live/projection reconciliation. Payment ledger là authority cuối cùng
+cho `bookingRevenueVnd`/`parcelRevenueVnd`; paid `NO_SHOW` có thể cộng revenue mà không cộng
+`completedBookingCount`. Overflow trả `REPORT_VALUE_OVERFLOW`, không wrap/saturate/partial. Missing
+operator summary giữ tên null. `byOperator` sort net revenue giảm dần rồi ID; totals bằng sum
+breakdown; Parcel/net revenue có thể âm. Timeout, upstream 5xx, source unavailable, payload
+malformed, ledger malformed/duplicate hoặc source-local mismatch trả `503 UPSTREAM_UNAVAILABLE`.
+Chỉ Booking ghi cache composite sau reconciliation với key
+`platform-report:v2:{fromUtc}:{toUtc}`; Payment không ghi DB hoặc cache composite report.
 
 Day 40 dùng live query với partial indexes trên terminal timestamp + operator. Stats materialization,
-Redis cache, Excel export và occupancy/cancellation/no-show analytics defer Day 42. Auto-merge bằng
+Redis cache v2, Excel export và occupancy/cancellation/no-show analytics defer Day 42. Auto-merge bằng
 geo/fuzzy matching vẫn v2; Day 40 chỉ System Admin merge thủ công.
 
 ---

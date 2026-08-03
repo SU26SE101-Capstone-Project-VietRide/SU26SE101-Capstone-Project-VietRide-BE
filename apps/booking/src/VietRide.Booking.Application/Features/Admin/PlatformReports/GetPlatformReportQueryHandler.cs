@@ -144,10 +144,19 @@ public sealed class GetPlatformReportQueryHandler
                 await bookingTask.ConfigureAwait(false),
                 await tripTask.ConfigureAwait(false),
                 await parcelTask.ConfigureAwait(false));
-            ReconcileLedgerRevenue(accumulators, await ledgerTask.ConfigureAwait(false));
+            var ledgerByOperator = ApplyLedgerRevenue(
+                accumulators,
+                await ledgerTask.ConfigureAwait(false));
             var names = await LoadOperatorNamesAsync(accumulators.Keys, ct).ConfigureAwait(false);
             var byOperator = accumulators.Values
-                .Select(item => item.ToResult(names.GetValueOrDefault(item.OperatorId)))
+                .Select(item =>
+                {
+                    var ledger = ledgerByOperator.GetValueOrDefault(item.OperatorId);
+                    return item.ToResult(
+                        names.GetValueOrDefault(item.OperatorId),
+                        ledger?.BookingRevenueVnd ?? 0,
+                        ledger?.ParcelRevenueVnd ?? 0);
+                })
                 .OrderByDescending(item => item.NetRevenueVnd)
                 .ThenBy(item => item.OperatorId)
                 .ToArray();
@@ -260,7 +269,7 @@ public sealed class GetPlatformReportQueryHandler
     }
 
     private static string BuildCacheKey(DateTimeOffset fromUtc, DateTimeOffset toUtc)
-        => $"platform-report:v1:{fromUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)}:{toUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)}";
+        => $"platform-report:v2:{fromUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)}:{toUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)}";
 
     private async Task<IReadOnlyDictionary<Guid, string>> LoadOperatorNamesAsync(
         IEnumerable<Guid> operatorIds,
@@ -312,7 +321,7 @@ public sealed class GetPlatformReportQueryHandler
             bookings,
             item => item.OperatorId,
             item => item.CompletedBookingCount,
-            item => Get(result, item.OperatorId).AddBooking(item.CompletedBookingCount, item.BookingRevenueVnd));
+            item => Get(result, item.OperatorId).AddBooking(item.CompletedBookingCount));
         AddUnique(
             trips,
             item => item.OperatorId,
@@ -322,7 +331,7 @@ public sealed class GetPlatformReportQueryHandler
             parcels,
             item => item.OperatorId,
             item => item.DeliveredParcelCount,
-            item => Get(result, item.OperatorId).AddParcel(item.DeliveredParcelCount, item.ParcelRevenueVnd));
+            item => Get(result, item.OperatorId).AddParcel(item.DeliveredParcelCount));
         return result;
     }
 
@@ -345,7 +354,7 @@ public sealed class GetPlatformReportQueryHandler
         }
     }
 
-    private void ReconcileLedgerRevenue(
+    private static Dictionary<Guid, PlatformLedgerReportItem> ApplyLedgerRevenue(
         IDictionary<Guid, OperatorAccumulator> accumulators,
         IReadOnlyList<PlatformLedgerReportItem> ledgerRows)
     {
@@ -358,21 +367,6 @@ public sealed class GetPlatformReportQueryHandler
             }
         }
 
-        foreach (var accumulator in accumulators.Values)
-        {
-            ledgerByOperator.TryGetValue(accumulator.OperatorId, out var ledger);
-            var ledgerBookingRevenue = ledger?.BookingRevenueVnd ?? 0;
-            var ledgerParcelRevenue = ledger?.ParcelRevenueVnd ?? 0;
-            if (accumulator.BookingRevenueVnd != ledgerBookingRevenue
-                || accumulator.ParcelRevenueVnd != ledgerParcelRevenue)
-            {
-                LogMismatch(accumulator, ledgerBookingRevenue, ledgerParcelRevenue);
-                throw new PlatformReportUnavailableException();
-            }
-
-            ledgerByOperator.Remove(accumulator.OperatorId);
-        }
-
         foreach (var ledger in ledgerByOperator.Values)
         {
             if (ledger.BookingRevenueVnd == 0 && ledger.ParcelRevenueVnd == 0)
@@ -380,28 +374,11 @@ public sealed class GetPlatformReportQueryHandler
                 continue;
             }
 
-            _logger.LogError(
-                "Platform report reconciliation mismatch for {OperatorId}: live booking {LiveBookingRevenueVnd}, ledger booking {LedgerBookingRevenueVnd}, live parcel {LiveParcelRevenueVnd}, ledger parcel {LedgerParcelRevenueVnd}",
-                ledger.OperatorId,
-                0,
-                ledger.BookingRevenueVnd,
-                0,
-                ledger.ParcelRevenueVnd);
-            throw new PlatformReportUnavailableException();
+            Get(accumulators, ledger.OperatorId);
         }
-    }
 
-    private void LogMismatch(
-        OperatorAccumulator accumulator,
-        long ledgerBookingRevenue,
-        long ledgerParcelRevenue)
-        => _logger.LogError(
-            "Platform report reconciliation mismatch for {OperatorId}: live booking {LiveBookingRevenueVnd}, ledger booking {LedgerBookingRevenueVnd}, live parcel {LiveParcelRevenueVnd}, ledger parcel {LedgerParcelRevenueVnd}",
-            accumulator.OperatorId,
-            accumulator.BookingRevenueVnd,
-            ledgerBookingRevenue,
-            accumulator.ParcelRevenueVnd,
-            ledgerParcelRevenue);
+        return ledgerByOperator;
+    }
 
     private static OperatorAccumulator Get(
         IDictionary<Guid, OperatorAccumulator> accumulators,
@@ -451,34 +428,29 @@ public sealed class GetPlatformReportQueryHandler
         public long CompletedBookingCount { get; private set; }
         public long CompletedTripCount { get; private set; }
         public long DeliveredParcelCount { get; private set; }
-        public long BookingRevenueVnd { get; private set; }
-        public long ParcelRevenueVnd { get; private set; }
 
-        public void AddBooking(long count, long revenue)
-        {
-            CompletedBookingCount = checked(CompletedBookingCount + count);
-            BookingRevenueVnd = checked(BookingRevenueVnd + revenue);
-        }
+        public void AddBooking(long count)
+            => CompletedBookingCount = checked(CompletedBookingCount + count);
 
         public void AddTrip(long count)
             => CompletedTripCount = checked(CompletedTripCount + count);
 
-        public void AddParcel(long count, long revenue)
-        {
-            DeliveredParcelCount = checked(DeliveredParcelCount + count);
-            ParcelRevenueVnd = checked(ParcelRevenueVnd + revenue);
-        }
+        public void AddParcel(long count)
+            => DeliveredParcelCount = checked(DeliveredParcelCount + count);
 
-        public PlatformReportOperatorItem ToResult(string? operatorName)
+        public PlatformReportOperatorItem ToResult(
+            string? operatorName,
+            long bookingRevenueVnd,
+            long parcelRevenueVnd)
             => new(
                 OperatorId,
                 operatorName,
                 CompletedBookingCount,
                 CompletedTripCount,
                 DeliveredParcelCount,
-                BookingRevenueVnd,
-                ParcelRevenueVnd,
-                checked(BookingRevenueVnd + ParcelRevenueVnd));
+                bookingRevenueVnd,
+                parcelRevenueVnd,
+                checked(bookingRevenueVnd + parcelRevenueVnd));
     }
 
     private sealed class InFlightGate

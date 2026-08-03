@@ -638,7 +638,7 @@ function seedPrerequisites() {
 }
 
 function clearPlatformReportCache() {
-  const keys = redis('--scan', '--pattern', 'platform-report:v1:*').split(/\r?\n/).filter(Boolean);
+  const keys = redis('--scan', '--pattern', 'platform-report:*').split(/\r?\n/).filter(Boolean);
   if (keys.length > 0) redis('DEL', ...keys);
   return keys.length;
 }
