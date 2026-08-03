@@ -1964,6 +1964,18 @@ per-Trip fare override mới tạo `MANUAL_OVERRIDE`. `PaymentSucceeded` không 
 Booking giữ immutable `baseFare`, `discountAmount`, `totalAmount`; cancel/refund dùng persisted
 `totalAmount`.
 
+**Operator holiday fare surcharge:** Trip Service owns one operator-scoped enable flag and named
+holiday periods. Each period uses inclusive ICT calendar dates (`startDate <= departureDateICT <=
+endDate`), an integer `surchargePercent` in `1..100`, and a separate `isActive` toggle. Active,
+non-deleted periods for the same operator cannot overlap. There is no default percentage: disabled
+settings or no matching period means `0%`. Resolve the ordinary fare first using the precedence
+above, then calculate `effectiveFare = round(originalFare * (100 + percent) / 100,
+MidpointRounding.AwayFromZero)`. The surcharge applies to the route base fare and every stop fare
+exception before vouchers. Search/detail expose the original fare plus surcharge breakdown;
+Booking persists the effective fare snapshot at creation, so later setting edits never reprice an
+existing Booking. Round-trip legs resolve independently from their own departure dates. Evaluation
+is request-time; no scheduler or background job activates a period.
+
 Trip DB dùng `btree_gist` + exclusion constraint trên equality `(routeId,stopId)` và overlap của
 half-open time range để chặn template window trùng ngay cả khi concurrent. Money giữ đến đơn vị
 đồng: `Money.FromRaw` pass-through; kết quả phép tính lẻ round `AwayFromZero`.
@@ -5056,6 +5068,8 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **`Route`** — Tuyến chính của 1 operator: origin/destination Station, `baseFare`, `totalDistanceKm`, `estimatedDurationMinutes`, `returnRouteId` self-FK link chiều về.
 - **`RouteStop`** — Junction Route ↔ Stop dọc tuyến. Có `orderIndex`, `distanceFromOriginKm` nullable, `allowPickup` + `allowDropoff` flags (CHECK ít nhất 1 = true).
 - **`RouteStopFareTemplate`** — Exception override `baseFare` per stop với effective time window (effectiveFrom/Until).
+- **`OperatorFareSurchargeSetting`** — One Trip-local row per logical Identity operator; global `isEnabled` switch, with a missing row treated as disabled.
+- **`OperatorFareSurchargePeriod`** — Named holiday window with inclusive ICT `startDate`/`endDate`, integer percent, activation flag and soft delete; active windows cannot overlap per operator.
 - **`AlternativeRoute`** + **`AlternativeRouteStop`** — Tuyến thay thế khi route change. Max 2 alternative per Route chính. Stop sequence riêng.
 - **`VehicleType`** — Loại xe: code unique, displayName, `estimatedPassengerLuggageKgPerSeat` override (optional), `isSystemDefined` block delete. Seed STANDARD_BUS / LIMOUSINE / SLEEPER_BUS.
 - **`Vehicle`** — Xe của operator: vehicleType, licensePlate, `seatLayoutJson` (xem 6.1 contract), totalSeats, maxCargoWeightKg, status (xem VehicleStatus enum).

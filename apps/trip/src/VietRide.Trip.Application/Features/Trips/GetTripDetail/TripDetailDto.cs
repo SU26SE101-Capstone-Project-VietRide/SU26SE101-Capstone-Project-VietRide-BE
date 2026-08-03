@@ -18,4 +18,9 @@ public sealed record TripDetailDto(
     TripFareBreakdownDto FareBreakdown)
 {
     public string? Notes { get; init; }
+    public int SurchargePercent { get; init; }
+    public long SurchargeAmount { get; init; }
+    public long EffectiveFare { get; init; } = BaseFare;
+    public Guid? SurchargePeriodId { get; init; }
+    public string? SurchargePeriodName { get; init; }
 }

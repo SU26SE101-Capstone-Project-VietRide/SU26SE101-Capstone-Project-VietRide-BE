@@ -2172,8 +2172,12 @@ Notes:
   input falls back to the stop-order formula. When those inputs are present but
   `totalDistanceKm - pickupDistance <= 0`, the explicit Technical Context edge rule wins:
   `traveledRatio = 0`; this case does not enter the order fallback.
-- The same serialized response fields are returned whether `pricingAt` is present or omitted;
-  only fare selection changes.
+- The legacy fields above are returned whether `pricingAt` is present or omitted. When
+  `pricingAt` is present, the response additionally includes `originalBaseFare`,
+  `surchargePercent`, `surchargeAmount`, nullable `surchargePeriodId` /
+  `surchargePeriodName`, and the corresponding original/surcharge breakdown on each stop.
+  These additive pricing fields are omitted when `pricingAt` is absent so existing operational
+  snapshot callers keep the legacy wire shape.
 - With `pricingAt`, Trip resolves each pickup fare in this exact order: persisted
   `TripStopFare.source=MANUAL_OVERRIDE`; otherwise the active `RouteStopFareTemplate` whose
   half-open window satisfies `effectiveFrom <= pricingAt < effectiveUntil` (or has no upper
@@ -2764,6 +2768,37 @@ in-flight request returns `409 IDEMPOTENCY_REQUEST_PENDING`.
 - The Day-22 conflict codes are exactly `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST`,
   `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`, `TRIP_VEHICLE_SWAP_TOO_LATE`, and existing
   `DRIVER_SCHEDULE_EDIT_TOO_LATE`; validation still uses `VALIDATION_ERROR`.
+
+## Operator holiday fare surcharge management (Trip Service)
+
+Gateway prefix: `/v1/operator/fare-surcharges`. Reads allow `OPERATOR_ADMIN|OPERATOR_STAFF`;
+writes allow `OPERATOR_ADMIN` only and require a UUID-v4 `Idempotency-Key`.
+
+- `GET /v1/operator/fare-surcharges/settings` returns `{ "isEnabled": false }`; a missing row is
+  materialized as the disabled default.
+- `PUT /v1/operator/fare-surcharges/settings` accepts `{ "isEnabled": true }` and returns the
+  persisted setting.
+- `GET /v1/operator/fare-surcharges/periods?page=1&pageSize=20` returns an ADR 0004
+  `PagedResult<FareSurchargePeriodDto>` ordered by `startDate`, then `periodId`.
+- `POST /v1/operator/fare-surcharges/periods` creates a period from `{ name, startDate, endDate,
+  surchargePercent, isActive? }`; `isActive` defaults true and response is `201`.
+- `PATCH /v1/operator/fare-surcharges/periods/{periodId}` accepts any non-empty subset of those
+  fields and returns the updated DTO.
+- `DELETE /v1/operator/fare-surcharges/periods/{periodId}` soft-deletes the period and returns
+  `204`.
+
+`FareSurchargePeriodDto` is `{ periodId, name, startDate, endDate, surchargePercent, isActive,
+status, createdAt, updatedAt }`; `status` is `UPCOMING|APPLYING|EXPIRED|DISABLED` based on the
+current ICT date and activation flag. Dates are inclusive; `name` is trimmed `1..120`, percentage
+is an integer `1..100`, and `startDate <= endDate`. Active non-deleted periods for one operator
+must not overlap. Errors: `404 FARE_SURCHARGE_PERIOD_NOT_FOUND`, `422
+FARE_SURCHARGE_PERIOD_OVERLAP`, or generic `422 VALIDATION_ERROR`.
+
+Trip search/detail keep `baseFare` as the original fare and add `surchargePercent`,
+`surchargeAmount`, `effectiveFare`, nullable `surchargePeriodId`, and nullable
+`surchargePeriodName`; stop-fare breakdowns expose the same effective adjustment. The internal
+Trip snapshot applies the same adjustment only when `pricingAt` is supplied, preserving the
+legacy no-`pricingAt` contract. Booking snapshots `effectiveFare` before voucher application.
 
 ## Parcel Service
 
@@ -4922,6 +4957,20 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+### GET `/v1/admin/operators/{operatorId}`
+
+Auth: `SYSTEM_ADMIN`.
+
+Response `200`: ADR 0004 envelope whose `data` contains `operatorId`, `name`,
+`businessRegistrationNumber`, `taxCode`, `contactEmail`, `contactPhone`, `logoUrl`, nested
+`address { street, ward, district, province }`, `representativeName`, `representativePhone`,
+`registrationStatus`, `isActive`, `createdAt`, `updatedAt`, `approvedAt`, `rejectedAt`,
+`rejectReason`, `suspendedAt`, `suspendReason`, `cancellationPolicy`, `parcelNoShowPolicy`, and
+`luggagePolicy`. Bank-account and subscription fields are intentionally excluded.
+
+Errors: `404 RESOURCE_NOT_FOUND` when the operator does not exist; standard `401`/`403` envelopes
+for missing authentication or a non-System-Admin caller.
 
 ### POST `/v1/admin/operators`
 

@@ -74,12 +74,13 @@ public class CreateBookingCommandHandlerTests
         int seatCount = 1,
         string paymentMethod = "WALLET",
         string? voucherCode = null,
-        ShuttlePickupCommand? shuttlePickup = null) =>
+        ShuttlePickupCommand? shuttlePickup = null,
+        Guid? pickupStopId = null) =>
         new(
             PassengerUserId: PassengerUserId,
             TripId: TripId,
-            PickupStationId: StationId,
-            PickupStopId: null,
+            PickupStationId: pickupStopId.HasValue ? null : StationId,
+            PickupStopId: pickupStopId,
             DropoffStationId: null,
             DropoffStopId: null,
             Seats: Enumerable.Range(1, seatCount)
@@ -163,6 +164,55 @@ public class CreateBookingCommandHandlerTests
             SeatLockToken,
             Arg.Any<Guid>(),
             Arg.Any<IReadOnlyList<PassengerSeatAssignment>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_PickupStop_UsesEffectiveStopFareBeforeVoucher()
+    {
+        var now = new DateTimeOffset(2026, 7, 11, 1, 2, 3, TimeSpan.Zero);
+        var pickupStopId = Guid.NewGuid();
+        var voucherId = Guid.NewGuid();
+        var trip = ValidTrip with
+        {
+            Stops =
+            [
+                new TripStopSnapshot(
+                    pickupStopId, 1, true, true, ValidTrip.DepartureDateTime, 10, 260_000, true),
+            ],
+        };
+        _clock.UtcNow.Returns(now);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(trip);
+        _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<BookingEntity>());
+        _paymentClient.ChargeAsync(default!, default, default, default, default!, default!, default)
+            .ReturnsForAnyArgs(new ChargeOutcome.Success(new ChargeResult(PaymentId, "SUCCEEDED", null)));
+        _tripClient.BookSeatsAsync(default, default, default, default!, default)
+            .ReturnsForAnyArgs(true);
+        _voucherService.ValidateAndComputeDiscountAsync(
+                default!, default, default, default, default!, default, default)
+            .ReturnsForAnyArgs(new VoucherValidationResult(voucherId, Money.FromRaw(10_000)));
+        _voucherService.RecordUsageAsync(default, default, default, default, default!, default)
+            .ReturnsForAnyArgs(Guid.NewGuid());
+
+        var result = await BuildSut().Handle(
+            BuildCommand(voucherCode: "HOLIDAY10", pickupStopId: pickupStopId),
+            CancellationToken.None);
+
+        result.TotalAmount.Should().Be(250_000);
+        result.Tickets.Should().ContainSingle().Which.FareAmount.Should().Be(260_000);
+        await _bookings.Received(1).AddAsync(
+            Arg.Is<BookingEntity>(booking => booking.BaseFare.Amount == 260_000),
+            Arg.Any<CancellationToken>());
+        await _voucherService.Received(1).ValidateAndComputeDiscountAsync(
+            "HOLIDAY10",
+            OperatorId,
+            trip.RouteId,
+            PassengerUserId,
+            Arg.Is<Money>(amount => amount.Amount == 260_000),
+            now,
             Arg.Any<CancellationToken>());
     }
 

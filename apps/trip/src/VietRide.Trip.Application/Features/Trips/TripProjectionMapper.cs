@@ -1,4 +1,5 @@
 using System.Text.Json;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
 using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
 using VietRide.Trip.Application.Features.Trips.SearchTrips;
@@ -17,7 +18,8 @@ internal static class TripProjectionMapper
         Station originStation,
         Station destinationStation,
         IReadOnlyCollection<TripSeat> seats,
-        IReadOnlyCollection<TripStop> stops)
+        IReadOnlyCollection<TripStop> stops,
+        FareSurchargeAdjustment fareAdjustment)
     {
         return new SearchTripItem(
             trip.Id,
@@ -31,7 +33,14 @@ internal static class TripProjectionMapper
             CountAvailableSeats(seats),
             trip.BaseFare.Amount,
             stops.Any(stop => stop.AllowPickup),
-            stops.Any(stop => stop.AllowDropoff));
+            stops.Any(stop => stop.AllowDropoff))
+        {
+            SurchargePercent = fareAdjustment.SurchargePercent,
+            SurchargeAmount = fareAdjustment.SurchargeAmount,
+            EffectiveFare = fareAdjustment.EffectiveFare,
+            SurchargePeriodId = fareAdjustment.SurchargePeriodId,
+            SurchargePeriodName = fareAdjustment.SurchargePeriodName,
+        };
     }
 
     public static TripDetailDto ToTripDetailDto(
@@ -42,7 +51,9 @@ internal static class TripProjectionMapper
         IReadOnlyCollection<TripSeat> seats,
         IReadOnlyCollection<TripStop> stops,
         IReadOnlyDictionary<Guid, Stop> stopDetails,
-        IReadOnlyDictionary<Guid, long> fares)
+        IReadOnlyDictionary<Guid, long> fares,
+        FareSurchargeAdjustment baseFareAdjustment,
+        IReadOnlyDictionary<Guid, FareSurchargeAdjustment> fareAdjustments)
     {
         var stopDtos = stops
             .OrderBy(stop => stop.OrderIndex)
@@ -54,6 +65,8 @@ internal static class TripProjectionMapper
                 }
 
                 var fareOverride = fares.TryGetValue(stop.StopId, out var fare) ? fare : (long?)null;
+                var originalFare = fareOverride ?? trip.BaseFare.Amount;
+                var adjustment = fareAdjustments.GetValueOrDefault(stop.StopId, baseFareAdjustment);
                 return new TripStopDto(
                     stop.StopId,
                     details.Name,
@@ -69,7 +82,13 @@ internal static class TripProjectionMapper
                     stop.ActualArrivalTime,
                     stop.DistanceFromOriginKm.HasValue ? (double)stop.DistanceFromOriginKm.Value : null,
                     fareOverride,
-                    fareOverride ?? trip.BaseFare.Amount);
+                    adjustment.EffectiveFare)
+                {
+                    SurchargePercent = adjustment.SurchargePercent,
+                    SurchargeAmount = checked(adjustment.EffectiveFare - originalFare),
+                    SurchargePeriodId = adjustment.SurchargePeriodId,
+                    SurchargePeriodName = adjustment.SurchargePeriodName,
+                };
             })
             .ToList();
 
@@ -90,7 +109,26 @@ internal static class TripProjectionMapper
             route.ReturnRouteId,
             new TripFareBreakdownDto(
                 trip.BaseFare.Amount,
-                fares.Select(fare => new TripFareStopDto(fare.Key, fare.Value)).ToList()));
+                fares.Select(fare => new TripFareStopDto(fare.Key, fare.Value)
+                {
+                    SurchargePercent = fareAdjustments[fare.Key].SurchargePercent,
+                    SurchargeAmount = fareAdjustments[fare.Key].SurchargeAmount,
+                    EffectiveFareFromThisStop = fareAdjustments[fare.Key].EffectiveFare,
+                }).ToList())
+            {
+                SurchargePercent = baseFareAdjustment.SurchargePercent,
+                SurchargeAmount = baseFareAdjustment.SurchargeAmount,
+                EffectiveBaseFare = baseFareAdjustment.EffectiveFare,
+                SurchargePeriodId = baseFareAdjustment.SurchargePeriodId,
+                SurchargePeriodName = baseFareAdjustment.SurchargePeriodName,
+            })
+        {
+            SurchargePercent = baseFareAdjustment.SurchargePercent,
+            SurchargeAmount = baseFareAdjustment.SurchargeAmount,
+            EffectiveFare = baseFareAdjustment.EffectiveFare,
+            SurchargePeriodId = baseFareAdjustment.SurchargePeriodId,
+            SurchargePeriodName = baseFareAdjustment.SurchargePeriodName,
+        };
     }
 
     public static TripSeatMapDto ToTripSeatMapDto(

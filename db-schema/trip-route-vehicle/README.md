@@ -21,6 +21,8 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `Route` | Tuyến chính: origin/destination Station + `baseFare`. | `returnRouteId` self-FK, `totalDistanceKm` |
 | `RouteStop` | Junction Route↔Stop intermediate. | composite PK, `orderIndex`, `allowPickup`+`allowDropoff` (CHECK ≥1 true), `distanceFromOriginKm` |
 | `RouteStopFareTemplate` | **Exception only** override `baseFare` per stop với half-open time window. | `effectiveFrom`/`effectiveUntil`; DB exclusion guard chống overlap |
+| `OperatorFareSurchargeSetting` | Global holiday-fare switch per logical operator. | `operatorId` PK, `isEnabled`; missing row = disabled |
+| `OperatorFareSurchargePeriod` | Named holiday surcharge window. | Inclusive ICT dates, percent `1..100`, active + soft-delete; DB exclusion guard chống active overlap |
 | `AlternativeRoute` | Tuyến thay thế (max 2 per Route, enforced app). | Stop sequence riêng — KHÔNG reuse `RouteStop` |
 | `AlternativeRouteStop` | Junction AlternativeRoute↔Stop. | composite PK, `orderIndex` |
 | `VehicleType` | Loại xe catalog. | `code` UNIQUE, `isSystemDefined` (block delete cho 3 platform seed) |
@@ -50,6 +52,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 - **`RouteStop` PRIMARY KEY `(route_id, stop_id)`** với UNIQUE phụ `(route_id, order_index)` — 1 stop xuất hiện 1 lần per route + order_index unique trên cùng route.
 - **`RouteStop` CHECK `allow_pickup OR allow_dropoff`** — enforce v6 rule "ít nhất 1 phải true".
 - **`RouteStopFareTemplate` KHÔNG composite key** trên `(route_id, stop_id)` mà dùng surrogate UUID + half-open `[effectiveFrom,effectiveUntil)` window — cho phép nhiều entry cùng stop với time windows khác nhau (future-dated pricing). PostgreSQL `btree_gist` + `ex_route_stop_fare_templates_no_overlap` enforce không overlap ngay cả khi concurrent; boundary liền kề được phép và `effectiveUntil = NULL` là open-ended.
+- **Holiday surcharge is Trip-owned** because matching depends on `Trip.departure_date_time`. `operator_id` remains a logical Identity reference with no DB FK. Inclusive ICT date windows are represented as half-open PostgreSQL `daterange(start_date,end_date+1,'[)')`; a partial GiST exclusion constraint applies only to active, non-deleted rows, so concurrent overlap is rejected while inactive drafts may coexist.
 - **`Vehicle.licensePlate` partial unique** trên `deleted_at IS NULL` — cho phép tái dùng biển số sau khi xe RETIRED + soft delete.
 - **`Trip` 2 unique partial indexes** `(driver_user_id, departure_date_time)` và `(vehicle_id, departure_date_time)` với `status NOT IN ('CANCELLED')` — chống conflict assignment + idempotent generate (Hangfire chạy 2 lần không tạo duplicate, CANCELLED không block re-create).
 - **`Trip.source` enum** với value `VEHICLE_SUBSTITUTION` — Hangfire counter check skip cho value này (xem v6 Section 4.5 c.0).

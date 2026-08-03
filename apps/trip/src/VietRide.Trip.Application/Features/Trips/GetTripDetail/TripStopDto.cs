@@ -15,4 +15,10 @@ public sealed record TripStopDto(
     DateTimeOffset? ActualArrivalTime,
     double? DistanceFromOriginKm,
     long? FareFromThisStop,
-    long EffectiveFare);
+    long EffectiveFare)
+{
+    public int SurchargePercent { get; init; }
+    public long SurchargeAmount { get; init; }
+    public Guid? SurchargePeriodId { get; init; }
+    public string? SurchargePeriodName { get; init; }
+}

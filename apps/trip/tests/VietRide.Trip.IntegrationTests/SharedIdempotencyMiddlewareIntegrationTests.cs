@@ -109,6 +109,28 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
         Assert.InRange(ttl!.Value, TimeSpan.FromHours(23), TimeSpan.FromHours(24));
     }
 
+    [Fact]
+    public async Task NoContent_FirstRequestAndReplay_DoNotWriteResponseBody()
+    {
+        var key = NewKey();
+        var invoked = 0;
+        RequestDelegate next = context =>
+        {
+            invoked++;
+            context.Response.StatusCode = StatusCodes.Status204NoContent;
+            return Task.CompletedTask;
+        };
+
+        var first = await InvokeAsync(key, next, responseBody: new RejectAnyWriteStream());
+        var replay = await InvokeAsync(key, next, responseBody: new RejectAnyWriteStream());
+
+        Assert.Equal(1, invoked);
+        Assert.Equal(StatusCodes.Status204NoContent, first.StatusCode);
+        Assert.Equal(StatusCodes.Status204NoContent, replay.StatusCode);
+        Assert.Empty(first.BodyBytes);
+        Assert.Empty(replay.BodyBytes);
+    }
+
     [Theory]
     [InlineData("PATCH", "/v1/items/1", "", "{\"value\":1}", "user-a")]
     [InlineData("POST", "/v1/items/2", "", "{\"value\":1}", "user-a")]
@@ -349,11 +371,12 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
         RequestDelegate next,
         RequestShape? shape = null,
         bool optedIn = true,
-        bool allowRequestBody = true)
+        bool allowRequestBody = true,
+        Stream? responseBody = null)
     {
         shape ??= RequestShape.Default;
         var context = new DefaultHttpContext();
-        context.Response.Body = new MemoryStream();
+        context.Response.Body = responseBody ?? new MemoryStream();
         context.Request.Method = shape.Method;
         context.Request.PathBase = shape.PathBase;
         context.Request.Path = shape.Path;
@@ -392,7 +415,9 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
             NullLogger<IdempotencyMiddleware>.Instance);
         await middleware.InvokeAsync(context);
 
-        var bytes = ((MemoryStream)context.Response.Body).ToArray();
+        var bytes = context.Response.Body is MemoryStream memoryStream
+            ? memoryStream.ToArray()
+            : [];
         return new ResponseSnapshot(context.Response.StatusCode, context.Response.ContentType, bytes);
     }
 
@@ -424,6 +449,25 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
     {
         using var document = JsonDocument.Parse(payload);
         return document.RootElement.GetProperty("ownerToken").GetString()!;
+    }
+
+    private sealed class RejectAnyWriteStream : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => 0;
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new InvalidOperationException("Response body write was not expected.");
+        public override ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromException(new InvalidOperationException("Response body write was not expected."));
     }
 
     private sealed record RequestShape(

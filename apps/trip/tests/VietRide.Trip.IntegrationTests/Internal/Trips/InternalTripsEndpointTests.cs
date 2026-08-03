@@ -311,7 +311,15 @@ public sealed class InternalTripsEndpointTests
     public async Task GetTrip_WithPricingAt_ForwardsNormalizedUtcInstant(string pricingAt, string expectedUtc)
     {
         var tripId = Guid.NewGuid();
-        var snapshot = CreateSnapshot(tripId, Guid.NewGuid(), null);
+        var surchargePeriodId = Guid.NewGuid();
+        var snapshot = CreateSnapshot(tripId, Guid.NewGuid(), null) with
+        {
+            OriginalBaseFare = 100000,
+            SurchargePercent = 20,
+            SurchargeAmount = 20000,
+            SurchargePeriodId = surchargePeriodId,
+            SurchargePeriodName = "Holiday",
+        };
         var mediator = new StubMediator(_ => snapshot);
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
@@ -321,6 +329,12 @@ public sealed class InternalTripsEndpointTests
             $"/internal/v1/trips/{tripId}?pricingAt={Uri.EscapeDataString(pricingAt)}"));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("originalBaseFare").GetInt64().Should().Be(100000);
+        document.RootElement.GetProperty("surchargePercent").GetInt32().Should().Be(20);
+        document.RootElement.GetProperty("surchargeAmount").GetInt64().Should().Be(20000);
+        document.RootElement.GetProperty("surchargePeriodId").GetGuid().Should().Be(surchargePeriodId);
+        document.RootElement.GetProperty("surchargePeriodName").GetString().Should().Be("Holiday");
         mediator.LastRequest.Should().Be(
             new GetTripSnapshotQuery(tripId, DateTimeOffset.Parse(expectedUtc, CultureInfo.InvariantCulture)));
     }
