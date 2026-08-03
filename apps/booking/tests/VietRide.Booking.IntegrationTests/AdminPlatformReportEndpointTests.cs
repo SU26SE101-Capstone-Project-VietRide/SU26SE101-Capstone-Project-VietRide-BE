@@ -77,6 +77,31 @@ public sealed class AdminPlatformReportEndpointTests
     }
 
     [Fact]
+    public async Task GetReport_WhenPaidNoShowHasNoCompletedBooking_ReturnsLedgerRevenueAndPromotesCache()
+    {
+        _factory.ConfigureLedgerOnlyBookingRevenue(OperatorId, 450_000);
+        using var client = _factory.CreateAuthenticatedClient("SYSTEM_ADMIN");
+
+        var response = await client.GetAsync(AdminPlatformReportWebApplicationFactory.ReportPath);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        var totals = data.GetProperty("totals");
+        totals.GetProperty("completedBookingCount").GetInt64().Should().Be(0);
+        totals.GetProperty("bookingRevenueVnd").GetInt64().Should().Be(450_000);
+        totals.GetProperty("netRevenueVnd").GetInt64().Should().Be(450_000);
+        var item = data.GetProperty("byOperator").EnumerateArray().Single();
+        item.GetProperty("completedBookingCount").GetInt64().Should().Be(0);
+        item.GetProperty("bookingRevenueVnd").GetInt64().Should().Be(450_000);
+        await _factory.Cache.Received(1).SetAsync(
+            Arg.Is<string>(key => key.StartsWith("platform-report:v2:", StringComparison.Ordinal)),
+            Arg.Any<PlatformReportResult>(),
+            TimeSpan.FromMinutes(5),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task GetReport_AsOperatorAdmin_Returns403BeforeQueryExecution()
     {
         _factory.ClearReceivedCalls();
@@ -169,6 +194,35 @@ public sealed class AdminPlatformReportWebApplicationFactory : WebApplicationFac
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
             .Returns([new PlatformLedgerReportItem(operatorId, 100_000, 50_000)]);
+        IdentityClient.GetAsync(
+                Arg.Any<IReadOnlyList<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns([new OperatorSummaryItem(operatorId, "Nha xe A")]);
+    }
+
+    public void ConfigureLedgerOnlyBookingRevenue(Guid operatorId, long bookingRevenueVnd)
+    {
+        ClearReceivedCalls();
+        BookingRepository.GetPlatformBookingMetricsAsync(
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<PlatformBookingReportItem>>([]);
+        TripClient.GetAsync(
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<TripPlatformReportItem>>([]);
+        ParcelClient.GetAsync(
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<ParcelPlatformReportItem>>([]);
+        LedgerClient.GetAsync(
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns([new PlatformLedgerReportItem(operatorId, bookingRevenueVnd, 0)]);
         IdentityClient.GetAsync(
                 Arg.Any<IReadOnlyList<Guid>>(),
                 Arg.Any<CancellationToken>())

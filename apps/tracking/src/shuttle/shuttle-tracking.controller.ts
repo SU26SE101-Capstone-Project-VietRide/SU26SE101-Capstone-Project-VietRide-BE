@@ -1,10 +1,24 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  ForbiddenException,
+  Get,
+  Param,
+  Req,
+  Res,
+  ServiceUnavailableException,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { ZodValidationPipe } from '@vietride/nest-common';
 import { ApiErrorEnvelopeDto } from '../tracking-data/dto/swagger-response.dto';
-import { ShuttleTrackingAuthGuard } from './shuttle-tracking-auth.guard';
+import {
+  type AuthorizedShuttleTrackingRequest,
+  ShuttleTrackingAuthGuard,
+} from './shuttle-tracking-auth.guard';
 import { ShuttleTripIdParamSchema, type ShuttleTripIdParamDto } from './shuttle.dto';
-import { ShuttleService } from './shuttle.service';
+import { ShuttlePassengerContextEnvelopeSwaggerDto } from './shuttle-passenger-context-response.dto';
+import { ShuttleService, type ShuttlePassengerContextDto } from './shuttle.service';
 
 @ApiTags('Shuttle Tracking')
 @ApiBearerAuth()
@@ -12,6 +26,38 @@ import { ShuttleService } from './shuttle.service';
 @Controller('v1/tracking/shuttle-trips')
 export class ShuttleTrackingController {
   constructor(private readonly service: ShuttleService) {}
+
+  @Get(':shuttleTripId/passenger-context')
+  @ApiOperation({ summary: 'Get the authenticated passenger own Shuttle pickup context' })
+  @ApiParam({ name: 'shuttleTripId', type: 'string', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Passenger-safe own pickup context.', type: ShuttlePassengerContextEnvelopeSwaggerDto })
+  @ApiResponse({ status: 400, description: 'Invalid shuttleTripId.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 401, description: 'Missing or invalid token.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 403, description: 'Passenger Shuttle tracking access denied.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 404, description: 'Shuttle trip not found.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 503, description: 'Authorization or Shuttle context unavailable.', type: ApiErrorEnvelopeDto })
+  async passengerContext(
+    @Param(new ZodValidationPipe(ShuttleTripIdParamSchema)) params: ShuttleTripIdParamDto,
+    @Req() request: AuthorizedShuttleTrackingRequest,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<ShuttlePassengerContextDto> {
+    if (request.trackingUser?.role !== 'PASSENGER') {
+      throw new ForbiddenException({
+        errorCode: 'TRACKING_ACCESS_DENIED',
+        detail: 'Only passengers may access Shuttle passenger context',
+      });
+    }
+    if (!request.shuttleTrackingContext
+      || request.shuttleTrackingContext.shuttleTripId !== params.shuttleTripId) {
+      throw new ServiceUnavailableException({
+        errorCode: 'TRACKING_CONTEXT_UNAVAILABLE',
+        detail: 'Shuttle tracking context is unavailable',
+      });
+    }
+
+    response.setHeader('Cache-Control', 'private, no-store');
+    return this.service.getPassengerContext(request.shuttleTrackingContext);
+  }
 
   @Get(':shuttleTripId/latest')
   @ApiOperation({ summary: 'Get latest shuttle GPS point' })

@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.53.0
+> **Phiên bản:** 1.54.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-08-03
 > **Capstone:** SU26SE101 — SU26
@@ -2073,6 +2073,9 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `GET /internal/v1/trips/{tripId}/cargo/capacity` | Parcel | Lấy available cargo capacity |
 | `POST /internal/v1/trips/{tripId}/cargo/reserve` · `remeasure` · `load` · `release` | Parcel | Idempotent single-Trip cargo-ledger mutation and counter update |
 | `POST /internal/v1/trips/{sourceTripId}/cargo/transfer` | Parcel | Exact `{parcelId,targetTripId,targetState:RESERVED\|LOADED,allowCapacityOverflow}`; lock source/target by ascending UUID and atomically release source plus reserve/load target in one Trip-local transaction. `RESERVED` always enforces capacity; `LOADED` permits explicit overflow only for approved substitution recovery. |
+| `GET /internal/v1/trips/{tripId}/route-geometry` | Tracking | Additive route-map context `{tripId,geometrySource:ROUTE_POLYLINE\|STOPS_ONLY,points,originStation?,intermediateStops,destinationStation?,alertRecipientUserIds?}`. Polyline malformed/null dùng ordered stop fallback; public Tracking chỉ render line cho `ROUTE_POLYLINE`. |
+| `GET /internal/v1/trips/{tripId}/route-stops` | Tracking | Ordered ETA stops gồm additive `status`; Tracking vẫn chấp nhận thiếu/null status khi rolling deploy. |
+| `GET /internal/v1/shuttle-trips/{shuttleTripId}/tracking-context` | Tracking | Additive `isOwnPickup` theo queried `userId` và public station metadata. Passenger allowed khi own manifest là `PENDING\|PICKED_UP`; full stops chỉ là internal input cho Driver/ETA và không được phát public. |
 
 #### Booking Service
 
@@ -2479,25 +2482,31 @@ vận hành không in full payload, contact, IP hoặc user-agent.
 
 Booking sở hữu public facade `GET /v1/admin/reports/platform?from=&to=` từ Day 42; Payment không
 đọc foreign DB và vẫn là authoritative ledger source. Cả hai RFC3339
-UTC boundary bắt buộc, `from < to`, tối đa 366 ngày, interval `[from,to)`. Ba source metrics:
+UTC boundary bắt buộc, `from < to`, tối đa 366 ngày, interval `[from,to)`. Ba source vận hành cung cấp
+metrics count:
 
-- Booking: `COMPLETED`, anchor `completed_at`, count và `SUM(total_amount)`.
+- Booking: `COMPLETED`, anchor `completed_at`, count. Doanh thu cuối cùng không lấy từ amount của
+  Booking mà lấy từ Payment ledger.
 - Trip: `COMPLETED`, anchor `completed_at`, count.
-- Parcel: `DELIVERY_CONFIRMED`, anchor `confirmed_at`, count và signed
-  `SUM(deposit_amount + additional_amount - refund_amount)`.
+- Parcel: `DELIVERY_CONFIRMED`, anchor `confirmed_at`, count. Doanh thu cuối cùng không lấy từ amount
+  vận hành của Parcel mà lấy từ Payment ledger.
 
-Earned live vẫn là metric anchor; không dùng payment-ledger time, non-terminal row hoặc Stats/cache
-chưa reconciliation làm nguồn trả kết quả. Source PostgreSQL đọc
-`SUM(BIGINT)` dưới dạng NUMERIC rồi checked-convert từng group và total về Int64. Booking checked
-mọi count/revenue/totals, union operator IDs, lookup Identity theo chunk 500, giữ missing operator
-với tên null, sort net revenue giảm dần rồi operator ID. Totals phải bằng sum `byOperator`;
-`parcelRevenueVnd`/`netRevenueVnd` có thể âm và không clamp.
+Earned live vẫn là anchor cho count vận hành; không dùng payment-ledger time, non-terminal row hoặc
+Stats/cache chưa reconciliation làm nguồn count. Payment ledger là authority cuối cùng cho
+`bookingRevenueVnd`/`parcelRevenueVnd`; paid Booking `NO_SHOW` có thể cộng revenue ledger nhưng
+`completedBookingCount` vẫn bằng 0. Source PostgreSQL đọc `SUM(BIGINT)` dưới dạng NUMERIC rồi
+checked-convert từng group và total về Int64. Booking checked mọi count/totals, union operator IDs
+cùng Payment ledger, lookup Identity theo chunk 500, giữ missing operator với tên null, sort net
+revenue giảm dần rồi operator ID. Totals phải bằng sum `byOperator`; `parcelRevenueVnd`/`netRevenueVnd`
+có thể âm và không clamp.
 
 Booking gọi bốn nguồn Trip/Parcel/Payment-ledger và Booking local song song với timeout 5 giây,
 sau đó mới lookup Identity. Canonical upstream
 `500 REPORT_VALUE_OVERFLOW` được propagate cùng code; timeout/5xx khác/payload unusable thành
-`503 UPSTREAM_UNAVAILABLE`; ledger mismatch cũng trả cùng `503`. Không partial/stale response hoặc
-Payment DB write. Chỉ kết quả đã reconciliation mới được ghi Redis cache. Partial indexes:
+`503 UPSTREAM_UNAVAILABLE`; source unavailable, ledger malformed/duplicate hoặc source-local
+live/projection mismatch cũng trả `503`. Chênh lệch operational amount với Payment ledger không
+phải mismatch vì Payment là authority cuối cùng. Không partial/stale response hoặc Payment DB write.
+Chỉ kết quả đã reconciliation mới được ghi Redis cache. Partial indexes:
 
 ```text
 Booking (completed_at, operator_id) WHERE status='COMPLETED' AND completed_at IS NOT NULL
@@ -2505,20 +2514,21 @@ Trip    (completed_at, operator_id) WHERE status='COMPLETED' AND completed_at IS
 Parcel  (confirmed_at, operator_id) WHERE status='DELIVERY_CONFIRMED' AND confirmed_at IS NOT NULL
 ```
 
-Day 40 là live indexed-report baseline. Day 42 materializes/validates Stats, reconciles against
-earned live sources, and promotes a Booking-owned Redis hot read only after a successful
-reconciliation. Redis TTL is five minutes and the exact UTC range plus `platform-report:v1` are
-part of the key. Day 41 owns the six operator XLSX routes and ClosedXML writer; no cross-DB query
-or new Payment attribution table is allowed.
+Day 40 là live indexed-report baseline. Day 42 materializes/validates Stats, đối chiếu projection
+với live operational source trong chính từng service, rồi promote Booking-owned Redis hot read sau
+reconciliation thành công. Redis TTL là năm phút; exact UTC range và `platform-report:v2` là một
+phần của key. Day 41 sở hữu sáu operator XLSX route và ClosedXML writer; không cross-DB query hoặc
+Payment attribution table mới.
 
 Mỗi nguồn Day 42 có projection per-earned-record riêng trong DB của service:
 `platform_booking_stats`, `platform_trip_stats`, `platform_parcel_stats`. Projection lưu source ID,
 operator, earned timestamp và revenue tương ứng; trigger đồng bộ nó trong cùng transaction với
 Booking/Trip/Parcel. Các recurring job `booking|trip|parcel.platform-stats-backfill` chạy mỗi năm
 phút và rebuild idempotent từ bảng live để sửa drift. Mỗi internal source query đối chiếu live với
-projection theo từng operator và exact UTC range trước khi trả dữ liệu; mismatch ghi structured log,
-trả `503 UPSTREAM_UNAVAILABLE` và không được cache. `projected_at` là freshness marker vận hành,
-nhưng timestamp mới không được dùng thay cho đối chiếu giá trị thực.
+projection theo từng operator và exact UTC range trước khi trả dữ liệu; source-local mismatch ghi
+structured log, trả `503 UPSTREAM_UNAVAILABLE` và không được cache. `projected_at` là freshness
+marker vận hành, nhưng timestamp mới không được dùng thay cho đối chiếu giá trị thực. Ledger-only
+revenue không bị coi là source mismatch; ledger malformed/duplicate vẫn trả `503`.
 
 #### Day 43 reliability contract
 
@@ -3778,7 +3788,8 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
-| **1.53.0** | 2026-08-03 | Codex | **MINOR** — Add System-Admin operator detail projection and Trip-owned operator holiday fare surcharge settings/periods. Inclusive ICT departure dates, active-window overlap protection, pre-voucher nearest-VND adjustment, additive search/detail breakdown and Booking-time snapshot semantics are canonical. Adds four UUID-v4-required mutation surfaces, raising the inventory to 185/168/17; no dependency, integration event or background job. |
+| **1.54.0** | 2026-08-03 | Codex | **MINOR** — Add System-Admin operator detail projection and Trip-owned operator holiday fare surcharge settings/periods. Inclusive ICT departure dates, active-window overlap protection, pre-voucher nearest-VND adjustment, additive search/detail breakdown and Booking-time snapshot semantics are canonical. Adds four UUID-v4-required mutation surfaces, raising the inventory to 185/168/17; no dependency, integration event or background job. |
+| **1.53.0** | 2026-08-02 | Codex | **MINOR** — Freeze public Tracking map context: authorized Trip route geometry with safe marker fallback, deterministic 1.000-point cap/ETag, passenger-only Shuttle context without foreign pickup leakage, post-pickup access continuity, and additive TripStop status for terminal-stop ETA selection. No migration, dependency, integration event, Gateway family, or Google configuration change. |
 | **1.52.1** | 2026-08-02 | BE lead (Vũ) | **PATCH** — Reconciles the v1.54 Shuttle pickup merge with the system-wide idempotency inventory: `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup` is UUID-v4-required, raising the executable baseline to 181 HTTP mutation surfaces / 164 required / exactly 17 exemptions. Runtime metadata and API Contract were already required; no dependency, schema, migration or additional endpoint change. |
 | **1.52.0** | 2026-08-02 | BE lead (Vũ) | **MINOR** — Freezes the Day-43 system-wide idempotency convention at 180 HTTP mutation surfaces: 163 UUID-v4-required actions and exactly 17 named exemptions. Reconciles the two post-merge read-only Trip batch POSTs and the higher-contract no-key DriverSchedule create/activate actions with auditable runtime metadata; preserves v2 replay/mismatch/pending/5xx semantics and does not rewrite historical Git metadata. No dependency, schema, migration or public endpoint change. |
 | **1.51.0** | 2026-08-01 | BE lead (Vũ) | **MINOR** — Reconciles the Days 30–43 repair boundary: defers the unregistered manual Trip-create API; keeps `activePlanId` entitlements during `PENDING_PAYMENT`; fixes the trial warning at daily 09:00 ICT; preserves one zero-net settlement marker that terminates `CANCELLED` without wallet/event side effects; and makes Day-39 Parcel unload depend on a synchronous Trip snapshot with no Parcel arrival consumer/projection. No endpoint implementation, event payload, schema or migration change. |

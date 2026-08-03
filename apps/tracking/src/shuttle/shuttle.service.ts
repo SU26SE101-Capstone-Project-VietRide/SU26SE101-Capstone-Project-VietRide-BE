@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { RedisService } from '@vietride/nest-redis';
 import { z } from 'zod';
 import { createHash, randomUUID } from 'crypto';
@@ -19,30 +19,61 @@ import {
 } from './shuttle.constants';
 import type { ShuttleGpsUpdateDto } from './shuttle.dto';
 
-export const ShuttleTrackingStopSchema = z.object({
+export const shuttleTrackingStopSchema = z.object({
   pickupOrder: z.number().int().positive(),
   bookingId: z.string().uuid().nullable().optional(),
   latitude: z.number(),
   longitude: z.number(),
   status: z.string(),
   isStation: z.boolean(),
+  isOwnPickup: z.boolean().optional(),
 });
-export const ShuttleTrackingContextSchema = z.object({
+export const shuttleTrackingStationSchema = z.object({
+  stationId: z.string().uuid(),
+  name: z.string(),
+  latitude: z.number().nullable(),
+  longitude: z.number().nullable(),
+  pickupOrder: z.number().int().positive(),
+});
+export const shuttleTrackingContextSchema = z.object({
   shuttleTripId: z.string().uuid(),
   mainTripId: z.string().uuid(),
   operatorId: z.string().uuid(),
   driverUserId: z.string().uuid(),
   allowed: z.boolean(),
   scope: z.string().nullable().optional(),
-  stops: z.array(ShuttleTrackingStopSchema),
+  stops: z.array(shuttleTrackingStopSchema),
+  station: shuttleTrackingStationSchema.nullable().optional(),
 });
-const EnvelopeSchema = z.object({
-  success: z.boolean(),
-  data: ShuttleTrackingContextSchema.optional(),
+const envelopeSchema = z.object({
+  success: z.literal(true),
+  data: shuttleTrackingContextSchema.optional(),
 });
 
-export type ShuttleTrackingContext = z.infer<typeof ShuttleTrackingContextSchema>;
-export type ShuttleTrackingStop = z.infer<typeof ShuttleTrackingStopSchema>;
+export type ShuttleTrackingContext = z.infer<typeof shuttleTrackingContextSchema>;
+export type ShuttleTrackingStop = z.infer<typeof shuttleTrackingStopSchema>;
+
+export interface ShuttlePassengerPickupDto {
+  bookingId: string;
+  pickupOrder: number;
+  latitude: number;
+  longitude: number;
+  status: 'PENDING' | 'PICKED_UP';
+  stopsBeforePickup: number;
+}
+
+export interface ShuttlePassengerContextDto {
+  shuttleTripId: string;
+  mainTripId: string;
+  ownPickups: ShuttlePassengerPickupDto[];
+  station: {
+    stationId: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+    pickupOrder: number;
+  } | null;
+}
 
 export type ShuttleGpsEvent = ShuttleGpsUpdateDto;
 const RECORD_SHUTTLE_GPS_SCRIPT = `
@@ -62,6 +93,11 @@ return 1
 const GPS_ACCEPTED = 1;
 const GPS_DUPLICATE = 0;
 const GPS_PAYLOAD_MISMATCH = -1;
+const TERMINAL_PICKUP_STATUSES = new Set(['PICKED_UP', 'DELIVERED', 'NO_SHOW', 'CANCELLED']);
+const passengerEtaStateSchema = z.object({
+  nextPickupOrder: z.number().int().positive().optional(),
+  order: z.number().int().positive().optional(),
+});
 
 @Injectable()
 export class ShuttleService {
@@ -101,11 +137,13 @@ export class ShuttleService {
           response.status === 404 ? 'SHUTTLE_TRIP_NOT_FOUND' : 'TRACKING_AUTH_UNAVAILABLE',
         );
       const body: unknown = await response.json();
-      const direct = ShuttleTrackingContextSchema.safeParse(body);
+      const direct = shuttleTrackingContextSchema.safeParse(body);
       if (direct.success) return direct.data;
-      const envelope = EnvelopeSchema.parse(body);
-      if (!envelope.data) throw new Error('TRACKING_AUTH_UNAVAILABLE');
-      return envelope.data;
+      const envelope = envelopeSchema.safeParse(body);
+      if (!envelope.success || !envelope.data.data) {
+        throw new Error('TRACKING_CONTEXT_UNAVAILABLE');
+      }
+      return envelope.data.data;
     } finally {
       clearTimeout(timeout);
     }
@@ -157,6 +195,101 @@ export class ShuttleService {
     const parsed = JSON.parse(state) as { order: number };
     const raw = await this.redis.getClient().get(shuttleEtaKey(shuttleTripId, parsed.order));
     return raw ? (JSON.parse(raw) as unknown) : null;
+  }
+
+  async getPassengerContext(
+    context: ShuttleTrackingContext,
+  ): Promise<ShuttlePassengerContextDto> {
+    if (context.station === undefined) throw this.contextUnavailable();
+    const ownPickups = context.stops
+      .filter((stop) => stop.isOwnPickup && (stop.status === 'PENDING' || stop.status === 'PICKED_UP'));
+    if (ownPickups.length === 0) throw this.contextUnavailable();
+    if (ownPickups.some((stop) =>
+      !stop.bookingId
+      || !this.isValidCoordinate(stop.latitude, stop.longitude))) {
+      throw this.contextUnavailable();
+    }
+
+    const currentOrder = await this.readCurrentPickupOrder(context);
+    const mappedPickups = ownPickups
+      .map((stop): ShuttlePassengerPickupDto => ({
+        bookingId: stop.bookingId as string,
+        pickupOrder: stop.pickupOrder,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        status: stop.status as 'PENDING' | 'PICKED_UP',
+        stopsBeforePickup: stop.status === 'PICKED_UP'
+          ? 0
+          : this.countStopsBeforePickup(context.stops, currentOrder, stop.pickupOrder),
+      }))
+      .sort((left, right) => left.pickupOrder - right.pickupOrder
+        || left.bookingId.localeCompare(right.bookingId));
+
+    const station = context.station
+      && context.station.latitude !== null
+      && context.station.longitude !== null
+      && this.isValidCoordinate(context.station.latitude, context.station.longitude)
+      ? {
+          stationId: context.station.stationId,
+          name: context.station.name,
+          latitude: context.station.latitude,
+          longitude: context.station.longitude,
+          pickupOrder: context.station.pickupOrder,
+        }
+      : null;
+
+    return {
+      shuttleTripId: context.shuttleTripId,
+      mainTripId: context.mainTripId,
+      ownPickups: mappedPickups,
+      station,
+    };
+  }
+
+  private async readCurrentPickupOrder(context: ShuttleTrackingContext): Promise<number | undefined> {
+    const raw = await this.redis.getClient().get(shuttleEtaStateKey(context.shuttleTripId));
+    if (raw) {
+      try {
+        const parsed = passengerEtaStateSchema.safeParse(JSON.parse(raw) as unknown);
+        if (parsed.success) return parsed.data.nextPickupOrder ?? parsed.data.order;
+      } catch {
+        // Fall through to the manifest-derived order when ETA state is unavailable or malformed.
+      }
+    }
+
+    return context.stops
+      .filter((stop) => !stop.isStation && !TERMINAL_PICKUP_STATUSES.has(stop.status))
+      .sort((left, right) => left.pickupOrder - right.pickupOrder)[0]?.pickupOrder;
+  }
+
+  private countStopsBeforePickup(
+    stops: ShuttleTrackingStop[],
+    currentOrder: number | undefined,
+    ownPickupOrder: number,
+  ): number {
+    if (currentOrder === undefined || currentOrder >= ownPickupOrder) return 0;
+    return new Set(stops
+      .filter((stop) => !stop.isStation
+        && !TERMINAL_PICKUP_STATUSES.has(stop.status)
+        && stop.pickupOrder >= currentOrder
+        && stop.pickupOrder < ownPickupOrder)
+      .map((stop) => stop.pickupOrder)).size;
+  }
+
+  private isValidCoordinate(latitude: number, longitude: number): boolean {
+    return Number.isFinite(latitude)
+      && Number.isFinite(longitude)
+      && latitude >= -90
+      && latitude <= 90
+      && longitude >= -180
+      && longitude <= 180;
+  }
+
+  private contextUnavailable(): ServiceUnavailableException {
+    return new ServiceUnavailableException({
+      errorCode: 'TRACKING_CONTEXT_UNAVAILABLE',
+      detail: 'Shuttle passenger context is unavailable',
+    });
   }
 
 }

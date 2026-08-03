@@ -1,5 +1,6 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Headers, HttpStatus, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { ZodValidationPipe } from '@vietride/nest-common';
 import {
   EtaQuerySchema,
@@ -22,13 +23,48 @@ import {
   TrackingLatestEnvelopeDto,
   TrackingTrailEnvelopeDto,
 } from './dto/swagger-response.dto';
+import { PublicTripRouteContextEnvelopeSwaggerDto } from './dto/route-context-response.dto';
+import {
+  type PublicTripRouteContextDto,
+  TripRouteContextService,
+} from './trip-route-context.service';
 
 @ApiTags('Tracking')
 @ApiBearerAuth()
 @UseGuards(TrackingDataAuthGuard)
 @Controller('/v1/tracking/trips')
 export class TrackingDataController {
-  constructor(private readonly trackingDataService: TrackingDataService) {}
+  constructor(
+    private readonly trackingDataService: TrackingDataService,
+    private readonly tripRouteContextService: TripRouteContextService,
+  ) {}
+
+  @Get(':tripId/route-geometry')
+  @ApiOperation({ summary: 'Get authorized public route geometry and map markers for a trip' })
+  @ApiParam({ name: 'tripId', type: 'string', format: 'uuid', description: 'The ID of the trip' })
+  @ApiResponse({ status: 200, description: 'Sanitized route geometry and map markers.', type: PublicTripRouteContextEnvelopeSwaggerDto })
+  @ApiResponse({ status: 304, description: 'The authorized route context has not changed.' })
+  @ApiResponse({ status: 400, description: 'Validation error (invalid tripId).', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 401, description: 'Unauthorized - missing or invalid token.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 403, description: 'User is not allowed to view this trip.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 404, description: 'Trip not found.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 503, description: 'Authorization or route context provider unavailable.', type: ApiErrorEnvelopeDto })
+  async getRouteGeometry(
+    @Param(new ZodValidationPipe(TripIdParamSchema)) params: TripIdParamDto,
+    @Headers('if-none-match') ifNoneMatch: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<PublicTripRouteContextDto | undefined> {
+    const result = await this.tripRouteContextService.getRouteContext(params.tripId);
+    response.setHeader('Cache-Control', 'private, max-age=600');
+    response.setHeader('Vary', 'Authorization');
+    response.setHeader('ETag', result.etag);
+    if (ifNoneMatch?.split(',').some((candidate) => candidate.trim() === result.etag)) {
+      response.status(HttpStatus.NOT_MODIFIED);
+      return undefined;
+    }
+
+    return result.data;
+  }
 
   @Get(':tripId/latest')
   @ApiOperation({ summary: 'Get latest location for a trip' })

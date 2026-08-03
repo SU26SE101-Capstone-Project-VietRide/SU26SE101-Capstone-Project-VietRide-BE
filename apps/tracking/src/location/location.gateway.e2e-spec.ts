@@ -342,6 +342,50 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     socket.disconnect();
   });
 
+  it('re-authorizes passenger Shuttle access on every join and reconnect', async () => {
+    const token = await signIdentityToken('PASSENGER');
+    const pendingContext = {
+      shuttleTripId: TEST_SHUTTLE_ID,
+      mainTripId: TEST_TRIP_ID,
+      operatorId: TEST_OPERATOR_ID,
+      driverUserId: TEST_USER_ID,
+      allowed: true,
+      scope: 'PASSENGER',
+      stops: [{ status: 'PENDING' }],
+    };
+    const pickedUpContext = {
+      ...pendingContext,
+      stops: [{ status: 'PICKED_UP' }],
+    };
+    shuttleGetContext
+      .mockResolvedValueOnce(pendingContext)
+      .mockResolvedValueOnce(pickedUpContext)
+      .mockResolvedValueOnce({ ...pendingContext, allowed: false, scope: null });
+
+    const pendingSocket = await connectSocket(token);
+    const pending = await emitWithAck<JoinTripTrackingAck>(pendingSocket, 'joinShuttleTracking', {
+      shuttleTripId: TEST_SHUTTLE_ID,
+    });
+    pendingSocket.disconnect();
+
+    const pickedUpSocket = await connectSocket(token);
+    const pickedUp = await emitWithAck<JoinTripTrackingAck>(pickedUpSocket, 'joinShuttleTracking', {
+      shuttleTripId: TEST_SHUTTLE_ID,
+    });
+    pickedUpSocket.disconnect();
+
+    const terminalSocket = await connectSocket(token);
+    const terminal = await emitWithAck<JoinTripTrackingAck>(terminalSocket, 'joinShuttleTracking', {
+      shuttleTripId: TEST_SHUTTLE_ID,
+    });
+    terminalSocket.disconnect();
+
+    expect(pending).toEqual(expect.objectContaining({ success: true, scope: 'PASSENGER' }));
+    expect(pickedUp).toEqual(expect.objectContaining({ success: true, scope: 'PASSENGER' }));
+    expect(terminal).toEqual({ success: false, error: 'ACCESS_DENIED' });
+    expect(shuttleGetContext).toHaveBeenCalledTimes(3);
+  });
+
   it('broadcasts published coordinates while off-route receives raw coordinates', async () => {
     routePeek.mockReturnValue({
       tripId: TEST_TRIP_ID,
@@ -626,7 +670,10 @@ function createTestEnv(publicKeyPem: string): Env {
 }
 
 function readListeningPort(app: INestApplication): number {
-  const address = app.getHttpServer().address();
+  const server = app.getHttpServer() as {
+    address(): string | { port: number } | null;
+  };
+  const address = server.address();
   if (typeof address === 'object' && address !== null) {
     return address.port;
   }

@@ -7,20 +7,52 @@ import {
   TrackingInternalJwtClaims,
   TrackingInternalJwtSigner,
 } from '../authorization/tracking-internal-jwt.signer';
-import type { RouteGeometryPoint, RouteGeometryProvider, RouteGeometrySnapshot } from './route-geometry.provider';
+import type {
+  DetailedRouteGeometryProvider,
+  RouteGeometryFetchResult,
+  RouteGeometryPoint,
+  RouteGeometrySnapshot,
+} from './route-geometry.provider';
 
-const RouteGeometryPointSchema = z.object({
+const routeGeometryPointSchema = z.object({
   latitude: z.number(),
   longitude: z.number(),
 });
 
-const RouteGeometryDataSchema = z.object({
-  tripId: z.string(),
-  points: z.array(RouteGeometryPointSchema),
-  alertRecipientUserIds: z.array(z.string()).nullish(),
+const routeGeometryStationSchema = z.object({
+  stationId: z.string().uuid(),
+  name: z.string(),
+  latitude: z.number(),
+  longitude: z.number(),
 });
 
-const ApiResponseEnvelopeSchema = z.object({
+const routeGeometryIntermediateStopSchema = z.object({
+  stopId: z.string().uuid(),
+  name: z.string(),
+  sequence: z.number().int(),
+  latitude: z.number(),
+  longitude: z.number(),
+});
+
+const routeGeometryDataSchema = z.object({
+  tripId: z.string().uuid(),
+  points: z.array(routeGeometryPointSchema),
+  alertRecipientUserIds: z.array(z.string()).nullish(),
+  geometrySource: z.enum(['ROUTE_POLYLINE', 'STOPS_ONLY']).optional(),
+  originStation: routeGeometryStationSchema.nullish(),
+  intermediateStops: z.array(routeGeometryIntermediateStopSchema).optional(),
+  destinationStation: routeGeometryStationSchema.nullish(),
+}).superRefine((value, context) => {
+  if (value.geometrySource === 'ROUTE_POLYLINE' && value.points.length < 2) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'ROUTE_POLYLINE requires at least two points',
+      path: ['points'],
+    });
+  }
+});
+
+const apiResponseEnvelopeSchema = z.object({
   success: z.literal(true),
   data: z.unknown(),
 });
@@ -29,14 +61,14 @@ const INTERNAL_AUTH_HEADER = 'X-Internal-Auth';
 const BEARER_PREFIX = 'Bearer ';
 
 interface CacheEntry {
-  data: RouteGeometrySnapshot | null;
+  result: RouteGeometryFetchResult;
   expiresAt: number;
 }
 
 @Injectable()
-export class HttpRouteGeometryProvider implements RouteGeometryProvider {
+export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider {
   private readonly cache = new Map<string, CacheEntry>();
-  private readonly inFlight = new Map<string, Promise<RouteGeometrySnapshot | null>>();
+  private readonly inFlight = new Map<string, Promise<RouteGeometryFetchResult>>();
 
   constructor(
     @Inject(ENV_TOKEN) private readonly env: Env,
@@ -44,9 +76,14 @@ export class HttpRouteGeometryProvider implements RouteGeometryProvider {
   ) {}
 
   async getRouteGeometry(tripId: string): Promise<RouteGeometrySnapshot | null> {
+    const result = await this.getDetailedRouteGeometry(tripId);
+    return this.toLegacySnapshot(result);
+  }
+
+  async getDetailedRouteGeometry(tripId: string): Promise<RouteGeometryFetchResult> {
     const cached = this.cache.get(tripId);
     if (cached && Date.now() < cached.expiresAt) {
-      return cached.data;
+      return cached.result;
     }
 
     const existing = this.inFlight.get(tripId);
@@ -64,10 +101,10 @@ export class HttpRouteGeometryProvider implements RouteGeometryProvider {
   peekCachedRouteGeometry(tripId: string): RouteGeometrySnapshot | null {
     const cached = this.cache.get(tripId);
     if (!cached || Date.now() >= cached.expiresAt) return null;
-    return cached.data;
+    return this.toLegacySnapshot(cached.result);
   }
 
-  private async fetchRouteGeometry(tripId: string): Promise<RouteGeometrySnapshot | null> {
+  private async fetchRouteGeometry(tripId: string): Promise<RouteGeometryFetchResult> {
     const url = this.buildUrl(tripId);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.env.TRACKING_DATA_PROVIDER_TIMEOUT_MS);
@@ -86,23 +123,23 @@ export class HttpRouteGeometryProvider implements RouteGeometryProvider {
         signal: controller.signal,
       });
 
+      if (response.status === 404) {
+        return this.cacheTransient(tripId, { kind: 'not_found' });
+      }
       if (!response.ok) {
-        this.cache.set(tripId, { data: null, expiresAt: Date.now() + 30_000 });
-        return null;
+        return this.cacheTransient(tripId, { kind: 'unavailable' });
       }
 
       const body = await response.json();
 
-      const envelope = ApiResponseEnvelopeSchema.safeParse(body);
+      const envelope = apiResponseEnvelopeSchema.safeParse(body);
       if (!envelope.success) {
-        this.cache.set(tripId, { data: null, expiresAt: Date.now() + 30_000 });
-        return null;
+        return this.cacheTransient(tripId, { kind: 'unavailable' });
       }
 
-      const parsed = RouteGeometryDataSchema.safeParse(envelope.data.data);
-      if (!parsed.success || parsed.data.points.length < 2) {
-        this.cache.set(tripId, { data: null, expiresAt: Date.now() + 30_000 });
-        return null;
+      const parsed = routeGeometryDataSchema.safeParse(envelope.data.data);
+      if (!parsed.success || parsed.data.tripId !== tripId) {
+        return this.cacheTransient(tripId, { kind: 'unavailable' });
       }
 
       const points: RouteGeometryPoint[] = parsed.data.points.map((p) => ({
@@ -113,20 +150,31 @@ export class HttpRouteGeometryProvider implements RouteGeometryProvider {
       const result: RouteGeometrySnapshot = {
         tripId: parsed.data.tripId,
         points,
+        ...(parsed.data.geometrySource ? { geometrySource: parsed.data.geometrySource } : {}),
+        ...(parsed.data.originStation !== undefined
+          ? { originStation: parsed.data.originStation ?? null }
+          : {}),
+        ...(parsed.data.intermediateStops
+          ? { intermediateStops: parsed.data.intermediateStops.map((stop) => ({ ...stop })) }
+          : {}),
+        ...(parsed.data.destinationStation !== undefined
+          ? { destinationStation: parsed.data.destinationStation ?? null }
+          : {}),
         ...(parsed.data.alertRecipientUserIds?.length
           ? { alertRecipientUserIds: parsed.data.alertRecipientUserIds }
           : {}),
       };
 
+      const fetchResult: RouteGeometryFetchResult = { kind: 'ok', snapshot: result };
+
       this.cache.set(tripId, {
-        data: result,
+        result: fetchResult,
         expiresAt: Date.now() + this.env.TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS * 1000,
       });
 
-      return result;
+      return fetchResult;
     } catch {
-      this.cache.set(tripId, { data: null, expiresAt: Date.now() + 30_000 });
-      return null;
+      return this.cacheTransient(tripId, { kind: 'unavailable' });
     } finally {
       clearTimeout(timeout);
     }
@@ -135,5 +183,18 @@ export class HttpRouteGeometryProvider implements RouteGeometryProvider {
   private buildUrl(tripId: string): string {
     const path = this.env.TRIP_ROUTE_GEOMETRY_PATH.replace(':tripId', encodeURIComponent(tripId));
     return new URL(path, this.env.TRIP_SERVICE_BASE_URL).toString();
+  }
+
+  private cacheTransient(
+    tripId: string,
+    result: Extract<RouteGeometryFetchResult, { kind: 'not_found' | 'unavailable' }>,
+  ): RouteGeometryFetchResult {
+    this.cache.set(tripId, { result, expiresAt: Date.now() + 30_000 });
+    return result;
+  }
+
+  private toLegacySnapshot(result: RouteGeometryFetchResult): RouteGeometrySnapshot | null {
+    if (result.kind !== 'ok' || result.snapshot.points.length < 2) return null;
+    return result.snapshot;
   }
 }

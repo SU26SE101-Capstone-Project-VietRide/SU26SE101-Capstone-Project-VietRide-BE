@@ -193,11 +193,13 @@ services:
       RabbitMq__ExchangeName: ${RABBITMQ_EXCHANGE:-vietride.events}
       TRIP_SERVICE_BASE_URL: http://trip:5002
       PAYMENT_SERVICE_BASE_URL: http://payment:5004
+      PARCEL_SERVICE_BASE_URL: http://parcel:5005
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
       # appsettings.json carries localhost defaults for running outside Docker. Override the
       # hierarchical keys too because IConfiguration resolves them before the env fallbacks.
       Trip__BaseUrl: http://trip:5002
       Payment__BaseUrl: http://payment:5004
+      Parcel__BaseUrl: http://parcel:5005
       Identity__BaseUrl: http://identity:5001
     healthcheck:
       test:
@@ -225,6 +227,14 @@ services:
       RabbitMq__UserName: ${RABBITMQ_USER:-vietride}
       RabbitMq__Password: ${RABBITMQ_PASSWORD}
       RabbitMq__ExchangeName: ${RABBITMQ_EXCHANGE:-vietride.events}
+      BOOKING_SERVICE_BASE_URL: http://booking:5003
+      TRIP_SERVICE_BASE_URL: http://trip:5002
+      PARCEL_SERVICE_BASE_URL: http://parcel:5005
+      IDENTITY_SERVICE_BASE_URL: http://identity:5001
+      Booking__BaseUrl: http://booking:5003
+      Trip__BaseUrl: http://trip:5002
+      Parcel__BaseUrl: http://parcel:5005
+      Identity__BaseUrl: http://identity:5001
       VNPAY_TMN_CODE: ${VNPAY_TMN_CODE:?VNPAY_TMN_CODE is required}
       VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:?VNPAY_HASH_SECRET is required}
       VNPAY_BASE_URL: ${VNPAY_BASE_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}

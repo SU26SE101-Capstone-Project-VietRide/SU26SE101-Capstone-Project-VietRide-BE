@@ -2,6 +2,7 @@ import type { ChannelModel, ConfirmChannel, ConsumeMessage } from 'amqplib';
 import { Logger } from '@nestjs/common';
 import { RabbitMqConsumer, type RabbitMqHandler } from './rabbitmq.consumer';
 import type { NestRabbitMqOptions } from './rabbitmq.tokens';
+import { RabbitMqTopologyHealth } from './rabbitmq.topology-health';
 
 describe('RabbitMqConsumer', () => {
   const exchange = 'vietride.events';
@@ -167,7 +168,8 @@ describe('RabbitMqConsumer', () => {
   });
 
   it('logs the conflicting queue and resolves when the broker rejects the queue declaration', async () => {
-    const consumer = createConsumer(connection);
+    const topologyHealth = new RabbitMqTopologyHealth();
+    const consumer = createConsumer(connection, topologyHealth);
     const errorSpy = jest.spyOn(Logger.prototype, 'error');
     channel.assertQueue.mockRejectedValue(
       new Error(
@@ -186,6 +188,26 @@ describe('RabbitMqConsumer', () => {
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining('PRECONDITION_FAILED'),
     );
+    expect(topologyHealth.isHealthy).toBe(false);
+    expect(topologyHealth.list()).toEqual([
+      {
+        queue,
+        routingKey,
+        error: expect.stringContaining('PRECONDITION_FAILED') as unknown as string,
+      },
+    ]);
+  });
+
+  it('reports healthy topology and clears a previous failure once the queue asserts', async () => {
+    const topologyHealth = new RabbitMqTopologyHealth();
+    topologyHealth.record({ queue, routingKey, error: 'PRECONDITION_FAILED - stale run' });
+
+    const consumer = createConsumer(connection, topologyHealth);
+    await consumer.subscribe(queue, routingKey, jest.fn(), { deadLetter: true });
+
+    expect(channel.consume).toHaveBeenCalled();
+    expect(topologyHealth.list()).toEqual([]);
+    expect(topologyHealth.isHealthy).toBe(true);
   });
 
   it('acks messages after successful json parse and handler completion', async () => {
@@ -203,14 +225,17 @@ describe('RabbitMqConsumer', () => {
   });
 });
 
-function createConsumer(connection: ChannelModel): RabbitMqConsumer {
+function createConsumer(
+  connection: ChannelModel,
+  topologyHealth: RabbitMqTopologyHealth = new RabbitMqTopologyHealth(),
+): RabbitMqConsumer {
   const options: NestRabbitMqOptions = {
     url: 'amqp://localhost',
     exchange: 'vietride.events',
     exchangeType: 'topic',
   };
 
-  return new RabbitMqConsumer(connection, options);
+  return new RabbitMqConsumer(connection, options, topologyHealth);
 }
 
 function createChannelMock(): jest.Mocked<ConfirmChannel> {
