@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import type { ChannelModel, ConfirmChannel, ConsumeMessage } from 'amqplib';
 import { RABBITMQ_CONNECTION, RABBITMQ_OPTIONS, type NestRabbitMqOptions } from './rabbitmq.tokens';
+import { RabbitMqTopologyHealth } from './rabbitmq.topology-health';
 
 export type RabbitMqHandler<T = unknown> = (payload: T, raw: ConsumeMessage) => Promise<void> | void;
 
@@ -27,6 +28,7 @@ export class RabbitMqConsumer implements OnModuleDestroy {
   constructor(
     @Inject(RABBITMQ_CONNECTION) private readonly conn: ChannelModel,
     @Inject(RABBITMQ_OPTIONS) private readonly opts: NestRabbitMqOptions,
+    private readonly topologyHealth: RabbitMqTopologyHealth,
   ) {}
 
   /**
@@ -67,10 +69,13 @@ export class RabbitMqConsumer implements OnModuleDestroy {
         await ch.bindQueue(queue, this.opts.exchange, this.retryReturnRoutingKey(queue));
       }
       if (options.prefetch) await ch.prefetch(options.prefetch);
+      this.topologyHealth.clear(queue);
     } catch (err) {
       // Broker rejected the topology (e.g. 406 inequivalent args on an existing durable
       // queue after a routing-key rename). Keep the service alive without this consumer;
-      // the stale queue must be deleted on the broker so it can be redeclared.
+      // the stale queue must be deleted on the broker so it can be redeclared. Record the
+      // failure so readiness reports degraded instead of the consumer vanishing silently.
+      this.topologyHealth.record({ queue, routingKey, error: (err as Error).message });
       this.logger.error(
         `Topology assertion failed on queue=${queue} rk=${routingKey}: ${(err as Error).message}. ` +
           `Consumer NOT started; delete the stale queue on the broker so it can be redeclared, then restart.`,

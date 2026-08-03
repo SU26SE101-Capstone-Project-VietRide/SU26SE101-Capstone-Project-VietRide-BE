@@ -3,7 +3,7 @@ import {
   BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
   type BookingPendingActionAutoResolvedEvent,
 } from '@vietride/contracts';
-import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
+import { RabbitMqConsumer, RabbitMqTopologyHealth } from '@vietride/nest-rabbitmq';
 import type { Channel, ChannelModel, ConsumeMessage } from 'amqplib';
 import {
   BOOKING_TRIP_CHANGE_QUEUE_BINDINGS,
@@ -22,11 +22,15 @@ describe('Day 23 schedule notification e2e:', () => {
     const connection = {
       createConfirmChannel: jest.fn(async () => createChannel(channels, consumeHandlers)),
     } as unknown as jest.Mocked<ChannelModel>;
-    const rabbitConsumer = new RabbitMqConsumer(connection, {
-      url: 'amqp://localhost',
-      exchange: 'vietride.events',
-      exchangeType: 'topic',
-    });
+    const rabbitConsumer = new RabbitMqConsumer(
+      connection,
+      {
+        url: 'amqp://localhost',
+        exchange: 'vietride.events',
+        exchangeType: 'topic',
+      },
+      new RabbitMqTopologyHealth(),
+    );
     const processed = new Set<string>();
     const idempotency = {
       begin: jest.fn(async (routingKey: string, messageId: string) =>

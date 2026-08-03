@@ -1,5 +1,5 @@
 import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { RABBITMQ_CONNECTION } from '@vietride/nest-rabbitmq';
+import { RABBITMQ_CONNECTION, RabbitMqTopologyHealth } from '@vietride/nest-rabbitmq';
 import { RedisService } from '@vietride/nest-redis';
 import type { ChannelModel } from 'amqplib';
 import { ENV_TOKEN } from './tokens';
@@ -29,6 +29,7 @@ export class ReadinessService {
     private readonly embeddingProbe: EmbeddingDimensionProbeService,
     @Inject(ENV_TOKEN) private readonly env: Env,
     @Inject(RABBITMQ_CONNECTION) private readonly rabbitMqConnection: ChannelModel,
+    private readonly topologyHealth: RabbitMqTopologyHealth,
   ) {}
 
   async check(): Promise<ReadinessDto> {
@@ -41,9 +42,18 @@ export class ReadinessService {
         this.embeddingProbe.probe(),
       ]);
     } catch {
+      // Queue and routing key are our own constants, safe to expose; the broker's
+      // message stays in the logs so readiness never leaks dependency internals.
+      const failedConsumers = this.topologyHealth
+        .list()
+        .map(({ queue, routingKey }) => ({ queue, routingKey }));
+
       throw new ServiceUnavailableException({
         errorCode: 'RAG_DEPENDENCY_UNAVAILABLE',
-        detail: 'RAG dependency readiness check failed',
+        detail: failedConsumers.length
+          ? `${failedConsumers.length} RabbitMQ consumer(s) failed topology assertion`
+          : 'RAG dependency readiness check failed',
+        ...(failedConsumers.length ? { failedConsumers } : {}),
       });
     }
 
@@ -71,6 +81,10 @@ export class ReadinessService {
   private async checkRabbitMq(): Promise<void> {
     const channel = await this.rabbitMqConnection.createChannel();
     await channel.close();
+
+    if (!this.topologyHealth.isHealthy) {
+      throw new Error('RabbitMQ consumers degraded');
+    }
   }
 
   private checkCloudinaryConfig(): void {
