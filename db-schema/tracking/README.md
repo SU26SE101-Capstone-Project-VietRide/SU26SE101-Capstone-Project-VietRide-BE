@@ -2,7 +2,7 @@
 
 ## Overview
 
-Tracking Service là **NestJS service** xử lý real-time GPS broadcast (Socket.IO) + ETA calculation + off-route detection. DB rất nhẹ — hầu hết state ở Redis (5 phút TTL), chỉ persist `GpsTrail` history (batch insert mỗi 5–10 phút từ Redis buffer) và `OutboxEvent` cho các broadcast event (TripDelayed, OffRouteAlert, ApproachingAlert).
+Tracking Service là **NestJS service** xử lý real-time GPS broadcast (Socket.IO), ETA, off-route detection và capability grant cho người thân theo dõi chuyến đi. Phần lớn state realtime nằm ở Redis; PostgreSQL persist `GpsTrail`, Outbox và `TripShareGrant`.
 
 - **Database:** `vietride_tracking`
 - **Framework:** NestJS + Prisma
@@ -19,14 +19,17 @@ Tracking Service là **NestJS service** xử lý real-time GPS broadcast (Socket
 | `GpsTrail` | GPS history per trip. Persisted from Redis buffer. | `tripId`, `lat`/`lng` decimal(10,7), `speedKmh` nullable, `recordedAt` |
 | `OutboxEvent` | Outbox pattern. | `eventType` (TripDelayed/OffRouteAlert/etc.), `payload` JSONB |
 | `OutboxDlq` | Terminal publish failures for operational review. | unique `eventId`, event metadata/payload, retry count, terminal time |
+| `TripShareGrant` | Capability grant cho guest trip sharing; không lưu token thô. | logical `tripId`, logical `createdByUserId`, SHA-256 `tokenHash`, expiry/revoke state |
 
 ## Design Decisions
 
-- **Minimal DB by design** — v6 spec: "Tracking Service có PostgreSQL DB riêng — chỉ chứa GpsTrail (và OutboxEvent nếu publish event). Redis handle realtime state."
+- **DB tối giản theo domain** — GPS realtime và ETA vẫn ở Redis; PostgreSQL chỉ chứa lịch sử GPS, Outbox/DLQ và lifecycle của share grant.
 - **`gps_trails.lat/lng` decimal(10,7)** — đủ độ chính xác ~1cm theo v6 spec.
 - **`gps_trails.recorded_at` vs `created_at`** — phân biệt thời điểm GPS sample (driver app) vs insert time (batch flush). Index trên `recorded_at` cho time-range query trail playback.
-- **NO foreign key** (chỉ logical FK `trip_id`) — Tracking Service không cần DB-level reference; trip lifecycle do Trip-Route-Vehicle Service quản lý.
+- **Không có cross-database foreign key** — `trip_id` và `created_by_user_id` là logical FK, được kiểm tra qua HTTP/event boundary.
 - **NO authorization data** trong DB — Socket.IO room authorization (joinTripTracking) verify ở handler thời điểm runtime qua HTTP internal call (xem v6 Section 5.5).
+- **Không lưu capability token thô** — `trip_share_grants.token_hash` chỉ lưu SHA-256 lowercase hex; HMAC secret chỉ đến từ environment.
+- **Một grant active cho mỗi owner/trip** — partial unique index chỉ áp dụng khi `revoked_at IS NULL`.
 - **Redis state list (reference, không trong DB):**
   - `tracking:latest:{tripId}` — last known position (TTL 5 min)
   - `tracking:gps_buffer:{tripId}` — buffer list (đến khi flush)
@@ -46,17 +49,22 @@ data and must never be written to application logs. Replay and purge are out of 
 
 | Index | Columns | Type | Purpose |
 |---|---|---|---|
-| `idx_gps_trails_trip_id_recorded_at` | `(trip_id, recorded_at)` | B-tree | Trail playback per trip |
+| `uq_gps_trails_trip_recorded_at` | `(trip_id, recorded_at)` | unique | Idempotent GPS history và trail playback |
 | `idx_gps_trails_recorded_at` | `recorded_at` | B-tree | Time-range cleanup (90-day retention) |
-| `idx_outbox_events_status_created` | partial | B-tree | Outbox poll |
+| `idx_outbox_events_status_created` | `(status, created_at)` | B-tree | Outbox poll |
 | `uq_outbox_dlq_event_id` | `event_id` | unique | Prevent duplicate terminal records on worker replay |
 | `idx_outbox_dlq_terminal_event_id` | `(terminal_at, event_id)` | B-tree | Read DLQ theo cursor contract |
+| `uq_trip_share_grants_token_hash` | `token_hash` | unique | Không cho hai grant dùng cùng capability token hash |
+| `uq_trip_share_grants_active_owner_trip` | `(trip_id, created_by_user_id)` where active | partial unique | Một active grant cho mỗi passenger/trip |
+| `idx_trip_share_grants_active_expires_at` | `expires_at` where active | partial B-tree | Tìm grant active đã hết hạn |
 
 ## Cross-service References (Logical FK)
 
 | Column | References | Enforcement |
 |---|---|---|
 | `GpsTrail.tripId` | `trip.Trip.id` | implicit (Tracking Service trusts driver app to send valid tripId; verify via Socket.IO joinTripTracking authorization) |
+| `TripShareGrant.tripId` | `trip.Trip.id` | HTTP snapshot và terminal integration event |
+| `TripShareGrant.createdByUserId` | `identity.User.id` | Identity JWT + Booking owner authorization |
 
 ## Migration Strategy
 

@@ -5,7 +5,8 @@
 -- Framework: NestJS + Prisma ORM
 -- =============================================================================
 -- Minimal DB — most state lives in Redis (last position, GPS buffer, ETA cache).
--- This DB only persists batched GpsTrail history and OutboxEvent.
+-- This DB persists batched GpsTrail history, Outbox reliability data, and
+-- capability grants for guest trip sharing.
 -- =============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -18,6 +19,12 @@ SET search_path TO vietride_tracking, public;
 -- =============================================================================
 
 CREATE TYPE outbox_event_status AS ENUM ('PENDING', 'PUBLISHING', 'PUBLISHED', 'FAILED');
+CREATE TYPE trip_share_grant_revoke_reason AS ENUM (
+    'USER_REVOKED',
+    'TRIP_TERMINATED',
+    'EXPIRED',
+    'CREATION_ROLLBACK'
+);
 
 -- =============================================================================
 -- TABLES
@@ -48,6 +55,40 @@ COMMENT ON TABLE gps_trails IS
     'GPS history per trip. Batch inserted by BullMQ scheduled job every 5–10 min from Redis buffer.';
 COMMENT ON COLUMN gps_trails.recorded_at IS
     'Time GPS sample was captured by driver app (not insert time).';
+
+-- -----------------------------------------------------------------------------
+-- trip_share_grants (anonymous capability links for active main trips)
+-- -----------------------------------------------------------------------------
+CREATE TABLE trip_share_grants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id UUID NOT NULL,                    -- logical FK trip.trips
+    created_by_user_id UUID NOT NULL,         -- logical FK identity.users
+    token_hash CHAR(64) NOT NULL,
+    token_version SMALLINT NOT NULL DEFAULT 1,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ NULL,
+    revoke_reason trip_share_grant_revoke_reason NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_trip_share_grants_expires_after_created
+        CHECK (expires_at > created_at),
+    CONSTRAINT chk_trip_share_grants_token_hash
+        CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_trip_share_grants_token_version_positive
+        CHECK (token_version > 0)
+);
+
+CREATE UNIQUE INDEX uq_trip_share_grants_token_hash
+    ON trip_share_grants (token_hash);
+CREATE UNIQUE INDEX uq_trip_share_grants_active_owner_trip
+    ON trip_share_grants (trip_id, created_by_user_id)
+    WHERE revoked_at IS NULL;
+CREATE INDEX idx_trip_share_grants_active_expires_at
+    ON trip_share_grants (expires_at)
+    WHERE revoked_at IS NULL;
+
+COMMENT ON TABLE trip_share_grants IS
+    'Capability grants for anonymous guest tracking. Only a SHA-256 token hash is persisted.';
 
 -- -----------------------------------------------------------------------------
 -- outbox_events

@@ -19,6 +19,16 @@ enum OutboxEventStatus {
   @@schema("vietride_tracking")
 }
 
+enum TripShareGrantRevokeReason {
+  USER_REVOKED
+  TRIP_TERMINATED
+  EXPIRED
+  CREATION_ROLLBACK
+
+  @@map("trip_share_grant_revoke_reason")
+  @@schema("vietride_tracking")
+}
+
 model GpsTrail {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tripId     String   @map("trip_id") @db.Uuid
@@ -32,6 +42,22 @@ model GpsTrail {
   @@unique([tripId, recordedAt], map: "uq_gps_trails_trip_recorded_at")
   @@index([recordedAt], map: "idx_gps_trails_recorded_at")
   @@map("gps_trails")
+  @@schema("vietride_tracking")
+}
+
+model TripShareGrant {
+  id              String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tripId          String                      @map("trip_id") @db.Uuid
+  createdByUserId String                      @map("created_by_user_id") @db.Uuid
+  tokenHash       String                      @unique(map: "uq_trip_share_grants_token_hash") @map("token_hash") @db.Char(64)
+  tokenVersion    Int                         @default(1) @map("token_version") @db.SmallInt
+  expiresAt       DateTime                    @map("expires_at") @db.Timestamptz(6)
+  revokedAt       DateTime?                   @map("revoked_at") @db.Timestamptz(6)
+  revokeReason    TripShareGrantRevokeReason? @map("revoke_reason")
+  createdAt       DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("trip_share_grants")
   @@schema("vietride_tracking")
 }
 
