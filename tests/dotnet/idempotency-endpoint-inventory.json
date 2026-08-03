@@ -2,8 +2,8 @@
   "version": 3,
   "policy": "system-wide-idempotency-contract",
   "expectedSummary": {
-    "mutationSurfaces": 181,
-    "required": 164,
+    "mutationSurfaces": 183,
+    "required": 166,
     "exemptions": 17
   },
   "services": {
@@ -909,6 +909,26 @@
         {
           "method": "POST",
           "path": "/v1/operator/notifications",
+          "policy": "required"
+        }
+      ]
+    },
+    "tracking": {
+      "stack": "nestjs",
+      "sourceDirectory": "apps/tracking/src",
+      "requiredDecorator": "ApiTripShareIdempotencyRequired",
+      "decoratorFile": "apps/tracking/src/trip-sharing/trip-share-idempotency.swagger.ts",
+      "expectedMutationCount": 2,
+      "expectedRequiredCount": 2,
+      "endpoints": [
+        {
+          "method": "PUT",
+          "path": "/v1/tracking/trips/:tripId/share-link",
+          "policy": "required"
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/tracking/trips/:tripId/share-link",
           "policy": "required"
         }
       ]

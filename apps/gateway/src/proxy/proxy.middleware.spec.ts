@@ -137,6 +137,39 @@ describe('createProxyHandler auth enforcement', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
+  it('proxies anonymous shared-trip context with query and share-token headers intact', async () => {
+    const upstreamHandler = jest.fn();
+    createProxyMiddlewareMock.mockReturnValue(
+      upstreamHandler as unknown as ReturnType<typeof createProxyMiddleware>,
+    );
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = makeRequest(
+      '/v1/tracking/shared-trip/context?locale=vi',
+      {
+        'x-request-id': 'req-shared-context',
+        'x-trip-share-token': 'v1.grant.signature',
+      },
+      'GET',
+    );
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({ sub: 'anonymous', reqId: 'req-shared-context' });
+    expect(req.headers['x-trip-share-token']).toBe('v1.grant.signature');
+    expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+    expect(req.url).toBe('/v1/tracking/shared-trip/context?locale=vi');
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.TRACKING_BASE_URL }),
+    );
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
   it('proxies Day 9 Trip route families instead of returning ROUTE_NOT_FOUND', async () => {
     const upstreamHandler = jest.fn();
     createProxyMiddlewareMock.mockReturnValue(

@@ -32,6 +32,8 @@ Before any environment that's not your laptop:
 - [ ] Set real `VNPAY_HASH_SECRET`, `SENDGRID_API_KEY`, `FIREBASE_PRIVATE_KEY`, `GOOGLE_MAPS_API_KEY`, `ANTHROPIC_API_KEY` per `.env.example`.
 - [ ] Confirm no `.env` accidentally baked into Docker image (`.dockerignore` should block it; verify with `docker run --rm <image> sh -c 'ls -la /.env* /app/.env*'`).
 - [ ] Confirm `ASPNETCORE_ENVIRONMENT=Production` (disables Swagger UI by default).
+- [ ] Tạo `TRACKING_SHARE_TOKEN_SECRET` ngẫu nhiên tối thiểu 32 byte, cấu hình riêng cho Tracking và
+  xác nhận secret không xuất hiện trong image, log hoặc output chẩn đoán.
 
 ## 3. Secret-handling rules
 
@@ -40,11 +42,42 @@ Before any environment that's not your laptop:
 3. **JWT secret rotation:** Internal JWT uses HS256 (symmetric) — rotation requires synchronous redeploy of Gateway + all 5 .NET services. There's no key-id; capstone v1 ships with single-key rotation. See [Appendix A.5 of BACKEND_SOURCE_OF_TRUTH.md](../BACKEND_SOURCE_OF_TRUTH.md) for procedure.
 4. **User Access Token (RS256):** Identity holds the private key, all other services verify via JWKS public endpoint. Key rotation = add new key to JWKS, wait for cache TTL (1h), retire old key.
 
-## 4. Reporting
+## 4. Capability token chia sẻ hành trình
+
+Link chia sẻ hành trình là bearer capability: bất kỳ ai có token đều xem được snapshot public cho
+đến khi grant hết hiệu lực. Áp dụng các quy tắc sau:
+
+1. Token có dạng `v1.<grant UUID>.<base64url HMAC-SHA256>` và chỉ được ký bằng
+   `TRACKING_SHARE_TOKEN_SECRET` tối thiểu 32 byte. Tracking phải fail startup nếu secret thiếu/yếu.
+2. PostgreSQL chỉ lưu SHA-256 của full token. Redis chỉ lưu token hash/fingerprint, grant ID và
+   outcome metadata; không lưu raw token hoặc URL chứa token.
+3. Share page đặt token trong URL fragment (`#token=...`) và gửi capability bằng
+   `X-Trip-Share-Token`. Response guest luôn `Cache-Control: no-store`, `Pragma: no-cache` và
+   `Referrer-Policy: no-referrer`.
+4. Không log raw share URL, handshake `auth.shareToken` hoặc header `X-Trip-Share-Token`. Cấu hình
+   logger/proxy phải redact các field/header này; khi điều tra chỉ dùng grant ID hoặc token hash.
+5. Gateway chỉ mở anonymous exact `GET /v1/tracking/shared-trip/context`. Namespace Socket.IO
+   `/shared` đi trực tiếp Tracking/Nginx và tự xác minh capability; Identity JWT và share token không
+   thay thế lẫn nhau giữa namespace public/private.
+6. Public DTO dùng allow-list và cấm internal ID, Booking/Ticket/seat, email, phone, passenger,
+   driver, assistant, operator data và GPS history. Grant-level room bảo đảm revoke Passenger A
+   không ngắt hoặc phát token/data của Passenger B trên cùng Trip.
+7. Rate limiter Redis fail closed: mặc định 60 context request/token-hash/phút và 20 socket
+   handshake/token-hash/phút. Socket có expiry timer và revalidate grant/Trip định kỳ.
+
+### Rotation secret chia sẻ
+
+Phase 13 chỉ có token version v1 và một signing secret, không có key ID hay dual-key window. Rotation
+`TRACKING_SHARE_TOKEN_SECRET` làm toàn bộ link v1 đang lưu hành mất hiệu lực ngay khi Tracking dùng
+secret mới. Trước rotation phải thông báo tác động, triển khai đồng nhất mọi Tracking replica, restart
+Tracking, xác nhận link cũ trả `401 TRACKING_SHARE_TOKEN_INVALID`, rồi yêu cầu Passenger tạo link mới.
+Không rollback sang secret cũ sau khi đã phát link bằng secret mới vì sẽ làm link mới mất hiệu lực.
+
+## 5. Reporting
 
 Capstone scope — no formal CVD program. If you find an issue during the SU26SE101 cycle, file it on the team's internal channel + tag the BE lead. For post-capstone (production deploy), set up a `SECURITY.md` policy and a `security@vietride.app` mailbox.
 
-## 5. Related docs
+## 6. Related docs
 
 - [BACKEND_SOURCE_OF_TRUTH.md §6](../BACKEND_SOURCE_OF_TRUTH.md) — Auth/JWT canonical
 - [Appendix A.5](../BACKEND_SOURCE_OF_TRUTH.md) — Internal JWT rotation procedure

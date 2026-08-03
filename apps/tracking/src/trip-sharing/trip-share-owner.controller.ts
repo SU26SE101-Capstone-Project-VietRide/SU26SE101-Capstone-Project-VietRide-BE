@@ -9,7 +9,6 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiHeader,
   ApiOperation,
   ApiParam,
   ApiResponse,
@@ -30,6 +29,7 @@ import { TripShareOwnerService } from './trip-share-owner.service';
 import { TripShareLinkEnvelopeSwaggerDto } from './trip-share-link-envelope.swagger.dto';
 import { TripShareRevokedEnvelopeSwaggerDto } from './trip-share-revoked-envelope.swagger.dto';
 import { TripShareErrorEnvelopeSwaggerDto } from './trip-share-error-envelope.swagger.dto';
+import { ApiTripShareIdempotencyRequired } from './trip-share-idempotency.swagger';
 
 @ApiTags('Trip Sharing')
 @ApiBearerAuth()
@@ -41,7 +41,7 @@ export class TripShareOwnerController {
   @Put(':tripId/share-link')
   @ApiOperation({ summary: 'Create or return the passenger-owned active trip share link' })
   @ApiParam({ name: 'tripId', type: 'string', format: 'uuid' })
-  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
+  @ApiTripShareIdempotencyRequired()
   @ApiResponse({ status: 200, type: TripShareLinkEnvelopeSwaggerDto })
   @ApiResponse({ status: 400, type: TripShareErrorEnvelopeSwaggerDto })
   @ApiResponse({ status: 401, type: TripShareErrorEnvelopeSwaggerDto })
@@ -67,7 +67,7 @@ export class TripShareOwnerController {
   @Delete(':tripId/share-link')
   @ApiOperation({ summary: 'Revoke the passenger-owned active trip share link' })
   @ApiParam({ name: 'tripId', type: 'string', format: 'uuid' })
-  @ApiHeader({ name: 'Idempotency-Key', required: true, schema: { type: 'string', format: 'uuid' } })
+  @ApiTripShareIdempotencyRequired()
   @ApiResponse({ status: 200, type: TripShareRevokedEnvelopeSwaggerDto })
   @ApiResponse({ status: 400, type: TripShareErrorEnvelopeSwaggerDto })
   @ApiResponse({ status: 401, type: TripShareErrorEnvelopeSwaggerDto })

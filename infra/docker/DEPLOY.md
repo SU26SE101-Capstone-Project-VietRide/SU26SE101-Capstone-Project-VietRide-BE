@@ -98,6 +98,14 @@ VNPAY_BASE_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
 VNPAY_RETURN_URL=https://app.vietride.online/payments/return
 VNPAY_IPN_URL=https://api.vietride.online/v1/payments/vnpay-ipn
 VNPAY_PAYMENT_TIMEOUT_MINUTES=15
+
+# Tracking Phase 13 — capability link chia sẻ Main Trip
+TRACKING_SHARE_TOKEN_SECRET=<openssl rand -hex 32>
+TRACKING_SHARE_PAGE_URL=https://app.vietride.online/trip-sharing
+TRACKING_SHARE_TOKEN_TTL_SECONDS=86400
+TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN=60
+TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN=20
+TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS=60
 ```
 
 `VNPAY_PAYMENT_TIMEOUT_MINUTES` is the legacy null-`DueAt` fallback. Persisted payment deadlines
@@ -218,6 +226,21 @@ Remove the email from the Access policy — effective immediately, no server cha
 ---
 
 ## Notes
+- Gateway chỉ mở anonymous exact `GET /v1/tracking/shared-trip/context`; mọi request Tracking khác
+  tiếp tục cần Identity JWT. Header `X-Trip-Share-Token` phải được forward nguyên vẹn và phải được
+  redact khỏi access/application logs.
+- Socket guest dùng namespace `/shared`, path `/tracking/socket.io` và đi trực tiếp qua Nginx đến
+  Tracking vì Gateway chỉ proxy HTTP. Nginx phải giữ WebSocket upgrade cho `/tracking/socket.io`;
+  không route namespace này qua Gateway.
+- Phase 13 hiện giả định một Tracking replica cho room delivery. Không tăng replica trước khi có
+  Socket.IO Redis adapter; nếu tăng sớm, viewer có thể không nhận event/revoke từ replica khác.
+- Rotation `TRACKING_SHARE_TOKEN_SECRET` vô hiệu hóa ngay toàn bộ link v1 hiện tại. Triển khai secret
+  mới đồng nhất trên mọi Tracking replica, restart service, kiểm tra link cũ bị từ chối và yêu cầu
+  Passenger tạo link mới. Không log hoặc in secret/token trong lệnh kiểm tra.
+- Sau deploy, kiểm tra ba queue terminal riêng `tracking-trip-share-completed`,
+  `tracking-trip-share-cancelled`, `tracking-trip-share-disrupted` đã bind lần lượt với
+  `trip.trip.completed`, `trip.trip.cancelled`, `trip.trip.disrupted`; kiểm tra `/ready`, retry/DLQ và
+  không xóa queue đang còn message.
 - `tracking`, `notification`, `rag` (NestJS) are **not deployed yet** — their images aren't built
   by `docker-build.yml`. When ready: add them to that workflow's matrix, uncomment their blocks in
   `docker-compose.prod.yml`, uncomment the gateway `*_BASE_URL` lines, and the `/tracking/` route

@@ -574,6 +574,13 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN'],
     },
     {
+      prefix: '/v1/tracking/shared-trip',
+      target: env.TRACKING_BASE_URL,
+      authRequired: 'mixed',
+      publicSubpaths: [{ method: 'GET', path: '/v1/tracking/shared-trip/context' }],
+      forwardUserAuthorization: true,
+    },
+    {
       prefix: '/v1/tracking',
       target: env.TRACKING_BASE_URL,
       authRequired: 'user',
