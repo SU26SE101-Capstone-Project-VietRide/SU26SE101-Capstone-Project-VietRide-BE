@@ -90,8 +90,19 @@ internal sealed class FinancialActorPrivacyStore : IFinancialActorPrivacyStore
                 .SetProperty(item => item.ActorEmail, (string?)null)
                 .SetProperty(item => item.ActorRole, (string?)null)
                 .SetProperty(item => item.ActorSnapshotResolved, true), cancellationToken);
+        var ledgerEntries = await _db.OperatorLedgerEntries
+            .Where(item => item.ActorUserId == userId
+                && (item.ActorDisplayName != DeletedDisplayName
+                    || item.ActorEmail != null
+                    || item.ActorRole != null
+                    || !item.ActorSnapshotResolved))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.ActorDisplayName, DeletedDisplayName)
+                .SetProperty(item => item.ActorEmail, (string?)null)
+                .SetProperty(item => item.ActorRole, (string?)null)
+                .SetProperty(item => item.ActorSnapshotResolved, true), cancellationToken);
 
-        return settlements + transactions;
+        return settlements + transactions + ledgerEntries;
     }
 
     private Task<int> AcquireActorLockAsync(Guid userId, CancellationToken cancellationToken)

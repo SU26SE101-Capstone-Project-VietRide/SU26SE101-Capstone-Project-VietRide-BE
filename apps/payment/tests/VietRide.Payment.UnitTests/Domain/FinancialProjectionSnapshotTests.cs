@@ -56,6 +56,52 @@ public sealed class FinancialProjectionSnapshotTests
     }
 
     [Fact]
+    public void OperatorLedger_AutomatedWrite_IsSystemActor()
+    {
+        var entry = OperatorLedgerEntry.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            OperatorLedgerEntryType.BOOKING_REVENUE,
+            100_000,
+            OperatorLedgerReferenceType.BOOKING,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "automated revenue");
+
+        entry.ActorType.Should().Be(FinancialActorType.SYSTEM);
+        entry.ActorUserId.Should().BeNull();
+        entry.ActorSnapshotResolved.Should().BeTrue();
+        entry.Note.Should().Be("automated revenue");
+    }
+
+    [Fact]
+    public void OperatorLedger_ManualWrite_PersistsCompleteUserSnapshot()
+    {
+        var actor = new FinancialActorSnapshot(
+            Guid.NewGuid(),
+            "System Admin",
+            "admin@vietride.vn",
+            "SYSTEM_ADMIN");
+        var entry = OperatorLedgerEntry.Create(
+            Guid.NewGuid(),
+            null,
+            OperatorLedgerEntryType.ADJUSTMENT,
+            50_000,
+            OperatorLedgerReferenceType.MANUAL,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "Manual correction",
+            actor);
+
+        entry.ActorType.Should().Be(FinancialActorType.USER);
+        entry.ActorUserId.Should().Be(actor.UserId);
+        entry.ActorDisplayName.Should().Be(actor.DisplayName);
+        entry.ActorEmail.Should().Be(actor.Email);
+        entry.ActorRole.Should().Be(actor.Role);
+        entry.ActorSnapshotResolved.Should().BeTrue();
+    }
+
+    [Fact]
     public void ManualSettlement_PersistsOperatorAndSettledBySnapshots()
     {
         var operatorId = Guid.NewGuid();

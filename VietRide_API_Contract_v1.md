@@ -4680,11 +4680,11 @@ Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `type?`, `
 
 ### GET `/v1/operator/trip-settlements`
 
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `status?`, `tripId?`, `from?`, `to?`, `sortBy?` (`createdAt|eligibleAt|settledAt|netAmount`), `sortDir?`. Items contain `settlementId`, `tripId`, `status`, `eligibleAt`, `netAmount`, `settlementMethod`, `settledAt`, `createdAt`.
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `status?`, `tripId?`, `from?`, `to?`, `sortBy?` (`createdAt|eligibleAt|settledAt|netAmount`), `sortDir?`. Items contain the legacy fields `settlementId`, `tripId`, `status`, `eligibleAt`, `netAmount`, `settlementMethod`, `settledAt`, `createdAt`, plus additive nullable `settledBy` (`{ userId, displayName, email, role }` or `null`). `settledBy=null` identifies automatic weekly settlement; a manual admin settlement includes the authenticated admin snapshot when available. Operator identity is omitted because the route is tenant-scoped.
 
 ### GET `/v1/operator/ledger`
 
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `tripId?`, `entryType?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain `ledgerEntryId`, `tripId`, `entryType`, signed `amount`, `referenceType`, `referenceId`, `createdAt`. Internal source-event identifiers and sensitive notes are not returned.
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `tripId?`, `entryType?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain the legacy fields `ledgerEntryId`, `tripId`, `entryType`, signed `amount`, `referenceType`, `referenceId`, `createdAt`, plus additive nullable `note`, `actorType` (`USER|SYSTEM`), and `actor` (`{ userId, displayName, email, role }` or `null`). Internal source-event identifiers are not returned. Automated/event-created rows use `actorType=SYSTEM`; admin wallet adjustments use `actorType=USER` and expose the authenticated admin snapshot when available. Historical manual rows whose actor cannot be proven may return `actor=null`.
 
 ### GET `/v1/admin/trip-settlements`
 

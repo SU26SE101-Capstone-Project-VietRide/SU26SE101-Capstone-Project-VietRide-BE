@@ -1,4 +1,5 @@
 using VietRide.Payment.Domain.Enums;
+using VietRide.Payment.Domain.ValueObjects;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Payment.Domain.Entities;
@@ -15,6 +16,12 @@ public sealed class OperatorLedgerEntry : BaseEntity<Guid>
     public Guid ReferenceId { get; private set; }
     public Guid SourceEventId { get; private set; }
     public string? Note { get; private set; }
+    public FinancialActorType ActorType { get; private set; } = FinancialActorType.SYSTEM;
+    public Guid? ActorUserId { get; private set; }
+    public string? ActorDisplayName { get; private set; }
+    public string? ActorEmail { get; private set; }
+    public string? ActorRole { get; private set; }
+    public bool ActorSnapshotResolved { get; private set; } = true;
 
     public static OperatorLedgerEntry Create(
         Guid operatorId,
@@ -24,7 +31,8 @@ public sealed class OperatorLedgerEntry : BaseEntity<Guid>
         OperatorLedgerReferenceType referenceType,
         Guid referenceId,
         Guid sourceEventId,
-        string? note = null)
+        string? note = null,
+        FinancialActorSnapshot? actor = null)
     {
         if (operatorId == Guid.Empty || referenceId == Guid.Empty || sourceEventId == Guid.Empty)
             throw new ArgumentException("Ledger identity fields are required.");
@@ -52,6 +60,38 @@ public sealed class OperatorLedgerEntry : BaseEntity<Guid>
             ReferenceId = referenceId,
             SourceEventId = sourceEventId,
             Note = note,
+            ActorType = actor is null ? FinancialActorType.SYSTEM : FinancialActorType.USER,
+            ActorUserId = actor?.UserId,
+            ActorDisplayName = actor?.DisplayName,
+            ActorEmail = actor?.Email,
+            ActorRole = actor?.Role,
         };
+    }
+
+    public void BackfillUserActor(FinancialActorSnapshot actor)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        if (ActorType != FinancialActorType.USER
+            || (ActorUserId.HasValue && ActorUserId != actor.UserId))
+        {
+            throw new InvalidOperationException("Actor snapshot does not belong to this ledger entry.");
+        }
+
+        ActorUserId = actor.UserId;
+        ActorDisplayName = actor.DisplayName;
+        ActorEmail = actor.Email;
+        ActorRole = actor.Role;
+        ActorSnapshotResolved = true;
+    }
+
+    public void MarkUserActorSnapshotUnavailable()
+    {
+        if (ActorType != FinancialActorType.USER)
+            throw new InvalidOperationException("Only user actor snapshots can be marked unavailable.");
+
+        ActorDisplayName = null;
+        ActorEmail = null;
+        ActorRole = null;
+        ActorSnapshotResolved = true;
     }
 }
