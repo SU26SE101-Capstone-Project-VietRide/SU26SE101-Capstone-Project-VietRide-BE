@@ -53,6 +53,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IRouteRepository, RouteRepository>();
         services.AddScoped<IRouteStopRepository, RouteStopRepository>();
         services.AddScoped<IRouteStopFareTemplateRepository, RouteStopFareTemplateRepository>();
+        services.AddScoped<IOperatorFareSurchargeSettingRepository, OperatorFareSurchargeSettingRepository>();
+        services.AddScoped<IOperatorFareSurchargePeriodRepository, OperatorFareSurchargePeriodRepository>();
+        services.AddScoped<IFareSurchargeService, FareSurchargeService>();
         services.AddScoped<IAlternativeRouteRepository, AlternativeRouteRepository>();
         services.AddScoped<IVehicleTypeRepository, VehicleTypeRepository>();
         services.AddScoped<IVehicleRepository, VehicleRepository>();

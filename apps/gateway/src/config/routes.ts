@@ -289,6 +289,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
+    {
+      prefix: '/v1/operator/fare-surcharges',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
     { prefix: '/v1/locations', target: env.TRIP_BASE_URL, authRequired: 'none' },
     {
       prefix: '/v1/admin/locations',

@@ -48,6 +48,10 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<RouteStopFareTemplate> RouteStopFareTemplates => Set<RouteStopFareTemplate>();
 
+    public DbSet<OperatorFareSurchargeSetting> OperatorFareSurchargeSettings => Set<OperatorFareSurchargeSetting>();
+
+    public DbSet<OperatorFareSurchargePeriod> OperatorFareSurchargePeriods => Set<OperatorFareSurchargePeriod>();
+
     public DbSet<AlternativeRoute> AlternativeRoutes => Set<AlternativeRoute>();
 
     public DbSet<AlternativeRouteStop> AlternativeRouteStops => Set<AlternativeRouteStop>();

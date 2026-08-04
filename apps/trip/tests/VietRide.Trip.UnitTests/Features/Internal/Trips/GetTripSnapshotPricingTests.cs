@@ -3,6 +3,7 @@ using VietRide.Shared.Application.Repositories;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 using VietRide.Trip.Domain.Entities;
 using RouteEntity = VietRide.Trip.Domain.Entities.Route;
@@ -149,6 +150,53 @@ public sealed class GetTripSnapshotPricingTests
     }
 
     [Fact]
+    public async Task ExplicitPricing_AppliesSurchargeAfterResolvingTemplateFare()
+    {
+        var surcharge = new FakeFareSurchargeService(20);
+        var fixture = SnapshotFixture.Create(surcharge);
+        fixture.Templates.Items.Add(RouteStopFareTemplate.Create(
+            fixture.Route.Id,
+            fixture.Stop.Id,
+            Money.FromRaw(150000),
+            WindowStart));
+
+        var result = await fixture.Handler.Handle(
+            new GetTripSnapshotQuery(fixture.Trip.Id, WindowStart.AddMinutes(1)),
+            CancellationToken.None);
+
+        result.OriginalBaseFare.Should().Be(250000);
+        result.BaseFare.Should().Be(300000);
+        result.SurchargePercent.Should().Be(20);
+        result.SurchargeAmount.Should().Be(50000);
+        result.Stops.Should().ContainSingle().Which.Should().Match<InternalTripStopSnapshotDto>(stop =>
+            stop.OriginalFareFromThisStop == 150000
+            && stop.FareFromThisStop == 180000
+            && stop.SurchargePercent == 20
+            && stop.SurchargeAmount == 30000);
+        surcharge.ResolveCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task OmittedPricing_DoesNotResolveOrApplySurcharge()
+    {
+        var surcharge = new FakeFareSurchargeService(20);
+        var fixture = SnapshotFixture.Create(surcharge);
+
+        var result = await fixture.Handler.Handle(
+            new GetTripSnapshotQuery(fixture.Trip.Id),
+            CancellationToken.None);
+
+        result.BaseFare.Should().Be(250000);
+        result.OriginalBaseFare.Should().BeNull();
+        result.SurchargePercent.Should().BeNull();
+        result.SurchargeAmount.Should().BeNull();
+        result.Stops.Should().ContainSingle().Which.OriginalFareFromThisStop.Should().BeNull();
+        result.Stops.Should().ContainSingle().Which.SurchargePercent.Should().BeNull();
+        result.Stops.Should().ContainSingle().Which.SurchargeAmount.Should().BeNull();
+        surcharge.ResolveCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task Snapshot_ExposesNullableRouteTotalDistanceForPerBookingDisruptionRefunds()
     {
         var fixture = SnapshotFixture.Create();
@@ -186,7 +234,7 @@ public sealed class GetTripSnapshotPricingTests
         public FakeRouteStopFareTemplateRepository Templates { get; }
         public FakeTripStopFareRepository Fares { get; }
 
-        public static SnapshotFixture Create()
+        public static SnapshotFixture Create(IFareSurchargeService? fareSurchargeService = null)
         {
             var operatorId = Guid.NewGuid();
             var origin = Station.Create("Origin", "origin", "HCM", "HCM");
@@ -225,9 +273,44 @@ public sealed class GetTripSnapshotPricingTests
                 new FakeStopRepository([stop]),
                 new FakeTripSeatRepository([]),
                 new FakeTripStopRepository([tripStop]),
-                fares);
+                fares,
+                fareSurchargeService);
 
             return new SnapshotFixture(handler, trip, route, stop, templates, fares);
+        }
+    }
+
+    private sealed class FakeFareSurchargeService(int percent) : IFareSurchargeService
+    {
+        private readonly FareSurchargeRule rule = new(Guid.NewGuid(), "Holiday", percent);
+
+        public int ResolveCount { get; private set; }
+
+        public Task<FareSurchargeRule?> ResolveAsync(
+            Guid operatorId,
+            DateTimeOffset departureDateTime,
+            CancellationToken cancellationToken = default)
+        {
+            ResolveCount++;
+            return Task.FromResult<FareSurchargeRule?>(rule);
+        }
+
+        public FareSurchargeAdjustment Apply(long originalFare, FareSurchargeRule? surchargeRule)
+        {
+            if (surchargeRule is null)
+                return new(originalFare, 0, 0, originalFare, null, null);
+
+            var effectiveFare = checked((long)decimal.Round(
+                originalFare * (100m + surchargeRule.Percent) / 100m,
+                0,
+                MidpointRounding.AwayFromZero));
+            return new(
+                originalFare,
+                surchargeRule.Percent,
+                effectiveFare - originalFare,
+                effectiveFare,
+                surchargeRule.PeriodId,
+                surchargeRule.PeriodName);
         }
     }
 

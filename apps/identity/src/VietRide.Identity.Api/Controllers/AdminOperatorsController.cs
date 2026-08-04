@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Admin.ApproveOperator;
 using VietRide.Identity.Application.Features.Admin.CreateOperator;
+using VietRide.Identity.Application.Features.Admin.GetOperatorDetail;
 using VietRide.Identity.Application.Features.Admin.ListOperators;
 using VietRide.Identity.Application.Features.Admin.RejectOperator;
 using VietRide.Identity.Application.Features.Admin.SuspendOperator;
@@ -47,6 +48,23 @@ public sealed class AdminOperatorsController : ControllerBase
                 sortBy,
                 sortDir,
                 status),
+            cancellationToken);
+
+        return Ok(response);
+    }
+
+    /// <summary>Returns the complete operator profile for System Admin detail views.</summary>
+    [HttpGet("{operatorId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<AdminOperatorDetailDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AdminOperatorDetailDto>> GetDetail(
+        Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        var response = await _sender.Send(
+            new GetOperatorDetailQuery(CurrentUserClaims.GetRole(User), operatorId),
             cancellationToken);
 
         return Ok(response);

@@ -179,8 +179,8 @@ public sealed class CreateRoundTripBookingCommandHandler
             : returnLockExpiresAt;
 
         var bookingGroupId = Guid.NewGuid();
-        var outboundPerSeatFare = Money.FromRaw(outboundTrip.BaseFare);
-        var returnPerSeatFare = Money.FromRaw(returnTrip.BaseFare);
+        var outboundPerSeatFare = Money.FromRaw(ResolvePerSeatFare(outboundTrip, request.Outbound.PickupStopId));
+        var returnPerSeatFare = Money.FromRaw(ResolvePerSeatFare(returnTrip, request.Return.PickupStopId));
         var outboundBaseFare = Money.FromRaw(outboundPerSeatFare.Amount * outboundSeatNumbers.Count);
         var returnBaseFare = Money.FromRaw(returnPerSeatFare.Amount * returnSeatNumbers.Count);
 
@@ -1036,6 +1036,15 @@ public sealed class CreateRoundTripBookingCommandHandler
         {
             throw new CodedValidationException("STOP_NOT_DROPOFF_ALLOWED", "Dropoff stop must be after pickup stop.");
         }
+    }
+
+    private static long ResolvePerSeatFare(TripSnapshot trip, Guid? pickupStopId)
+    {
+        if (!pickupStopId.HasValue)
+            return trip.BaseFare;
+
+        return trip.Stops.First(stop => stop.StopId == pickupStopId.Value).FareFromThisStop
+            ?? trip.BaseFare;
     }
 
     private static IReadOnlyList<CreateRoundTripBookingResult.RoundTripTicketResult> ToTicketResults(

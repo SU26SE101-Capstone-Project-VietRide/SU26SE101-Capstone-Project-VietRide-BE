@@ -218,6 +218,19 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes operator fare-surcharge settings to Trip with operator roles', () => {
+    const settings = matchRoute(routes, '/v1/operator/fare-surcharges/settings');
+    const periods = matchRoute(routes, '/v1/operator/fare-surcharges/periods');
+
+    expect(settings).toMatchObject({
+      prefix: '/v1/operator/fare-surcharges',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    });
+    expect(periods).toEqual(settings);
+  });
+
   it('routes passenger transfer confirmation to Booking with user auth', () => {
     const route = matchRoute(
       routes,
@@ -721,9 +734,7 @@ describe('buildRouteTable', () => {
   });
 
   it('routes crew parcel actions to Parcel with assigned crew roles', () => {
-    const crewParcelRouteIndex = routes.findIndex(
-      (route) => route.prefix === '/v1/crew/parcels',
-    );
+    const crewParcelRouteIndex = routes.findIndex((route) => route.prefix === '/v1/crew/parcels');
     const publicParcelRouteIndex = routes.findIndex((route) => route.prefix === '/v1/parcels');
 
     expect(crewParcelRouteIndex).toBeGreaterThanOrEqual(0);
@@ -858,10 +869,8 @@ describe('buildRouteTable', () => {
 
   it('preserves legacy staff reads outside the two new admin-only exact routes', () => {
     expect(
-      matchRoute(
-        routes,
-        '/v1/operator/trips/11111111-1111-4111-8111-111111111111/cargo-capacity',
-      )?.requiredRoles,
+      matchRoute(routes, '/v1/operator/trips/11111111-1111-4111-8111-111111111111/cargo-capacity')
+        ?.requiredRoles,
     ).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
     expect(matchRoute(routes, '/v1/operator/parcel-route-fares')?.requiredRoles).toEqual([
       'OPERATOR_ADMIN',
