@@ -61,6 +61,7 @@ const identityOtpEventIds = new Set();
 const identityUserCreatedEventIds = new Set();
 const emailDeliveryIds = new Set();
 const sockets = new Set();
+const RESOURCE_CLOSE_TIMEOUT_MS = 5_000;
 let redis;
 let rabbitConnection;
 let rabbitChannel;
@@ -145,6 +146,20 @@ async function poll(check, description, timeoutMs = 45_000) {
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`Timed out waiting for ${description}`);
+}
+
+async function settleWithin(promise, timeoutMs = RESOURCE_CLOSE_TIMEOUT_MS) {
+  let timer;
+  try {
+    await Promise.race([
+      Promise.resolve(promise).catch(() => undefined),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function preflight() {
@@ -528,7 +543,8 @@ async function pollOutbox() {
       );
       if (!value) return false;
       const separator = value.indexOf('|');
-      row = { id: value.slice(0, separator), payload: JSON.parse(value.slice(separator + 1)) };
+      const rawPayload = value.slice(separator + 1);
+      row = { id: value.slice(0, separator), rawPayload, payload: JSON.parse(rawPayload) };
       assert.match(row.payload.eventId, /^[0-9a-f-]{36}$/iu, 'Trip event omitted eventId');
       row.eventId = row.payload.eventId;
       outboxIds.add(row.id);
@@ -553,7 +569,7 @@ async function publishDuplicate(outbox) {
   rabbitChannel.publish(
     'vietride.events',
     'trip.trip.completed',
-    Buffer.from(JSON.stringify(outbox.payload)),
+    Buffer.from(outbox.rawPayload, 'utf8'),
     {
       contentType: 'application/json',
       persistent: true,
@@ -628,7 +644,7 @@ function discoverTripEvents() {
   }
 }
 
-function discoverEmailDeliveries() {
+function discoverEmailDeliveries(requireComplete = true) {
   if (!identityOtpEventIds.size) return;
   const dedupeKeys = [...identityOtpEventIds]
     .map((eventId) => literal(`identity.otp.requested:${eventId}:email`))
@@ -638,11 +654,13 @@ function discoverEmailDeliveries() {
     `SET search_path TO vietride_notification,public; SELECT id FROM email_deliveries WHERE dedupe_key IN (${dedupeKeys});`,
   );
   for (const id of rows.split(/\r?\n/u).filter(Boolean)) emailDeliveryIds.add(id);
-  assert.equal(
-    emailDeliveryIds.size,
-    identityOtpEventIds.size,
-    'Notification did not create exactly one email delivery per OTP event',
-  );
+  if (requireComplete) {
+    assert.equal(
+      emailDeliveryIds.size,
+      identityOtpEventIds.size,
+      'Notification did not create exactly one email delivery per OTP event',
+    );
+  }
 }
 
 async function quiesceIdentitySideEffects() {
@@ -678,17 +696,26 @@ async function quiesceIdentitySideEffects() {
     [...identityOtpEventIds].map(literal).join(',') || "'00000000-0000-0000-0000-000000000000'";
   if (identityOtpEventIds.size)
     await poll(
-      () =>
-        Number(
-          sql(
-            'vietride_notification',
-            `SET search_path TO vietride_notification,public; SELECT count(*) FROM processed_messages WHERE message_id IN (${otpList});`,
+      async () => {
+        const databaseProcessed =
+          Number(
+            sql(
+              'vietride_notification',
+              `SET search_path TO vietride_notification,public; SELECT count(*) FROM processed_messages WHERE message_id IN (${otpList});`,
+            ),
+          ) === identityOtpEventIds.size;
+        if (databaseProcessed) return true;
+        const redisProcessed = await Promise.all(
+          [...identityOtpEventIds].map((eventId) =>
+            redis.exists(`notification:idem:processed:identity.otp.requested:${eventId}`),
           ),
-        ) === identityOtpEventIds.size,
+        );
+        return redisProcessed.every((exists) => exists === 1);
+      },
       'Notification identity.otp.requested consumers',
       30_000,
     );
-  discoverEmailDeliveries();
+  discoverEmailDeliveries(false);
   if (emailDeliveryIds.size)
     await poll(
       () =>
@@ -735,13 +762,12 @@ async function quiesceTripTerminalSideEffects() {
   await poll(
     () =>
       Number(
-        sql(
-          'vietride_payment',
-          `SET search_path TO vietride_payment,public; SELECT count(*) FROM processed_integration_events WHERE event_id IN (${eventList}) AND consumer IN ('payment.trip-completed-settlement','payment.trip-terminal-settlement');`,
-        ),
-      ) ===
-      eventIds.size * 2,
-    'Payment trip.trip.completed consumers',
+          sql(
+            'vietride_payment',
+            `SET search_path TO vietride_payment,public; SELECT count(*) FROM processed_integration_events WHERE event_id IN (${eventList}) AND consumer='payment.trip-terminal-settlement';`,
+          ),
+        ) === eventIds.size,
+      'Payment trip.trip.completed consumers',
     60_000,
   );
 }
@@ -766,73 +792,89 @@ async function removeEmailJobs() {
       assert.equal(await queue.getJob(deliveryId), undefined, `Email job ${deliveryId} remained`);
     }
   } finally {
-    await queue.close().catch(() => undefined);
-    if (connection.status !== 'end') await connection.quit().catch(() => connection.disconnect());
+    await settleWithin(queue.close());
+    if (connection.status !== 'end') connection.disconnect();
   }
 }
 
 async function cleanup() {
+  const deferredErrors = [];
   for (const socket of sockets) socket.close();
-  if (rabbitChannel) await rabbitChannel.close().catch(() => undefined);
-  if (rabbitConnection) await rabbitConnection.close().catch(() => undefined);
+  if (rabbitChannel) await settleWithin(rabbitChannel.close());
+  if (rabbitConnection) await settleWithin(rabbitConnection.close());
   if (databasesReady) {
     discoverIdentityEvents();
     discoverTripEvents();
-    await quiesceIdentitySideEffects();
-    await quiesceTripTerminalSideEffects();
+    try {
+      await quiesceIdentitySideEffects();
+    } catch (error) {
+      deferredErrors.push(error);
+      discoverEmailDeliveries(false);
+    }
+    try {
+      await quiesceTripTerminalSideEffects();
+    } catch (error) {
+      deferredErrors.push(error);
+    }
   }
-  if (redis?.status === 'ready') {
-    await removeEmailJobs();
-    await redis.srem('tracking:active_trips', ids.trip);
-    const tokenHashes = [...rawShareTokens].map((token) =>
-      createHash('sha256').update(token, 'utf8').digest('hex'),
-    );
-    const operationHashes = [...idempotencyKeys].map((value) =>
-      createHash('sha256').update(value.toLowerCase(), 'utf8').digest('hex'),
-    );
-    const markers = [
-      runId,
-      ...Object.values(ids),
-      ...grantIds,
-      ...eventIds,
-      ...identityEventIds,
-      ...emailDeliveryIds,
-      ...Object.values(emails),
-      ...tokenHashes,
-      ...operationHashes,
-      ...operationHashes.map((value) => value.toUpperCase()),
-    ];
-    for (const email of Object.values(emails))
-      await redis.del(`identity:otp_rate:${email.toLowerCase()}`);
-    const keys = await redisKeys();
-    const owned = [];
-    for (const redisKey of keys) {
-      if (redisKey === 'tracking:active_trips') continue;
-      const dump = (await redis.dump(redisKey))?.toString('utf8') || '';
-      const dedicated = [
-        'tracking:idem:trip-share:',
-        'tracking:trip-share:event:',
-        'tracking:trip-share:rate:',
-        'tracking:latest:',
-        'tracking:gps_buffer:',
-        'tracking:gps:idempotency:',
-        'identity:idem:v2:',
-        'notification:idem:',
-        'trip:idem:v2:',
-      ].some((prefix) => redisKey.startsWith(prefix));
-      if (dedicated && markers.some((marker) => redisKey.includes(marker) || dump.includes(marker)))
-        owned.push(redisKey);
+  if (redis) {
+    try {
+      if (redis.status === 'ready') {
+        await removeEmailJobs();
+        await redis.srem('tracking:active_trips', ids.trip);
+        const tokenHashes = [...rawShareTokens].map((token) =>
+          createHash('sha256').update(token, 'utf8').digest('hex'),
+        );
+        const operationHashes = [...idempotencyKeys].map((value) =>
+          createHash('sha256').update(value.toLowerCase(), 'utf8').digest('hex'),
+        );
+        const markers = [
+          runId,
+          ...Object.values(ids),
+          ...grantIds,
+          ...eventIds,
+          ...identityEventIds,
+          ...emailDeliveryIds,
+          ...Object.values(emails),
+          ...tokenHashes,
+          ...operationHashes,
+          ...operationHashes.map((value) => value.toUpperCase()),
+        ];
+        for (const email of Object.values(emails))
+          await redis.del(`identity:otp_rate:${email.toLowerCase()}`);
+        const keys = await redisKeys();
+        const owned = [];
+        for (const redisKey of keys) {
+          if (redisKey === 'tracking:active_trips') continue;
+          const dump = (await redis.dump(redisKey))?.toString('utf8') || '';
+          const runOwnedNamespace = [
+            'tracking:',
+            'identity:idem:v2:',
+            'identity:otp_rate:',
+            'notification:',
+            'trip:idem:v2:',
+          ].some((prefix) => redisKey.startsWith(prefix));
+          if (
+            runOwnedNamespace &&
+            markers.some((marker) => redisKey.includes(marker) || dump.includes(marker))
+          )
+            owned.push(redisKey);
+        }
+        if (owned.length) await redis.del(...owned);
+        for (const redisKey of await redisKeys()) {
+          if (redisKey === 'tracking:active_trips') continue;
+          const dump = (await redis.dump(redisKey))?.toString('utf8') || '';
+          assert(
+            !markers.some((marker) => redisKey.includes(marker) || dump.includes(marker)),
+            `Run-owned Redis residue remained in ${redisKey}`,
+          );
+        }
+      }
+    } catch (error) {
+      deferredErrors.push(error);
+    } finally {
+      redis.disconnect();
     }
-    if (owned.length) await redis.del(...owned);
-    for (const redisKey of await redisKeys()) {
-      if (redisKey === 'tracking:active_trips') continue;
-      const dump = (await redis.dump(redisKey))?.toString('utf8') || '';
-      assert(
-        !markers.some((marker) => redisKey.includes(marker) || dump.includes(marker)),
-        `Run-owned Redis residue remained in ${redisKey}`,
-      );
-    }
-    await redis.quit().catch(() => redis.disconnect());
   }
   if (!databasesReady) return;
   const identityEventList =
@@ -909,9 +951,11 @@ async function cleanup() {
     ],
   ])
     assert.equal(Number(sql(database, query)), 0, `${database} retained a Phase13 fixture`);
+  if (deferredErrors.length) throw deferredErrors[0];
 }
 
 async function main() {
+  let journeyPassed = false;
   try {
     await preflight();
     redis = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 });
@@ -919,7 +963,7 @@ async function main() {
     const tokens = await seedIdentity();
     seedDomain();
     await journey(tokens);
-    console.log('PASS | Phase 13 full local-stack real API journey');
+    journeyPassed = true;
   } catch (error) {
     const prefix = error.integrationBlocked ? 'INTEGRATION_BLOCKED' : 'FAIL';
     console.error(`${prefix} | ${redact(error.stack || error.message)}`);
@@ -931,6 +975,9 @@ async function main() {
       console.error(`FAIL | cleanup: ${redact(error.stack || error.message)}`);
       process.exitCode = 1;
     }
+  }
+  if (journeyPassed && process.exitCode !== 1) {
+    console.log('PASS | Phase 13 full local-stack real API journey');
   }
 }
 

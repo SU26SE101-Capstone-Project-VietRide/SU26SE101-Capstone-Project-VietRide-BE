@@ -57,7 +57,9 @@ describe('TripShareAccessService', () => {
       throw invalidToken();
     });
 
-    await expect(service.authorize(TOKEN, NOW)).rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
+    await expect(service.authorize(TOKEN, NOW)).rejects.toMatchObject({
+      status: HttpStatus.UNAUTHORIZED,
+    });
     expect(rateLimiter.consume).toHaveBeenCalledWith('context', TOKEN);
     expect(rateLimiter.consume.mock.invocationCallOrder[0]).toBeLessThan(
       codec.verify.mock.invocationCallOrder[0] as number,
@@ -111,22 +113,44 @@ describe('TripShareAccessService', () => {
   });
 
   it('maps revoked grants to 410 without consulting Trip', async () => {
-    repository.findById.mockResolvedValueOnce(createGrant({ revokedAt: NOW, revokeReason: 'USER_REVOKED' }));
+    repository.findById.mockResolvedValueOnce(
+      createGrant({ revokedAt: NOW, revokeReason: 'USER_REVOKED' }),
+    );
     await expectUnavailable();
+    expect(tripProvider.getTrip).not.toHaveBeenCalled();
+  });
+
+  it('preserves EXPIRED when revalidating an already expired grant', async () => {
+    repository.findById.mockResolvedValueOnce(
+      createGrant({ revokedAt: NOW, revokeReason: 'EXPIRED' }),
+    );
+
+    await expect(service.revalidate(TOKEN, NOW)).rejects.toMatchObject({
+      status: HttpStatus.GONE,
+      response: { errorCode: 'TRACKING_SHARE_LINK_UNAVAILABLE' },
+      cause: 'EXPIRED',
+    });
     expect(tripProvider.getTrip).not.toHaveBeenCalled();
   });
 
   it('lazily expires an active grant and maps it to 410', async () => {
     repository.findById.mockResolvedValueOnce(createGrant({ expiresAt: NOW }));
-    await expectUnavailable();
+    await expect(service.revalidate(TOKEN, NOW)).rejects.toMatchObject({
+      status: HttpStatus.GONE,
+      response: { errorCode: 'TRACKING_SHARE_LINK_UNAVAILABLE' },
+      cause: 'EXPIRED',
+    });
     expect(repository.revokeGrantById).toHaveBeenCalledWith(GRANT_ID, 'EXPIRED', NOW);
   });
 
-  it.each(['COMPLETED', 'CANCELLED', 'DISRUPTED'])('revokes a %s Trip grant and returns 410', async (status) => {
-    tripProvider.getTrip.mockResolvedValueOnce({ tripId: TRIP_ID, status });
-    await expectUnavailable();
-    expect(repository.revokeGrantById).toHaveBeenCalledWith(GRANT_ID, 'TRIP_TERMINATED', NOW);
-  });
+  it.each(['COMPLETED', 'CANCELLED', 'DISRUPTED'])(
+    'revokes a %s Trip grant and returns 410',
+    async (status) => {
+      tripProvider.getTrip.mockResolvedValueOnce({ tripId: TRIP_ID, status });
+      await expectUnavailable();
+      expect(repository.revokeGrantById).toHaveBeenCalledWith(GRANT_ID, 'TRIP_TERMINATED', NOW);
+    },
+  );
 
   it('maps a Trip 404 after grant validation to 410', async () => {
     tripProvider.getTrip.mockRejectedValueOnce(new NotFoundException());
@@ -135,11 +159,16 @@ describe('TripShareAccessService', () => {
   });
 
   it('propagates rate-limit and Redis limiter failures', async () => {
-    const rateLimited = new HttpException({ errorCode: 'RATE_LIMITED' }, HttpStatus.TOO_MANY_REQUESTS);
+    const rateLimited = new HttpException(
+      { errorCode: 'RATE_LIMITED' },
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
     rateLimiter.consume.mockRejectedValueOnce(rateLimited);
     await expect(service.authorize(TOKEN, NOW)).rejects.toBe(rateLimited);
 
-    const unavailable = new ServiceUnavailableException({ errorCode: 'TRACKING_SHARE_RATE_LIMIT_UNAVAILABLE' });
+    const unavailable = new ServiceUnavailableException({
+      errorCode: 'TRACKING_SHARE_RATE_LIMIT_UNAVAILABLE',
+    });
     rateLimiter.consume.mockRejectedValueOnce(unavailable);
     await expect(service.authorize(TOKEN, NOW)).rejects.toBe(unavailable);
   });

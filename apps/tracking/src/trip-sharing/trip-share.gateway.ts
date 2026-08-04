@@ -1,9 +1,5 @@
 import { GoneException, HttpException, Inject } from '@nestjs/common';
-import {
-  OnGatewayInit,
-  WebSocketGateway,
-  WebSocketServer,
-} from '@nestjs/websockets';
+import { OnGatewayInit, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import type { Namespace, Socket } from 'socket.io';
 import { ENV_TOKEN } from '../app/tokens';
 import type { Env } from '../config/env.schema';
@@ -52,9 +48,11 @@ export class TripShareGateway implements OnGatewayInit {
   afterInit(namespace: Namespace): void {
     this.realtime.attach(namespace);
     namespace.use((socket: TripShareSocket, next) => {
-      void this.authenticate(socket).then(() => next()).catch((error: unknown) => {
-        next(new Error(this.connectErrorCode(error)));
-      });
+      void this.authenticate(socket)
+        .then(() => next())
+        .catch((error: unknown) => {
+          next(new Error(this.connectErrorCode(error)));
+        });
     });
   }
 
@@ -116,10 +114,15 @@ export class TripShareGateway implements OnGatewayInit {
   private connectErrorCode(error: unknown): string {
     if (!(error instanceof HttpException)) return ACCESS_UNAVAILABLE;
     const response = error.getResponse();
-    const errorCode = typeof response === 'object' && response !== null
-      ? (response as Record<string, unknown>)['errorCode']
-      : undefined;
-    if (errorCode === SHARE_TOKEN_INVALID || errorCode === SHARE_LINK_UNAVAILABLE || errorCode === RATE_LIMITED) {
+    const errorCode =
+      typeof response === 'object' && response !== null
+        ? (response as Record<string, unknown>)['errorCode']
+        : undefined;
+    if (
+      errorCode === SHARE_TOKEN_INVALID ||
+      errorCode === SHARE_LINK_UNAVAILABLE ||
+      errorCode === RATE_LIMITED
+    ) {
       return errorCode;
     }
     return ACCESS_UNAVAILABLE;
@@ -127,6 +130,7 @@ export class TripShareGateway implements OnGatewayInit {
 
   private revalidationReason(error: unknown): TripShareAccessRevocationReason {
     if (error instanceof GoneException && error.cause === 'TRIP_ENDED') return 'TRIP_ENDED';
+    if (error instanceof GoneException && error.cause === 'EXPIRED') return 'EXPIRED';
     if (error instanceof GoneException) return 'REVOKED';
     return 'ACCESS_UNAVAILABLE';
   }

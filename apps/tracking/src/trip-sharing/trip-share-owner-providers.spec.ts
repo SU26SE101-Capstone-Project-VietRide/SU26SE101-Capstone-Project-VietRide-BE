@@ -48,6 +48,15 @@ describe('Trip share owner HTTP providers', () => {
       [200, { allowed: false }],
       [200, { allowed: true, scope: 'PARCEL_RECIPIENT' }],
       [200, { success: false, error: { code: 'ACCESS_DENIED' } }],
+      [
+        200,
+        {
+          success: true,
+          statusCode: 200,
+          data: { allowed: false, scope: null, error: 'ACCESS_DENIED' },
+          meta: { traceId: 'booking-trace', timestamp: '2026-08-04T00:00:00.000Z' },
+        },
+      ],
       [403, { allowed: false }],
       [404, null],
     ])('maps denial, wrong scope, 403 and 404 to ACCESS_DENIED', async (status, body) => {

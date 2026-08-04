@@ -45,6 +45,8 @@ const compose = [
   'infra/docker/docker-compose.tracking-sharing-e2e.yml',
   '--profile',
   'infra',
+  '--profile',
+  'app',
 ];
 const ids = {
   trip: randomUUID(),
@@ -81,6 +83,7 @@ function composeEnv(extra = {}) {
     REDIS_PORT: String(ports.redis),
     RABBITMQ_PORT: String(ports.rabbitmq),
     RABBITMQ_MGMT_PORT: String(ports.rabbitManagement),
+    TRACKING_PORT: String(ports.tracking),
     TRACKING_SHARING_E2E_PREFIX: prefix,
     TRACKING_SHARING_E2E_POSTGRES_PORT: String(ports.postgres),
     TRACKING_SHARING_E2E_REDIS_PORT: String(ports.redis),
@@ -236,26 +239,24 @@ async function startFakeBoundaries() {
         JSON.stringify({
           success: true,
           data: {
-            data: {
-              tripId: ids.trip,
-              points: [
-                { latitude: 10.7812, longitude: 106.6981 },
-                { latitude: 10.8123, longitude: 106.7214 },
-              ],
-              geometrySource: 'ROUTE_POLYLINE',
-              originStation: {
-                stationId: ids.originStation,
-                name: 'Bến xe Miền Đông',
-                latitude: 10.7812,
-                longitude: 106.6981,
-              },
-              intermediateStops: [],
-              destinationStation: {
-                stationId: ids.destinationStation,
-                name: 'Bến xe Đà Lạt',
-                latitude: 11.9404,
-                longitude: 108.4583,
-              },
+            tripId: ids.trip,
+            points: [
+              { latitude: 10.7812, longitude: 106.6981 },
+              { latitude: 10.8123, longitude: 106.7214 },
+            ],
+            geometrySource: 'ROUTE_POLYLINE',
+            originStation: {
+              stationId: ids.originStation,
+              name: 'Bến xe Miền Đông',
+              latitude: 10.7812,
+              longitude: 106.6981,
+            },
+            intermediateStops: [],
+            destinationStation: {
+              stationId: ids.destinationStation,
+              name: 'Bến xe Đà Lạt',
+              latitude: 11.9404,
+              longitude: 108.4583,
             },
           },
         }),
@@ -590,7 +591,12 @@ async function verifyOwnerConcurrencyAndPrivacy(tokens) {
   );
   assert(
     firstResponse.response.status === 200 && secondResponse.response.status === 200,
-    'Concurrent owner PUT did not return two successful responses',
+    `Concurrent owner PUT did not return two successful responses (${[firstResponse, secondResponse]
+      .map(
+        ({ response, body }) =>
+          `${response.status}:${body?.errorCode ?? body?.error?.code ?? 'NO_ERROR_CODE'}`,
+      )
+      .join(', ')})`,
   );
   const first = extractShareToken(firstResponse.body);
   const second = extractShareToken(secondResponse.body);

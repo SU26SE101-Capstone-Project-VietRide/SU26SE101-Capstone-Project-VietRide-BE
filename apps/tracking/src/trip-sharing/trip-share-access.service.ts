@@ -28,7 +28,10 @@ export class TripShareAccessService {
     private readonly trips: TripShareTripSnapshotProvider,
   ) {}
 
-  async authorize(rawToken: string | undefined, now: Date = new Date()): Promise<TripShareAccessContext> {
+  async authorize(
+    rawToken: string | undefined,
+    now: Date = new Date(),
+  ): Promise<TripShareAccessContext> {
     return this.authorizeWithSurface(rawToken, 'context', now);
   }
 
@@ -39,7 +42,10 @@ export class TripShareAccessService {
     return this.authorizeWithSurface(rawToken, 'socket', now);
   }
 
-  async revalidate(rawToken: string | undefined, now: Date = new Date()): Promise<TripShareAccessContext> {
+  async revalidate(
+    rawToken: string | undefined,
+    now: Date = new Date(),
+  ): Promise<TripShareAccessContext> {
     if (!rawToken) this.invalidToken();
     return this.validate(rawToken, now);
   }
@@ -59,14 +65,17 @@ export class TripShareAccessService {
     const grant = await this.grants.findById(verified.grantId);
     if (!grant || !this.hashesMatch(verified.tokenHash, grant.tokenHash)) this.invalidToken();
     if (grant.revokedAt) {
-      const reason = grant.revokeReason === 'TRIP_TERMINATED' || grant.revokeReason === 'CREATION_ROLLBACK'
-        ? 'TRIP_ENDED'
-        : 'REVOKED';
+      const reason =
+        grant.revokeReason === 'TRIP_TERMINATED' || grant.revokeReason === 'CREATION_ROLLBACK'
+          ? 'TRIP_ENDED'
+          : grant.revokeReason === 'EXPIRED'
+            ? 'EXPIRED'
+            : 'REVOKED';
       this.unavailable(reason);
     }
     if (grant.expiresAt.getTime() <= now.getTime()) {
       await this.grants.revokeGrantById(grant.id, 'EXPIRED', now);
-      this.unavailable('REVOKED');
+      this.unavailable('EXPIRED');
     }
 
     let snapshot: Awaited<ReturnType<TripShareTripSnapshotProvider['getTrip']>>;
@@ -99,7 +108,9 @@ export class TripShareAccessService {
     }
     const leftBuffer = Buffer.from(normalizedLeft, 'ascii');
     const rightBuffer = Buffer.from(normalizedRight, 'ascii');
-    return leftBuffer.byteLength === rightBuffer.byteLength && timingSafeEqual(leftBuffer, rightBuffer);
+    return (
+      leftBuffer.byteLength === rightBuffer.byteLength && timingSafeEqual(leftBuffer, rightBuffer)
+    );
   }
 
   private invalidToken(): never {
@@ -109,10 +120,13 @@ export class TripShareAccessService {
     });
   }
 
-  private unavailable(reason: 'REVOKED' | 'TRIP_ENDED'): never {
-    throw new GoneException({
-      errorCode: 'TRACKING_SHARE_LINK_UNAVAILABLE',
-      detail: 'The trip share link is no longer available',
-    }, { cause: reason });
+  private unavailable(reason: 'REVOKED' | 'EXPIRED' | 'TRIP_ENDED'): never {
+    throw new GoneException(
+      {
+        errorCode: 'TRACKING_SHARE_LINK_UNAVAILABLE',
+        detail: 'The trip share link is no longer available',
+      },
+      { cause: reason },
+    );
   }
 }

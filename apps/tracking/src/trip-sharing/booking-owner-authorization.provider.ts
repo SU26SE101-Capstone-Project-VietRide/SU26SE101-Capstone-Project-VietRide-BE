@@ -14,7 +14,7 @@ import type { Env } from '../config/env.schema';
 const INTERNAL_AUTH_HEADER = 'X-Internal-Auth';
 const AUTH_RESPONSE_SCHEMA = z.object({
   allowed: z.boolean(),
-  scope: z.string().optional(),
+  scope: z.string().nullable().optional(),
 }).passthrough();
 const AUTH_ENVELOPE_SCHEMA = z.object({
   success: z.boolean(),
