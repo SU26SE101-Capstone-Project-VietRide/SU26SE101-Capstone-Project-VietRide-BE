@@ -502,6 +502,30 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes only the exact shared-trip context through the dedicated mixed Tracking route', () => {
+    const publicRoute = matchRoute(routes, '/v1/tracking/shared-trip/context');
+    const protectedSharedRoute = matchRoute(routes, '/v1/tracking/shared-trip/context/extra');
+    const ownerRoute = matchRoute(
+      routes,
+      '/v1/tracking/trips/11111111-1111-4111-8111-111111111111/share-link',
+    );
+
+    expect(publicRoute).toMatchObject({
+      prefix: '/v1/tracking/shared-trip',
+      target: env.TRACKING_BASE_URL,
+      authRequired: 'mixed',
+      publicSubpaths: [{ method: 'GET', path: '/v1/tracking/shared-trip/context' }],
+      forwardUserAuthorization: true,
+    });
+    expect(protectedSharedRoute).toBe(publicRoute);
+    expect(ownerRoute).toMatchObject({
+      prefix: '/v1/tracking',
+      target: env.TRACKING_BASE_URL,
+      authRequired: 'user',
+      forwardUserAuthorization: true,
+    });
+  });
+
   it('does not expose internal trip endpoints through Gateway', () => {
     expect(matchRoute(routes, '/internal/v1/trips/search')).toBeUndefined();
     expect(matchRoute(routes, '/internal/v1/reports/platform/bookings')).toBeUndefined();

@@ -413,6 +413,12 @@ CREATE TABLE operator_ledger_entries (
     reference_id UUID NOT NULL,
     source_event_id UUID NOT NULL,
     note TEXT NULL,
+    actor_type VARCHAR(16) NOT NULL DEFAULT 'SYSTEM',
+    actor_user_id UUID NULL,
+    actor_display_name VARCHAR(200) NULL,
+    actor_email VARCHAR(320) NULL,
+    actor_role VARCHAR(50) NULL,
+    actor_snapshot_resolved BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_operator_ledger_entries_amount_direction CHECK (
         (entry_type IN ('BOOKING_REFUND', 'PARCEL_REFUND') AND amount < 0)
@@ -420,7 +426,8 @@ CREATE TABLE operator_ledger_entries (
         OR entry_type = 'ADJUSTMENT'
         OR (entry_type NOT IN ('BOOKING_REFUND', 'PARCEL_REFUND', 'VOUCHER_OPERATOR_FUNDED_AUDIT', 'ADJUSTMENT') AND amount > 0)
     ),
-    CONSTRAINT chk_operator_ledger_entries_trip_required CHECK (entry_type = 'ADJUSTMENT' OR trip_id IS NOT NULL)
+    CONSTRAINT chk_operator_ledger_entries_trip_required CHECK (entry_type = 'ADJUSTMENT' OR trip_id IS NOT NULL),
+    CONSTRAINT chk_operator_ledger_entries_actor_type CHECK (actor_type IN ('USER', 'SYSTEM'))
 );
 
 CREATE INDEX idx_operator_ledger_entries_operator_id_created_at
@@ -434,6 +441,8 @@ CREATE INDEX idx_operator_ledger_entries_entry_type
     ON operator_ledger_entries (operator_id, entry_type);
 CREATE UNIQUE INDEX uq_operator_ledger_entries_source
     ON operator_ledger_entries (source_event_id, entry_type, reference_id);
+CREATE INDEX idx_operator_ledger_entries_actor_user_id
+    ON operator_ledger_entries (actor_user_id) WHERE actor_user_id IS NOT NULL;
 
 COMMENT ON TABLE operator_ledger_entries IS
     'Audit-only log per-booking/per-parcel event. NOT the wallet balance source — see operator_wallets + operator_trip_settlements.';

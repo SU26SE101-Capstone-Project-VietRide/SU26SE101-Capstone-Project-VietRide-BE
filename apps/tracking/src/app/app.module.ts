@@ -18,6 +18,7 @@ import { LocationModule } from '../location/location.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { TrackingPrismaModule } from '../prisma/prisma.module';
 import { TrackingDataModule } from '../tracking-data/tracking-data.module';
+import { TripSharingModule } from '../trip-sharing/trip-sharing.module';
 
 const env = loadEnv();
 
@@ -36,6 +37,7 @@ const env = loadEnv();
     GpsBatchModule,
     OutboxModule,
     TrackingDataModule,
+    TripSharingModule,
   ],
   controllers: [HealthController, ReadyController],
   providers: [

@@ -125,8 +125,10 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             _ => query.OrderByDescending(item => item.CreatedAt),
         };
         var rows = await query.Skip(Offset(options)).Take(options.PageSize).ToListAsync(ct);
+        var actorFallbacks = await LoadLedgerActorFallbacksAsync(rows, ct);
         var items = rows.Select(item => new LedgerEntryDto(item.Id, item.TripId, item.EntryType.ToString(), item.Amount,
-            item.ReferenceType.ToString(), item.ReferenceId, item.CreatedAt)).ToList();
+            item.ReferenceType.ToString(), item.ReferenceId, item.CreatedAt, item.Note,
+            item.ActorType.ToString(), ToActor(item, actorFallbacks))).ToList();
         return PagedResult<LedgerEntryDto>.Create(items, options.Page, options.PageSize, total);
     }
 
@@ -266,10 +268,26 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         PageOptions options, Guid? operatorId, string? status, Guid? tripId, bool stuckOnly, string? severity, CancellationToken ct)
     {
         var page = await LoadSettlementRowsAsync(options, operatorId, status, tripId, stuckOnly, severity, ct);
+        var actorFallbacks = await LoadSettlementActorFallbacksAsync(page.Rows, ct);
         var items = page.Rows.Select(item => new SettlementDto(item.Id, item.TripId,
             item.Status.ToString(), item.EligibleAt, item.NetAmount, item.SettlementMethod?.ToString(), item.SettledAt,
-            item.CreatedAt)).ToList();
+            item.CreatedAt, ToActor(item, actorFallbacks))).ToList();
         return PagedResult<SettlementDto>.Create(items, options.Page, options.PageSize, page.Total);
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, IdentityFinancialUser>> LoadSettlementActorFallbacksAsync(
+        IReadOnlyCollection<OperatorTripSettlement> rows, CancellationToken ct)
+    {
+        var userIds = rows
+            .Where(item => item.SettledByUserId.HasValue && !item.SettledBySnapshotResolved)
+            .Select(item => item.SettledByUserId!.Value)
+            .Distinct()
+            .ToArray();
+        if (userIds.Length == 0)
+            return new Dictionary<Guid, IdentityFinancialUser>();
+
+        var users = await _identity.GetUsersAsync(userIds, ct);
+        return users.ToDictionary(item => item.UserId);
     }
 
     private async Task<SettlementPageRows> LoadSettlementRowsAsync(
@@ -373,6 +391,23 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         return users.ToDictionary(item => item.UserId);
     }
 
+    private async Task<IReadOnlyDictionary<Guid, IdentityFinancialUser>> LoadLedgerActorFallbacksAsync(
+        IReadOnlyCollection<OperatorLedgerEntry> rows, CancellationToken ct)
+    {
+        var userIds = rows
+            .Where(item => item.ActorType == FinancialActorType.USER
+                && item.ActorUserId.HasValue
+                && !item.ActorSnapshotResolved)
+            .Select(item => item.ActorUserId!.Value)
+            .Distinct()
+            .ToArray();
+        if (userIds.Length == 0)
+            return new Dictionary<Guid, IdentityFinancialUser>();
+
+        var users = await _identity.GetUsersAsync(userIds, ct);
+        return users.ToDictionary(item => item.UserId);
+    }
+
     private async Task<AdjustmentResult> AdjustPlatformAsUserAsync(
         AdjustmentRequest request,
         Guid actorUserId,
@@ -445,6 +480,26 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     }
 
     private static FinancialActorDto? ToActor(
+        OperatorLedgerEntry entry,
+        IReadOnlyDictionary<Guid, IdentityFinancialUser> fallbacks)
+    {
+        if (entry.ActorType != FinancialActorType.USER || !entry.ActorUserId.HasValue)
+            return null;
+        if (entry.ActorSnapshotResolved)
+        {
+            return CreateActorDto(
+                entry.ActorUserId.Value,
+                entry.ActorDisplayName,
+                entry.ActorEmail,
+                entry.ActorRole);
+        }
+
+        return fallbacks.TryGetValue(entry.ActorUserId.Value, out var item) && !item.Deleted
+            ? CreateActorDto(item.UserId, item.DisplayName, item.Email, item.Role)
+            : null;
+    }
+
+    private static FinancialActorDto? ToActor(
         OperatorTripSettlement settlement,
         IReadOnlyDictionary<Guid, IdentityFinancialUser> fallbacks)
     {
@@ -499,10 +554,13 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         Guid operatorId, AdjustmentRequest request, Guid actorUserId, CancellationToken ct)
     {
         ValidateAdjustment(request);
+        var actor = await LoadRequiredActorAsync(actorUserId, ct);
         var type = Enum.Parse<OperatorWalletTransactionType>(request.Type, false);
         for (var attempt = 0; attempt < 3; attempt++)
         {
             await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+            if (await _actorPrivacy.IsDeletedWithLockAsync(actor.UserId, ct))
+                throw new UnauthorizedAccessException("Financial actor account is deleted.");
             var wallet = await _db.OperatorWallets.AsNoTracking().SingleOrDefaultAsync(item => item.OperatorId == operatorId, ct)
                 ?? throw NotFound("RESOURCE_NOT_FOUND", "Operator wallet was not found.");
             var before = wallet.Balance.Amount;
@@ -526,7 +584,7 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             var signedAmount = type == OperatorWalletTransactionType.CREDIT ? request.Amount : -request.Amount;
             await _db.OperatorLedgerEntries.AddAsync(OperatorLedgerEntry.Create(operatorId, null,
                 OperatorLedgerEntryType.ADJUSTMENT, signedAmount, OperatorLedgerReferenceType.MANUAL,
-                movement.Id, movement.Id, request.Note), ct);
+                movement.Id, movement.Id, request.Note, actor), ct);
             await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             _logger.LogInformation("Operator wallet {OperatorId} adjusted by admin {ActorUserId}; type {Type}, amount {Amount}.", operatorId, actorUserId, type, request.Amount);

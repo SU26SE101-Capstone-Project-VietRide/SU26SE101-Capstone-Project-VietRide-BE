@@ -15,7 +15,7 @@ import type { UserJwtVerifier } from '../auth/user-jwt.verifier';
 import type { TrackingAuthorizationAdapter } from '../authorization/tracking-authorization.adapter';
 import { EtaService } from '../eta/eta.service';
 import { OffRouteService } from '../off-route/off-route.service';
-import { TripDelayService } from '../trip-delay/trip-delay.service';
+import { TripDelayService, type TripDelayEtaUpdate } from '../trip-delay/trip-delay.service';
 import { shuttleRoom } from '../shuttle/shuttle.constants';
 import { JoinShuttleTrackingSchema, ShuttleGpsUpdateSchema } from '../shuttle/shuttle.dto';
 import { ShuttleService } from '../shuttle/shuttle.service';
@@ -24,6 +24,7 @@ import { TRACKING_SOCKET_PATH, trackingTripRoom } from './location.constants';
 import { JoinTripTrackingSchema } from './dto/join-trip-tracking.dto';
 import { UpdateLocationSchema } from './dto/update-location.dto';
 import { LocationService, type GpsUpdateEvent } from './location.service';
+import { TripShareRealtimePublisher } from '../trip-sharing/trip-share-realtime.publisher';
 
 interface TrackingSocket extends Socket {
   data: {
@@ -66,6 +67,7 @@ export class LocationGateway implements OnGatewayInit {
     private readonly tripDelayService: TripDelayService,
     private readonly shuttleService: ShuttleService,
     private readonly shuttleEtaService: ShuttleEtaService,
+    private readonly tripShareRealtime: TripShareRealtimePublisher,
   ) {}
 
   afterInit(server: Server): void {
@@ -227,6 +229,7 @@ export class LocationGateway implements OnGatewayInit {
     const event = result.event;
 
     this.server.to(trackingTripRoom(parsed.data.tripId)).emit('gps:update', event);
+    this.publishSharedGps(event);
     void this.runDetection(event, result.rawEvent).catch((error) => {
       this.logger.error(
         `Tracking detection chain failed for trip ${event.tripId}: ${(error as Error).message}`,
@@ -242,6 +245,7 @@ export class LocationGateway implements OnGatewayInit {
     if (etaUpdate) {
       const tripDelayEtaUpdate = await this.tripDelayService.handleEtaUpdate(etaUpdate);
       this.server.to(trackingTripRoom(event.tripId)).emit('eta:update', tripDelayEtaUpdate);
+      this.publishSharedEta(tripDelayEtaUpdate);
       if (tripDelayEtaUpdate.delayed) {
         this.server.to(trackingTripRoom(event.tripId)).emit('trip:statusChanged', {
           tripId: tripDelayEtaUpdate.tripId,
@@ -250,8 +254,38 @@ export class LocationGateway implements OnGatewayInit {
           delayMinutes: tripDelayEtaUpdate.delayMinutes,
           updatedAt: tripDelayEtaUpdate.updatedAt,
         });
+        this.publishSharedStatus(tripDelayEtaUpdate);
       }
       await this.approachingAlertService.handleEtaUpdate(tripDelayEtaUpdate);
+    }
+  }
+
+  private publishSharedGps(event: GpsUpdateEvent): void {
+    try {
+      this.tripShareRealtime.publishGps(event);
+    } catch (error) {
+      this.logger.warn(`Shared GPS broadcast failed for trip ${event.tripId}: ${(error as Error).message}`);
+    }
+  }
+
+  private publishSharedEta(event: TripDelayEtaUpdate): void {
+    try {
+      this.tripShareRealtime.publishEta(event);
+    } catch (error) {
+      this.logger.warn(`Shared ETA broadcast failed for trip ${event.tripId}: ${(error as Error).message}`);
+    }
+  }
+
+  private publishSharedStatus(event: TripDelayEtaUpdate): void {
+    try {
+      this.tripShareRealtime.publishStatus({
+        tripId: event.tripId,
+        status: 'DELAYED',
+        ...(event.delayMinutes !== undefined ? { delayMinutes: event.delayMinutes } : {}),
+        updatedAt: event.updatedAt,
+      });
+    } catch (error) {
+      this.logger.warn(`Shared status broadcast failed for trip ${event.tripId}: ${(error as Error).message}`);
     }
   }
 

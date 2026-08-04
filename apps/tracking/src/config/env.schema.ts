@@ -30,6 +30,14 @@ export const envSchema = baseEnvSchema.merge(
     TRACKING_DATA_PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(2_000),
     TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(60),
     TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+    TRACKING_SHARE_TOKEN_SECRET: z
+      .string()
+      .min(32, 'TRACKING_SHARE_TOKEN_SECRET must be at least 32 characters'),
+    TRACKING_SHARE_PAGE_URL: z.string().url(),
+    TRACKING_SHARE_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
+    TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(60),
+    TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(20),
+    TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS: z.coerce.number().int().positive().default(60),
     GOOGLE_ROUTES_ENABLED: booleanEnvSchema.default(false),
     GOOGLE_ROUTES_API_KEY: z.string().trim().default(''),
     GOOGLE_ROUTES_BASE_URL: z.string().url().default('https://routes.googleapis.com'),

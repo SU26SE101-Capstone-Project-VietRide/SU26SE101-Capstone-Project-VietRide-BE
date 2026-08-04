@@ -40,6 +40,7 @@ Mỗi phase phải test được bằng e2e/unit theo hướng production. Nếu
 - [x] Phase 10 — Hardening Và Final Acceptance
 - [x] Phase 11 — Shuttle GPS Và Google Routes ETA
 - [x] Phase 12 — Public Tracking Map Context
+- [x] Phase 13 — Chia Sẻ Hành Trình Cho Người Thân
 
 ---
 
@@ -499,6 +500,91 @@ npx nx run tracking:test
 npx nx run tracking:test:e2e
 npx nx run tracking:build
 node scripts/test-tracking-map-context.js
+git diff --check
+```
+
+## Phase 13 — Chia Sẻ Hành Trình Cho Người Thân
+
+**Mục tiêu:** Cho phép Passenger sở hữu Booking chia sẻ vị trí xe của Main Trip đang chạy bằng
+capability link; người nhận không cần tài khoản và không nhìn thấy dữ liệu định danh nội bộ.
+
+### Quyền và vòng đời grant
+
+- Chỉ `PASSENGER` có quyền `BOOKING_OWNER` được gọi
+  `PUT /v1/tracking/trips/{tripId}/share-link`; Parcel ownership không cấp quyền.
+- Chỉ tạo hoặc tái sử dụng link khi Trip chính xác `IN_PROGRESS`. Tracking kiểm tra trạng thái Trip
+  lần hai sau khi tạo grant để đóng race với terminal transition; race thua bị revoke bằng
+  `CREATION_ROLLBACK` và không trả link.
+- Mỗi `(tripId, passengerUserId)` chỉ có một grant active. PUT với grant còn hiệu lực trả lại cùng
+  link; DELETE cùng endpoint luôn idempotent và chỉ revoke grant của owner đang gọi.
+- Grant hết hiệu lực khi owner revoke, Trip `COMPLETED`/`CANCELLED`/`DISRUPTED`, hoặc sau TTL mặc
+  định 24 giờ. Hai passenger cùng Trip có grant và room độc lập.
+- Token có dạng `v1.<grantId>.<HMAC-SHA256>`; PostgreSQL chỉ lưu SHA-256 của full token. Redis
+  idempotency chỉ lưu fingerprint, grant ID và metadata kết quả, không lưu token hoặc share URL.
+
+### HTTP công khai và Gateway
+
+- Owner PUT/DELETE dùng Identity JWT và UUID-v4 `Idempotency-Key`; generic `/v1/tracking` vẫn bắt
+  buộc user auth và forward `Authorization` cho Tracking tự xác minh.
+- Gateway chỉ cho anonymous đúng `GET /v1/tracking/shared-trip/context`; query string không ảnh
+  hưởng phép match. POST, trailing slash, suffix thường hoặc suffix encode đều không được public.
+- Guest gửi token trong `X-Trip-Share-Token`. Response luôn đặt `Cache-Control: no-store`,
+  `Pragma: no-cache`, `Referrer-Policy: no-referrer`.
+- DTO guest chỉ gồm trạng thái, hạn link, thời điểm cập nhật gần nhất, vị trí xe hiện tại, tên điểm
+  đầu/cuối, GeoJSON `LineString` và ETA. GPS, geometry hoặc ETA chưa có phải trả `null`, không dựng
+  dữ liệu giả. Cấm phát `tripId`, grant/token/hash, mọi internal ID, Booking/Ticket/seat, PII,
+  driver/assistant/operator data và GPS history.
+
+### Realtime công khai
+
+- Frontend kết nối trực tiếp Tracking/Nginx với namespace `/shared`, path
+  `/tracking/socket.io`, handshake `auth.shareToken`; Gateway hiện không proxy Socket.IO.
+- Server tự join cả `shared-trip:{tripId}` và `shared-grant:{grantId}`. Client không có event tự
+  chọn room. Sự kiện public là `shared:gps:update`, `shared:eta:update`,
+  `shared:trip:statusChanged`, `shared:access:revoked`.
+- Revoke một grant chỉ ngắt viewer trong grant room đó. Trip terminal ngắt toàn bộ trip room.
+  Socket đặt timer đến `expiresAt` và revalidate grant/Trip theo
+  `TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS` (mặc định 60 giây).
+- GPS public chỉ phát sau khi private GPS đã được chấp nhận và không duplicate; publish public lỗi
+  không được làm hỏng flow riêng của Driver. Hot path GPS không lookup DB/HTTP.
+- Phase 13 giữ giả định một Tracking replica cho room delivery; Redis Socket.IO adapter thuộc phase
+  scale-out riêng.
+
+### Đồng bộ Trip terminal qua RabbitMQ
+
+- Ba queue độc lập: `tracking-trip-share-completed` → `trip.trip.completed`,
+  `tracking-trip-share-cancelled` → `trip.trip.cancelled`, và
+  `tracking-trip-share-disrupted` → `trip.trip.disrupted`.
+- Consumer dùng `prefetch=1`, dead-letter, tối đa 5 retry và delay 10 giây. Thứ tự xử lý là kiểm tra
+  processed → lấy processing lock 120 giây → validate Zod → revoke DB → emit/disconnect realtime →
+  mark processed 7 ngày.
+- Lock bận phải retry; payload malformed được drop có chủ đích sau khi mark processed. Lỗi transient
+  chỉ release lock do chính consumer sở hữu rồi throw. Retry sau DB commit nhưng realtime fail vẫn
+  phải emit/disconnect dù lần revoke DB tiếp theo cập nhật 0 row.
+- Nếu bỏ lỡ terminal event, guest context, socket handshake và revalidation vẫn kiểm tra Trip để
+  đóng quyền truy cập.
+
+### Cấu hình và vận hành
+
+- `TRACKING_SHARE_TOKEN_SECRET` tối thiểu 32 byte; thiếu hoặc yếu làm Tracking fail startup. Rotation
+  secret làm toàn bộ token v1 hiện tại mất hiệu lực và phải được triển khai có chủ đích.
+- `TRACKING_SHARE_PAGE_URL`, `TRACKING_SHARE_TOKEN_TTL_SECONDS`,
+  `TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN`, `TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN` và
+  `TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS` phải lấy từ cấu hình.
+- Rate limit Redis là 60 context request/token-hash/phút và 20 socket handshake/token-hash/phút theo
+  mặc định; Redis lỗi thì fail closed. Không log raw token hoặc header `X-Trip-Share-Token`.
+
+### Verify
+
+```bash
+npx nx run tracking:test
+npx nx run tracking:test:e2e
+npx nx run tracking:build
+npx nx run gateway:test
+npx nx run gateway:build
+node scripts/verify-idempotency-inventory.mjs
+node scripts/run-tracking-sharing-e2e.mjs
+node scripts/test-tracking-phase13-sharing.js
 git diff --check
 ```
 

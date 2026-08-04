@@ -932,6 +932,7 @@ function main() {
     'booking',
     'payment',
     'parcel',
+    'tracking',
     'notification',
     'rag',
   ];

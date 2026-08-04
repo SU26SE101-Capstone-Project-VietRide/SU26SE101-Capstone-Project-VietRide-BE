@@ -44,14 +44,15 @@ namespace VietRide.Payment.Infrastructure.Migrations
             modelBuilder.Entity("VietRide.Payment.Domain.Entities.DeletedFinancialActorMarker", b =>
                 {
                     b.Property<Guid>("UserId")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("user_id");
 
                     b.Property<DateTimeOffset>("DeletedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("now()")
-                        .HasColumnName("deleted_at");
+                        .HasColumnName("deleted_at")
+                        .HasDefaultValueSql("now()");
 
                     b.HasKey("UserId")
                         .HasName("pk_deleted_financial_actor_markers");
@@ -216,6 +217,39 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
 
+                    b.Property<string>("ActorDisplayName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("actor_display_name");
+
+                    b.Property<string>("ActorEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)")
+                        .HasColumnName("actor_email");
+
+                    b.Property<string>("ActorRole")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("actor_role");
+
+                    b.Property<bool>("ActorSnapshotResolved")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("actor_snapshot_resolved");
+
+                    b.Property<string>("ActorType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("actor_type")
+                        .HasDefaultValueSql("'SYSTEM'");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("actor_user_id");
+
                     b.Property<long>("Amount")
                         .HasColumnType("bigint")
                         .HasColumnName("amount");
@@ -257,6 +291,10 @@ namespace VietRide.Payment.Infrastructure.Migrations
                     b.HasKey("Id")
                         .HasName("pk_operator_ledger_entries");
 
+                    b.HasIndex("ActorUserId")
+                        .HasDatabaseName("idx_operator_ledger_entries_actor_user_id")
+                        .HasFilter("actor_user_id IS NOT NULL");
+
                     b.HasIndex("OperatorId", "CreatedAt")
                         .IsDescending(false, true)
                         .HasDatabaseName("idx_operator_ledger_entries_operator_id_created_at");
@@ -277,6 +315,8 @@ namespace VietRide.Payment.Infrastructure.Migrations
 
                     b.ToTable("operator_ledger_entries", "vietride_payment", t =>
                         {
+                            t.HasCheckConstraint("chk_operator_ledger_entries_actor_type", "actor_type IN ('USER','SYSTEM')");
+
                             t.HasCheckConstraint("chk_operator_ledger_entries_amount_direction", "(entry_type IN ('BOOKING_REFUND','PARCEL_REFUND') AND amount < 0) OR (entry_type = 'VOUCHER_OPERATOR_FUNDED_AUDIT' AND amount = 0) OR (entry_type = 'ADJUSTMENT') OR (entry_type NOT IN ('BOOKING_REFUND','PARCEL_REFUND','VOUCHER_OPERATOR_FUNDED_AUDIT','ADJUSTMENT') AND amount > 0)");
 
                             t.HasCheckConstraint("chk_operator_ledger_entries_trip_required", "entry_type = 'ADJUSTMENT' OR trip_id IS NOT NULL");
