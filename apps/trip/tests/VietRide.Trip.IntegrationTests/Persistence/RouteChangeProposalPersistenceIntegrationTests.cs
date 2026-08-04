@@ -497,8 +497,7 @@ public sealed class RouteChangeProposalPersistenceIntegrationTests
 
     private static TripDbContext CreateDbContext(string databaseName = "route_proposal_model", params IInterceptor[] interceptors)
     {
-        var dataSourceBuilder = new NpgsqlDataSourceBuilder(
-            $"Host=127.0.0.1;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev");
+        var dataSourceBuilder = new NpgsqlDataSourceBuilder(CreateConnectionString(databaseName));
         dataSourceBuilder.MapEnum<OutboxEventStatus>(
             $"{TripDbContext.SchemaName}.outbox_event_status",
             new NpgsqlNullNameTranslator());
@@ -511,6 +510,21 @@ public sealed class RouteChangeProposalPersistenceIntegrationTests
             .AddInterceptors(interceptors)
             .Options;
         return new TripDbContext(options, new SystemClock());
+    }
+
+    private static string CreateConnectionString(string databaseName)
+    {
+        const string fallback = "Host=127.0.0.1;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+        var template = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            template = fallback;
+        }
+
+        var expanded = template.Contains("{databaseName}", StringComparison.OrdinalIgnoreCase)
+            ? template.Replace("{databaseName}", databaseName, StringComparison.OrdinalIgnoreCase)
+            : template;
+        return new NpgsqlConnectionStringBuilder(expanded) { Database = databaseName }.ConnectionString;
     }
 
     private sealed class CommandCaptureInterceptor : DbCommandInterceptor
