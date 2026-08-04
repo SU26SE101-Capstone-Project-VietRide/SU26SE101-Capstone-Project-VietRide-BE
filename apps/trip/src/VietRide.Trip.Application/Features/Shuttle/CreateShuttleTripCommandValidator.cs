@@ -8,6 +8,10 @@ public sealed class CreateShuttleTripCommandValidator : AbstractValidator<Create
     {
         RuleFor(x => x.OperatorId).NotEmpty();
         RuleFor(x => x.MainTripId).NotEmpty();
+        RuleFor(x => x.Direction)
+            .NotEmpty()
+            .Must(direction => direction is "INBOUND_TO_STATION" or "OUTBOUND_FROM_STATION")
+            .WithMessage("direction must be INBOUND_TO_STATION or OUTBOUND_FROM_STATION.");
         RuleFor(x => x.DriverUserId).NotEmpty();
         RuleFor(x => x.VehicleId).NotEmpty();
         RuleFor(x => x.ScheduledDepartureTime).NotEmpty();

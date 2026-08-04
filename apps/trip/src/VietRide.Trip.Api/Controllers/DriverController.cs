@@ -216,4 +216,47 @@ public sealed class DriverController : ControllerBase
             new MarkShuttlePickupCommand(shuttleTripId, pickupOrder, driverUserId),
             cancellationToken));
     }
+
+    [HttpPost("shuttle-trips/{shuttleTripId:guid}/stops/{pickupOrder:int}/delivered")]
+    [Authorize(Roles = "DRIVER")]
+    [RequireIdempotency(AllowRequestBody = false)]
+    public async Task<ActionResult<ShuttleLifecycleResult>> MarkShuttleDeliveredAsync(
+        Guid shuttleTripId,
+        int pickupOrder,
+        CancellationToken cancellationToken)
+        => Ok(await mediator.Send(
+            new MarkShuttleDeliveredCommand(shuttleTripId, pickupOrder, CurrentUserClaims.GetUserId(User)),
+            cancellationToken));
+
+    [HttpPost("shuttle-trips/{shuttleTripId:guid}/stops/{pickupOrder:int}/no-show")]
+    [Authorize(Roles = "DRIVER")]
+    [RequireIdempotency]
+    public async Task<ActionResult<ShuttleLifecycleResult>> MarkShuttleNoShowAsync(
+        Guid shuttleTripId,
+        int pickupOrder,
+        [FromBody] ShuttleReasonRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await mediator.Send(
+            new MarkShuttleNoShowCommand(shuttleTripId, pickupOrder, CurrentUserClaims.GetUserId(User), request.Reason),
+            cancellationToken));
+
+    [HttpPost("shuttle-trips/{shuttleTripId:guid}/start")]
+    [Authorize(Roles = "DRIVER")]
+    [RequireIdempotency(AllowRequestBody = false)]
+    public async Task<ActionResult<ShuttleLifecycleResult>> StartShuttleAsync(
+        Guid shuttleTripId,
+        CancellationToken cancellationToken)
+        => Ok(await mediator.Send(
+            new StartShuttleTripCommand(shuttleTripId, CurrentUserClaims.GetUserId(User)),
+            cancellationToken));
+
+    [HttpPost("shuttle-trips/{shuttleTripId:guid}/complete")]
+    [Authorize(Roles = "DRIVER")]
+    [RequireIdempotency(AllowRequestBody = false)]
+    public async Task<ActionResult<ShuttleLifecycleResult>> CompleteShuttleAsync(
+        Guid shuttleTripId,
+        CancellationToken cancellationToken)
+        => Ok(await mediator.Send(
+            new CompleteShuttleTripCommand(shuttleTripId, CurrentUserClaims.GetUserId(User)),
+            cancellationToken));
 }

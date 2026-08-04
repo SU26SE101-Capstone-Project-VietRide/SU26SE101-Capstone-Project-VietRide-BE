@@ -13,6 +13,7 @@ public sealed class CreateBookingRequest
     public PickupRequest? Pickup { get; init; }
     public DropoffRequest? Dropoff { get; init; }
     public ShuttlePickupRequest? ShuttlePickup { get; init; }
+    public ShuttleDropoffRequest? ShuttleDropoff { get; init; }
 
     public IReadOnlyList<SeatBookingRequest> Seats { get; init; } = [];
 
@@ -24,6 +25,13 @@ public sealed class CreateBookingRequest
 }
 
 public sealed class ShuttlePickupRequest
+{
+    public string Address { get; init; } = string.Empty;
+    public decimal Latitude { get; init; }
+    public decimal Longitude { get; init; }
+}
+
+public sealed class ShuttleDropoffRequest
 {
     public string Address { get; init; } = string.Empty;
     public decimal Latitude { get; init; }

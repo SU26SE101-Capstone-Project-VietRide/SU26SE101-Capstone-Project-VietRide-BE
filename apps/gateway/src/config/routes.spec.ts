@@ -476,6 +476,17 @@ describe('buildRouteTable', () => {
     expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
   });
 
+  it('routes shuttle cancellation to Trip for both operator roles', () => {
+    const route = matchRoute(
+      routes,
+      '/v1/operator/shuttle-trips/11111111-1111-4111-8111-111111111111/cancel',
+    );
+
+    expect(route?.prefix).toBe('/v1/operator/shuttle-trips/{shuttleTripId}/cancel');
+    expect(route?.target).toBe(env.TRIP_BASE_URL);
+    expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+  });
+
   it('routes trip search through the mixed public subpath without a duplicate prefix', () => {
     const route = matchRoute(routes, '/v1/trips/search');
 
@@ -639,6 +650,29 @@ describe('buildRouteTable', () => {
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN'],
+    });
+  });
+
+  it('forwards shuttle driver lifecycle routes to Trip with DRIVER-only access', () => {
+    const shuttleDriverRoute = matchRoute(
+      routes,
+      '/v1/driver/shuttle-trips/11111111-1111-4111-8111-111111111111/stops/1/pickup',
+    );
+    const genericDriverRoute = matchRoute(
+      routes,
+      '/v1/driver/trips/11111111-1111-4111-8111-111111111111/complete',
+    );
+
+    expect(shuttleDriverRoute).toMatchObject({
+      prefix: '/v1/driver/shuttle-trips',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER'],
+    });
+    expect(genericDriverRoute).toMatchObject({
+      prefix: '/v1/driver',
+      target: env.TRIP_BASE_URL,
+      requiredRoles: ['DRIVER', 'ASSISTANT'],
     });
   });
 

@@ -56,6 +56,14 @@ public sealed class DevTripServiceClient : ITripServiceClient
         return Task.FromResult<TripSnapshot?>(snapshot);
     }
 
+    public Task<ShuttleRoadDistanceOutcome> GetShuttleRoadDistanceAsync(
+        Guid tripId,
+        string direction,
+        decimal latitude,
+        decimal longitude,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<ShuttleRoadDistanceOutcome>(new ShuttleRoadDistanceOutcome.Success(1_000));
+
     public Task<TripSnapshot?> GetTripSnapshotAsync(
         Guid tripId,
         DateTimeOffset pricingAt,

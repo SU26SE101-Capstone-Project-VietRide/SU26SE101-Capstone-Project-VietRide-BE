@@ -120,8 +120,10 @@ public sealed class CreateRoundTripBookingCommandHandler
         returnTrip = BookingStationCanonicalization.ResolveTrip(returnTrip, stationCanonicalization);
         ValidateStopSelections(outboundTrip, request.Outbound.PickupStopId, request.Outbound.DropoffStopId);
         ValidateStopSelections(returnTrip, request.Return.PickupStopId, request.Return.DropoffStopId);
-        ValidateShuttleRequest(request.Outbound, outboundTrip, now);
-        ValidateShuttleRequest(request.Return, returnTrip, now);
+        var outboundShuttleDistances = await ValidateShuttleRequestAsync(
+            request.Outbound, outboundTrip, now, cancellationToken);
+        var returnShuttleDistances = await ValidateShuttleRequestAsync(
+            request.Return, returnTrip, now, cancellationToken);
 
         if (outboundTrip.ReturnRouteId is null)
         {
@@ -326,7 +328,8 @@ public sealed class CreateRoundTripBookingCommandHandler
                 bookingGroupId,
                 TripDirection.OUTBOUND,
                 outboundLockToken,
-                now);
+                now,
+                outboundShuttleDistances);
 
             returnBooking = CreatePendingBooking(
                 request.PassengerUserId,
@@ -340,7 +343,8 @@ public sealed class CreateRoundTripBookingCommandHandler
                 bookingGroupId,
                 TripDirection.RETURN,
                 returnLockToken,
-                now);
+                now,
+                returnShuttleDistances);
 
             await _bookings.AddAsync(outboundBooking, cancellationToken);
             await _bookings.AddAsync(returnBooking, cancellationToken);
@@ -527,34 +531,59 @@ public sealed class CreateRoundTripBookingCommandHandler
         return trip;
     }
 
-    private static void ValidateShuttleRequest(
+    private async Task<(int? InboundDistanceMeters, int? OutboundDistanceMeters)> ValidateShuttleRequestAsync(
         CreateRoundTripBookingCommand.RoundTripBookingLegCommand leg,
         TripSnapshot trip,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
     {
-        if (leg.ShuttlePickup is null)
+        if (leg.ShuttlePickup is null && leg.ShuttleDropoff is null)
         {
-            return;
+            return (null, null);
         }
 
-        if (string.IsNullOrWhiteSpace(leg.ShuttlePickup.Address)
-            || leg.ShuttlePickup.Latitude is < -90m or > 90m
-            || leg.ShuttlePickup.Longitude is < -180m or > 180m)
+        if (leg.ShuttlePickup is not null
+            && (string.IsNullOrWhiteSpace(leg.ShuttlePickup.Address)
+                || leg.ShuttlePickup.Latitude is < -90m or > 90m
+                || leg.ShuttlePickup.Longitude is < -180m or > 180m))
         {
             throw new CodedValidationException(
                 "VALIDATION_ERROR",
                 "Shuttle pickup address and coordinates are invalid.");
         }
 
-        if (leg.PickupStopId.HasValue || leg.PickupStationId != trip.OriginStation.Id
-            || !trip.OriginStation.IsActive
-            || !trip.OriginStation.SupportsShuttle
-            || !trip.OriginStation.Latitude.HasValue
-            || !trip.OriginStation.Longitude.HasValue)
+        if (leg.ShuttleDropoff is not null
+            && (string.IsNullOrWhiteSpace(leg.ShuttleDropoff.Address)
+                || leg.ShuttleDropoff.Latitude is < -90m or > 90m
+                || leg.ShuttleDropoff.Longitude is < -180m or > 180m))
+        {
+            throw new CodedValidationException(
+                "VALIDATION_ERROR",
+                "Shuttle dropoff address and coordinates are invalid.");
+        }
+
+        if (leg.ShuttlePickup is not null
+            && (leg.PickupStopId.HasValue || leg.PickupStationId != trip.OriginStation.Id
+                || !trip.OriginStation.IsActive
+                || !trip.OriginStation.SupportsShuttle
+                || !trip.OriginStation.Latitude.HasValue
+                || !trip.OriginStation.Longitude.HasValue))
         {
             throw new CodedValidationException(
                 "SHUTTLE_STATION_NOT_SUPPORTED",
                 "Shuttle is available only at a supported origin Station.");
+        }
+
+        if (leg.ShuttleDropoff is not null
+            && (leg.DropoffStopId.HasValue || leg.DropoffStationId != trip.DestinationStation.Id
+                || !trip.DestinationStation.IsActive
+                || !trip.DestinationStation.SupportsShuttle
+                || !trip.DestinationStation.Latitude.HasValue
+                || !trip.DestinationStation.Longitude.HasValue))
+        {
+            throw new CodedValidationException(
+                "SHUTTLE_STATION_NOT_SUPPORTED",
+                "Shuttle is available only at a supported destination Station.");
         }
 
         if (now >= trip.DepartureDateTime.AddMinutes(-30))
@@ -563,6 +592,36 @@ public sealed class CreateRoundTripBookingCommandHandler
                 "SHUTTLE_REQUEST_CUTOFF_PASSED",
                 "The shuttle request cutoff has passed.");
         }
+
+        var inboundDistance = leg.ShuttlePickup is null
+            ? (int?)null
+            : await ResolveShuttleDistanceAsync(
+                leg.TripId,
+                BookingShuttleIntent.InboundDirection,
+                leg.ShuttlePickup.Latitude,
+                leg.ShuttlePickup.Longitude,
+                cancellationToken);
+        var outboundDistance = leg.ShuttleDropoff is null
+            ? (int?)null
+            : await ResolveShuttleDistanceAsync(
+                leg.TripId,
+                BookingShuttleIntent.OutboundDirection,
+                leg.ShuttleDropoff.Latitude,
+                leg.ShuttleDropoff.Longitude,
+                cancellationToken);
+        return (inboundDistance, outboundDistance);
+    }
+
+    private async Task<int> ResolveShuttleDistanceAsync(
+        Guid tripId,
+        string direction,
+        decimal latitude,
+        decimal longitude,
+        CancellationToken cancellationToken)
+    {
+        var outcome = await _tripClient.GetShuttleRoadDistanceAsync(
+            tripId, direction, latitude, longitude, cancellationToken);
+        return ShuttleDistancePolicy.Resolve(outcome);
     }
 
     private BookingEntity CreatePendingBooking(
@@ -577,7 +636,8 @@ public sealed class CreateRoundTripBookingCommandHandler
         Guid bookingGroupId,
         TripDirection tripDirection,
         Guid seatLockToken,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        (int? InboundDistanceMeters, int? OutboundDistanceMeters) shuttleDistances)
     {
         var booking = BookingEntity.CreatePendingPayment(
             bookingCode: BookingCode.Generate(now),
@@ -618,9 +678,21 @@ public sealed class CreateRoundTripBookingCommandHandler
         if (leg.ShuttlePickup is not null)
         {
             booking.RequestShuttle(
+                BookingShuttleIntent.InboundDirection,
                 leg.ShuttlePickup.Address,
                 leg.ShuttlePickup.Latitude,
-                leg.ShuttlePickup.Longitude);
+                leg.ShuttlePickup.Longitude,
+                shuttleDistances.InboundDistanceMeters);
+        }
+
+        if (leg.ShuttleDropoff is not null)
+        {
+            booking.RequestShuttle(
+                BookingShuttleIntent.OutboundDirection,
+                leg.ShuttleDropoff.Address,
+                leg.ShuttleDropoff.Latitude,
+                leg.ShuttleDropoff.Longitude,
+                shuttleDistances.OutboundDistanceMeters);
         }
 
         return booking;
@@ -861,6 +933,17 @@ public sealed class CreateRoundTripBookingCommandHandler
                 latitude = booking.ShuttleIntent.PickupLatitude,
                 longitude = booking.ShuttleIntent.PickupLongitude,
             },
+            shuttleRequests = booking.ShuttleIntents
+                .Where(intent => intent.IsActive)
+                .Select(intent => new
+                {
+                    direction = intent.Direction,
+                    address = intent.PickupAddress,
+                    latitude = intent.PickupLatitude,
+                    longitude = intent.PickupLongitude,
+                    roadDistanceMeters = intent.RoadDistanceMeters,
+                })
+                .ToArray(),
         };
 
         await _outbox.EnqueueAsync(

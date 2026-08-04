@@ -64,6 +64,17 @@ public class CreateBookingCommandHandlerTests
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IIdentityUserServiceClient _identityUsers = CreateIdentityClient();
 
+    public CreateBookingCommandHandlerTests()
+    {
+        _tripClient.GetShuttleRoadDistanceAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<string>(),
+                Arg.Any<decimal>(),
+                Arg.Any<decimal>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ShuttleRoadDistanceOutcome.Success(1_000));
+    }
+
     private CreateBookingCommandHandler BuildSut(IBookingStationCanonicalizer? stationCanonicalizer = null) => new(
         _bookings, _tripClient, _paymentClient, _bookingService, _voucherService, _outbox, _clock,
         NullLogger<CreateBookingCommandHandler>.Instance, _statusHistory,

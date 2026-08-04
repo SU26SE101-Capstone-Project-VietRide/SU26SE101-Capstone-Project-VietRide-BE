@@ -770,6 +770,7 @@ CREATE TABLE shuttle_passengers (
     pickup_address TEXT NOT NULL,
     pickup_lat DECIMAL(10,7) NOT NULL,
     pickup_lng DECIMAL(10,7) NOT NULL,
+    road_distance_meters INT NULL,
     scheduled_pickup_time TIMESTAMPTZ NULL,
     pickup_order INT NULL,
     status VARCHAR(30) NOT NULL DEFAULT 'PENDING_ASSIGNMENT',
@@ -779,15 +780,16 @@ CREATE TABLE shuttle_passengers (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_shuttle_passengers_direction CHECK (direction IN ('INBOUND_TO_STATION', 'OUTBOUND_FROM_STATION')),
-    CONSTRAINT chk_shuttle_passengers_status CHECK (status IN ('PENDING_ASSIGNMENT', 'PENDING', 'PICKED_UP', 'DELIVERED', 'NO_SHOW', 'CANCELLED'))
+    CONSTRAINT chk_shuttle_passengers_status CHECK (status IN ('PENDING_ASSIGNMENT', 'PENDING', 'PICKED_UP', 'DELIVERED', 'NO_SHOW', 'CANCELLED')),
+    CONSTRAINT chk_shuttle_passengers_road_distance CHECK (road_distance_meters IS NULL OR road_distance_meters >= 0)
 );
 
 CREATE INDEX idx_shuttle_passengers_shuttle_trip ON shuttle_passengers (shuttle_trip_id)
     WHERE shuttle_trip_id IS NOT NULL;
 CREATE INDEX idx_shuttle_passengers_main_trip_status ON shuttle_passengers (main_trip_id, status);
 CREATE INDEX idx_shuttle_passengers_booking ON shuttle_passengers (booking_id) WHERE booking_id IS NOT NULL;
-CREATE UNIQUE INDEX uq_shuttle_passengers_booking_ticket
-    ON shuttle_passengers (booking_id, ticket_id)
+CREATE UNIQUE INDEX uq_shuttle_passengers_booking_ticket_direction
+    ON shuttle_passengers (booking_id, ticket_id, direction)
     WHERE booking_id IS NOT NULL AND ticket_id IS NOT NULL;
 
 -- -----------------------------------------------------------------------------

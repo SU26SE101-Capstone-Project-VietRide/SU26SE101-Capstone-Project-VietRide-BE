@@ -19,6 +19,12 @@ import {
 } from './shuttle.constants';
 import type { ShuttleGpsUpdateDto } from './shuttle.dto';
 
+export const ShuttleDirectionSchema = z.enum([
+  'INBOUND_TO_STATION',
+  'OUTBOUND_FROM_STATION',
+]);
+export type ShuttleDirection = z.infer<typeof ShuttleDirectionSchema>;
+
 export const shuttleTrackingStopSchema = z.object({
   pickupOrder: z.number().int().positive(),
   bookingId: z.string().uuid().nullable().optional(),
@@ -27,6 +33,10 @@ export const shuttleTrackingStopSchema = z.object({
   status: z.string(),
   isStation: z.boolean(),
   isOwnPickup: z.boolean().optional(),
+  serviceAddress: z.string().trim().min(1).optional(),
+  serviceOrder: z.number().int().positive().optional(),
+  roadDistanceMeters: z.number().nonnegative().optional(),
+  roadDistanceSnapshotMeters: z.number().nonnegative().optional(),
 });
 export const shuttleTrackingStationSchema = z.object({
   stationId: z.string().uuid(),
@@ -42,6 +52,8 @@ export const shuttleTrackingContextSchema = z.object({
   driverUserId: z.string().uuid(),
   allowed: z.boolean(),
   scope: z.string().nullable().optional(),
+  direction: ShuttleDirectionSchema.optional(),
+  status: z.string().optional(),
   stops: z.array(shuttleTrackingStopSchema),
   station: shuttleTrackingStationSchema.nullable().optional(),
 });
@@ -56,6 +68,9 @@ export type ShuttleTrackingStop = z.infer<typeof shuttleTrackingStopSchema>;
 export interface ShuttlePassengerPickupDto {
   bookingId: string;
   pickupOrder: number;
+  serviceAddress?: string;
+  serviceOrder?: number;
+  roadDistanceMeters?: number;
   latitude: number;
   longitude: number;
   status: 'PENDING' | 'PICKED_UP';
@@ -65,6 +80,7 @@ export interface ShuttlePassengerPickupDto {
 export interface ShuttlePassengerContextDto {
   shuttleTripId: string;
   mainTripId: string;
+  direction?: ShuttleDirection;
   ownPickups: ShuttlePassengerPickupDto[];
   station: {
     stationId: string;
@@ -206,6 +222,7 @@ export class ShuttleService {
     if (ownPickups.length === 0) throw this.contextUnavailable();
     if (ownPickups.some((stop) =>
       !stop.bookingId
+      || !stop.serviceAddress
       || !this.isValidCoordinate(stop.latitude, stop.longitude))) {
       throw this.contextUnavailable();
     }
@@ -215,6 +232,13 @@ export class ShuttleService {
       .map((stop): ShuttlePassengerPickupDto => ({
         bookingId: stop.bookingId as string,
         pickupOrder: stop.pickupOrder,
+        serviceAddress: stop.serviceAddress as string,
+        serviceOrder: stop.serviceOrder ?? stop.pickupOrder,
+        ...(stop.roadDistanceMeters !== undefined
+          ? { roadDistanceMeters: stop.roadDistanceMeters }
+          : stop.roadDistanceSnapshotMeters !== undefined
+            ? { roadDistanceMeters: stop.roadDistanceSnapshotMeters }
+            : {}),
         latitude: stop.latitude,
         longitude: stop.longitude,
         status: stop.status as 'PENDING' | 'PICKED_UP',
@@ -241,6 +265,7 @@ export class ShuttleService {
     return {
       shuttleTripId: context.shuttleTripId,
       mainTripId: context.mainTripId,
+      direction: context.direction ?? 'INBOUND_TO_STATION',
       ownPickups: mappedPickups,
       station,
     };

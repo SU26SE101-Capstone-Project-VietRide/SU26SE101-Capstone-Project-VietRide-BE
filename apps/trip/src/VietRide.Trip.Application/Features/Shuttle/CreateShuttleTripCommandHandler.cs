@@ -40,6 +40,7 @@ public sealed class CreateShuttleTripCommandHandler : IRequestHandler<CreateShut
             request.ScheduledDepartureTime,
             request.ScheduledEndTime,
             request.OrderedBookingIds,
-            request.Notes), cancellationToken);
+            request.Notes,
+            request.Direction), cancellationToken);
     }
 }

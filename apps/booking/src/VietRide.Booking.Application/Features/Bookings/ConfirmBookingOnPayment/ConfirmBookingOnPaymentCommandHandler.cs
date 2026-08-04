@@ -546,6 +546,17 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
                 latitude = snapshot.ShuttleIntent.Latitude,
                 longitude = snapshot.ShuttleIntent.Longitude,
             },
+            shuttleRequests = (snapshot.ShuttleIntents ??
+                (snapshot.ShuttleIntent is null ? [] : [snapshot.ShuttleIntent]))
+                .Select(intent => new
+                {
+                    direction = intent.Direction,
+                    address = intent.Address,
+                    latitude = intent.Latitude,
+                    longitude = intent.Longitude,
+                    roadDistanceMeters = intent.RoadDistanceMeters,
+                })
+                .ToArray(),
         };
 
         await _outbox.EnqueueAsync(

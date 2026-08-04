@@ -12,6 +12,9 @@ internal sealed class ShuttlePassengerConfiguration : IEntityTypeConfiguration<S
         {
             table.HasCheckConstraint("chk_shuttle_passengers_direction", "direction IN ('INBOUND_TO_STATION', 'OUTBOUND_FROM_STATION')");
             table.HasCheckConstraint("chk_shuttle_passengers_status", "status IN ('PENDING_ASSIGNMENT', 'PENDING', 'PICKED_UP', 'DELIVERED', 'NO_SHOW', 'CANCELLED')");
+            table.HasCheckConstraint(
+                "chk_shuttle_passengers_road_distance",
+                "road_distance_meters IS NULL OR road_distance_meters >= 0");
         });
         builder.HasKey(x => x.Id).HasName("pk_shuttle_passengers");
         builder.Ignore(x => x.RowVersion);
@@ -25,6 +28,7 @@ internal sealed class ShuttlePassengerConfiguration : IEntityTypeConfiguration<S
         builder.Property(x => x.PickupAddress).HasColumnName("pickup_address");
         builder.Property(x => x.PickupLat).HasColumnName("pickup_lat").HasColumnType("decimal(10,7)");
         builder.Property(x => x.PickupLng).HasColumnName("pickup_lng").HasColumnType("decimal(10,7)");
+        builder.Property(x => x.RoadDistanceMeters).HasColumnName("road_distance_meters");
         builder.Property(x => x.ScheduledPickupTime).HasColumnName("scheduled_pickup_time");
         builder.Property(x => x.PickupOrder).HasColumnName("pickup_order");
         builder.Property(x => x.Status).HasColumnName("status").HasMaxLength(30)
@@ -37,9 +41,9 @@ internal sealed class ShuttlePassengerConfiguration : IEntityTypeConfiguration<S
         builder.HasIndex(x => x.ShuttleTripId).HasFilter("shuttle_trip_id IS NOT NULL").HasDatabaseName("idx_shuttle_passengers_shuttle_trip");
         builder.HasIndex(x => new { x.MainTripId, x.Status }).HasDatabaseName("idx_shuttle_passengers_main_trip_status");
         builder.HasIndex(x => x.BookingId).HasFilter("booking_id IS NOT NULL").HasDatabaseName("idx_shuttle_passengers_booking");
-        builder.HasIndex(x => new { x.BookingId, x.TicketId }).IsUnique()
+        builder.HasIndex(x => new { x.BookingId, x.TicketId, x.Direction }).IsUnique()
             .HasFilter("booking_id IS NOT NULL AND ticket_id IS NOT NULL")
-            .HasDatabaseName("uq_shuttle_passengers_booking_ticket");
+            .HasDatabaseName("uq_shuttle_passengers_booking_ticket_direction");
         builder.HasOne<ShuttleTrip>().WithMany().HasForeignKey(x => x.ShuttleTripId).OnDelete(DeleteBehavior.SetNull);
         builder.HasOne<Domain.Entities.Trip>().WithMany().HasForeignKey(x => x.MainTripId).OnDelete(DeleteBehavior.Restrict);
     }

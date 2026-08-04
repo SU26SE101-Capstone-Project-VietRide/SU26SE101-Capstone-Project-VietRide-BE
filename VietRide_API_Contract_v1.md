@@ -4366,10 +4366,14 @@ Response `200` dùng ADR 0004 envelope với `data`:
 {
   "shuttleTripId": "uuid",
   "mainTripId": "uuid",
+  "direction": "INBOUND_TO_STATION",
   "ownPickups": [
     {
       "bookingId": "uuid",
       "pickupOrder": 3,
+      "serviceAddress": "123 Nguyen Hue, Quan 1",
+      "serviceOrder": 3,
+      "roadDistanceMeters": 4200,
       "latitude": 10.0,
       "longitude": 106.0,
       "status": "PENDING",
@@ -5603,19 +5607,33 @@ Errors: `402 SUBSCRIPTION_EXPIRED`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 SUB
 
 Auth: Internal JWT. Idempotency-Key: required. Caller: Trip service after its local persistence fails or after a resource is soft-deleted. Releasing an already released allocation is a `200` idempotent no-op. A scheduled Identity reconciliation may release only allocations whose resource is verified absent through the owning service's internal lookup.
 
+### GET `/internal/v1/trips/{tripId}/shuttle-road-distance`
+
+Auth: valid Internal JWT only. Booking calls this endpoint before creating each shuttle intent.
+Query `direction=INBOUND_TO_STATION|OUTBOUND_FROM_STATION`, `latitude`, and `longitude` are
+required. Inbound measures to the route origin Station; outbound measures to the destination
+Station. Trip uses Google Routes `travelMode=DRIVE` and returns raw `{ "distanceMeters": 5000 }`.
+Errors are `422 VALIDATION_ERROR`/`422 SHUTTLE_STATION_NOT_SUPPORTED` or
+`503 SHUTTLE_DISTANCE_UNAVAILABLE`; there is no Haversine fallback.
+
 ### GET `/v1/operator/shuttle-requests`
+
+Shuttle được nhóm theo `mainTripId + direction`, trong đó `direction` là `INBOUND_TO_STATION` hoặc `OUTBOUND_FROM_STATION`. Khoảng cách hiển thị là `roadDistanceMeters` snapshot từ Google Routes; không dùng Haversine cho điều kiện đủ điều kiện. Giới hạn toàn nền tảng là 5.000 mét, bao gồm cả điểm đúng 5.000 mét.
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant lấy từ JWT. Query phân trang theo main Trip.
 
-Response trả `mainTripId`, origin Station, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `distanceToStationMeters`, `requestedAt`) và `suggestedBookingOrder`. Gợi ý dùng Haversine, xa nhất trước, hòa thì `requestedAt ASC`; operator có thể đổi thứ tự.
+Response trả `mainTripId`, Station theo direction, `direction`, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `roadDistanceMeters`, `requestedAt`) và `suggestedBookingOrder`. Thứ tự gợi ý dùng road-distance snapshot, xa nhất trước, hòa thì `requestedAt ASC`; không dùng Haversine để quyết định eligibility.
 
 ### POST `/v1/operator/shuttle-trips`
+
+Request bắt buộc có thêm `direction`. Inbound dùng origin Station và `scheduledEndTime <= departureDateTime - 30 phút`; outbound dùng destination Station và `scheduledDepartureTime >= estimatedArrivalTime + 30 phút`.
 
 Auth: `OPERATOR_ADMIN`. `Idempotency-Key` bắt buộc.
 
 ```json
 {
   "mainTripId": "uuid",
+  "direction": "INBOUND_TO_STATION",
   "driverUserId": "uuid",
   "vehicleId": "uuid",
   "scheduledDepartureTime": "2026-07-13T01:00:00Z",
@@ -5636,9 +5654,12 @@ Errors: `402 SUBSCRIPTION_EXPIRED`; `403 FORBIDDEN`; `403 SUBSCRIPTION_MODULE_DI
 `404 TRIP_NOT_FOUND`; `404 VEHICLE_NOT_FOUND`; `404 DRIVER_NOT_FOUND`; `409
 SHUTTLE_REQUEST_SET_CHANGED`; `409 SHUTTLE_CAPACITY_EXCEEDED`; `409
 SHUTTLE_DRIVER_CONFLICT`; `409 SHUTTLE_VEHICLE_CONFLICT`; `409
-SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 VALIDATION_ERROR`; `503 UPSTREAM_UNAVAILABLE`.
+SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 SHUTTLE_DISTANCE_EXCEEDED`; `422 VALIDATION_ERROR`;
+`503 SHUTTLE_DISTANCE_UNAVAILABLE`; `503 UPSTREAM_UNAVAILABLE`.
 
 ### POST `/v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup`
+
+Các endpoint driver bổ sung là `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/delivered`, `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/no-show`, `POST /v1/driver/shuttle-trips/{shuttleTripId}/start` và `POST /v1/driver/shuttle-trips/{shuttleTripId}/complete`. Chỉ driver được gán có quyền mutation và mọi mutation yêu cầu `Idempotency-Key`.
 
 Auth: assigned `DRIVER` only. `Idempotency-Key` is required. The request has no body.
 
@@ -5661,9 +5682,20 @@ Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN`; `404 SHUTTLE_TRIP_NOT_FOUND`; `404
 SHUTTLE_PICKUP_NOT_FOUND`; `409 SHUTTLE_TRIP_TERMINAL`; `409 SHUTTLE_PICKUP_NOT_PENDING`; `422
 VALIDATION_ERROR`; `422 IDEMPOTENCY_KEY_MISMATCH`.
 
+Delivered/no-show/start/complete/cancel transitions that do not match the state machine return
+`409 SHUTTLE_TRIP_INVALID_STATE` or `409 SHUTTLE_PASSENGER_INVALID_STATE`; a blank reason returns
+`422 VALIDATION_ERROR`. All Shuttle mutations repeat the active/approved operator and
+`enableShuttle=true` subscription guard and are idempotent.
+
 ### Shuttle fields trong Booking
 
-`POST /v1/bookings` và mỗi leg của round-trip nhận optional `shuttlePickup: { address, latitude, longitude }`. Chỉ origin Station active có `supportsShuttle=true` và đủ tọa độ được nhận. Booking dùng `TripSnapshot.departureDateTime` để từ chối request tại/sau T-30 với `409 SHUTTLE_REQUEST_CUTOFF_PASSED`. Khi intent còn active, `edit-pickup` trả `409 SHUTTLE_PICKUP_LOCKED`.
+Booking hỗ trợ đồng thời `shuttlePickup` cho inbound và `shuttleDropoff` cho outbound, bao gồm từng leg round-trip. Mỗi booking có tối đa một intent active cho mỗi direction. Trip gọi Google Routes với `travelMode=DRIVE`: `distanceMeters <= 5000` được phép, lớn hơn 5000 trả `422 SHUTTLE_DISTANCE_EXCEEDED`, còn lỗi upstream/timeout/thiếu key/response sai trả `503 SHUTTLE_DISTANCE_UNAVAILABLE`. Event mới dùng `shuttleRequests[]`; consumer vẫn đọc `shuttlePickup` cũ như inbound.
+
+Trip configuration is `SHUTTLE_MAX_DISTANCE_KM=5`, `GOOGLE_ROUTES_ENABLED=true`,
+`GOOGLE_ROUTES_API_KEY`, `GOOGLE_ROUTES_BASE_URL=https://routes.googleapis.com`, and
+`TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS=1500`. Missing configuration fails closed.
+
+`POST /v1/bookings` và mỗi leg của round-trip nhận optional `shuttlePickup: { address, latitude, longitude }` cho inbound và `shuttleDropoff: { address, latitude, longitude }` cho outbound. Chỉ origin/destination Station tương ứng, active, có `supportsShuttle=true` và đủ tọa độ được nhận; Stop dọc tuyến không được dùng làm điểm shuttle. Booking dùng `TripSnapshot.departureDateTime` để từ chối request tại/sau T-30 với `409 SHUTTLE_REQUEST_CUTOFF_PASSED`. Khi intent còn active, `edit-pickup`/`edit-dropoff` bị khóa theo direction.
 
 ### GET `/v1/stations/search`
 

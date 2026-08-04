@@ -24,6 +24,43 @@ public interface IShuttleDispatchService
         int pickupOrder,
         Guid driverUserId,
         CancellationToken cancellationToken);
+
+    Task<ShuttleLifecycleResult> MarkDeliveredAsync(
+        Guid shuttleTripId,
+        int pickupOrder,
+        Guid driverUserId,
+        CancellationToken cancellationToken);
+
+    Task<ShuttleLifecycleResult> MarkNoShowAsync(
+        Guid shuttleTripId,
+        int pickupOrder,
+        Guid driverUserId,
+        string reason,
+        CancellationToken cancellationToken);
+
+    Task<ShuttleLifecycleResult> StartAsync(
+        Guid shuttleTripId,
+        Guid driverUserId,
+        CancellationToken cancellationToken);
+
+    Task<ShuttleLifecycleResult> CompleteAsync(
+        Guid shuttleTripId,
+        Guid driverUserId,
+        CancellationToken cancellationToken);
+
+    Task<ShuttleLifecycleResult> CancelRequestAsync(
+        Guid operatorId,
+        Guid mainTripId,
+        Guid bookingId,
+        string direction,
+        string reason,
+        CancellationToken cancellationToken);
+
+    Task<ShuttleLifecycleResult> CancelShuttleTripAsync(
+        Guid operatorId,
+        Guid shuttleTripId,
+        string reason,
+        CancellationToken cancellationToken);
 }
 
 public sealed record CreateShuttleTripInput(
@@ -34,7 +71,8 @@ public sealed record CreateShuttleTripInput(
     DateTimeOffset ScheduledDepartureTime,
     DateTimeOffset ScheduledEndTime,
     IReadOnlyList<Guid> OrderedBookingIds,
-    string? Notes);
+    string? Notes,
+    string Direction = "INBOUND_TO_STATION");
 
 public sealed record CreateShuttleTripResult(
     Guid ShuttleTripId,
@@ -50,6 +88,7 @@ public sealed record ShuttleRequestPage(
 
 public sealed record ShuttleRequestTripGroup(
     Guid MainTripId,
+    string Direction,
     DateTimeOffset DepartureDateTime,
     DateTimeOffset HardCutoffAt,
     Guid StationId,
@@ -64,8 +103,9 @@ public sealed record ShuttleBookingGroup(
     string PickupAddress,
     decimal PickupLat,
     decimal PickupLng,
-    int DistanceToStationMeters,
-    DateTimeOffset RequestedAt);
+    int? DistanceToStationMeters,
+    DateTimeOffset RequestedAt,
+    int? RoadDistanceMeters = null);
 
 public sealed record ShuttleTrackingContext(
     Guid ShuttleTripId,
@@ -75,7 +115,9 @@ public sealed record ShuttleTrackingContext(
     bool Allowed,
     string? Scope,
     IReadOnlyList<ShuttleTrackingStop> Stops,
-    ShuttleTrackingStation? Station = null);
+    ShuttleTrackingStation? Station = null,
+    string Direction = "INBOUND_TO_STATION",
+    string Status = "SCHEDULED");
 
 public sealed record ShuttleTrackingStop(
     int PickupOrder,
@@ -84,4 +126,7 @@ public sealed record ShuttleTrackingStop(
     decimal Longitude,
     string Status,
     bool IsStation,
-    bool IsOwnPickup = false);
+    bool IsOwnPickup = false,
+    string? ServiceAddress = null,
+    int? ServiceOrder = null,
+    int? RoadDistanceSnapshotMeters = null);

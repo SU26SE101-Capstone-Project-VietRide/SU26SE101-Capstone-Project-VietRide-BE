@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Abstractions.Services;
@@ -53,9 +54,32 @@ public sealed class OperatorShuttleController : ControllerBase
             request.ScheduledDepartureTime,
             request.ScheduledEndTime,
             request.OrderedBookingIds,
-            request.Notes), cancellationToken);
+            request.Notes,
+            request.Direction ?? string.Empty), cancellationToken);
         return StatusCode(StatusCodes.Status201Created, result);
     }
+
+    [HttpPost("shuttle-requests/{mainTripId:guid}/{bookingId:guid}/cancel")]
+    [Authorize(Roles = "OPERATOR_ADMIN,OPERATOR_STAFF")]
+    [RequireIdempotency]
+    public async Task<ActionResult<ShuttleLifecycleResult>> CancelRequest(
+        Guid mainTripId,
+        Guid bookingId,
+        [FromQuery] string direction,
+        [FromBody] CancelShuttleRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await _sender.Send(new CancelShuttleRequestCommand(
+            GetOperatorId(), mainTripId, bookingId, direction, request.Reason), cancellationToken));
+
+    [HttpPost("shuttle-trips/{shuttleTripId:guid}/cancel")]
+    [Authorize(Roles = "OPERATOR_ADMIN,OPERATOR_STAFF")]
+    [RequireIdempotency]
+    public async Task<ActionResult<ShuttleLifecycleResult>> CancelTrip(
+        Guid shuttleTripId,
+        [FromBody] CancelShuttleRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await _sender.Send(new CancelShuttleTripCommand(
+            GetOperatorId(), shuttleTripId, request.Reason), cancellationToken));
 
     private Guid GetOperatorId()
         => CurrentUserClaims.GetOperatorId(User)

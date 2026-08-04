@@ -1,5 +1,19 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
+import {
+  TRIP_SHUTTLE_ASSIGNED_ROUTING_KEY,
+  TRIP_SHUTTLE_CANCELLED_ROUTING_KEY,
+  TRIP_SHUTTLE_COMPLETED_ROUTING_KEY,
+  TRIP_SHUTTLE_DELIVERED_ROUTING_KEY,
+  TRIP_SHUTTLE_NO_SHOW_ROUTING_KEY,
+  TRIP_SHUTTLE_PICKED_UP_ROUTING_KEY,
+  TRIP_SHUTTLE_UNFULFILLED_ROUTING_KEY,
+  TRIP_SHUTTLE_WARNING_ROUTING_KEY,
+  TripShuttleAssignedEventSchema,
+  TripShuttleLifecycleEventSchema,
+  TripShuttleUnfulfilledEventSchema,
+  TripShuttleWarningEventSchema,
+} from '@vietride/contracts';
 import type { ConsumeMessage } from 'amqplib';
 import { z, ZodError } from 'zod';
 import { NotificationType } from '../generated/notification-prisma-client';
@@ -10,42 +24,15 @@ import { createNotificationLogger } from './notification-logger';
 import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
 
-const AssignedSchema = z.object({
-  shuttleTripId: z.string().uuid(),
-  mainTripId: z.string().uuid(),
-  bookingId: z.string().uuid(),
-  passengerUserId: z.string().uuid(),
-  ticketIds: z.array(z.string().uuid()).min(1),
-  pickupOrder: z.number().int().positive(),
-  scheduledDepartureTime: z.string(),
-  scheduledEndTime: z.string(),
-  driver: z.object({
-    userId: z.string().uuid(),
-    displayName: z.string().min(1),
-    phone: z.string().min(1),
-  }),
-  vehicle: z.object({ id: z.string().uuid(), licensePlate: z.string().min(1) }),
-});
-const WarningSchema = z.object({
-  mainTripId: z.string().uuid(),
-  operatorId: z.string().uuid(),
-  alertType: z.enum(['WARNING_120', 'WARNING_60']),
-  pendingBookingCount: z.number().int().nonnegative(),
-  pendingPassengerCount: z.number().int().nonnegative(),
-  hardCutoffAt: z.string(),
-});
-const UnfulfilledSchema = z.object({
-  mainTripId: z.string().uuid(),
-  bookingId: z.string().uuid(),
-  passengerUserId: z.string().uuid(),
-  stationId: z.string().uuid(),
-  reason: z.literal('AUTO_UNFULFILLED_CUTOFF'),
-});
-
 const bindings = [
-  { queue: 'notification:shuttle-assigned', routingKey: 'trip.shuttle.assigned' },
-  { queue: 'notification:shuttle-warning', routingKey: 'trip.shuttle.warning_issued' },
-  { queue: 'notification:shuttle-unfulfilled', routingKey: 'trip.shuttle.unfulfilled' },
+  { queue: 'notification:shuttle-assigned', routingKey: TRIP_SHUTTLE_ASSIGNED_ROUTING_KEY },
+  { queue: 'notification:shuttle-warning', routingKey: TRIP_SHUTTLE_WARNING_ROUTING_KEY },
+  { queue: 'notification:shuttle-unfulfilled', routingKey: TRIP_SHUTTLE_UNFULFILLED_ROUTING_KEY },
+  { queue: 'notification:shuttle-cancelled', routingKey: TRIP_SHUTTLE_CANCELLED_ROUTING_KEY },
+  { queue: 'notification:shuttle-picked-up', routingKey: TRIP_SHUTTLE_PICKED_UP_ROUTING_KEY },
+  { queue: 'notification:shuttle-delivered', routingKey: TRIP_SHUTTLE_DELIVERED_ROUTING_KEY },
+  { queue: 'notification:shuttle-no-show', routingKey: TRIP_SHUTTLE_NO_SHOW_ROUTING_KEY },
+  { queue: 'notification:shuttle-completed', routingKey: TRIP_SHUTTLE_COMPLETED_ROUTING_KEY },
 ] as const;
 
 @Injectable()
@@ -78,7 +65,10 @@ export class ShuttleEventsConsumer implements OnModuleInit {
   }
 
   async handle(routingKey: string, payload: unknown, raw: ConsumeMessage): Promise<void> {
-    const messageId = raw.properties.messageId ?? raw.properties.correlationId;
+    const payloadEventId = z.object({ eventId: z.string().uuid() }).safeParse(payload);
+    const messageId = payloadEventId.success
+      ? payloadEventId.data.eventId
+      : raw.properties.messageId ?? raw.properties.correlationId;
     if (!messageId) throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     const state = await this.idempotency.begin(routingKey, messageId, raw.content);
     if (state === 'duplicate') return;
@@ -105,8 +95,8 @@ export class ShuttleEventsConsumer implements OnModuleInit {
   }
 
   private async createNotifications(routingKey: string, payload: unknown): Promise<number> {
-    if (routingKey === 'trip.shuttle.assigned') {
-      const event = AssignedSchema.parse(payload);
+    if (routingKey === TRIP_SHUTTLE_ASSIGNED_ROUTING_KEY) {
+      const event = TripShuttleAssignedEventSchema.parse(payload);
       await this.notifications.createNotification({
         userId: event.passengerUserId,
         type: NotificationType.SHUTTLE_ASSIGNED,
@@ -128,8 +118,8 @@ export class ShuttleEventsConsumer implements OnModuleInit {
       });
       return 1;
     }
-    if (routingKey === 'trip.shuttle.unfulfilled') {
-      const event = UnfulfilledSchema.parse(payload);
+    if (routingKey === TRIP_SHUTTLE_UNFULFILLED_ROUTING_KEY) {
+      const event = TripShuttleUnfulfilledEventSchema.parse(payload);
       await this.notifications.createNotification({
         userId: event.passengerUserId,
         type: NotificationType.SHUTTLE_UNFULFILLED,
@@ -145,7 +135,42 @@ export class ShuttleEventsConsumer implements OnModuleInit {
       });
       return 1;
     }
-    const event = WarningSchema.parse(payload);
+    if (routingKey.startsWith('trip.shuttle.') && routingKey !== TRIP_SHUTTLE_WARNING_ROUTING_KEY) {
+      const event = TripShuttleLifecycleEventSchema.parse(payload);
+      const eventId = event.eventId;
+      const typeByRoutingKey = {
+        [TRIP_SHUTTLE_CANCELLED_ROUTING_KEY]: NotificationType.SHUTTLE_CANCELLED,
+        [TRIP_SHUTTLE_PICKED_UP_ROUTING_KEY]: NotificationType.SHUTTLE_PICKED_UP,
+        [TRIP_SHUTTLE_DELIVERED_ROUTING_KEY]: NotificationType.SHUTTLE_DELIVERED,
+        [TRIP_SHUTTLE_NO_SHOW_ROUTING_KEY]: NotificationType.SHUTTLE_NO_SHOW,
+        [TRIP_SHUTTLE_COMPLETED_ROUTING_KEY]: NotificationType.SHUTTLE_COMPLETED,
+      } as const;
+      const type = typeByRoutingKey[routingKey as keyof typeof typeByRoutingKey];
+      const data = { ...event, eventId: event.eventId };
+      let count = 0;
+      if (event.passengerUserId) {
+        await this.notifications.createNotification({
+          userId: event.passengerUserId,
+          type,
+          title: `Cập nhật trung chuyển: ${event.status}`,
+          body: event.reason ?? `Trạng thái trung chuyển đã chuyển sang ${event.status}.`,
+          data,
+          dedupeKey: `${eventId}:passenger:${event.passengerUserId}`,
+        });
+        count++;
+      }
+      const operatorUserIds = [...new Set(await this.recipients.resolveOperatorRecipientUserIds(event.operatorId))];
+      await Promise.all(operatorUserIds.map((userId) => this.notifications.createNotification({
+        userId,
+        type,
+        title: `Trung chuyển: ${event.status}`,
+        body: event.reason ?? `ShuttleTrip ${event.shuttleTripId} đã cập nhật trạng thái.`,
+        data,
+        dedupeKey: `${eventId}:operator:${userId}`,
+      })));
+      return count + operatorUserIds.length;
+    }
+    const event = TripShuttleWarningEventSchema.parse(payload);
     const userIds = [
       ...new Set(await this.recipients.resolveOperatorRecipientUserIds(event.operatorId)),
     ];

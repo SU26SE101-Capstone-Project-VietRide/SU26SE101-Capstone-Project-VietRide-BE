@@ -91,6 +91,8 @@ describe('ShuttleService', () => {
     expect(result.ownPickups).toEqual([{
       bookingId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
       pickupOrder: 5,
+      serviceAddress: expect.any(String),
+      serviceOrder: 5,
       latitude: 10.5,
       longitude: 106.5,
       status: 'PENDING',
@@ -99,6 +101,41 @@ describe('ShuttleService', () => {
     expect(JSON.stringify(result)).not.toContain('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
     expect(JSON.stringify(result)).not.toContain('"latitude":10.2');
     expect(result.station?.stationId).toBe('66666666-6666-4666-8666-666666666666');
+  });
+
+  it('redacts other outbound service addresses and coordinates while preserving direction', async () => {
+    const service = createPassengerContextService(null);
+    const context = createTrackingContext([
+      {
+        ...createStop(1, 'PICKED_UP', false, null),
+        isStation: true,
+      },
+      {
+        ...createStop(2, 'PENDING', true, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'),
+        serviceAddress: 'Own destination',
+      },
+      {
+        ...createStop(3, 'PENDING', false, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+        latitude: 11.1,
+        longitude: 107.1,
+        serviceAddress: 'Other passenger destination',
+      },
+    ]);
+    context.direction = 'OUTBOUND_FROM_STATION';
+
+    const result = await service.getPassengerContext(context);
+
+    expect(result.direction).toBe('OUTBOUND_FROM_STATION');
+    expect(result.ownPickups).toEqual([
+      expect.objectContaining({
+        bookingId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+        pickupOrder: 2,
+        serviceAddress: 'Own destination',
+        serviceOrder: 2,
+      }),
+    ]);
+    expect(JSON.stringify(result)).not.toContain('Other passenger destination');
+    expect(JSON.stringify(result)).not.toContain('11.1');
   });
 
   it('falls back to the first non-terminal manifest order and returns PICKED_UP as zero', async () => {
@@ -268,5 +305,7 @@ function createStop(
     status,
     isStation: false,
     isOwnPickup,
+    serviceAddress: bookingId ? `Service ${bookingId}` : 'Service stop',
+    serviceOrder: pickupOrder,
   };
 }

@@ -404,6 +404,13 @@ public class CreateRoundTripBookingCommandHandlerTests
         };
         _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(supportedOutbound);
         _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(supportedReturn);
+        _tripClient.GetShuttleRoadDistanceAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<string>(),
+                Arg.Any<decimal>(),
+                Arg.Any<decimal>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ShuttleRoadDistanceOutcome.Success(1_000));
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
             .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.Success(OutboundLockData, ReturnLockData));
         _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())

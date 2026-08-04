@@ -12,6 +12,7 @@ public sealed record BookingShuttleConfirmedIntegrationEvent : IIntegrationEvent
     public Guid UserId { get; init; }
     public IReadOnlyList<ConfirmedTicket> Tickets { get; init; } = [];
     public ShuttlePickupPayload? ShuttlePickup { get; init; }
+    public IReadOnlyList<ShuttleRequestPayload>? ShuttleRequests { get; init; }
 
     [JsonIgnore]
     public Guid EventId => BookingId;
@@ -24,4 +25,10 @@ public sealed record BookingShuttleConfirmedIntegrationEvent : IIntegrationEvent
 
     public sealed record ConfirmedTicket(Guid TicketId, Guid? PassengerUserId);
     public sealed record ShuttlePickupPayload(string Address, decimal Latitude, decimal Longitude);
+    public sealed record ShuttleRequestPayload(
+        string Direction,
+        string Address,
+        decimal Latitude,
+        decimal Longitude,
+        int? RoadDistanceMeters = null);
 }

@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.Configuration;
 using Npgsql;
 using Npgsql.NameTranslation;
 using VietRide.Shared.Application.Exceptions;
@@ -412,6 +413,10 @@ public sealed class ShuttlePersistenceIntegrationTests
                 CancellationToken.None);
             await wrongDriver.Should().ThrowAsync<ForbiddenException>();
 
+            await service.StartAsync(
+                created.ShuttleTripId,
+                seed.ShuttleDriverId,
+                CancellationToken.None);
             var first = await service.MarkPickupAsync(
                 created.ShuttleTripId,
                 1,
@@ -563,7 +568,8 @@ public sealed class ShuttlePersistenceIntegrationTests
         return (IIntegrationEventHandler<BookingShuttleConfirmedIntegrationEvent>)Activator.CreateInstance(
             type,
             db,
-            unitOfWork ?? new EfUnitOfWork(db))!;
+            unitOfWork ?? new EfUnitOfWork(db),
+            new StubShuttleDistanceClient())!;
     }
 
     private static IShuttleDispatchService CreateDispatchService(
@@ -578,7 +584,18 @@ public sealed class ShuttlePersistenceIntegrationTests
             type,
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
             binder: null,
-            [db, new StubIdentityClient(operatorId), CreateOutbox(db, clock), clock],
+            [
+                db,
+                new StubIdentityClient(operatorId),
+                CreateOutbox(db, clock),
+                clock,
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["SHUTTLE_MAX_DISTANCE_KM"] = "5",
+                    })
+                    .Build(),
+            ],
             culture: null)!;
     }
 
@@ -684,5 +701,16 @@ public sealed class ShuttlePersistenceIntegrationTests
             {
                 Phone = "0900000000",
             });
+    }
+
+    private sealed class StubShuttleDistanceClient : IShuttleDistanceClient
+    {
+        public Task<ShuttleDistanceOutcome> CalculateAsync(
+            decimal originLatitude,
+            decimal originLongitude,
+            decimal destinationLatitude,
+            decimal destinationLongitude,
+            CancellationToken cancellationToken)
+            => Task.FromResult<ShuttleDistanceOutcome>(new ShuttleDistanceOutcome.Success(1_000));
     }
 }

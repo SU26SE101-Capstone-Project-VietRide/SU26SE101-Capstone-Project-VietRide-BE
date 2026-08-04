@@ -133,6 +133,12 @@ public sealed class BookingsController : ControllerBase
                     request.ShuttlePickup.Address,
                     request.ShuttlePickup.Latitude,
                     request.ShuttlePickup.Longitude),
+            ShuttleDropoff: request.ShuttleDropoff is null
+                ? null
+                : new ShuttleDropoffCommand(
+                    request.ShuttleDropoff.Address,
+                    request.ShuttleDropoff.Latitude,
+                    request.ShuttleDropoff.Longitude),
             IdempotencyKey: GetRequiredIdempotencyKey());
 
         var result = await _sender.Send(command, ct);
@@ -361,7 +367,13 @@ public sealed class BookingsController : ControllerBase
                 : new CreateRoundTripBookingCommand.RoundTripShuttlePickupCommand(
                     leg.ShuttlePickup.Address,
                     leg.ShuttlePickup.Latitude,
-                    leg.ShuttlePickup.Longitude));
+                    leg.ShuttlePickup.Longitude),
+            ShuttleDropoff: leg.ShuttleDropoff is null
+                ? null
+                : new CreateRoundTripBookingCommand.RoundTripShuttleDropoffCommand(
+                    leg.ShuttleDropoff.Address,
+                    leg.ShuttleDropoff.Latitude,
+                    leg.ShuttleDropoff.Longitude));
 
     private string GetRequiredIdempotencyKey()
     {

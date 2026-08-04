@@ -35,6 +35,17 @@ public sealed class ShuttleDomainTests
     }
 
     [Fact]
+    public void RequestPassenger_WithNegativeRoadDistance_Throws()
+    {
+        FluentActions.Invoking(() => ShuttlePassenger.Request(
+                Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+                "123 Nguyen Hue", 10.77m, 106.70m,
+                roadDistanceMeters: -1))
+            .Should().Throw<ArgumentOutOfRangeException>()
+            .And.ParamName.Should().Be("roadDistanceMeters");
+    }
+
+    [Fact]
     public void CancelPassenger_IsIdempotent()
     {
         var passenger = ShuttlePassenger.Request(

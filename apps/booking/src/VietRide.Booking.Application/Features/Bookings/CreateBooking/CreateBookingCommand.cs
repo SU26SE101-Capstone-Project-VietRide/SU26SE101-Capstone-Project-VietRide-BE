@@ -23,9 +23,12 @@ public sealed record CreateBookingCommand(
     string? VoucherCode,
     string PaymentMethod,
     ShuttlePickupCommand? ShuttlePickup = null,
+    ShuttleDropoffCommand? ShuttleDropoff = null,
     string? IdempotencyKey = null) : IRequest<CreateBookingResult>;
 
 public sealed record ShuttlePickupCommand(string Address, decimal Latitude, decimal Longitude);
+
+public sealed record ShuttleDropoffCommand(string Address, decimal Latitude, decimal Longitude);
 
 /// <summary>
 /// Per-seat operational booking request. Passenger PII is intentionally not collected.

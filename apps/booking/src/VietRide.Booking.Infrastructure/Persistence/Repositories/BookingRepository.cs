@@ -311,7 +311,7 @@ internal sealed class BookingRepository : IBookingRepository
         CancellationToken ct = default)
         => await _db.Bookings
             .Include(booking => booking.Tickets)
-            .Include(booking => booking.ShuttleIntent)
+            .Include(booking => booking.ShuttleIntents)
             .Where(booking => booking.TripId == tripId
                 && booking.OperatorId == operatorId
                 && (booking.Status == BookingStatus.PENDING_PAYMENT
@@ -336,7 +336,7 @@ internal sealed class BookingRepository : IBookingRepository
                 FOR UPDATE
                 """)
             .Include(booking => booking.Tickets)
-            .Include(booking => booking.ShuttleIntent)
+            .Include(booking => booking.ShuttleIntents)
             .AsSplitQuery()
             .ToListAsync(ct);
 
@@ -908,7 +908,7 @@ internal sealed class BookingRepository : IBookingRepository
         Guid bookingId,
         CancellationToken ct = default)
         => await _db.Bookings
-            .Include(b => b.ShuttleIntent)
+            .Include(b => b.ShuttleIntents)
             .FirstOrDefaultAsync(b => b.Id == bookingId, ct);
 
     public async Task<BookingEntity?> FindByIdForUpdateAsync(
@@ -919,14 +919,17 @@ internal sealed class BookingRepository : IBookingRepository
         if (trackedBooking is not null)
             _db.Entry(trackedBooking).State = EntityState.Detached;
 
-        var trackedIntent = _db.BookingShuttleIntents.Local.SingleOrDefault(intent => intent.BookingId == bookingId);
-        if (trackedIntent is not null)
+        foreach (var trackedIntent in _db.BookingShuttleIntents.Local
+                     .Where(intent => intent.BookingId == bookingId)
+                     .ToArray())
+        {
             _db.Entry(trackedIntent).State = EntityState.Detached;
+        }
 
         return await _db.Bookings
             .FromSqlInterpolated($"SELECT * FROM vietride_booking.bookings WHERE id = {bookingId} FOR UPDATE")
             .Include(booking => booking.Tickets)
-            .Include(booking => booking.ShuttleIntent)
+            .Include(booking => booking.ShuttleIntents)
             .SingleOrDefaultAsync(ct);
     }
 
@@ -994,7 +997,7 @@ internal sealed class BookingRepository : IBookingRepository
         => await _db.Bookings
             .Include(b => b.Passengers)
             .Include(b => b.Tickets)
-            .Include(b => b.ShuttleIntent)
+            .Include(b => b.ShuttleIntents)
             .FirstOrDefaultAsync(b => b.Id == bookingId, ct);
 
     /// <inheritdoc/>
@@ -1056,14 +1059,17 @@ internal sealed class BookingRepository : IBookingRepository
             .OrderBy(t => t.SeatNumber)
             .Select(t => t.Id)
             .ToArrayAsync(ct);
-        var shuttleIntent = await _db.BookingShuttleIntents
+        var shuttleIntents = await _db.BookingShuttleIntents
             .AsNoTracking()
             .Where(intent => intent.BookingId == bookingId && intent.IsActive)
             .Select(intent => new BookingShuttleIntentSnapshot(
                 intent.PickupAddress,
                 intent.PickupLatitude,
-                intent.PickupLongitude))
-            .SingleOrDefaultAsync(ct);
+                intent.PickupLongitude,
+                intent.Direction,
+                intent.RoadDistanceMeters))
+            .ToArrayAsync(ct);
+        var shuttleIntent = shuttleIntents.FirstOrDefault(intent => intent.Direction == "INBOUND_TO_STATION");
 
         return new BookingPaymentTransitionSnapshot(
             booking.Id,
@@ -1075,7 +1081,8 @@ internal sealed class BookingRepository : IBookingRepository
             assignedPassengers,
             ticketCodes,
             ticketIds,
-            shuttleIntent);
+            shuttleIntent,
+            shuttleIntents);
     }
 
     /// <inheritdoc/>
