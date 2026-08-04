@@ -20,7 +20,7 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         var connectionString = Environment.GetEnvironmentVariable("VIETRIDE_TEST_REDIS")
-            ?? "localhost:6379,abortConnect=false,connectTimeout=3000";
+            ?? "127.0.0.1:6379,abortConnect=false,connectTimeout=3000";
         _redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
         await _redis.GetDatabase().PingAsync();
     }

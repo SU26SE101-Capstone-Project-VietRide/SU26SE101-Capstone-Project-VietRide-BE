@@ -180,7 +180,7 @@ public sealed class Day29CargoNearFullOutboxIntegrationTests
 
     private static string CreateConnectionString(string databaseName)
     {
-        const string fallback = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+        const string fallback = "Host=127.0.0.1;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
         var template = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(template))
         {
@@ -202,7 +202,18 @@ public sealed class Day29CargoNearFullOutboxIntegrationTests
             throw new InvalidOperationException($"Refusing to delete non-scratch database '{connectedDatabase}'.");
         }
 
-        await db.Database.EnsureDeletedAsync();
+        await db.Database.CloseConnectionAsync();
+        var adminConnectionString = new NpgsqlConnectionStringBuilder(CreateConnectionString("postgres"))
+        {
+            Host = "127.0.0.1",
+            Database = "postgres",
+            Pooling = false,
+        }.ConnectionString;
+        await using var adminConnection = new NpgsqlConnection(adminConnectionString);
+        await adminConnection.OpenAsync();
+        var quotedDatabase = new NpgsqlCommandBuilder().QuoteIdentifier(databaseName);
+        await using var command = new NpgsqlCommand($"DROP DATABASE IF EXISTS {quotedDatabase} WITH (FORCE)", adminConnection);
+        await command.ExecuteNonQueryAsync();
     }
 
     private sealed class ThrowAfterStagingOutbox(IIntegrationEventOutbox inner) : IIntegrationEventOutbox

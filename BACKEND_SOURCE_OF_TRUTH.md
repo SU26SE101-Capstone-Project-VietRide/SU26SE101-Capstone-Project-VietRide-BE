@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.54.0
+> **Phiên bản:** 1.55.1
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-03
+> **Cập nhật lần cuối:** 2026-08-04
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -85,7 +85,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 |---|---|---|---|---|---|---|
 | 0 | **API Gateway** | NestJS | — (stateless) | — | — | JWT validate (RS256 JWKS), Internal JWT sign (HS256 120s), reverse proxy, rate limit, phone-completion gate |
 | 1 | **Identity & User** | .NET 8 + EF Core 8 | `vietride_identity` | ✓ | — | Auth (OAuth/email/OTP), RBAC, User/Operator profile, refresh token rotation, SubscriptionPlan + OperatorSubscription, ActivityLog, UserDevice (FCM token) |
-| 2 | **Trip-Route-Vehicle** | .NET 8 + EF Core 8 | `vietride_trip` | ✓ | — | Station/Stop/Route/RouteStop, Vehicle + VehicleType, Trip + TripSeat + TripStop + TripStopFare, operator holiday fare surcharge, DriverSchedule + Hangfire generate, AlternativeRoute, ShuttleTrip, Incident |
+| 2 | **Trip-Route-Vehicle** | .NET 8 + EF Core 8 | `vietride_trip` | ✓ | — | Station/Stop/Route/RouteStop, Vehicle + VehicleType, Trip + TripSeat + TripStop + TripStopFare, operator holiday fare surcharge, DriverSchedule + Hangfire generate, AlternativeRoute, RouteChangeProposal snapshots, ShuttleTrip, Incident |
 | 3 | **Booking** | .NET 8 + EF Core 8 | `vietride_booking` | ✓ | — | Booking order + per-seat Ticket + Passenger boarding record + BookingTransfer, BookingPendingAction, Voucher + VoucherUsage + OperatorVoucherConsent, BookingStats, seat lock TTL (Redis) |
 | 4 | **Payment & Wallet** | .NET 8 + EF Core 8 | `vietride_payment` | ✓ | — | Payment (BOOKING/PARCEL/TOP_UP/SUBSCRIPTION), Wallet + WalletTransaction (passenger), PlatformWallet + OperatorWallet + OperatorLedgerEntry + OperatorTripSettlement, Invoice + PDF, VNPay integration, RefundFailureLog |
 | 5 | **Parcel** | .NET 8 + EF Core 8 | `vietride_parcel` | ✓ | — | Parcel lifecycle, ParcelRouteFare, hashed delivery-token history, transfer/return flows, ParcelStats |
@@ -1077,7 +1077,7 @@ Idempotent: chạy migration 2 lần không lỗi (EF Core / Prisma migrations h
 
 `Location` is the admin-managed public origin/destination catalog used by FE trip search; `Station.locationId` and `Stop.locationId` are nullable links to this catalog.
 
-`Station` · `OperatorStation` · `Stop` · `Route` · `RouteStop` · `RouteStopFareTemplate` · `OperatorFareSurchargeSetting` · `OperatorFareSurchargePeriod` · `AlternativeRoute` · `AlternativeRouteStop` · `VehicleType` · `Vehicle` · `Trip` · `TripSeat` · `TripStop` · `TripStopFare` · `DriverSchedule` · `TripGenerationSkipLog` · `TripAuditLog` · `DriverScheduleAuditLog` · `ShuttleTrip` · `ShuttlePassenger` · `Incident` · `OutboxEvent`
+`Station` · `OperatorStation` · `Stop` · `Route` · `RouteStop` · `RouteStopFareTemplate` · `OperatorFareSurchargeSetting` · `OperatorFareSurchargePeriod` · `AlternativeRoute` · `AlternativeRouteStop` · `RouteChangeProposal` · `RouteChangeProposalStop` · `VehicleType` · `Vehicle` · `Trip` · `TripSeat` · `TripStop` · `TripStopFare` · `DriverSchedule` · `TripGenerationSkipLog` · `TripAuditLog` · `DriverScheduleAuditLog` · `ShuttleTrip` · `ShuttlePassenger` · `Incident` · `OutboxEvent`
 
 #### Booking (`vietride_booking`)
 
@@ -1265,7 +1265,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
 endpoint có behavior-idempotent hay không, trừ đúng 17 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `185 mutation surfaces / 168 required / 17 exempt`;
+bảng sau. Inventory executable phải giữ tổng `188 mutation surfaces / 171 required / 17 exempt`;
 thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
 
 **Canonical 17 exemptions (không yêu cầu `Idempotency-Key`):**
@@ -1350,6 +1350,9 @@ Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable
 | 39 | `DELETE /v1/operator/policies/{policyId}` | RAG |
 | 40 | `PUT /v1/operator/parcel-route-fares/{routeId}/batch` | Parcel |
 | 41 | `POST /v1/operator/trips/{tripId}/disrupt-no-substitution` | Trip |
+| 42 | `POST /v1/driver/trips/{tripId}/route-change-proposals` | Trip |
+| 43 | `POST /v1/operator/route-change-proposals/{proposalId}/approve` | Trip |
+| 44 | `POST /v1/operator/route-change-proposals/{proposalId}/reject` | Trip |
 
 `POST /v1/operator/trips` is deferred outside current v1 and MUST remain absent from the public
 API and Gateway inventories. `Trip.source=MANUAL` is compatibility/readiness only; it does not
@@ -1583,6 +1586,10 @@ updates the column.
 | | `VEHICLE_NOT_ACTIVE` | 422 | Replacement Vehicle exists but is not active |
 | | `VEHICLE_TYPE_NOT_FOUND` | 404 | VehicleType không tồn tại hoặc không active |
 | | `TRIP_NOT_EDITABLE` | 409 | Requested Trip field is not editable in the current lifecycle state |
+| | `ROUTE_CHANGE_PROPOSAL_NOT_FOUND` | 404 | Proposal không tồn tại hoặc bị tenant-mask cho `OPERATOR_ADMIN` khác operator |
+| | `ROUTE_CHANGE_PROPOSAL_NOT_PENDING` | 409 | Approve/reject proposal đã rời `PENDING`, hoặc Trip không còn editable và pending proposal vừa được expire |
+| | `ROUTE_CHANGE_PROPOSAL_STALE` | 409 | Frozen EXISTING source đã sửa/deactivate, hoặc CUSTOM destination/Stop không còn hợp lệ tại approval |
+| | `INCIDENT_NOT_FOUND` | 404 | Optional proposal `incidentId` không tồn tại hoặc không thuộc cùng Trip |
 | | `TRIP_ALREADY_TERMINAL` | 409 | Manual complete/fallback/disruption race already produced a terminal state |
 | | `TRIP_VEHICLE_CONFLICT` | 409 | Vehicle trùng giờ trên Trip khác |
 | | `TRIP_DRIVER_CONFLICT` | 409 | Driver trùng giờ |
@@ -1629,7 +1636,7 @@ updates the column.
 | | `ROUTE_GEOMETRY_INVALID` | 422 | Encoded route polyline cannot be decoded as Google precision-5 or has points/count outside accepted bounds |
 | | `ROUTE_GEOMETRY_STOP_MISMATCH` | 422 | One or more configured Stop/Station coordinates are farther than 500 m from the submitted route polyline; `error.fields` uses `stopIds`/`stationIds` |
 | | `ROUTE_RETURN_NOT_CONFIGURED` | 422 | returnRouteId NULL khi đặt round-trip |
-| | `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED` | 422 | Day-8 config-time third active AlternativeRoute for the same Route |
+| | `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED` | — (retired) | Không còn được emit; v1 không có global active-count cap cho AlternativeRoute |
 | **Station** | `STATION_NOT_FOUND` | 404 | Day-7 Trip Station handlers use coded 404 path |
 | | `STATION_DUPLICATE_NEARBY` | 200 (warning) | Operator tạo Station < 100m gần Station hiện có |
 | | `STATION_MERGE_CONFLICT` | 409 | Merge làm Route origin=destination, vi phạm domain invariant hoặc precondition thay đổi sau khi lock; transaction không được partial relink |
@@ -2176,6 +2183,11 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.trip.vehicle_swapped` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldVehicleId,newVehicleId,oldVehiclePlateNumber,newVehiclePlateNumber,departureDateTime,driverUserId,assistantUserId,seatImpacts:[{bookingId,seatNumbers,reason}] }`; `assistantUserId` present nullable, reasons exactly `SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED` |
 | `trip.trip.vehicle_substituted` | Trip | Booking, Parcel (Day 35) | Exact `{eventId,occurredAt,substitutionId,disruptedAt,operatorId,oldTripId,oldTripStatus,oldVehicleId,newTripId,newTripStatus,newVehicleId,newVehiclePlateNumber,newTripDepartureDateTime,actorUserId,reason,notifyPassengers,mappings:[{bookingId,passengerId,originalSeatNumber,newSeatNumber,originalBoardingStatus}]}`; exactly one fact per substitution; `occurredAt = disruptedAt`; `substitutionId = eventId`; `oldTripStatus=DISRUPTED`; `newTripStatus=BOARDING`; both `originalSeatNumber` and `newSeatNumber` are nullable; `originalBoardingStatus=BOARDED\|PENDING`; `payload.eventId == Outbox row id == RabbitMQ MessageId`. |
 | `trip.trip.route_changed` | Trip | Booking, Notification | { eventId, occurredAt, tripId, operatorId, tripStatus, alternativeRouteId, affectedBookings } |
+| `trip.route_change_proposal.created` | Trip | Notification | Exact `{ eventId, occurredAt, proposalId, tripId, operatorId, proposedByUserId, actorUserId, proposalType, status, sourceAlternativeRouteId, approvedAlternativeRouteId, incidentId, reason, rejectionReason, resolutionCode, supersededByProposalId }`; nullable fields serialize as null; `actorUserId=proposedByUserId`, `status=PENDING`. Notification resolves every active `OPERATOR_ADMIN` by `operatorId` and creates `ROUTE_CHANGE_PROPOSAL_CREATED` per admin. |
+| `trip.route_change_proposal.approved` | Trip | Notification | Exact `{ eventId, occurredAt, proposalId, tripId, operatorId, proposedByUserId, actorUserId, proposalType, status, sourceAlternativeRouteId, approvedAlternativeRouteId, incidentId, reason, rejectionReason, resolutionCode, supersededByProposalId }`; `actorUserId` is deciding `OPERATOR_ADMIN`, `status=APPROVED`, `approvedAlternativeRouteId` is non-null. Notification sends `ROUTE_CHANGE_PROPOSAL_APPROVED` to `proposedByUserId`; approval also emits canonical `trip.trip.route_changed` atomically. |
+| `trip.route_change_proposal.rejected` | Trip | Notification | Exact `{ eventId, occurredAt, proposalId, tripId, operatorId, proposedByUserId, actorUserId, proposalType, status, sourceAlternativeRouteId, approvedAlternativeRouteId, incidentId, reason, rejectionReason, resolutionCode, supersededByProposalId }`; `actorUserId` is deciding `OPERATOR_ADMIN`, `status=REJECTED`; optional `rejectionReason` is trimmed/null-normalized. Notification sends `ROUTE_CHANGE_PROPOSAL_REJECTED` to `proposedByUserId`. |
+| `trip.route_change_proposal.superseded` | Trip | Notification | Exact `{ eventId, occurredAt, proposalId, tripId, operatorId, proposedByUserId, actorUserId, proposalType, status, sourceAlternativeRouteId, approvedAlternativeRouteId, incidentId, reason, rejectionReason, resolutionCode, supersededByProposalId }`; `status=SUPERSEDED`; `resolutionCode=ANOTHER_PROPOSAL_APPROVED|ROUTE_CHANGED_DIRECTLY`; `supersededByProposalId` is winner id for approval and null for direct route change. Notification sends `ROUTE_CHANGE_PROPOSAL_SUPERSEDED` to `proposedByUserId`. |
+| `trip.route_change_proposal.expired` | Trip | Notification | Exact `{ eventId, occurredAt, proposalId, tripId, operatorId, proposedByUserId, actorUserId, proposalType, status, sourceAlternativeRouteId, approvedAlternativeRouteId, incidentId, reason, rejectionReason, resolutionCode, supersededByProposalId }`; `status=EXPIRED`; `actorUserId=null`; `resolutionCode=TRIP_NO_LONGER_EDITABLE|SOURCE_ROUTE_CHANGED`. Notification sends `ROUTE_CHANGE_PROPOSAL_EXPIRED` to `proposedByUserId`. |
 | `trip.trip.schedule_changed` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity }`, severity `MINOR\|MEDIUM\|MAJOR`; Booking owns passenger facts while Notification resolves current Trip crew only |
 | `trip.stop.disabled` | Trip | Booking | Exact `{ eventId, occurredAt, eventType, stopId, operatorId, replacedByStopId? }`; `eventId == OutboxEvent.Id == RabbitMQ MessageId`. |
 | `trip.station.merged` | Trip | Booking, Identity | `{ eventId, occurredAt, eventType, actorUserId, ipAddress?, userAgent?, primaryStationId, duplicateStationId, primaryBefore, duplicateBefore, primaryAfter, relinkedCounts }`; Station snapshots omit contact phone/email |
@@ -2309,6 +2321,33 @@ AlternativeRoute in the same transaction as the mutation/Outbox write. ETA uses
 `actualDepartureTime ?? departureDateTime` plus each stop's duration from origin; the destination
 uses `AlternativeRoute.estimatedDurationMinutes`, falling back to the final intermediate duration
 or zero. There is no cross-DB FK and no synchronous consumer lookup.
+
+**Route-change proposal lifecycle:** assigned `DRIVER|ASSISTANT` may create `EXISTING|CUSTOM`
+snapshot proposals only while the Trip is `SCHEDULED|BOARDING|IN_PROGRESS`; multiple pending rows
+per Trip are permitted. `OPERATOR_ADMIN` owns tenant-scoped list/detail/approve/reject. Approval
+promotes CUSTOM into an official AlternativeRoute when needed, applies the route, and supersedes
+all other pending rows atomically. Direct admin change-route remains supported and supersedes all
+pending rows. Source mutation/deactivation or terminal Trip transitions expire pending rows.
+The public CUSTOM body property is `route`; its `pathPolyline` is required and reuses the canonical
+Google precision-5 geometry/500-metre waypoint validator. Its destination Station must have an
+active OperatorStation mapping for the proposal tenant, and all Stops must be active and owned by
+that tenant. The public reject body property is optional `reason`; the persisted/response/event
+field remains `rejectionReason`.
+All creation, approval, source-write, direct-change, and terminal-transition paths use one fixed
+PostgreSQL transaction lock protocol: source-referencing paths first acquire the transaction-scoped
+AlternativeRoute advisory lock, then lock `Trip`, pending proposal rows by UUID ascending, and the
+required AlternativeRoute/Station/OperatorStation/Stop dependency rows in deterministic order.
+Proposal creation runs this full protocol, audit write, and Outbox enqueue in one transaction.
+
+Notification consumes all five `trip.route_change_proposal.*` facts. Created resolves all active
+`OPERATOR_ADMIN` recipients by `operatorId`; each terminal fact targets `proposedByUserId`.
+The exact type mapping is
+`created→ROUTE_CHANGE_PROPOSAL_CREATED`, `approved→ROUTE_CHANGE_PROPOSAL_APPROVED`,
+`rejected→ROUTE_CHANGE_PROPOSAL_REJECTED`, `superseded→ROUTE_CHANGE_PROPOSAL_SUPERSEDED`, and
+`expired→ROUTE_CHANGE_PROPOSAL_EXPIRED`. Consumer dedupe uses `eventId`, which equals Outbox id and
+RabbitMQ `MessageId`; replay/redelivery creates no duplicate Notification or push. These operational
+notifications are additive; passenger messaging remains owned by existing `trip.trip.route_changed`
+→ Booking pending-action facts and the existing `TRIP_ROUTE_CHANGED` mapping.
 
 Day-22 schedule-day removal sets `trip.trip.cancelled.cancelReason` to
 `DRIVER_SCHEDULE_DAY_REMOVED` and `cancelledAt=occurredAt`. Payment does not consume the terminal
@@ -2753,6 +2792,13 @@ Day-22 extends `TripAuditAction` with exactly `TRIP_EDITED`, `TRIP_VEHICLE_SWAPP
 `DriverScheduleAuditAction.DriverScheduleEdited = "DRIVER_SCHEDULE_EDITED"`. Both audit stores are
 append-only; same-value requests append nothing. Day-22 metadata is exactly
 `{changedFields,before,after,requestId}` and never contains the raw Idempotency-Key.
+
+Route-change proposals extend `TripAuditAction` with exactly
+`ROUTE_CHANGE_PROPOSAL_CREATED|ROUTE_CHANGE_PROPOSAL_APPROVED|ROUTE_CHANGE_PROPOSAL_REJECTED|ROUTE_CHANGE_PROPOSAL_SUPERSEDED|ROUTE_CHANGE_PROPOSAL_EXPIRED`.
+Their metadata is exactly `{proposalId,proposalType,status}`. Proposal approval additionally appends
+the existing `TRIP_ROUTE_CHANGED` action with metadata `{proposalId,alternativeRouteId}`. Automatic
+expiry uses null `actorUserId`; crew/admin transitions use the authenticated actor. Proposal state,
+audit rows, and Outbox rows commit in the same Trip-local transaction.
 
 `driver_schedule_audit_logs` mirrors the Trip audit shape with `driver_schedule_id` as a local FK
 to `driver_schedules(id) ON DELETE RESTRICT`, nullable logical `actor_user_id` (no cross-DB FK),
@@ -3788,6 +3834,8 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.55.1** | 2026-08-04 | Codex | **PATCH** — Freeze the route-change proposal transaction lock protocol as source advisory lock → Trip → pending proposal UUIDs → dependency rows, and require proposal creation, audit, and Outbox persistence in that transaction. |
+| **1.55.0** | 2026-08-04 | Codex | **MINOR** — Add assigned Driver/Assistant EXISTING/CUSTOM route-change proposal snapshots, tenant-scoped Operator Admin decision flow, approval promotion/supersession/expiry semantics, five Trip lifecycle facts, four canonical errors and five audit actions. Notification consumes all five facts with active-admin fan-out for create, proposer delivery for terminal outcomes, five dedicated types and EventId/MessageId dedupe. Preserve direct admin route change and existing passenger impact, retire the global AlternativeRoute active-count cap and `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`, and add three UUID-v4-required mutations (188/171/17). |
 | **1.54.0** | 2026-08-03 | Codex | **MINOR** — Add System-Admin operator detail projection and Trip-owned operator holiday fare surcharge settings/periods. Inclusive ICT departure dates, active-window overlap protection, pre-voucher nearest-VND adjustment, additive search/detail breakdown and Booking-time snapshot semantics are canonical. Adds four UUID-v4-required mutation surfaces, raising the inventory to 185/168/17; no dependency, integration event or background job. |
 | **1.53.0** | 2026-08-02 | Codex | **MINOR** — Freeze public Tracking map context: authorized Trip route geometry with safe marker fallback, deterministic 1.000-point cap/ETag, passenger-only Shuttle context without foreign pickup leakage, post-pickup access continuity, and additive TripStop status for terminal-stop ETA selection. No migration, dependency, integration event, Gateway family, or Google configuration change. |
 | **1.52.1** | 2026-08-02 | BE lead (Vũ) | **PATCH** — Reconciles the v1.54 Shuttle pickup merge with the system-wide idempotency inventory: `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup` is UUID-v4-required, raising the executable baseline to 181 HTTP mutation surfaces / 164 required / exactly 17 exemptions. Runtime metadata and API Contract were already required; no dependency, schema, migration or additional endpoint change. |
@@ -3845,7 +3893,7 @@ PR fail nếu bất kỳ step nào fail.
 | **1.10.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — SOT reconciliation patches (Day-11 Q2 / Day-12 C1,C2,CO2 / Day-13 C5): (1) §9.9 Redis key `booking:seat_lock:{tripId}:{seatNumber}` owner Booking → key `seat_lock:{tripId}:{seatNumber}` owner Trip (source: BSOT 1.8.0 + API Contract §`lock-seats`). (2) §5.6 idempotency table: split combined row `POST /v1/bookings/{id}/edit-pickup-dropoff` into two separate rows `POST /v1/bookings/{id}/edit-pickup` and `POST /v1/bookings/{id}/edit-dropoff` (source: API Contract lines ~830-885 defines two separate endpoints, higher precedence). (3) §7.2 Payment seam: `POST /internal/v1/payments/wallet-charge` → `POST /internal/v1/payments/charge` (source: API Contract line ~1565). (4) §9.10 + §9.1 logging example: BookingCode short-form `VR-<4 char base32>` → `VR-yyyyMMdd-XXXXXXXX` (date + 8-char base32 uppercase) (source: db-schema/booking/schema.sql COMMENT + API Contract line ~713). No code/DDL change. |
 | **1.9.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — Day-9 Trip vehicle/schedule contract + registry sync: add the VehicleType catalog read, operator-scoped Vehicle CRUD, exact `seatLayoutJson` BE/FE shape and v1 validation scope, and DriverSchedule create contract with local-ICT weekly recurrence, validity window, conflict handling via existing `TRIP_DRIVER_CONFLICT`, no Trip generation, and Day-11 deferred driver/assistant role validation. Add exactly two new §5.9 tenant/reference codes: `VEHICLE_NOT_FOUND` and `VEHICLE_TYPE_NOT_FOUND`. No code/DDL change. |
 | **1.8.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — Trip↔Booking seam freeze (unblocks parallel Day-12 Booking work). Document the seat lifecycle as **synchronous internal HTTP** owned by Trip-Route-Vehicle: `TripSeat` lives in the `trip-route-vehicle` schema (NOT Booking — corrects the BE_TIMELINE Day-12 "TripSeat tables" note, which loses to technical_context §6.1/§6.10 + db-schema), generated by the Trip Hangfire job from `Vehicle.seatLayoutJson`; Booking drives `lock-seats` (AVAILABLE→HELD, Redis `seat_lock:{tripId}:{seatNumber}` TTL 10 min, all-or-nothing) → `book-seats` (HELD→BOOKED) → `release-seats` (HELD→AVAILABLE, idempotent compensation); no event on the seat path. Reconcile §7.2 endpoint name `confirm-seats` → **`book-seats`** to match API Contract (#2 > #3). Flesh out the API contract: add the missing `GET /internal/v1/trips/{tripId}` raw-DTO shape (operatorId/routeId/baseFare/stops[allowPickup,allowDropoff,orderIndex,fareFromThisStop]/seatSummary) already registered in §7.2, and add error responses to the three seat endpoints. **No new error codes** (`BOOKING_SEAT_UNAVAILABLE` 409, `BOOKING_TRIP_NOT_BOOKABLE` 409, `TRIP_NOT_FOUND` 404 already §5.9). No code/DDL change. |
-| **1.7.0** | 2026-06-10 | BE lead (Vũ) | **MINOR** — Day-8 Trip route contract + registry sync: add the Route/RouteStop/FareTemplate/AlternativeRoute section to the API contract with ADR 0004 envelopes, method-level role matrix (WRITE = `OPERATOR_ADMIN` only; READ = `OPERATOR_ADMIN` + `OPERATOR_STAFF`), tenant-isolation `404 ROUTE_NOT_FOUND`, RouteStop hard-delete, AlternativeRoute soft-deactivate, fare-template `fareFromThisStop` and effective-window rules, and the app-layer preconditions for Route create. Add three new §5.9 validation codes for Day-8 config-time failures: `ROUTE_STOP_ORDER_CONFLICT`, `ROUTE_STOP_FLAGS_INVALID`, and `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`, each with `error.fields` discriminators. No code/DDL change. |
+| **1.7.0** | 2026-06-10 | BE lead (Vũ) | **MINOR** — Day-8 Trip route contract + registry sync: add the Route/RouteStop/FareTemplate/AlternativeRoute section to the API contract with ADR 0004 envelopes, method-level role matrix (WRITE = `OPERATOR_ADMIN` only; READ = `OPERATOR_ADMIN` + `OPERATOR_STAFF`), tenant-isolation `404 ROUTE_NOT_FOUND`, RouteStop hard-delete, AlternativeRoute soft-deactivate, fare-template `fareFromThisStop` and effective-window rules, and the app-layer preconditions for Route create. Historically added `ROUTE_STOP_ORDER_CONFLICT`, `ROUTE_STOP_FLAGS_INVALID`, and `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`; the last code was retired in 1.55.0. No code/DDL change. |
 | **1.6.5** | 2026-06-10 | BE lead (Vũ) | **PATCH** — Day-10 Outbox + passenger-stub contract sync. Add two stub endpoints to the API contract + Postman: `GET /v1/passenger/me` (reuses the `/v1/users/me` `GetMeResponseDto` projection verbatim — `id,email,displayName,phone,role,operatorId,status,avatarUrl`; no passenger-specific fields) and `GET /v1/passenger/bookings` (empty `PagedResult` envelope `{items:[],page:1,pageSize:20,total:0}` — booking ITEM schema deferred to Sprint 3 / [SCV-76](https://hoangvutran088.atlassian.net/browse/SCV-76)), both marked `stub -- item schema finalized in Sprint 3 (SCV-76 / Booking)`; both require a user JWT (401 without). Add Gateway route `/v1/passenger/*` → identity (authRequired `user`). Implement the three already-registered §7.3 events transactionally from Identity handlers (`identity.user.created {userId,role,email,createdAt}`, `identity.operator.approved {operatorId,approvedAt}`, `identity.operator.suspended {operatorId,suspendedAt}`) via the string-based `IIntegrationEventOutbox` seam; wire `AddVietRideMessaging` into Identity + set the identity container's `RabbitMq__HostName=rabbitmq` so the Outbox publishes to `vietride.events`. Add the placeholder Redis `IdempotencyMiddleware` to Shared.Web (not wired). **No new event keys, no new error codes** (`IDEMPOTENCY_KEY_MISMATCH` already §5.9; events already §7.3). `staff.password_set` intentionally NOT emitted (Q2: no registry row, no consumer — registry §7.3 > timeline). No schema/migration change (reuse existing `outbox_events`). |
 | **1.6.4** | 2026-06-08 | BE lead (Vũ) | **PATCH** — Day-7 Trip Station/Stop contract sync: reconcile station autocomplete to `GET /v1/stations/search?q=` as a targeted endpoint-specific exception to §5.8 `search=` because `technical_context_v7` line 523 has higher priority; `q` is required and blank/empty `q` maps to `422 VALIDATION_ERROR`; document accent-insensitive `unaccent` contains matching, `pg_trgm` placeholder-only compatibility, duplicate-nearby Station warning shape (`STATION_DUPLICATE_NEARBY` 200 without ApiMeta changes), single `POST /v1/operator/stations` link/create branch, Stop CRU under `/v1/operator/stops` (without Day-7 `sharedSuggestion`/`shared_suggestion` mutation), no Day-7 `Idempotency-Key` requirement, Trip->Identity logical-FK failures mapping to `422 VALIDATION_ERROR`, non-APPROVED/inactive operator writes mapping to `403 FORBIDDEN`, internal station/stop raw DTO lookup with coded 404 error envelopes, and existing coded 404 use cases for `STATION_NOT_FOUND`/`STOP_NOT_FOUND`. No new error codes, no event keys. |
 | **1.6.3** | 2026-06-07 | BE lead (Vũ) | **PATCH** — Day-6 Operator contract baseline: sync API contract/BSOT for operator self-register, System Admin manual-create, approve/reject/suspend POST action endpoints, operator-created user create/resend initial-password, operator profile GET/PATCH, and internal operator/subscription/usage endpoints. Ratify Day-6 decisions without adding new error codes, Idempotency-Key requirements, or Outbox emission: non-APPROVED operator login/write-action guards use `FORBIDDEN`; invalid lifecycle transitions use `VALIDATION_ERROR`; reject cancels `OperatorSubscription` without `deletedAt`; ActivityLog `user_id` stores actor user id with JSONB serializer metadata; Day 10 remains responsible for emitting `identity.operator.approved`/`identity.operator.suspended`. |

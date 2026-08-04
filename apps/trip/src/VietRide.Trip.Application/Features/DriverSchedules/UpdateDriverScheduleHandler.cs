@@ -38,6 +38,7 @@ public sealed class UpdateDriverScheduleHandler
     private readonly ITripGenerationJobScheduler generationJobs;
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
+    private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
 
     public UpdateDriverScheduleHandler(
         IDriverScheduleRepository schedules,
@@ -54,7 +55,8 @@ public sealed class UpdateDriverScheduleHandler
         IIntegrationEventOutbox outbox,
         ITripGenerationJobScheduler generationJobs,
         IUnitOfWork unitOfWork,
-        IClock clock)
+        IClock clock,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
     {
         this.schedules = schedules;
         this.scheduleAudits = scheduleAudits;
@@ -71,6 +73,7 @@ public sealed class UpdateDriverScheduleHandler
         this.generationJobs = generationJobs;
         this.unitOfWork = unitOfWork;
         this.clock = clock;
+        this.routeChangeProposals = routeChangeProposals;
     }
 
     public async Task<DriverScheduleDto> Handle(
@@ -383,6 +386,8 @@ public sealed class UpdateDriverScheduleHandler
         {
             var previousStatus = trip.Status;
             trip.Cancel(now, request.ActorUserId, TripCancelledIntegrationEvent.DriverScheduleDayRemovedReason);
+            if (routeChangeProposals is not null)
+                await routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
             var cancelled = new TripCancelledIntegrationEvent(
                 Guid.NewGuid(),
                 now,

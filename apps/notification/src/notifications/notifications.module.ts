@@ -43,6 +43,7 @@ import { Day24StopDisabledAutoFallbackEventsConsumer } from './day24-stop-disabl
 import { BookingTripRecipientProvider } from './booking-trip-recipient.provider';
 import { ParcelRecipientProvider } from './parcel-recipient.provider';
 import { IdentitySystemAdminRecipientProvider } from './identity-system-admin-recipient.provider';
+import { RouteChangeProposalEventsConsumer } from './route-change-proposal-events.consumer';
 
 @Module({
   controllers: [NotificationsController, OperatorNotificationsController, InternalEmailsController],
@@ -71,6 +72,7 @@ import { IdentitySystemAdminRecipientProvider } from './identity-system-admin-re
     TripTrackingAlertEventsConsumer,
     ParcelSubscriptionOperatorEventsConsumer,
     ShuttleEventsConsumer,
+    RouteChangeProposalEventsConsumer,
     UserJwtAuthGuard,
     InternalJwtAuthGuard,
     { provide: NOTIFICATION_JWT_VERIFIER, useClass: JoseNotificationUserJwtVerifier },

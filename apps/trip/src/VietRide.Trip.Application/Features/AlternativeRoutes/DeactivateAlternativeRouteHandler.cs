@@ -1,8 +1,10 @@
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Stops;
 
 namespace VietRide.Trip.Application.Features.AlternativeRoutes;
@@ -12,15 +14,21 @@ public sealed class DeactivateAlternativeRouteHandler : IRequestHandler<Deactiva
     private readonly IAlternativeRouteRepository alternativeRouteRepository;
     private readonly IIdentityInternalClient identityInternalClient;
     private readonly IUnitOfWork unitOfWork;
+    private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
+    private readonly IClock? clock;
 
     public DeactivateAlternativeRouteHandler(
         IAlternativeRouteRepository alternativeRouteRepository,
         IIdentityInternalClient identityInternalClient,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null,
+        IClock? clock = null)
     {
         this.alternativeRouteRepository = alternativeRouteRepository;
         this.identityInternalClient = identityInternalClient;
         this.unitOfWork = unitOfWork;
+        this.routeChangeProposals = routeChangeProposals;
+        this.clock = clock;
     }
 
     public async Task<Unit> Handle(DeactivateAlternativeRouteCommand request, CancellationToken cancellationToken)
@@ -38,6 +46,8 @@ public sealed class DeactivateAlternativeRouteHandler : IRequestHandler<Deactiva
 
         alternativeRoute.Deactivate();
         alternativeRouteRepository.Update(alternativeRoute);
+        if (routeChangeProposals is not null)
+            await routeChangeProposals.ExpirePendingForSourceAsync(alternativeRoute.Id, clock?.UtcNow ?? DateTimeOffset.UtcNow, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return Unit.Value;

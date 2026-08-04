@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Features.Trips.Operations;
@@ -18,17 +19,20 @@ public sealed class CompleteTripCommandHandler
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
     private readonly ILogger<CompleteTripCommandHandler> _logger;
+    private readonly IRouteChangeProposalLifecycleService? _routeChangeProposals;
 
     public CompleteTripCommandHandler(
         ITripRepository trips,
         IIntegrationEventOutbox outbox,
         IClock clock,
-        ILogger<CompleteTripCommandHandler> logger)
+        ILogger<CompleteTripCommandHandler> logger,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
     {
         _trips = trips;
         _outbox = outbox;
         _clock = clock;
         _logger = logger;
+        _routeChangeProposals = routeChangeProposals;
     }
 
     public async Task<CompleteTripResponse> Handle(
@@ -62,6 +66,8 @@ public sealed class CompleteTripCommandHandler
             trip.CompleteAutomatically(now);
         else
             trip.CompleteManually(now, request.ActorUserId!.Value);
+        if (_routeChangeProposals is not null)
+            await _routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
 
         var evt = new TripCompletedIntegrationEvent(
             trip.Id,

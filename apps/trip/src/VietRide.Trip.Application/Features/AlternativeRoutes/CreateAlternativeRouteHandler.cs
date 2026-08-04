@@ -10,8 +10,6 @@ namespace VietRide.Trip.Application.Features.AlternativeRoutes;
 
 public sealed class CreateAlternativeRouteHandler : IRequestHandler<CreateAlternativeRouteCommand, AlternativeRouteDto>
 {
-    private const int MaxActiveAlternativeRoutesPerRoute = 2;
-
     private readonly IAlternativeRouteRepository alternativeRouteRepository;
     private readonly IIdentityInternalClient identityInternalClient;
     private readonly IRouteRepository routeRepository;
@@ -45,7 +43,6 @@ public sealed class CreateAlternativeRouteHandler : IRequestHandler<CreateAltern
             throw new CodedNotFoundException("ROUTE_NOT_FOUND", "Route was not found.");
         }
 
-        await ValidateActiveLimitAsync(request.RouteId, cancellationToken);
         await ValidateStationExistsAsync(request.DestinationStationId, cancellationToken);
         await ValidateStopsAsync(request.OperatorId, request.Stops, cancellationToken);
 
@@ -70,18 +67,6 @@ public sealed class CreateAlternativeRouteHandler : IRequestHandler<CreateAltern
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return AlternativeRouteMapper.ToDto(alternativeRoute, stops);
-    }
-
-    private async Task ValidateActiveLimitAsync(Guid routeId, CancellationToken cancellationToken)
-    {
-        var activeCount = await alternativeRouteRepository.CountActiveByRouteAsync(routeId, cancellationToken);
-        if (activeCount >= MaxActiveAlternativeRoutesPerRoute)
-        {
-            throw new CodedValidationException(
-                "ALTERNATIVE_ROUTE_LIMIT_EXCEEDED",
-                "A route can have at most two active alternative routes.",
-                [new ValidationError("alternativeRoutes", "A route can have at most two active alternative routes.")]);
-        }
     }
 
     private async Task ValidateStationExistsAsync(Guid stationId, CancellationToken cancellationToken)

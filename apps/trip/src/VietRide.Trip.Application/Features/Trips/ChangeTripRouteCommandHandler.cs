@@ -1,39 +1,39 @@
-using System.Text.Json;
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
-using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
-using VietRide.Trip.Application.Events;
+using VietRide.Trip.Application.Abstractions.Services;
 
 namespace VietRide.Trip.Application.Features.Trips;
 
 public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRouteCommand, ChangeTripRouteResponse>
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ITripRepository trips;
     private readonly IAlternativeRouteRepository alternativeRoutes;
     private readonly IBookingImpactClient bookingImpact;
-    private readonly IIntegrationEventOutbox outbox;
+    private readonly ITripRouteChangeService tripRouteChanges;
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
+    private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
 
     public ChangeTripRouteCommandHandler(
         ITripRepository trips,
         IAlternativeRouteRepository alternativeRoutes,
         IBookingImpactClient bookingImpact,
-        IIntegrationEventOutbox outbox,
+        ITripRouteChangeService tripRouteChanges,
         IUnitOfWork unitOfWork,
-        IClock clock)
+        IClock clock,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
     {
         this.trips = trips;
         this.alternativeRoutes = alternativeRoutes;
         this.bookingImpact = bookingImpact;
-        this.outbox = outbox;
+        this.tripRouteChanges = tripRouteChanges;
         this.unitOfWork = unitOfWork;
         this.clock = clock;
+        this.routeChangeProposals = routeChangeProposals;
     }
 
     public async Task<ChangeTripRouteResponse> Handle(ChangeTripRouteCommand request, CancellationToken cancellationToken)
@@ -62,6 +62,9 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
             if (lockedTrip is null || lockedTrip.OperatorId != request.OperatorId)
                 throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip was not found.");
             EnsureRouteChangeAllowed(lockedTrip);
+            var now = clock.UtcNow;
+            if (routeChangeProposals is not null)
+                await routeChangeProposals.SupersedePendingAsync(lockedTrip.Id, request.ActorUserId, null, now, cancellationToken);
             var lockedAlternative = await alternativeRoutes.AcquireOwnedByIdAsync(
                 request.OperatorId, request.AlternativeRouteId, cancellationToken);
             if (lockedAlternative is null
@@ -70,39 +73,17 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
             {
                 throw new CodedNotFoundException("ROUTE_NOT_FOUND", "Alternative route was not found.");
             }
-            var candidateStops = await alternativeRoutes.ListCandidateStopsAsync(
-                lockedAlternative.Id,
-                lockedTrip.ActualDepartureTime ?? lockedTrip.DepartureDateTime,
-                cancellationToken);
-            var affectedBookings = affectedBookingIds
-                .Select(bookingId => new TripRouteChangedAffectedBooking(bookingId, candidateStops))
-                .ToArray();
-            if (!lockedTrip.ChangeAlternativeRoute(request.AlternativeRouteId))
-            {
-                return new ChangeTripRouteResponse(
-                    lockedTrip.Id,
-                    lockedTrip.Status.ToString(),
-                    request.AlternativeRouteId,
-                    affectedBookings);
-            }
-
-            var evt = new TripRouteChangedIntegrationEvent(
-                lockedTrip.Id,
-                lockedTrip.OperatorId,
-                lockedTrip.Status.ToString(),
-                request.AlternativeRouteId,
-                affectedBookings,
-                clock.UtcNow);
-            await outbox.EnqueueAsync(
-                evt.EventId,
-                evt.EventType,
-                JsonSerializer.Serialize(evt, JsonOptions),
+            var result = await tripRouteChanges.ApplyAsync(
+                lockedTrip,
+                lockedAlternative,
+                affectedBookingIds,
+                now,
                 cancellationToken);
             return new ChangeTripRouteResponse(
-                lockedTrip.Id,
-                lockedTrip.Status.ToString(),
-                request.AlternativeRouteId,
-                affectedBookings);
+                result.TripId,
+                result.Status,
+                result.AlternativeRouteId,
+                result.AffectedBookings);
         }, cancellationToken);
     }
 

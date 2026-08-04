@@ -11,6 +11,7 @@ using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Events;
 using VietRide.Trip.Application.Features.Trips;
+using VietRide.Trip.Application.Services;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
 using VietRide.Trip.IntegrationTests.Internal.Trips;
@@ -50,12 +51,14 @@ public sealed class TripRouteChangedIntegrationEventTests
             db.ChangeTracker.Clear();
 
             var affectedBookingIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
+            var alternativeRoutes = CreateRepository<IAlternativeRouteRepository>(db, "AlternativeRouteRepository");
+            var outbox = new IntegrationEventOutbox(
+                new OutboxStore(db, new Day29CargoNearFullOutboxIntegrationTests.FixedClock()));
             var handler = new ChangeTripRouteCommandHandler(
                 CreateRepository<ITripRepository>(db, "TripRepository"),
-                CreateRepository<IAlternativeRouteRepository>(db, "AlternativeRouteRepository"),
+                alternativeRoutes,
                 new BookingImpactStub(seed.TripId, affectedBookingIds),
-                new IntegrationEventOutbox(
-                    new OutboxStore(db, new Day29CargoNearFullOutboxIntegrationTests.FixedClock())),
+                new TripRouteChangeService(alternativeRoutes, outbox),
                 new EfUnitOfWork(db),
                 new Day29CargoNearFullOutboxIntegrationTests.FixedClock());
 
@@ -217,14 +220,18 @@ public sealed class TripRouteChangedIntegrationEventTests
     private static ChangeTripRouteCommandHandler CreateHandler(
         TripDbContext db,
         IBookingImpactClient bookingImpact)
-        => new(
+    {
+        var alternativeRoutes = CreateRepository<IAlternativeRouteRepository>(db, "AlternativeRouteRepository");
+        var outbox = new IntegrationEventOutbox(
+            new OutboxStore(db, new Day29CargoNearFullOutboxIntegrationTests.FixedClock()));
+        return new ChangeTripRouteCommandHandler(
             CreateRepository<ITripRepository>(db, "TripRepository"),
-            CreateRepository<IAlternativeRouteRepository>(db, "AlternativeRouteRepository"),
+            alternativeRoutes,
             bookingImpact,
-            new IntegrationEventOutbox(
-                new OutboxStore(db, new Day29CargoNearFullOutboxIntegrationTests.FixedClock())),
+            new TripRouteChangeService(alternativeRoutes, outbox),
             new EfUnitOfWork(db),
             new Day29CargoNearFullOutboxIntegrationTests.FixedClock());
+    }
 
     private static async Task AssertTerminalStateRejectedByRealHandlerAsync()
     {

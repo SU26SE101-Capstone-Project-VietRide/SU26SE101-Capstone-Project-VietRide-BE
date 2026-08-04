@@ -34,6 +34,7 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
     private readonly ISender sender;
+    private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
 
     public EditTripCommandHandler(
         ITripRepository trips,
@@ -49,7 +50,8 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
         IClock clock,
-        ISender sender)
+        ISender sender,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
     {
         this.trips = trips;
         this.tripSeats = tripSeats;
@@ -65,6 +67,7 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
         this.unitOfWork = unitOfWork;
         this.clock = clock;
         this.sender = sender;
+        this.routeChangeProposals = routeChangeProposals;
     }
 
     public async Task<TripDetailDto> Handle(EditTripCommand request, CancellationToken cancellationToken)
@@ -163,6 +166,9 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
                 }
 
                 ValidateLifecycle(lockedTrip.Status, lockedChanged);
+
+                if (lockedChanged.Contains(EditTripField.RouteId) && routeChangeProposals is not null)
+                    await routeChangeProposals.SupersedePendingAsync(lockedTrip.Id, request.ActorUserId, null, now, cancellationToken);
 
                 IReadOnlyList<Vehicle> lockedVehicles = [];
                 Vehicle? lockedOldVehicle = null;

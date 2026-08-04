@@ -82,11 +82,6 @@ internal sealed class AlternativeRouteRepository : IAlternativeRouteRepository
         return belongsToOperator ? alternativeRoute : null;
     }
 
-    public Task<int> CountActiveByRouteAsync(Guid routeId, CancellationToken cancellationToken)
-        => dbContext.AlternativeRoutes.CountAsync(
-            alternativeRoute => alternativeRoute.RouteId == routeId && alternativeRoute.IsActive,
-            cancellationToken);
-
     public Task<bool> ExistsStopAsync(Guid alternativeRouteId, Guid stopId, CancellationToken cancellationToken)
         => dbContext.AlternativeRouteStops.AnyAsync(
             stop => stop.AlternativeRouteId == alternativeRouteId && stop.StopId == stopId,
@@ -219,4 +214,14 @@ internal sealed class AlternativeRouteRepository : IAlternativeRouteRepository
 
         return alternativeRoutes.Count;
     }
+
+    public async Task<IReadOnlyList<Guid>> ListIdsByDestinationAsync(
+        Guid destinationStationId,
+        CancellationToken cancellationToken)
+        => await dbContext.AlternativeRoutes
+            .AsNoTracking()
+            .Where(route => route.DestinationStationId == destinationStationId)
+            .OrderBy(route => route.Id)
+            .Select(route => route.Id)
+            .ToArrayAsync(cancellationToken);
 }

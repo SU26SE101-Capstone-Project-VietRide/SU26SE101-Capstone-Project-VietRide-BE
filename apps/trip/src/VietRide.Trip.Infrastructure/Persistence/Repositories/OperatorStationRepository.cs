@@ -34,6 +34,35 @@ internal sealed class OperatorStationRepository : IOperatorStationRepository
     public IQueryable<OperatorStation> QueryNoTracking()
         => _dbContext.OperatorStations.AsNoTracking();
 
+    public Task<bool> ExistsActiveAsync(
+        Guid operatorId,
+        Guid stationId,
+        CancellationToken cancellationToken)
+        => _dbContext.OperatorStations.AsNoTracking().AnyAsync(
+            item => item.OperatorId == operatorId
+                && item.StationId == stationId
+                && item.IsActive,
+            cancellationToken);
+
+    public Task<OperatorStation?> AcquireActiveForRouteProposalApprovalAsync(
+        Guid operatorId,
+        Guid stationId,
+        CancellationToken cancellationToken)
+    {
+        if (_dbContext.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("A transaction is required.");
+        foreach (var local in _dbContext.OperatorStations.Local
+                     .Where(item => item.OperatorId == operatorId && item.StationId == stationId)
+                     .ToArray())
+        {
+            _dbContext.Entry(local).State = EntityState.Detached;
+        }
+
+        return _dbContext.OperatorStations
+            .FromSqlInterpolated($"SELECT * FROM vietride_trip.operator_stations WHERE operator_id = {operatorId} AND station_id = {stationId} AND is_active = TRUE ORDER BY id FOR UPDATE")
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<(int RelinkedCount, int CollapsedCount)> RelinkForStationMergeAsync(
         Guid duplicateStationId,
         Guid primaryStationId,

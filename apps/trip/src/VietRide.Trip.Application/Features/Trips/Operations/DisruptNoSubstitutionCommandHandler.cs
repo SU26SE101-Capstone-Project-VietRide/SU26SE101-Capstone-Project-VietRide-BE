@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Features.Trips.Operations;
@@ -16,17 +17,20 @@ public sealed class DisruptNoSubstitutionCommandHandler : IRequestHandler<Disrup
     private readonly IIntegrationEventOutbox outbox;
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
+    private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
 
     public DisruptNoSubstitutionCommandHandler(
         ITripRepository tripRepository,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
-        IClock clock)
+        IClock clock,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
     {
         this.tripRepository = tripRepository;
         this.outbox = outbox;
         this.unitOfWork = unitOfWork;
         this.clock = clock;
+        this.routeChangeProposals = routeChangeProposals;
     }
 
     public async Task<DisruptNoSubstitutionResponse> Handle(DisruptNoSubstitutionCommand request, CancellationToken cancellationToken)
@@ -56,6 +60,8 @@ public sealed class DisruptNoSubstitutionCommandHandler : IRequestHandler<Disrup
             var now = clock.UtcNow;
             var reason = request.Reason.Trim();
             trip.Disrupt(now, reason);
+            if (routeChangeProposals is not null)
+                await routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
             trip.MarkSubstitution(false);
             var eventId = Guid.NewGuid();
             var evt = new TripDisruptedIntegrationEvent(

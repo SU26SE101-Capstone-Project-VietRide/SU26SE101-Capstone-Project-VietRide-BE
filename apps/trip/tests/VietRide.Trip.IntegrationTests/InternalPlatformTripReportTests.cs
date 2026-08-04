@@ -194,7 +194,7 @@ public sealed class PlatformTripReportWebApplicationFactory : WebApplicationFact
         builder.UseSetting("INTERNAL_JWT_SECRET", TestSecret);
         builder.UseSetting("ConnectionStrings:Default", _connectionString);
         builder.UseSetting("Identity:BaseUrl", "http://identity.invalid");
-        builder.UseSetting("REDIS_URL", "localhost:6379,abortConnect=false");
+        builder.UseSetting("REDIS_URL", "127.0.0.1:6379,abortConnect=false");
         builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
         builder.ConfigureServices(services =>
         {
@@ -592,7 +592,7 @@ public sealed class PlatformTripReportWebApplicationFactory : WebApplicationFact
     {
         var configured =
             Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING")
-            ?? "Host=localhost;Port=5432;Database=unused;Username=vietride;Password=vietride_dev";
+            ?? "Host=127.0.0.1;Port=5432;Database=unused;Username=vietride;Password=vietride_dev";
         return new NpgsqlConnectionStringBuilder(configured)
         {
             Database = $"vietride_trip_platform_report_{Guid.NewGuid():N}",

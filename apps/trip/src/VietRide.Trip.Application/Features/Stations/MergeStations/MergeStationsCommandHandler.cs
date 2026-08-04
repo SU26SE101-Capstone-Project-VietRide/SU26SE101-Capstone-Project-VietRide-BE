@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Events;
 using VietRide.Trip.Domain.Entities;
 
@@ -21,6 +22,7 @@ public sealed class MergeStationsCommandHandler : IRequestHandler<MergeStationsC
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IClock _clock;
+    private readonly IRouteChangeProposalLifecycleService? _routeChangeProposals;
 
     public MergeStationsCommandHandler(
         IStationRepository stations,
@@ -29,7 +31,8 @@ public sealed class MergeStationsCommandHandler : IRequestHandler<MergeStationsC
         IAlternativeRouteRepository alternativeRoutes,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
-        IClock clock)
+        IClock clock,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
     {
         _stations = stations;
         _operatorStations = operatorStations;
@@ -38,6 +41,7 @@ public sealed class MergeStationsCommandHandler : IRequestHandler<MergeStationsC
         _outbox = outbox;
         _unitOfWork = unitOfWork;
         _clock = clock;
+        _routeChangeProposals = routeChangeProposals;
     }
 
     public async Task<MergeStationsResponse> Handle(
@@ -78,6 +82,14 @@ public sealed class MergeStationsCommandHandler : IRequestHandler<MergeStationsC
                 duplicate.Id,
                 primary.Id,
                 cancellationToken);
+            var changedAlternativeRouteIds = await _alternativeRoutes.ListIdsByDestinationAsync(
+                duplicate.Id,
+                cancellationToken);
+            if (_routeChangeProposals is not null)
+            {
+                foreach (var alternativeRouteId in changedAlternativeRouteIds)
+                    await _routeChangeProposals.ExpirePendingForSourceAsync(alternativeRouteId, _clock.UtcNow, cancellationToken);
+            }
             var alternativeRouteCount = await _alternativeRoutes.RelinkDestinationForStationMergeAsync(
                 duplicate.Id,
                 primary.Id,

@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Trips.Operations;
 using VietRide.Trip.Domain.Constants;
 using VietRide.Trip.Domain.Entities;
@@ -23,19 +24,22 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
     private readonly IIntegrationEventOutbox outbox;
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
+    private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
 
     public CompleteTripCommandHandler(
         ITripRepository tripRepository,
         ITripAuditLogRepository auditLogRepository,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
-        IClock clock)
+        IClock clock,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
     {
         this.tripRepository = tripRepository;
         this.auditLogRepository = auditLogRepository;
         this.outbox = outbox;
         this.unitOfWork = unitOfWork;
         this.clock = clock;
+        this.routeChangeProposals = routeChangeProposals;
     }
 
     public async Task<CompleteTripResponse> Handle(CompleteTripCommand request, CancellationToken cancellationToken)
@@ -52,6 +56,8 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
             try
             {
                 trip.CompleteManually(now, request.ActorUserId);
+                if (routeChangeProposals is not null)
+                    await routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
             }
             catch (InvalidOperationException exception)
             {

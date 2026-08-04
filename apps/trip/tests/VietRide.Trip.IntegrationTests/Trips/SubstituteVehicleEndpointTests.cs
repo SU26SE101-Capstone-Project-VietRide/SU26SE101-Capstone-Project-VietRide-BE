@@ -775,7 +775,7 @@ public sealed class SubstituteVehicleEndpointTests
                 builder.UseSetting("Identity:BaseUrl", "http://identity.local");
                 builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
                 builder.UseSetting("ConnectionStrings:Default", ConnectionString(databaseName));
-                builder.UseSetting("REDIS_URL", "localhost:6379");
+                builder.UseSetting("REDIS_URL", "127.0.0.1:6379");
                 builder.UseEnvironment("Testing");
                 builder.ConfigureTestServices(services =>
                 {
@@ -791,7 +791,7 @@ public sealed class SubstituteVehicleEndpointTests
             private static string ConnectionString(string databaseName)
             {
                 const string fallback =
-                    "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+                    "Host=127.0.0.1;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
                 var template = Environment.GetEnvironmentVariable(
                     "VIETRIDE_TRIP_TEST_CONNECTION_STRING");
                 if (string.IsNullOrWhiteSpace(template))
