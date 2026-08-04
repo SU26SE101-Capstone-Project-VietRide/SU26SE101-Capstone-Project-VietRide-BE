@@ -40,7 +40,7 @@ Mỗi phase phải test được bằng e2e/unit theo hướng production. Nếu
 - [x] Phase 10 — Hardening Và Final Acceptance
 - [x] Phase 11 — Shuttle GPS Và Google Routes ETA
 - [x] Phase 12 — Public Tracking Map Context
-- [ ] Phase 13 — Chia Sẻ Hành Trình Cho Người Thân
+- [x] Phase 13 — Chia Sẻ Hành Trình Cho Người Thân
 
 ---
 
