@@ -197,7 +197,20 @@ describe('ShuttleService', () => {
 
   it('parses additive own-pickup and nullable station metadata from Trip context', async () => {
     const context = createTrackingContext([
-      createStop(1, 'PICKED_UP', true, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+      {
+        ...createStop(1, 'PICKED_UP', true, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+        roadDistanceSnapshotMeters: 4_500,
+      },
+      {
+        pickupOrder: 6,
+        bookingId: null,
+        latitude: 10.8,
+        longitude: 106.8,
+        status: 'PENDING',
+        isStation: true,
+        isOwnPickup: false,
+        roadDistanceSnapshotMeters: null,
+      },
     ]);
     context.station = {
       stationId: '66666666-6666-4666-8666-666666666666',
@@ -227,6 +240,7 @@ describe('ShuttleService', () => {
     );
 
     expect(result.stops[0]?.isOwnPickup).toBe(true);
+    expect(result.stops[1]?.roadDistanceSnapshotMeters).toBeNull();
     expect(result.station?.latitude).toBeNull();
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });

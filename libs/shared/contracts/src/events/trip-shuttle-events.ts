@@ -35,6 +35,7 @@ export type TripShuttleAssignedEvent = z.infer<typeof tripShuttleAssignedEventSc
 export { tripShuttleAssignedEventSchema as TripShuttleAssignedEventSchema };
 
 const tripShuttleWarningEventSchema = z.object({
+  eventId: z.string().uuid().optional(),
   mainTripId: z.string().uuid(),
   operatorId: z.string().uuid(),
   alertType: z.enum(['WARNING_120', 'WARNING_60']),
@@ -47,6 +48,7 @@ export type TripShuttleWarningEvent = z.infer<typeof tripShuttleWarningEventSche
 export { tripShuttleWarningEventSchema as TripShuttleWarningEventSchema };
 
 const tripShuttleUnfulfilledEventSchema = z.object({
+  eventId: z.string().uuid().optional(),
   mainTripId: z.string().uuid(),
   bookingId: z.string().uuid(),
   passengerUserId: z.string().uuid(),

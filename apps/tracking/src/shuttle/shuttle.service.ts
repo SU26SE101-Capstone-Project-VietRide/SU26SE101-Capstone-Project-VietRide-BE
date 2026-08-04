@@ -36,7 +36,7 @@ export const shuttleTrackingStopSchema = z.object({
   serviceAddress: z.string().trim().min(1).optional(),
   serviceOrder: z.number().int().positive().optional(),
   roadDistanceMeters: z.number().nonnegative().optional(),
-  roadDistanceSnapshotMeters: z.number().nonnegative().optional(),
+  roadDistanceSnapshotMeters: z.number().nonnegative().nullable().optional(),
 });
 export const shuttleTrackingStationSchema = z.object({
   stationId: z.string().uuid(),
@@ -236,7 +236,7 @@ export class ShuttleService {
         serviceOrder: stop.serviceOrder ?? stop.pickupOrder,
         ...(stop.roadDistanceMeters !== undefined
           ? { roadDistanceMeters: stop.roadDistanceMeters }
-          : stop.roadDistanceSnapshotMeters !== undefined
+          : typeof stop.roadDistanceSnapshotMeters === 'number'
             ? { roadDistanceMeters: stop.roadDistanceSnapshotMeters }
             : {}),
         latitude: stop.latitude,
