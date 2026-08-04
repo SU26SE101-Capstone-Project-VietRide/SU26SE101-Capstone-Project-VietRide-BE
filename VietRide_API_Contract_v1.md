@@ -4622,6 +4622,159 @@ Response `200` dùng ADR 0004 envelope với `data`:
 - Errors: `400 VALIDATION_FAILED`; `401 UNAUTHORIZED`; `403 TRACKING_ACCESS_DENIED`;
   `404 SHUTTLE_TRIP_NOT_FOUND`; `503 TRACKING_AUTH_UNAVAILABLE`; `503 TRACKING_CONTEXT_UNAVAILABLE`.
 
+### Chia sẻ Main Trip cho người thân
+
+Chỉ `PASSENGER` có Booking ownership của Main Trip được quản lý link. Trip phải chính xác
+`IN_PROGRESS` khi tạo link; Parcel ownership không cấp quyền. Một grant active tồn tại cho mỗi
+`(tripId, passengerUserId)`, vì vậy nhiều passenger trên cùng Trip có link và quyền revoke độc lập.
+
+#### PUT `/v1/tracking/trips/{tripId}/share-link`
+
+Auth: Identity User Access Token với role `PASSENGER`; sau đó Tracking gọi Booking để yêu cầu
+authorization scope chính xác `BOOKING_OWNER` cho Trip. `BOOKING_OWNER` là scope do Booking trả về,
+không phải role trong Identity JWT.
+`Idempotency-Key`: bắt buộc, UUID v4. Request không có body. Cùng owner gọi lại khi grant còn active
+nhận cùng link và `200`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "shareUrl": "https://app.vietride.vn/trip-sharing#token=v1.grant.signature",
+    "expiresAt": "2026-08-04T09:30:00.000Z"
+  },
+  "meta": { "traceId": "req-123", "timestamp": "2026-08-03T09:30:00.000Z" }
+}
+```
+
+Backend kiểm tra Trip lần hai sau khi tạo grant. Nếu Trip vừa terminal, grant bị revoke với
+`CREATION_ROLLBACK` và link không được trả. Token nằm trong URL fragment để browser không gửi nó
+trong request page/referrer.
+
+#### DELETE `/v1/tracking/trips/{tripId}/share-link`
+
+Auth: Identity User Access Token với role `PASSENGER`. `Idempotency-Key` giống PUT, nhưng DELETE
+không gọi lại Booking và không phụ thuộc trạng thái hiện tại của Trip; endpoint chỉ tác động grant
+active do chính user đó tạo và luôn idempotent:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": { "revoked": true },
+  "meta": { "traceId": "req-124", "timestamp": "2026-08-03T09:31:00.000Z" }
+}
+```
+
+#### GET `/v1/tracking/shared-trip/context`
+
+Auth: public capability token trong `X-Trip-Share-Token`. Đây là public subpath duy nhất dưới
+Gateway prefix `/v1/tracking/shared-trip`; chỉ exact method/path GET được anonymous. Query string
+được phép, nhưng POST, trailing slash, `/extra` và encoded suffix vẫn cần Identity JWT.
+
+Response `200` dùng ADR 0004 envelope; `data` có shape cố định:
+
+```json
+{
+  "status": "IN_PROGRESS",
+  "expiresAt": "2026-08-04T09:30:00.000Z",
+  "lastUpdatedAt": "2026-08-03T09:35:12.000Z",
+  "vehicle": {
+    "location": {
+      "latitude": 10.7812,
+      "longitude": 106.6981,
+      "heading": 42,
+      "speedKph": 38,
+      "recordedAt": "2026-08-03T09:35:12.000Z"
+    }
+  },
+  "route": {
+    "originName": "Bến xe Miền Đông",
+    "destinationName": "Bến xe Đà Lạt",
+    "geometry": {
+      "type": "LineString",
+      "coordinates": [[106.6981, 10.7812], [106.7124, 10.7935]]
+    }
+  },
+  "eta": {
+    "estimatedArrivalAt": "2026-08-03T15:10:00.000Z",
+    "remainingSeconds": 20100,
+    "delayMinutes": null,
+    "updatedAt": "2026-08-03T09:35:00.000Z"
+  }
+}
+```
+
+`lastUpdatedAt`, `vehicle.location`, `route.geometry` và `eta` có thể là `null`; `heading`,
+`speedKph`, `eta.delayMinutes` cũng nullable. Không dựng GPS, geometry hoặc ETA giả. Response luôn có:
+
+```http
+Cache-Control: no-store
+Pragma: no-cache
+Referrer-Policy: no-referrer
+```
+
+Public DTO không được chứa `tripId`, grant/share ID, token/hash, station/stop/booking/ticket/user/
+operator ID, seat, email, phone, passenger/driver/assistant data hoặc GPS history.
+
+#### Public Socket.IO `/shared`
+
+Guest kết nối trực tiếp Tracking/Nginx, không qua Gateway HTTP proxy:
+
+```ts
+io("wss://api.vietride.app/shared", {
+  path: "/tracking/socket.io",
+  auth: { shareToken: "v1.<grantId>.<signature>" }
+})
+```
+
+Server tự join `shared-trip:{tripId}` và `shared-grant:{grantId}`; client không có event tự chọn room.
+Identity JWT không dùng được ở namespace `/shared`, và share token không dùng được ở namespace mặc
+định. Events public:
+
+- `shared:gps:update`
+- `shared:eta:update`
+- `shared:trip:statusChanged`
+- `shared:access:revoked` với reason `EXPIRED`, `REVOKED`, `TRIP_ENDED` hoặc `ACCESS_UNAVAILABLE`
+
+Owner revoke chỉ emit/disconnect grant room của họ. Trip terminal emit/disconnect toàn trip room.
+Socket đặt expiry timer chính xác và mặc định revalidate grant/Trip mỗi 60 giây. Phase 13 giả định một
+Tracking replica; Socket.IO Redis adapter cho scale-out không thuộc contract này.
+
+#### Vòng đời, RabbitMQ và bảo mật
+
+- Grant hard-expire sau TTL mặc định 24 giờ, khi owner revoke, hoặc khi Trip
+  `COMPLETED`/`CANCELLED`/`DISRUPTED`.
+- Tracking subscribe `tracking-trip-share-completed` → `trip.trip.completed`,
+  `tracking-trip-share-cancelled` → `trip.trip.cancelled`, và
+  `tracking-trip-share-disrupted` → `trip.trip.disrupted` với `prefetch=1`, dead-letter, 5 retry,
+  delay 10 giây. Consumer chỉ mark processed sau DB revoke và realtime disconnect; retry sau DB
+  commit vẫn emit realtime dù update lần hai bằng 0.
+- Token là `v1.<grant UUID>.<base64url HMAC-SHA256>` ký canonical `v1.<grantId>`. PostgreSQL chỉ lưu
+  SHA-256 full token; Redis idempotency chỉ lưu fingerprint, grant ID và outcome metadata. Không log
+  raw token hoặc `X-Trip-Share-Token`.
+- Context rate limit mặc định 60 request/token-hash/phút; socket handshake 20/token-hash/phút. Redis
+  lỗi thì fail closed `503`.
+
+Error contract:
+
+| Trường hợp | HTTP | Error code |
+|---|---:|---|
+| Token malformed/tampered/not found | 401 | `TRACKING_SHARE_TOKEN_INVALID` |
+| Token expired/revoked/Trip terminal | 410 | `TRACKING_SHARE_LINK_UNAVAILABLE` |
+| PUT không có Booking scope `BOOKING_OWNER` | 403 | `ACCESS_DENIED` |
+| Trip không tồn tại | 404 | `TRIP_NOT_FOUND` |
+| Trip không `IN_PROGRESS` | 409 | `TRACKING_TRIP_NOT_ACTIVE` |
+| Thiếu idempotency key | 422 | `IDEMPOTENCY_KEY_REQUIRED` |
+| Key không phải UUID v4 | 422 | `VALIDATION_ERROR` |
+| Key dùng lại cho fingerprint khác | 422 | `IDEMPOTENCY_KEY_MISMATCH` |
+| Request cùng key đang chạy | 409 | `IDEMPOTENCY_REQUEST_PENDING` |
+| Vượt rate limit | 429 | `RATE_LIMITED` |
+| Redis rate limiter không khả dụng | 503 | `TRACKING_SHARE_RATE_LIMIT_UNAVAILABLE` |
+| Booking authorization lỗi | 503 | `TRACKING_AUTH_UNAVAILABLE` |
+| Trip/route dependency lỗi | 503 | `TRACKING_TRIP_UNAVAILABLE` |
+
 ## RAG AI Service
 
 ### GET `/v1/rag/documents`
@@ -4942,11 +5095,11 @@ Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `type?`, `
 
 ### GET `/v1/operator/trip-settlements`
 
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `status?`, `tripId?`, `from?`, `to?`, `sortBy?` (`createdAt|eligibleAt|settledAt|netAmount`), `sortDir?`. Items contain `settlementId`, `tripId`, `status`, `eligibleAt`, `netAmount`, `settlementMethod`, `settledAt`, `createdAt`.
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `status?`, `tripId?`, `from?`, `to?`, `sortBy?` (`createdAt|eligibleAt|settledAt|netAmount`), `sortDir?`. Items contain the legacy fields `settlementId`, `tripId`, `status`, `eligibleAt`, `netAmount`, `settlementMethod`, `settledAt`, `createdAt`, plus additive nullable `settledBy` (`{ userId, displayName, email, role }` or `null`). `settledBy=null` identifies automatic weekly settlement; a manual admin settlement includes the authenticated admin snapshot when available. Operator identity is omitted because the route is tenant-scoped.
 
 ### GET `/v1/operator/ledger`
 
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `tripId?`, `entryType?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain `ledgerEntryId`, `tripId`, `entryType`, signed `amount`, `referenceType`, `referenceId`, `createdAt`. Internal source-event identifiers and sensitive notes are not returned.
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `tripId?`, `entryType?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain the legacy fields `ledgerEntryId`, `tripId`, `entryType`, signed `amount`, `referenceType`, `referenceId`, `createdAt`, plus additive nullable `note`, `actorType` (`USER|SYSTEM`), and `actor` (`{ userId, displayName, email, role }` or `null`). Internal source-event identifiers are not returned. Automated/event-created rows use `actorType=SYSTEM`; admin wallet adjustments use `actorType=USER` and expose the authenticated admin snapshot when available. Historical manual rows whose actor cannot be proven may return `actor=null`.
 
 ### GET `/v1/admin/trip-settlements`
 

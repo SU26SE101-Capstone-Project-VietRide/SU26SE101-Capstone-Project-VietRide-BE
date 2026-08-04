@@ -1,0 +1,83 @@
+name: tracking-sharing-e2e
+
+x-fast-healthcheck: &fast-healthcheck
+  interval: 2s
+  timeout: 5s
+  retries: 90
+  start_period: 5s
+
+services:
+  postgres:
+    container_name: ${TRACKING_SHARING_E2E_PREFIX:-tracking-sharing-e2e}-postgres
+    ports:
+      - '${TRACKING_SHARING_E2E_POSTGRES_PORT:-55481}:5432'
+    healthcheck: *fast-healthcheck
+
+  redis:
+    container_name: ${TRACKING_SHARING_E2E_PREFIX:-tracking-sharing-e2e}-redis
+    ports:
+      - '${TRACKING_SHARING_E2E_REDIS_PORT:-56398}:6379'
+    healthcheck: *fast-healthcheck
+
+  rabbitmq:
+    container_name: ${TRACKING_SHARING_E2E_PREFIX:-tracking-sharing-e2e}-rabbitmq
+    ports:
+      - '${TRACKING_SHARING_E2E_RABBITMQ_PORT:-55698}:5672'
+      - '${TRACKING_SHARING_E2E_RABBITMQ_MGMT_PORT:-55699}:15672'
+    healthcheck:
+      # `rabbitmq-diagnostics` boots another Erlang VM and can starve slow CI hosts
+      # when this overlay polls every few seconds. The runner opens a real AMQP
+      # connection immediately after startup, so a lightweight listener probe is
+      # sufficient for the disposable compose readiness gate.
+      test: ['CMD-SHELL', 'nc -z 127.0.0.1 5672']
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+
+  tracking:
+    container_name: ${TRACKING_SHARING_E2E_PREFIX:-tracking-sharing-e2e}-tracking
+    restart: 'no'
+    environment:
+      NODE_ENV: test
+      PORT: 3001
+      GATEWAY_URL: http://host.docker.internal:${TRACKING_SHARING_E2E_TRACKING_PORT:-56421}
+      INTERNAL_JWT_SECRET: ${TRACKING_SHARING_E2E_INTERNAL_JWT_SECRET}
+      DATABASE_URL: postgresql://vietride:vietride_dev@postgres:5432/vietride_tracking
+      TRACKING_DATABASE_URL: postgresql://vietride:vietride_dev@postgres:5432/vietride_tracking
+      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_URL: amqp://vietride:vietride_dev@rabbitmq:5672
+      RABBITMQ_EXCHANGE: vietride.events
+      JWT_PUBLIC_KEY_URL: http://host.docker.internal:${TRACKING_SHARING_E2E_FAKE_PORT:-56431}/v1/.well-known/jwks.json
+      USER_JWT_PUBLIC_KEY: ''
+      TRIP_SERVICE_BASE_URL: http://host.docker.internal:${TRACKING_SHARING_E2E_FAKE_PORT:-56431}
+      BOOKING_SERVICE_BASE_URL: http://host.docker.internal:${TRACKING_SHARING_E2E_FAKE_PORT:-56431}
+      PARCEL_SERVICE_BASE_URL: http://host.docker.internal:${TRACKING_SHARING_E2E_FAKE_PORT:-56431}
+      TRACKING_AUTH_HTTP_TIMEOUT_MS: 10000
+      TRACKING_DATA_PROVIDER_TIMEOUT_MS: 10000
+      TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: 1
+      TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS: 1
+      TRACKING_SHARE_TOKEN_SECRET: ${TRACKING_SHARING_E2E_SHARE_SECRET}
+      TRACKING_SHARE_PAGE_URL: https://sharing-e2e.vietride.invalid/trip-sharing
+      TRACKING_SHARE_TOKEN_TTL_SECONDS: ${TRACKING_SHARING_E2E_SHARE_TTL_SECONDS:-15}
+      TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN: 1000
+      TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN: 1000
+      TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS: 1
+      GOOGLE_ROUTES_ENABLED: 'false'
+      TRACKING_GPS_FLUSH_ENABLED: 'false'
+      TRACKING_TRIP_DELAY_ENABLED: 'false'
+      TRACKING_OUTBOX_PUBLISH_ENABLED: 'false'
+      TRACKING_CORS_ORIGIN: '*'
+      TRACKING_SWAGGER_ENABLED: 'false'
+      LOG_LEVEL: warn
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '${TRACKING_SHARING_E2E_TRACKING_PORT:-56421}:3001'
+    healthcheck: *fast-healthcheck
+
+networks:
+  default:
+    name: ${TRACKING_SHARING_E2E_PREFIX:-tracking-sharing-e2e}-net

@@ -1,0 +1,68 @@
+import { ApiProperty } from '@nestjs/swagger';
+import type { TripShareContextDto } from './trip-share-context.dto';
+import { TripShareEnvelopeMetaSwaggerDto } from './trip-share-envelope-meta.swagger.dto';
+
+export class TripShareContextEnvelopeSwaggerDto {
+  @ApiProperty({ example: true })
+  success!: boolean;
+
+  @ApiProperty({ example: 200 })
+  statusCode!: number;
+
+  @ApiProperty({
+    type: 'object',
+    properties: {
+      status: { type: 'string', enum: ['IN_PROGRESS'] },
+      expiresAt: { type: 'string', format: 'date-time' },
+      lastUpdatedAt: { type: 'string', format: 'date-time', nullable: true },
+      vehicle: {
+        type: 'object',
+        properties: {
+          location: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              latitude: { type: 'number' },
+              longitude: { type: 'number' },
+              heading: { type: 'number', nullable: true },
+              speedKph: { type: 'number', nullable: true },
+              recordedAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        },
+      },
+      route: {
+        type: 'object',
+        properties: {
+          originName: { type: 'string' },
+          destinationName: { type: 'string' },
+          geometry: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              type: { type: 'string', enum: ['LineString'] },
+              coordinates: {
+                type: 'array',
+                items: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 },
+              },
+            },
+          },
+        },
+      },
+      eta: {
+        type: 'object',
+        nullable: true,
+        properties: {
+          estimatedArrivalAt: { type: 'string', format: 'date-time' },
+          remainingSeconds: { type: 'integer' },
+          delayMinutes: { type: 'integer', nullable: true },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+    },
+  })
+  data!: TripShareContextDto;
+
+  @ApiProperty({ type: TripShareEnvelopeMetaSwaggerDto })
+  meta!: TripShareEnvelopeMetaSwaggerDto;
+}

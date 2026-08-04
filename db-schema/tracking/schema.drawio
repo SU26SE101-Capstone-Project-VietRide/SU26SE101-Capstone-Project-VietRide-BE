@@ -203,6 +203,12 @@
         <mxCell id="tbl_outboxevent_r8_c3" value="timestamptz" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;top=0;left=0;bottom=0;right=0;pointerEvents=1;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="tbl_outboxevent_r8">
           <mxGeometry x="230" width="120" height="30" as="geometry" />
         </mxCell>
+        <mxCell id="tbl_tripsharegrant" value="&lt;b&gt;TripShareGrant&lt;/b&gt;&lt;br&gt;&lt;br&gt;&lt;u&gt;id&lt;/u&gt; : uuid (PK)&lt;br&gt;&lt;i&gt;tripId&lt;/i&gt; : uuid (logical FK)&lt;br&gt;&lt;i&gt;createdByUserId&lt;/i&gt; : uuid (logical FK)&lt;br&gt;tokenHash : char(64) (UQ)&lt;br&gt;tokenVersion : smallint&lt;br&gt;expiresAt : timestamptz&lt;br&gt;revokedAt : timestamptz?&lt;br&gt;revokeReason : enum?&lt;br&gt;createdAt : timestamptz&lt;br&gt;updatedAt : timestamptz" style="shape=swimlane;html=1;rounded=0;startSize=30;whiteSpace=wrap;align=left;spacingLeft=12;fontSize=12;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="840" y="40" width="350" height="360" as="geometry" />
+        </mxCell>
+        <mxCell id="tbl_outboxdlq" value="&lt;b&gt;OutboxDlq&lt;/b&gt;&lt;br&gt;&lt;br&gt;&lt;u&gt;id&lt;/u&gt; : uuid (PK)&lt;br&gt;eventId : uuid (UQ)&lt;br&gt;eventType : varchar(100)&lt;br&gt;payload : jsonb&lt;br&gt;retryCount : int&lt;br&gt;lastError : text&lt;br&gt;createdAt : timestamptz&lt;br&gt;terminalAt : timestamptz" style="shape=swimlane;html=1;rounded=0;startSize=30;whiteSpace=wrap;align=left;spacingLeft=12;fontSize=12;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="40" width="350" height="300" as="geometry" />
+        </mxCell>
       </root>
     </mxGraphModel>
   </diagram>

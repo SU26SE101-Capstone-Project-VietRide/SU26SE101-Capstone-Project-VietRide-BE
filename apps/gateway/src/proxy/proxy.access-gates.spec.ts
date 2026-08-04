@@ -1789,4 +1789,72 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
       error: { code: 'AUTH_TOKEN_INVALID' },
     });
   });
+
+  it.each([
+    ['POST', '/v1/tracking/shared-trip/context'],
+    ['GET', '/v1/tracking/shared-trip/context/'],
+    ['GET', '/v1/tracking/shared-trip/context/extra'],
+    ['GET', '/v1/tracking/shared-trip/context%2Fextra'],
+    ['PUT', '/v1/tracking/trips/11111111-1111-4111-8111-111111111111/share-link'],
+    ['DELETE', '/v1/tracking/trips/11111111-1111-4111-8111-111111111111/share-link'],
+    ['GET', '/v1/tracking/trips/11111111-1111-4111-8111-111111111111/latest'],
+  ] as const)('requires a user JWT for non-public Tracking request %s %s', async (method, path) => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = makeRequest(path, { 'x-request-id': 'req-tracking-protected' }, method);
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 401,
+      error: { code: 'AUTH_TOKEN_INVALID' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it.each(['PUT', 'DELETE'] as const)(
+    'forwards passenger Authorization and Idempotency-Key for owner %s share-link',
+    async (method) => {
+      const upstreamHandler = arrangeProxyPass();
+      const signer = {
+        sign: jest.fn().mockResolvedValue('internal-token'),
+      } as unknown as InternalJwtSigner;
+      const handler = createProxyHandler(env, signer);
+      const authorization = await makeAuthorizationHeader({
+        sub: 'passenger-1',
+        role: 'PASSENGER',
+        hasPhone: true,
+      });
+      const idempotencyKey = '11111111-1111-4111-8111-111111111111';
+      const path = '/v1/tracking/trips/22222222-2222-4222-8222-222222222222/share-link';
+      const req = makeRequest(
+        path,
+        {
+          authorization,
+          'idempotency-key': idempotencyKey,
+          'x-request-id': `req-share-owner-${method.toLowerCase()}`,
+        },
+        method,
+      );
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(req.headers.authorization).toBe(authorization);
+      expect(req.headers['idempotency-key']).toBe(idempotencyKey);
+      expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
+      expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+        expect.objectContaining({ target: env.TRACKING_BASE_URL }),
+      );
+      expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+      expect(res.status).not.toHaveBeenCalled();
+    },
+  );
 });

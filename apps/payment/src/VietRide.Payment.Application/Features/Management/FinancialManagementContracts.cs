@@ -39,7 +39,8 @@ public sealed record SettlementDto(
     long NetAmount,
     string? SettlementMethod,
     DateTimeOffset? SettledAt,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    FinancialActorDto? SettledBy = null);
 
 public sealed record AdminSettlementDto(
     Guid SettlementId,
@@ -89,7 +90,10 @@ public sealed record LedgerEntryDto(
     long Amount,
     string ReferenceType,
     Guid ReferenceId,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? Note = null,
+    string ActorType = "SYSTEM",
+    FinancialActorDto? Actor = null);
 
 public sealed record InvoiceListItemDto(
     Guid InvoiceId,

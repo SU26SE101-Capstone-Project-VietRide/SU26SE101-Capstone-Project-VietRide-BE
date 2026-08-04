@@ -69,6 +69,74 @@ public sealed class AdminFinancialProjectionEndpointTests
     }
 
     [Fact]
+    public async Task OperatorLedger_ReturnsAdditiveNoteAndActorInsideAdrEnvelope()
+    {
+        _factory.Reset();
+        var operatorId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        _factory.Financial.ListOperatorLedgerAsync(
+                default, default!, default, default, default, default)
+            .ReturnsForAnyArgs(PagedResult<LedgerEntryDto>.Create(
+            [
+                new LedgerEntryDto(
+                    Guid.NewGuid(),
+                    null,
+                    "ADJUSTMENT",
+                    10_000,
+                    "MANUAL",
+                    Guid.NewGuid(),
+                    DateTimeOffset.UtcNow,
+                    "manual correction",
+                    "USER",
+                    new FinancialActorDto(actorId, "System Admin", "admin@vietride.vn", "SYSTEM_ADMIN")),
+            ], 1, 20, 1));
+        using var client = _factory.CreateOperatorRoleClient("OPERATOR_ADMIN", operatorId);
+
+        var response = await client.GetAsync("/v1/operator/ledger?page=1&pageSize=20");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using var document = JsonDocument.Parse(body);
+        var item = document.RootElement.GetProperty("data").GetProperty("items")[0];
+        item.GetProperty("note").GetString().Should().Be("manual correction");
+        item.GetProperty("actorType").GetString().Should().Be("USER");
+        item.GetProperty("actor").GetProperty("email").GetString().Should().Be("admin@vietride.vn");
+    }
+
+    [Fact]
+    public async Task OperatorSettlements_ReturnAdditiveSettledByInsideAdrEnvelope()
+    {
+        _factory.Reset();
+        var operatorId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        _factory.Financial.ListOperatorSettlementsAsync(
+                default, default!, default, default, default)
+            .ReturnsForAnyArgs(PagedResult<SettlementDto>.Create(
+            [
+                new SettlementDto(
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    "SETTLED",
+                    DateTimeOffset.UtcNow,
+                    500_000,
+                    "ADMIN_MANUAL",
+                    DateTimeOffset.UtcNow,
+                    DateTimeOffset.UtcNow,
+                    new FinancialActorDto(actorId, "System Admin", "admin@vietride.vn", "SYSTEM_ADMIN")),
+            ], 1, 20, 1));
+        using var client = _factory.CreateOperatorRoleClient("OPERATOR_ADMIN", operatorId);
+
+        var response = await client.GetAsync("/v1/operator/trip-settlements?page=1&pageSize=20");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using var document = JsonDocument.Parse(body);
+        var item = document.RootElement.GetProperty("data").GetProperty("items")[0];
+        item.GetProperty("settledBy").GetProperty("userId").GetGuid().Should().Be(actorId);
+        item.GetProperty("settledBy").GetProperty("role").GetString().Should().Be("SYSTEM_ADMIN");
+    }
+
+    [Fact]
     public async Task PlatformTransactions_ReturnUserOrSystemActorWithoutChangingLegacyFields()
     {
         _factory.Reset();
@@ -165,6 +233,13 @@ public sealed class FinancialManagementWebApplicationFactory : WebApplicationFac
         return client;
     }
 
+    public HttpClient CreateOperatorRoleClient(string role, Guid operatorId)
+    {
+        var client = CreateRoleClient(role);
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Test-Operator-Id", operatorId.ToString());
+        return client;
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
@@ -223,12 +298,15 @@ public sealed class FinancialManagementWebApplicationFactory : WebApplicationFac
             if (string.IsNullOrWhiteSpace(role))
                 return Task.FromResult(AuthenticateResult.NoResult());
 
-            var principal = new ClaimsPrincipal(new ClaimsIdentity(
-                [
-                    new Claim("sub", AuthenticatedAdminId.ToString()),
-                    new Claim(ClaimTypes.Role, role),
-                ],
-                SchemeName));
+            var claims = new List<Claim>
+            {
+                new("sub", AuthenticatedAdminId.ToString()),
+                new(ClaimTypes.Role, role),
+            };
+            if (Guid.TryParse(Request.Headers["X-Test-Operator-Id"].ToString(), out var operatorId))
+                claims.Add(new Claim("operatorId", operatorId.ToString()));
+
+            var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, SchemeName));
             return Task.FromResult(AuthenticateResult.Success(
                 new AuthenticationTicket(principal, SchemeName)));
         }
