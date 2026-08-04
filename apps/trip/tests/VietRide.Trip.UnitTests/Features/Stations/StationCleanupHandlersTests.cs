@@ -472,7 +472,6 @@ public sealed class StationCleanupHandlersTests
             Guid operatorId,
             Guid alternativeRouteId,
             CancellationToken cancellationToken) => Task.FromResult<AlternativeRoute?>(null);
-        public Task<int> CountActiveByRouteAsync(Guid routeId, CancellationToken cancellationToken) => Task.FromResult(0);
         public Task<bool> ExistsStopAsync(Guid alternativeRouteId, Guid stopId, CancellationToken cancellationToken)
             => Task.FromResult(false);
         public Task<bool> ExistsStopOrderIndexAsync(Guid alternativeRouteId, int orderIndex, CancellationToken cancellationToken)

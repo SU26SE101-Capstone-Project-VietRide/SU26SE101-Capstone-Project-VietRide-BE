@@ -8,6 +8,11 @@ public static class TripAuditAction
     public const string TripRouteChanged = "TRIP_ROUTE_CHANGED";
     public const string DriverScheduleCascadeApplied = "DRIVER_SCHEDULE_CASCADE_APPLIED";
     public const string VehicleSubstitutionTriggered = "VEHICLE_SUBSTITUTION_TRIGGERED";
+    public const string RouteChangeProposalCreated = "ROUTE_CHANGE_PROPOSAL_CREATED";
+    public const string RouteChangeProposalApproved = "ROUTE_CHANGE_PROPOSAL_APPROVED";
+    public const string RouteChangeProposalRejected = "ROUTE_CHANGE_PROPOSAL_REJECTED";
+    public const string RouteChangeProposalSuperseded = "ROUTE_CHANGE_PROPOSAL_SUPERSEDED";
+    public const string RouteChangeProposalExpired = "ROUTE_CHANGE_PROPOSAL_EXPIRED";
 
     public static bool IsApproved(string action) => action is
         TripCompletedManual
@@ -15,5 +20,10 @@ public static class TripAuditAction
         or TripVehicleSwapped
         or TripRouteChanged
         or DriverScheduleCascadeApplied
-        or VehicleSubstitutionTriggered;
+        or VehicleSubstitutionTriggered
+        or RouteChangeProposalCreated
+        or RouteChangeProposalApproved
+        or RouteChangeProposalRejected
+        or RouteChangeProposalSuperseded
+        or RouteChangeProposalExpired;
 }

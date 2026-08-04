@@ -9,6 +9,7 @@ export * from './events/trip-vehicle-substituted.event';
 export * from './events/booking-transferred.event';
 export * from './events/trip-schedule-changed.event';
 export * from './events/trip-route-changed.event';
+export * from './events/route-change-proposal-events';
 export * from './events/trip-cancelled.event';
 export * from './events/booking-seat-reassignment-required.event';
 export * from './events/booking-schedule-change-informational.event';

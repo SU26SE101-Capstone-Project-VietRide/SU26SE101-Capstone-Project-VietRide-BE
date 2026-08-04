@@ -100,7 +100,7 @@
 - Route CRUD with `returnRouteId` self-reference
 - RouteStop add/remove with `orderIndex`, `allowPickup`, `allowDropoff` flags
 - `RouteStopFareTemplate` with `effectiveFrom`/`effectiveUntil` (future-dated pricing)
-- AlternativeRoute CRUD (max 2 per main route, validated at API)
+- AlternativeRoute CRUD (the original Day-8 cap was retired by the additive 2026-08-04 proposal extension; there is no global per-Route active-count limit)
 - **DoD**: operator can create route with main stops + future-dated fare; flags enforced (no pickup at terminal-only stop)
 - **Review**: validation test — adding stop with order index conflict returns 422
 

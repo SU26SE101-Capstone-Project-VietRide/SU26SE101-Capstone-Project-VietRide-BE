@@ -275,6 +275,32 @@ public sealed class TripsEndpointTests
         mediator.LastRequest.Should().BeNull();
     }
 
+    [Theory]
+    [InlineData("GET", "/v1/driver/trips/not-a-uuid/alternative-routes", "DRIVER")]
+    [InlineData("POST", "/v1/driver/trips/not-a-uuid/route-change-proposals", "DRIVER")]
+    [InlineData("GET", "/v1/driver/trips/not-a-uuid/route-change-proposals", "ASSISTANT")]
+    [InlineData("GET", "/v1/operator/route-change-proposals/not-a-uuid", "OPERATOR_ADMIN")]
+    [InlineData("POST", "/v1/operator/route-change-proposals/not-a-uuid/approve", "OPERATOR_ADMIN")]
+    [InlineData("POST", "/v1/operator/route-change-proposals/not-a-uuid/reject", "OPERATOR_ADMIN")]
+    public async Task RouteChangeProposalEndpoints_MalformedPathUuid_Return422WithoutDispatching(
+        string method,
+        string path,
+        string role)
+    {
+        var mediator = new StubMediator(_ => throw new InvalidOperationException("Must not dispatch."));
+        using var factory = new TripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+        using var request = CreateAuthorizedRequest(new HttpMethod(method), path, role, Guid.NewGuid());
+        if (method == "POST")
+            request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("D"));
+
+        using var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertErrorEnvelopeAsync(response, "VALIDATION_ERROR");
+        mediator.LastRequest.Should().BeNull();
+    }
+
     [Fact]
     public async Task CompleteTrip_MissingIdempotencyKey_Returns422WithoutDispatching()
     {

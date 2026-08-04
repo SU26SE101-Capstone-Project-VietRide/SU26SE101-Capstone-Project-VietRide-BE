@@ -512,7 +512,7 @@ public sealed class AdminStationMergeEndpointTests
             return;
 
         var connectionString = Environment.GetEnvironmentVariable("VIETRIDE_TEST_REDIS")
-            ?? "localhost:6379,abortConnect=false,connectTimeout=3000";
+            ?? "127.0.0.1:6379,abortConnect=false,connectTimeout=3000";
         await using var redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
         var database = redis.GetDatabase();
         foreach (var key in values)
@@ -543,7 +543,7 @@ public sealed class AdminStationMergeEndpointTests
             builder.UseSetting("INTERNAL_JWT_SECRET", TestSecret);
             builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Default", CreateConnectionString(_databaseName));
-            builder.UseSetting("REDIS_URL", "localhost:6379,abortConnect=false,connectTimeout=3000");
+            builder.UseSetting("REDIS_URL", "127.0.0.1:6379,abortConnect=false,connectTimeout=3000");
             builder.UseEnvironment("Testing");
             builder.ConfigureServices(services =>
             {
@@ -563,7 +563,7 @@ public sealed class AdminStationMergeEndpointTests
 
     private static string CreateConnectionString(string databaseName)
     {
-        const string fallback = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+        const string fallback = "Host=127.0.0.1;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
         var template = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(template))
             template = fallback;

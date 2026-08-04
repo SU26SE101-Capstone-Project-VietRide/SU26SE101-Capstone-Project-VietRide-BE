@@ -104,7 +104,7 @@ public sealed class FareSurchargeMigrationTests
             .ConfigureWarnings(warnings => warnings.Ignore(
                 Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId.ManyServiceProvidersCreatedWarning))
             .UseNpgsql(
-                "Host=localhost;Port=5432;Database=unused;Username=vietride;Password=vietride_dev",
+                "Host=127.0.0.1;Port=5432;Database=unused;Username=vietride;Password=vietride_dev",
                 npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history", TripDbContext.SchemaName))
             .Options;
         return new TripDbContext(options, new VietRide.Shared.Kernel.Abstractions.SystemClock());

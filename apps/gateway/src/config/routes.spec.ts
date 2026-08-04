@@ -642,6 +642,43 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes route-change proposal operations to Trip for operator admins only', () => {
+    const listRoute = matchRoute(routes, '/v1/operator/route-change-proposals');
+    const approveRoute = matchRoute(
+      routes,
+      '/v1/operator/route-change-proposals/11111111-1111-4111-8111-111111111111/approve',
+    );
+
+    [listRoute, approveRoute].forEach((route) => {
+      expect(route).toMatchObject({
+        prefix: '/v1/operator/route-change-proposals',
+        target: env.TRIP_BASE_URL,
+        authRequired: 'user',
+        requiredRoles: ['OPERATOR_ADMIN'],
+      });
+    });
+  });
+
+  it('routes only exact UUID operator change-route paths through the admin-only override', () => {
+    const validPath = '/v1/operator/trips/11111111-1111-4111-8111-111111111111/change-route';
+    const route = matchRoute(routes, validPath);
+
+    expect(route).toMatchObject({
+      prefix: '/v1/operator/trips/{tripId}/change-route',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    });
+    expect(matchRoute(routes, '/v1/operator/trips/not-a-uuid/change-route')).toMatchObject({
+      prefix: '/v1/operator/trips',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    });
+    expect(matchRoute(routes, `${validPath}/extra`)).toMatchObject({
+      prefix: '/v1/operator/trips',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    });
+  });
+
   it('matches operator vehicles using the dedicated prefix without changing generic vehicles', () => {
     const operatorRoute = matchRoute(
       routes,

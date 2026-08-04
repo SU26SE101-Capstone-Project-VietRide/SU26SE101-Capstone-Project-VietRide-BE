@@ -157,7 +157,7 @@ public sealed class Day23BookingCancelledCompatibilityTests
 
     private static string CreateConnectionString(string databaseName)
     {
-        const string fallback = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+        const string fallback = "Host=127.0.0.1;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
         var template = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
         template = string.IsNullOrWhiteSpace(template) ? fallback : template;
         return template.Contains("{databaseName}", StringComparison.OrdinalIgnoreCase)

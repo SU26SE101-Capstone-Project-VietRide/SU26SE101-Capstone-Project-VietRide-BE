@@ -2516,6 +2516,233 @@ Errors:
   parent Route, or belongs to another operator.
 - `409 TRIP_NOT_EDITABLE` when the Trip lifecycle does not permit a route change.
 
+This direct `OPERATOR_ADMIN` action remains supported. It does not require a proposal. A successful
+direct change atomically marks every `PENDING` route-change proposal for the Trip as `SUPERSEDED`
+with `resolutionCode=ROUTE_CHANGED_DIRECTLY` before committing the existing
+`trip.trip.route_changed` fact.
+
+### Driver/Assistant Route-Change Proposals
+
+All endpoints below are public only through the Gateway `/v1/*` surface and use the ADR 0004
+`ApiResponse<T>` envelope. Driver endpoints require the authenticated `DRIVER` or `ASSISTANT` to
+be assigned to the Trip. Operator endpoints require `OPERATOR_ADMIN` from the proposal's operator;
+cross-tenant proposal lookup is masked as `404 ROUTE_CHANGE_PROPOSAL_NOT_FOUND`.
+
+`RouteChangeProposalDto` is exactly:
+
+```jsonc
+{
+  "id": "uuid",
+  "tripId": "uuid",
+  "operatorId": "uuid",
+  "proposedByUserId": "uuid",
+  "type": "EXISTING",
+  "status": "PENDING",
+  "sourceAlternativeRouteId": "uuid",
+  "sourceUpdatedAt": "2026-08-04T02:00:00Z",
+  "incidentId": null,
+  "reason": "Traffic congestion ahead",
+  "snapshot": {
+    "name": "Bypass via Bao Loc",
+    "description": "Frozen at proposal creation.",
+    "destinationStationId": "uuid",
+    "totalDistanceKm": 321.25,
+    "estimatedDurationMinutes": 455,
+    "pathPolyline": "encoded-google-polyline-precision-5",
+    "stops": [
+      {
+        "stopId": "uuid",
+        "orderIndex": 1,
+        "estimatedDurationFromOriginMinutes": 80,
+        "distanceFromOriginKm": 70.25
+      }
+    ]
+  },
+  "decidedByUserId": null,
+  "decidedAt": null,
+  "rejectionReason": null,
+  "resolutionCode": null,
+  "supersededByProposalId": null,
+  "approvedAlternativeRouteId": null,
+  "createdAt": "2026-08-04T02:00:00Z",
+  "updatedAt": "2026-08-04T02:00:00Z"
+}
+```
+
+`type` is `EXISTING|CUSTOM`; `status` is
+`PENDING|APPROVED|REJECTED|SUPERSEDED|EXPIRED`. Resolution codes are
+`ANOTHER_PROPOSAL_APPROVED|ROUTE_CHANGED_DIRECTLY|TRIP_NO_LONGER_EDITABLE|SOURCE_ROUTE_CHANGED`.
+`snapshot.stops` is ordered by `orderIndex`, then `stopId`. Nullable fields are serialized as
+`null`. For `EXISTING`, `sourceAlternativeRouteId` and `sourceUpdatedAt` are non-null. For `CUSTOM`,
+both are null. Multiple `PENDING` proposals for one Trip are allowed.
+
+Every paged endpoint in this section returns the selected DTO array inside exact data shape
+`{items,page,pageSize,totalItems,totalPages,hasNextPage,hasPreviousPage}`; pagination is not moved
+to `meta`.
+
+#### GET `/v1/driver/trips/{tripId}/alternative-routes`
+
+Auth: assigned `DRIVER` or `ASSISTANT`. Query: `page?`, `pageSize?`; defaults are `page=1`,
+`pageSize=20`, and both must be in `1..100`.
+
+Response `200`: `PagedResult<AlternativeRouteDto>` containing only active AlternativeRoutes for
+the assigned Trip's parent Route, ordered by `name`, then `id`.
+
+Statuses: `200`, `401`, `403`, `404`, `422`.
+
+Errors: `403 FORBIDDEN` for authenticated but unassigned crew; `404 TRIP_NOT_FOUND` for a missing
+Trip; `422 VALIDATION_ERROR` for an invalid UUID/pagination value.
+
+#### POST `/v1/driver/trips/{tripId}/route-change-proposals`
+
+Auth: assigned `DRIVER` or `ASSISTANT`. Idempotency: required UUID-v4 `Idempotency-Key`.
+
+EXISTING request is exactly:
+
+```json
+{
+  "type": "EXISTING",
+  "alternativeRouteId": "uuid",
+  "incidentId": "uuid",
+  "reason": "Traffic congestion ahead"
+}
+```
+
+CUSTOM request is exactly:
+
+```jsonc
+{
+  "type": "CUSTOM",
+  "route": {
+    "name": "Crew-proposed bypass",
+    "description": "Avoid the blocked pass.",
+    "destinationStationId": "uuid",
+    "totalDistanceKm": 318.5,
+    "estimatedDurationMinutes": 440,
+    "pathPolyline": "encoded-google-polyline-precision-5",
+    "stops": [
+      {
+        "stopId": "uuid",
+        "orderIndex": 1,
+        "estimatedDurationFromOriginMinutes": 75,
+        "distanceFromOriginKm": 68.5
+      }
+    ]
+  },
+  "incidentId": null,
+  "reason": "Road closure reported by local authority"
+}
+```
+
+Unknown fields are rejected. `reason` is required, trimmed, and 1..500 characters; custom
+`name` is required, trimmed, and at most 255 characters. `incidentId` is optional but, when
+present, must identify an Incident belonging to the same Trip. `EXISTING` requires exactly a
+non-null `alternativeRouteId` and no `route`; the AlternativeRoute must be active and match
+the Trip's Route/operator. `CUSTOM` requires exactly a non-null `route` and no
+`alternativeRouteId`; destination Station must have an active OperatorStation mapping for the
+proposal operator, and every Stop must be active and belong to that operator. `pathPolyline` is
+required, must be a valid Google encoded polyline (precision 5), and must pass the existing
+500-metre Station/Stop waypoint validator. Stop IDs and positive `orderIndex` values are unique;
+duration/distance values are non-negative. Both types persist an immutable snapshot. Creation
+never changes the Trip or AlternativeRoute catalog.
+
+The Trip must be `SCHEDULED|BOARDING|IN_PROGRESS`. Response `201` data is the created
+`RouteChangeProposalDto` with `status=PENDING`.
+
+Statuses: `201`, `401`, `403`, `404`, `409`, `422`.
+
+Errors:
+
+- `403 FORBIDDEN`: caller is not assigned to the Trip.
+- `404 TRIP_NOT_FOUND`: Trip does not exist.
+- `404 ROUTE_NOT_FOUND`: EXISTING source is missing, inactive, cross-route, or cross-operator.
+- `404 STATION_NOT_FOUND` / `404 STOP_NOT_FOUND`: CUSTOM snapshot references an unavailable
+  destination/Stop.
+- `404 INCIDENT_NOT_FOUND`: `incidentId` is missing or does not belong to this Trip.
+- `409 TRIP_NOT_EDITABLE`: Trip is outside `SCHEDULED|BOARDING|IN_PROGRESS`.
+- `422 VALIDATION_ERROR`: shape, enum, required, length, UUID, uniqueness, or numeric validation.
+
+#### GET `/v1/driver/trips/{tripId}/route-change-proposals`
+
+Auth: assigned `DRIVER` or `ASSISTANT`. Query: `type?=EXISTING|CUSTOM`, `page?`, `pageSize?`;
+pagination defaults to `1/20`, range `1..100`. Results include every proposal for that Trip,
+regardless of proposer/status, ordered by `createdAt DESC`, then `id`.
+
+Response `200`: `PagedResult<RouteChangeProposalDto>`. Statuses: `200`, `401`, `403`, `404`,
+`422`; assignment/not-found behavior matches the candidate-list endpoint, and invalid filters or
+pagination return `422 VALIDATION_ERROR`.
+
+#### GET `/v1/operator/route-change-proposals`
+
+Auth: `OPERATOR_ADMIN`. Query: `tripId?`,
+`status?=PENDING|APPROVED|REJECTED|SUPERSEDED|EXPIRED`, `type?=EXISTING|CUSTOM`, `page?`,
+`pageSize?`; pagination defaults to `1/20`, range `1..100`. Results are tenant-scoped and ordered
+by `createdAt DESC`, then `id`.
+
+Response `200`: `PagedResult<RouteChangeProposalDto>`. Statuses: `200`, `401`, `403`, `422`;
+invalid UUID/filter/pagination values return `422 VALIDATION_ERROR`.
+
+#### GET `/v1/operator/route-change-proposals/{proposalId}`
+
+Auth: `OPERATOR_ADMIN`. Response `200`: `RouteChangeProposalDto`.
+
+Statuses: `200`, `401`, `403`, `404`, `422`. Missing or cross-tenant IDs return
+`404 ROUTE_CHANGE_PROPOSAL_NOT_FOUND`; malformed/empty UUID returns `422 VALIDATION_ERROR`.
+
+#### POST `/v1/operator/route-change-proposals/{proposalId}/approve`
+
+Auth: `OPERATOR_ADMIN`. Idempotency: required UUID-v4 `Idempotency-Key`. Request is bodyless.
+
+Approval locks the Trip and all of its pending proposals. The Trip must still be
+`SCHEDULED|BOARDING|IN_PROGRESS`. An EXISTING source must still be active and have the exact
+frozen `sourceUpdatedAt`. A CUSTOM snapshot is revalidated against active destination/Stops, then
+promoted to a new official AlternativeRoute; there is no global active-route cap. Approval applies
+the selected/promoted route, publishes the existing `trip.trip.route_changed`, marks the chosen
+proposal `APPROVED`, and marks every other pending proposal for the Trip `SUPERSEDED` with
+`resolutionCode=ANOTHER_PROPOSAL_APPROVED` and `supersededByProposalId` set to the winner, all in
+one transaction.
+
+Response `200` data is the exact composite:
+
+```jsonc
+{
+  "proposal": { "id": "uuid", "status": "APPROVED", "approvedAlternativeRouteId": "uuid" },
+  "routeChange": {
+    "tripId": "uuid",
+    "status": "IN_PROGRESS",
+    "alternativeRouteId": "uuid",
+    "affectedBookings": [
+      { "bookingId": "uuid", "candidateStops": [] }
+    ]
+  }
+}
+```
+
+`proposal` is the full `RouteChangeProposalDto`, not the abbreviated JSON shown for readability;
+`routeChange` is the exact direct change-route response defined above.
+
+Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
+
+Errors: `404 ROUTE_CHANGE_PROPOSAL_NOT_FOUND` for missing/cross-tenant proposal or missing owned
+Trip; `409 ROUTE_CHANGE_PROPOSAL_NOT_PENDING` when already decided or when the Trip became
+non-editable (pending rows become `EXPIRED`); `409 ROUTE_CHANGE_PROPOSAL_STALE` when the frozen
+EXISTING source changed/deactivated or CUSTOM destination/Stops are no longer valid; idempotency
+and malformed UUID failures use the shared `422` contract.
+
+#### POST `/v1/operator/route-change-proposals/{proposalId}/reject`
+
+Auth: `OPERATOR_ADMIN`. Idempotency: required UUID-v4 `Idempotency-Key`.
+
+Request is exactly `{ "reason": "Optional operator note" }`.
+`reason` is optional, blank-normalized to null, trimmed, and at most 500 characters. The response
+continues to expose the persisted decision note as `rejectionReason`.
+Response `200` data is the full `RouteChangeProposalDto` with `status=REJECTED`.
+
+Statuses: `200`, `401`, `403`, `404`, `409`, `422`. Missing/cross-tenant proposal returns
+`404 ROUTE_CHANGE_PROPOSAL_NOT_FOUND`; any non-pending state returns
+`409 ROUTE_CHANGE_PROPOSAL_NOT_PENDING`; invalid body/length/UUID/idempotency returns the shared
+`422` response.
+
 ### POST `/v1/operator/trips/{tripId}/substitute-vehicle`
 
 Auth: `OPERATOR_ADMIN`-only for the Trip's operator. `Idempotency-Key` is required UUID v4.
@@ -6332,7 +6559,8 @@ Response `200`: `PagedResult<RouteStopFareTemplateDto>` in the ADR 0004 success 
 }
 ```
 
-Each main Route can have at most two active AlternativeRoutes. AlternativeRoute stops are an independent stop sequence and do not reuse RouteStop rows.
+Each main Route may have any number of active AlternativeRoutes; there is no global active-count cap.
+AlternativeRoute stops are an independent stop sequence and do not reuse RouteStop rows.
 
 `pathPolyline` is nullable and appears on create/update/geometry responses only. The paged alternative-route list uses `AlternativeRouteListItemDto` without `pathPolyline`.
 
@@ -6364,7 +6592,6 @@ Request:
 Validation:
 - Parent Route must belong to caller operator; otherwise `404 ROUTE_NOT_FOUND`.
 - `destinationStationId` must reference an existing active Station; missing Station returns `404 STATION_NOT_FOUND`.
-- A third active AlternativeRoute for the same parent Route is rejected with `422 ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`; `error.fields.alternativeRoutes` identifies the discriminator. Only active rows count toward the cap.
 - Duplicate `orderIndex` within the same AlternativeRoute stop sequence is rejected with `422 VALIDATION_ERROR` and `error.fields.orderIndex`.
 - `stopId` values in the alternative stop sequence must belong to caller operator; otherwise `404 STOP_NOT_FOUND`.
 
@@ -6422,7 +6649,7 @@ Response `200`: updated `AlternativeRouteDto` including `pathPolyline`.
 
 Auth: `OPERATOR_ADMIN`.
 
-AlternativeRoute delete deactivates the row by setting `isActive=false`; it is not a hard-delete and `alternative_routes` has no `deleted_at`. Deactivating one AlternativeRoute frees one slot toward the max-two-active cap.
+AlternativeRoute delete deactivates the row by setting `isActive=false`; it is not a hard-delete and `alternative_routes` has no `deleted_at`.
 
 Validation: missing AlternativeRoute or AlternativeRoute whose parent Route belongs to another operator returns `404 ROUTE_NOT_FOUND`.
 
@@ -6462,21 +6689,8 @@ RouteStop flags invalid:
 }
 ```
 
-AlternativeRoute active limit exceeded:
-```json
-{
-  "success": false,
-  "statusCode": 422,
-  "error": {
-    "code": "ALTERNATIVE_ROUTE_LIMIT_EXCEEDED",
-    "message": "A route can have at most two active alternative routes.",
-    "fields": [
-      { "field": "alternativeRoutes", "message": "Deactivate an existing alternative route before creating another one." }
-    ]
-  },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-10T10:00:00Z" }
-}
-```
+`ALTERNATIVE_ROUTE_LIMIT_EXCEEDED` is retired and is no longer emitted. Creating a third or later
+active AlternativeRoute follows the same success contract as any other valid create request.
 
 ## Trip Vehicle and Driver Schedule Management (Day 9)
 
@@ -7378,6 +7592,45 @@ Error responses use the ADR 0004 envelope:
 - `422 VALIDATION_ERROR`: the route parameter or booking-code format is invalid.
 
 ## Integration Event Contracts
+
+### Route-change proposal lifecycle facts
+
+Trip produces five lifecycle routing keys on `vietride.events`:
+`trip.route_change_proposal.created`, `.approved`, `.rejected`, `.superseded`, and `.expired`.
+Notification consumes all five. The created fact resolves all active `OPERATOR_ADMIN` users for
+`operatorId` and creates one `ROUTE_CHANGE_PROPOSAL_CREATED` notification per resolved admin.
+Approved, rejected, superseded, and expired each notify `proposedByUserId` with the matching type
+`ROUTE_CHANGE_PROPOSAL_APPROVED|ROUTE_CHANGE_PROPOSAL_REJECTED|ROUTE_CHANGE_PROPOSAL_SUPERSEDED|ROUTE_CHANGE_PROPOSAL_EXPIRED`.
+Consumer processing is idempotent by `eventId`/RabbitMQ `MessageId`; redelivery creates neither a
+duplicate Notification row nor duplicate push. Every key uses the same exact payload field set;
+nullable fields are serialized as `null`:
+
+```jsonc
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-08-04T02:00:00Z",
+  "proposalId": "uuid",
+  "tripId": "uuid",
+  "operatorId": "uuid",
+  "proposedByUserId": "uuid",
+  "actorUserId": "uuid|null",
+  "proposalType": "EXISTING",
+  "status": "PENDING",
+  "sourceAlternativeRouteId": "uuid|null",
+  "approvedAlternativeRouteId": "uuid|null",
+  "incidentId": "uuid|null",
+  "reason": "Traffic congestion ahead",
+  "rejectionReason": null,
+  "resolutionCode": null,
+  "supersededByProposalId": null
+}
+```
+
+`proposalType=EXISTING|CUSTOM`; status is the post-transition state. `created.actorUserId` is the
+proposer; `approved|rejected` uses the deciding admin; automatic expiry uses null. Supersede uses
+the approving/direct-change admin when available. `eventId` equals the Outbox row id and RabbitMQ
+MessageId. Approval also emits the pre-existing `trip.trip.route_changed` fact in the same
+Trip-local transaction; the proposal lifecycle fact never duplicates its affected-Booking fields.
 
 ### Day-22 Trip edit and Booking passenger-impact facts
 

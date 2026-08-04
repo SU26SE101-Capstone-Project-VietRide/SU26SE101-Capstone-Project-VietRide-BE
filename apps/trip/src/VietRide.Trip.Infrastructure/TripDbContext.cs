@@ -32,6 +32,8 @@ public sealed class TripDbContext : VietRideDbContextBase
         builder.MapEnum<TripGenerationSkipReason>($"{SchemaName}.trip_generation_skip_reason", PostgresEnumNameTranslator);
         builder.MapEnum<VehicleStatus>("public.vehicle_status", PostgresEnumNameTranslator);
         builder.MapEnum<IncidentCategory>($"{SchemaName}.incident_category", PostgresEnumNameTranslator);
+        builder.MapEnum<RouteChangeProposalType>($"{SchemaName}.route_change_proposal_type", PostgresEnumNameTranslator);
+        builder.MapEnum<RouteChangeProposalStatus>($"{SchemaName}.route_change_proposal_status", PostgresEnumNameTranslator);
     }
 
     public DbSet<Location> Locations => Set<Location>();
@@ -86,6 +88,10 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<Incident> Incidents => Set<Incident>();
 
+    public DbSet<RouteChangeProposal> RouteChangeProposals => Set<RouteChangeProposal>();
+
+    public DbSet<RouteChangeProposalStop> RouteChangeProposalStops => Set<RouteChangeProposalStop>();
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Conventions.Remove(typeof(ForeignKeyIndexConvention));
@@ -105,6 +111,8 @@ public sealed class TripDbContext : VietRideDbContextBase
         modelBuilder.HasPostgresEnum("trip_generation_skip_reason", new[] { "SUBSCRIPTION_LIMIT_EXCEEDED", "VEHICLE_CONFLICT", "DRIVER_CONFLICT", "OTHER" });
         modelBuilder.HasPostgresEnum("vehicle_status", new[] { "ACTIVE", "MAINTENANCE", "OFF_DUTY", "RETIRED" });
         modelBuilder.HasPostgresEnum(SchemaName, "incident_category", new[] { "TRAFFIC_JAM", "VEHICLE_BREAKDOWN", "ACCIDENT", "WEATHER", "OTHER" });
+        modelBuilder.HasPostgresEnum(SchemaName, "route_change_proposal_type", new[] { "EXISTING", "CUSTOM" });
+        modelBuilder.HasPostgresEnum(SchemaName, "route_change_proposal_status", new[] { "PENDING", "APPROVED", "REJECTED", "SUPERSEDED", "EXPIRED" });
         modelBuilder.AddVietRideIntegrationInbox();
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(TripDbContext).Assembly);

@@ -1,0 +1,38 @@
+import {
+  TRIP_ROUTE_CHANGE_PROPOSAL_APPROVED_ROUTING_KEY,
+  TRIP_ROUTE_CHANGE_PROPOSAL_CREATED_ROUTING_KEY,
+  TRIP_ROUTE_CHANGE_PROPOSAL_EXPIRED_ROUTING_KEY,
+  TRIP_ROUTE_CHANGE_PROPOSAL_REJECTED_ROUTING_KEY,
+  TRIP_ROUTE_CHANGE_PROPOSAL_SUPERSEDED_ROUTING_KEY,
+} from '@vietride/contracts';
+
+export {
+  TRIP_ROUTE_CHANGE_PROPOSAL_APPROVED_ROUTING_KEY,
+  TRIP_ROUTE_CHANGE_PROPOSAL_CREATED_ROUTING_KEY,
+  TRIP_ROUTE_CHANGE_PROPOSAL_EXPIRED_ROUTING_KEY,
+  TRIP_ROUTE_CHANGE_PROPOSAL_REJECTED_ROUTING_KEY,
+  TRIP_ROUTE_CHANGE_PROPOSAL_SUPERSEDED_ROUTING_KEY,
+};
+
+export const ROUTE_CHANGE_PROPOSAL_QUEUE_BINDINGS = [
+  {
+    queue: 'notification:route-change-proposal-created',
+    routingKey: TRIP_ROUTE_CHANGE_PROPOSAL_CREATED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:route-change-proposal-approved',
+    routingKey: TRIP_ROUTE_CHANGE_PROPOSAL_APPROVED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:route-change-proposal-rejected',
+    routingKey: TRIP_ROUTE_CHANGE_PROPOSAL_REJECTED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:route-change-proposal-superseded',
+    routingKey: TRIP_ROUTE_CHANGE_PROPOSAL_SUPERSEDED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:route-change-proposal-expired',
+    routingKey: TRIP_ROUTE_CHANGE_PROPOSAL_EXPIRED_ROUTING_KEY,
+  },
+] as const;
