@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { RedisService } from '@vietride/nest-redis';
 import { trackingEtaKey, trackingLatestKey } from '../location/location.constants';
+import { trackingTripDelayStateKey } from '../trip-delay/trip-delay.constants';
 import { UpdateLocationSchema } from '../location/dto/update-location.dto';
 import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
-import { EtaResponseSchema } from './dto/eta-response.dto';
+import { EtaBaseResponseSchema, type EtaResponseDto } from './dto/eta-response.dto';
 import type { TrailQueryDto } from './dto/tracking-data-query.dto';
 
 export interface TrackingLatestDto {
@@ -88,7 +89,7 @@ export class TrackingDataRepository {
     };
   }
 
-  async findEta(tripId: string, stopId: string): Promise<import('./dto/eta-response.dto').EtaResponseDto | null> {
+  async findEta(tripId: string, stopId: string): Promise<EtaResponseDto | null> {
     const payload = await this.redis.getClient().get(trackingEtaKey(tripId, stopId));
     if (!payload) return null;
 
@@ -99,9 +100,53 @@ export class TrackingDataRepository {
       return null;
     }
 
-    const parsed = EtaResponseSchema.safeParse(parsedJson);
-    if (!parsed.success) return null;
+    const parsed = EtaBaseResponseSchema.safeParse(parsedJson);
+    if (!parsed.success || parsed.data.tripId !== tripId || parsed.data.stopId !== stopId) return null;
+    const baseEta: Omit<EtaResponseDto, 'delayed' | 'delayStatus' | 'delayMinutes'> = parsed.data;
 
-    return parsed.data;
+    type DelayState = {
+      stopId: string;
+      delayStatus: 'DELAYED' | 'ON_TIME';
+      delayMinutes: number;
+    };
+    let state: DelayState | null = null;
+    const stateKeys = [
+      trackingTripDelayStateKey(tripId, baseEta.stopId),
+      trackingTripDelayStateKey(tripId),
+    ];
+    for (const stateKey of stateKeys) {
+      const statePayload = await this.redis.getClient().get(stateKey);
+      if (!statePayload) continue;
+
+      try {
+        const candidate = JSON.parse(statePayload) as Partial<DelayState> & { tripId?: unknown };
+        if (
+          candidate.tripId === tripId &&
+          candidate.stopId === baseEta.stopId &&
+          (candidate.delayStatus === 'DELAYED' || candidate.delayStatus === 'ON_TIME') &&
+          typeof candidate.delayMinutes === 'number' &&
+          Number.isFinite(candidate.delayMinutes) &&
+          candidate.delayMinutes >= 0
+        ) {
+          state = {
+            stopId: candidate.stopId,
+            delayStatus: candidate.delayStatus,
+            delayMinutes: candidate.delayMinutes,
+          };
+          break;
+        }
+      } catch {
+        // Try the legacy trip-level key before returning UNKNOWN.
+      }
+    }
+
+    const stateForEta = state !== null && state.stopId === baseEta.stopId ? state : null;
+
+    return {
+      ...baseEta,
+      delayed: stateForEta?.delayStatus === 'DELAYED' ? true : stateForEta ? false : null,
+      delayStatus: stateForEta?.delayStatus ?? 'UNKNOWN',
+      delayMinutes: stateForEta?.delayMinutes ?? null,
+    };
   }
 }

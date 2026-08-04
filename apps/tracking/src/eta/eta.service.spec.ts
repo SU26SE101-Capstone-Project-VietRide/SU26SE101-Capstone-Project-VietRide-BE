@@ -8,6 +8,7 @@ import { ROUTE_GEOMETRY_PROVIDER } from '../off-route/off-route.constants';
 import type { RouteGeometryProvider } from '../off-route/route-geometry.provider';
 import {
   ETA_CACHE_TTL_SECONDS,
+  ETA_STOPS_ONLY_CACHE_TTL_SECONDS,
   ETA_STATE_TTL_SECONDS,
   GOOGLE_ETA_PROVIDER,
   LOCAL_ETA_PROVIDER,
@@ -35,6 +36,7 @@ describe('EtaService', () => {
   let localProvider: jest.Mocked<EtaProvider>;
   let googleProvider: jest.Mocked<EtaProvider>;
   let tripDataProvider: jest.Mocked<TripDataProvider>;
+  let routePeek: jest.Mock;
   let env: Env;
 
   beforeEach(async () => {
@@ -76,14 +78,15 @@ describe('EtaService', () => {
         return [createStop()];
       }),
     };
-    const routeProvider: RouteGeometryProvider = {
-      peekCachedRouteGeometry: () => ({
+    routePeek = jest.fn(() => ({
         tripId: TEST_TRIP_ID,
         points: [
           { latitude: 10.7, longitude: 106.66 },
           { latitude: 10.9, longitude: 106.66 },
         ],
-      }),
+      }));
+    const routeProvider: RouteGeometryProvider = {
+      peekCachedRouteGeometry: routePeek,
       getRouteGeometry: async () => null,
     };
 
@@ -169,6 +172,19 @@ describe('EtaService', () => {
     expect(localProvider.calculate).not.toHaveBeenCalled();
   });
 
+  it('uses Google when no route polyline is cached', async () => {
+    routePeek.mockReturnValue(null);
+    env.GOOGLE_ROUTES_ENABLED = true;
+    env.GOOGLE_ROUTES_API_KEY = 'fake-key';
+
+    await expect(service.handleGpsUpdate(createGps())).resolves.toEqual(
+      expect.objectContaining({ etaMinutes: 10 }),
+    );
+
+    expect(googleProvider.calculate).toHaveBeenCalledTimes(1);
+    expect(localProvider.calculate).not.toHaveBeenCalled();
+  });
+
   it('falls back locally and opens cooldown after three Google failures', async () => {
     env.GOOGLE_ROUTES_ENABLED = true;
     env.GOOGLE_ROUTES_API_KEY = 'fake-key';
@@ -241,6 +257,59 @@ describe('EtaService', () => {
     expect(localProvider.calculate).toHaveBeenCalledWith(
       expect.any(Object),
       expect.objectContaining({ sequence: 2 }),
+    );
+  });
+
+  it('recalculates immediately when the selected stop changes before the 60-second interval', async () => {
+    const nextStopId = '33333333-3333-4333-8333-333333333333';
+    tripDataProvider.getRouteStops.mockResolvedValue([
+      createStop({
+        stopId: '44444444-4444-4444-8444-444444444444',
+        sequence: 1,
+        status: 'ARRIVED',
+      }),
+      createStop({
+        stopId: nextStopId,
+        sequence: 2,
+        latitude: 10.85,
+        status: 'PENDING',
+      }),
+    ]);
+    seedState({ latitude: 10.7627, longitude: 106.6602, etaMinutes: 30 });
+
+    const result = await service.handleGpsUpdate(createGps());
+
+    expect(result).toEqual(expect.objectContaining({ stopId: nextStopId }));
+    expect(localProvider.calculate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ stopId: nextStopId, sequence: 2 }),
+    );
+    expect(multiSet).toHaveBeenCalledWith(
+      trackingEtaKey(TEST_TRIP_ID, nextStopId),
+      expect.any(String),
+      'EX',
+      ETA_CACHE_TTL_SECONDS,
+    );
+  });
+
+  it('uses the 30-second fallback cache TTL even when Trip stop status is absent', async () => {
+    routePeek.mockReturnValue({
+      tripId: TEST_TRIP_ID,
+      geometrySource: 'STOPS_ONLY',
+      points: [
+        { latitude: 10.7, longitude: 106.66 },
+        { latitude: 10.9, longitude: 106.66 },
+      ],
+    });
+    tripDataProvider.getRouteStops.mockResolvedValue([createStop()]);
+
+    await service.handleGpsUpdate(createGps());
+
+    expect(multiSet).toHaveBeenCalledWith(
+      trackingEtaKey(TEST_TRIP_ID, TEST_STOP_ID),
+      expect.any(String),
+      'EX',
+      ETA_STOPS_ONLY_CACHE_TTL_SECONDS,
     );
   });
 

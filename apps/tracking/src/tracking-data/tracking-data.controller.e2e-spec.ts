@@ -21,6 +21,7 @@ import type {
 } from '../authorization/tracking-authorization.adapter';
 import type { Env } from '../config/env.schema';
 import { trackingEtaKey, trackingLatestKey } from '../location/location.constants';
+import { trackingTripDelayStateKey } from '../trip-delay/trip-delay.constants';
 import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
 import { TrackingDataController } from './tracking-data.controller';
 import { TrackingDataRepository } from './tracking-data.repository';
@@ -53,11 +54,22 @@ describe('TrackingDataController REST fallback (e2e)', () => {
   let prismaFindMany: jest.MockedFunction<(args: unknown) => Promise<unknown[]>>;
   let prismaCount: jest.MockedFunction<(args: unknown) => Promise<number>>;
   let routeContextGet: jest.MockedFunction<TripRouteContextService['getRouteContext']>;
+  let delayStatePayload: string | null;
+  let etaPayload: Record<string, unknown>;
 
   beforeAll(async () => {
     const generated = await generateKeyPair('RS256');
     privateKey = generated.privateKey;
     const publicKeyPem = await exportSPKI(generated.publicKey);
+    delayStatePayload = null;
+    etaPayload = {
+      tripId: TEST_TRIP_ID,
+      stopId: TEST_STOP_ID,
+      etaMinutes: 12,
+      estimatedArrivalTime: '2026-06-03T10:13:00.000Z',
+      distanceMeters: 8500,
+      updatedAt: '2026-06-03T10:01:00.000Z',
+    };
 
     redisGet = jest.fn(async (key: string) => {
       if (key === trackingLatestKey(TEST_TRIP_ID)) {
@@ -71,15 +83,9 @@ describe('TrackingDataController REST fallback (e2e)', () => {
         });
       }
       if (key === trackingEtaKey(TEST_TRIP_ID, TEST_STOP_ID)) {
-        return JSON.stringify({
-          tripId: TEST_TRIP_ID,
-          stopId: TEST_STOP_ID,
-          etaMinutes: 12,
-          estimatedArrivalTime: '2026-06-03T10:13:00.000Z',
-          distanceMeters: 8500,
-          updatedAt: '2026-06-03T10:01:00.000Z',
-        });
+        return JSON.stringify(etaPayload);
       }
+      if (key === trackingTripDelayStateKey(TEST_TRIP_ID)) return delayStatePayload;
       return null;
     });
 
@@ -374,8 +380,88 @@ describe('TrackingDataController REST fallback (e2e)', () => {
     expect(response.body.data?.eta).toEqual(
       expect.objectContaining({
         etaMinutes: 12,
+        delayed: null,
+        delayStatus: 'UNKNOWN',
+        delayMinutes: null,
       }),
     );
+  });
+
+  it('does not apply a delay state belonging to a different ETA stop', async () => {
+    delayStatePayload = JSON.stringify({
+      tripId: TEST_TRIP_ID,
+      stopId: '77777777-7777-4777-8777-777777777777',
+      delayStatus: 'DELAYED',
+      delayMinutes: 45,
+      evaluatedAt: '2026-06-03T10:00:00.000Z',
+    });
+    const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
+    const response = await getJson<ApiEnvelope<{
+      eta: { delayed: boolean | null; delayStatus: string; delayMinutes: number | null };
+    }>>(
+      `/v1/tracking/trips/${TEST_TRIP_ID}/eta?stopId=${TEST_STOP_ID}`,
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.data?.eta).toEqual(expect.objectContaining({
+      delayed: null,
+      delayStatus: 'UNKNOWN',
+      delayMinutes: null,
+    }));
+    delayStatePayload = null;
+  });
+
+  it('rejects a legacy ETA cache with mismatched trip or stop identity', async () => {
+    etaPayload = {
+      tripId: TEST_TRIP_ID,
+      stopId: '77777777-7777-4777-8777-777777777777',
+      etaMinutes: 12,
+      estimatedArrivalTime: '2026-06-03T10:13:00.000Z',
+      distanceMeters: 8500,
+      updatedAt: '2026-06-03T10:01:00.000Z',
+    };
+    const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
+    const response = await getJson<ApiEnvelope<{ eta: unknown | null }>>(
+      `/v1/tracking/trips/${TEST_TRIP_ID}/eta?stopId=${TEST_STOP_ID}`,
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.data?.eta).toBeNull();
+    etaPayload = {
+      tripId: TEST_TRIP_ID,
+      stopId: TEST_STOP_ID,
+      etaMinutes: 12,
+      estimatedArrivalTime: '2026-06-03T10:13:00.000Z',
+      distanceMeters: 8500,
+      updatedAt: '2026-06-03T10:01:00.000Z',
+    };
+  });
+
+  it('treats a negative delay state as UNKNOWN on REST', async () => {
+    delayStatePayload = JSON.stringify({
+      tripId: TEST_TRIP_ID,
+      stopId: TEST_STOP_ID,
+      delayStatus: 'DELAYED',
+      delayMinutes: -1,
+      evaluatedAt: '2026-06-03T10:00:00.000Z',
+    });
+    const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
+    const response = await getJson<ApiEnvelope<{
+      eta: { delayed: boolean | null; delayStatus: string; delayMinutes: number | null };
+    }>>(
+      `/v1/tracking/trips/${TEST_TRIP_ID}/eta?stopId=${TEST_STOP_ID}`,
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.data?.eta).toEqual(expect.objectContaining({
+      delayed: null,
+      delayStatus: 'UNKNOWN',
+      delayMinutes: null,
+    }));
+    delayStatePayload = null;
   });
 
   it('returns 400 envelope when ETA stopId is invalid', async () => {

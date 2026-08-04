@@ -17,6 +17,7 @@ import {
   LOCAL_ETA_PROVIDER,
   ETA_RECALCULATE_DISTANCE_THRESHOLD_METERS,
   ETA_RECALCULATE_SOON_THRESHOLD_MINUTES,
+  ETA_STOPS_ONLY_CACHE_TTL_SECONDS,
   ETA_STATE_TTL_SECONDS,
   ETA_STOP_REACHED_DISTANCE_METERS,
   MILLISECONDS_PER_SECOND,
@@ -144,8 +145,11 @@ export class EtaService {
         googleFailureCount: calculation.googleFailureCount,
         ...(calculation.cooldownUntil ? { cooldownUntil: calculation.cooldownUntil } : {}),
       };
+      const etaCacheTtl = route?.geometrySource === 'STOPS_ONLY'
+        ? ETA_STOPS_ONLY_CACHE_TTL_SECONDS
+        : this.env.TRACKING_ETA_CACHE_TTL_SECONDS ?? ETA_CACHE_TTL_SECONDS;
       await this.redis.getClient().multi()
-        .set(trackingEtaKey(gps.tripId, nextStop.stopId), JSON.stringify(event), 'EX', this.env.TRACKING_ETA_CACHE_TTL_SECONDS ?? ETA_CACHE_TTL_SECONDS)
+        .set(trackingEtaKey(gps.tripId, nextStop.stopId), JSON.stringify(event), 'EX', etaCacheTtl)
         .set(trackingEtaStateKey(gps.tripId), JSON.stringify(nextState), 'EX', ETA_STATE_TTL_SECONDS)
         .exec();
       return event;
@@ -217,10 +221,10 @@ export class EtaService {
   }
 
   private shouldRecalculate(gps: GpsUpdateEvent, state: EtaState | null, cached: EtaUpdateEvent | null): boolean {
+    if (!cached) return true;
     if (!state?.lastProviderCallAt) return true;
     const interval = this.env.TRACKING_ETA_MIN_INTERVAL_SECONDS ?? ETA_MIN_INTERVAL_SECONDS;
     if (Date.now() - new Date(state.lastProviderCallAt).getTime() < interval * 1000) return false;
-    if (!cached) return true;
     if ((cached.etaMinutes ?? state.etaMinutes ?? Number.POSITIVE_INFINITY) < ETA_RECALCULATE_SOON_THRESHOLD_MINUTES) return true;
     if (state.latitude === undefined || state.longitude === undefined) return true;
     return calculateDistanceMeters(gps.latitude, gps.longitude, state.latitude, state.longitude) > ETA_RECALCULATE_DISTANCE_THRESHOLD_METERS;

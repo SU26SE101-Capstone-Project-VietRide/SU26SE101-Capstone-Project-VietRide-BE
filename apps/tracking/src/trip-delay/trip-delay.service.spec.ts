@@ -2,13 +2,16 @@ import { Test } from '@nestjs/testing';
 import { RedisService } from '@vietride/nest-redis';
 import { TRIP_DATA_PROVIDER } from '../eta/eta.constants';
 import type { EtaUpdateEvent } from '../eta/eta.service';
-import type { TripDataProvider } from '../eta/trip-data.provider';
+import type { TripDataProvider, TripStopSnapshot } from '../eta/trip-data.provider';
 import { TRACKING_ACTIVE_TRIPS_KEY, trackingEtaKey } from '../location/location.constants';
 import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
 import {
   TRIP_DELAY_DEDUPE_TTL_SECONDS,
+  TRIP_DELAY_LOCK_TTL_SECONDS,
   TRIP_DELAYED_EVENT_TYPE,
   trackingTripDelayedDedupeKey,
+  trackingTripDelayLockKey,
+  trackingTripDelayStateKey,
 } from './trip-delay.constants';
 import { TripDelayService } from './trip-delay.service';
 
@@ -30,6 +33,7 @@ describe('TripDelayService', () => {
     ttl: number,
     condition: string,
   ) => Promise<string | null>>;
+  let redisEval: jest.MockedFunction<(...args: unknown[]) => Promise<number>>;
   let outboxCreate: jest.MockedFunction<(args: unknown) => Promise<unknown>>;
   let tripDataProvider: jest.Mocked<TripDataProvider>;
 
@@ -50,6 +54,7 @@ describe('TripDelayService', () => {
       void condition;
       return 'OK';
     });
+    redisEval = jest.fn(async () => 1);
     outboxCreate = jest.fn(async (args: unknown) => args);
     tripDataProvider = {
       getRouteStops: jest.fn(async (tripId: string) => {
@@ -68,6 +73,7 @@ describe('TripDelayService', () => {
               smembers: redisSmembers,
               get: redisGet,
               set: redisSet,
+              eval: redisEval,
             })),
           },
         },
@@ -96,7 +102,12 @@ describe('TripDelayService', () => {
 
     expect(redisSmembers).toHaveBeenCalledWith(TRACKING_ACTIVE_TRIPS_KEY);
     expect(redisGet).toHaveBeenCalledWith(trackingEtaKey(TEST_TRIP_ID, TEST_STOP_ID));
-    expect(redisSet).not.toHaveBeenCalled();
+    expect(redisSet).toHaveBeenCalledWith(
+      trackingTripDelayStateKey(TEST_TRIP_ID, TEST_STOP_ID),
+      expect.stringContaining('"delayStatus":"ON_TIME"'),
+      'EX',
+      86_400,
+    );
     expect(outboxCreate).not.toHaveBeenCalled();
   });
 
@@ -110,11 +121,11 @@ describe('TripDelayService', () => {
       '1',
       'EX',
       TRIP_DELAY_DEDUPE_TTL_SECONDS,
-      'NX',
     );
     expect(outboxCreate).toHaveBeenCalledWith({
       data: {
         eventType: TRIP_DELAYED_EVENT_TYPE,
+        dedupeKey: `trip-delay:${TEST_TRIP_ID}:${TEST_STOP_ID}:${String(Math.floor(new Date(DELAYED_DYNAMIC_ETA).getTime() / 300_000))}`,
         payload: {
           tripId: TEST_TRIP_ID,
           stopId: TEST_STOP_ID,
@@ -131,11 +142,62 @@ describe('TripDelayService', () => {
 
   it('does not publish duplicate detection in the same trip stop window', async () => {
     redisGet.mockResolvedValue(JSON.stringify(createCachedEta(DELAYED_DYNAMIC_ETA)));
-    redisSet.mockResolvedValue(null);
+    outboxCreate.mockRejectedValue({ code: 'P2002' });
 
     await expect(service.detectTripDelay(TEST_TRIP_ID)).resolves.toBe(0);
 
+    expect(outboxCreate).toHaveBeenCalled();
+  });
+
+  it('skips ARRIVED and SKIPPED stops during the background scan', async () => {
+    tripDataProvider.getRouteStops.mockResolvedValue([
+      createStop({ status: 'ARRIVED' }),
+      createStop({
+        stopId: '33333333-3333-4333-8333-333333333333',
+        status: 'SKIPPED',
+        sequence: 2,
+      }),
+    ]);
+
+    await expect(service.detectTripDelay(TEST_TRIP_ID)).resolves.toBe(0);
+
+    expect(redisGet).not.toHaveBeenCalledWith(
+      expect.stringContaining('tracking:eta:'),
+    );
     expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite realtime state while scanning multiple nonterminal stops', async () => {
+    const secondStopId = '33333333-3333-4333-8333-333333333333';
+    const realtimeStateWrites: string[] = [];
+    tripDataProvider.getRouteStops.mockResolvedValue([
+      createStop(),
+      createStop({ stopId: secondStopId, sequence: 2 }),
+    ]);
+    redisGet.mockImplementation(async (key: string) => {
+      if (key === trackingEtaKey(TEST_TRIP_ID, TEST_STOP_ID)) {
+        return JSON.stringify(createCachedEta(DELAYED_DYNAMIC_ETA));
+      }
+      if (key === trackingEtaKey(TEST_TRIP_ID, secondStopId)) {
+        return JSON.stringify({
+          ...createCachedEta(DELAYED_DYNAMIC_ETA),
+          stopId: secondStopId,
+        });
+      }
+      return null;
+    });
+    redisSet.mockImplementation(async (key: string) => {
+      if (key.includes('tracking:trip_delay_state:')) realtimeStateWrites.push(key);
+      return 'OK';
+    });
+
+    await expect(service.detectTripDelay(TEST_TRIP_ID)).resolves.toBe(2);
+
+    expect(realtimeStateWrites).toEqual([
+      trackingTripDelayStateKey(TEST_TRIP_ID, TEST_STOP_ID),
+      trackingTripDelayStateKey(TEST_TRIP_ID, secondStopId),
+    ]);
+    expect(outboxCreate).toHaveBeenCalledTimes(2);
   });
 
   it('returns delayed flag for realtime ETA updates', async () => {
@@ -152,10 +214,259 @@ describe('TripDelayService', () => {
       ...eta,
       delayed: true,
       delayMinutes: 31,
+      delayStatus: 'DELAYED',
+      statusTransition: 'DELAYED',
     });
   });
 
-  function createStop() {
+  it('keeps delayed true when the same window already exists in the durable Outbox', async () => {
+    let statePayload: string | null = null;
+    redisGet.mockImplementation(async (key: string) => {
+      if (key.includes('tracking:trip_delay_state:')) return statePayload;
+      return null;
+    });
+    redisSet.mockImplementation(async (key: string, value: string) => {
+      if (key.includes('tracking:trip_delay_state:')) statePayload = value;
+      return 'OK';
+    });
+    outboxCreate.mockRejectedValue({ code: 'P2002' });
+
+    const eta: EtaUpdateEvent = {
+      tripId: TEST_TRIP_ID,
+      stopId: TEST_STOP_ID,
+      etaMinutes: 45,
+      estimatedArrivalTime: DELAYED_DYNAMIC_ETA,
+      distanceMeters: 10_000,
+      updatedAt: '2026-06-04T09:15:00.000Z',
+    };
+
+    const first = await service.handleEtaUpdate(eta);
+    const second = await service.handleEtaUpdate(eta);
+
+    expect(first).toEqual(expect.objectContaining({ delayed: true, delayStatus: 'DELAYED' }));
+    expect(second).toEqual(expect.objectContaining({ delayed: true, delayStatus: 'DELAYED' }));
+    expect(second).not.toHaveProperty('statusTransition');
+    expect(outboxCreate).toHaveBeenCalledTimes(2);
+    expect(redisSet).not.toHaveBeenCalledWith(
+      expect.stringContaining('tracking:trip_delayed:'),
+      '1',
+      'EX',
+      expect.any(Number),
+    );
+  });
+
+  it('retries Outbox creation after a transient database failure without a Redis dedupe marker', async () => {
+    let statePayload: string | null = null;
+    redisGet.mockImplementation(async (key: string) => {
+      if (key.includes('tracking:trip_delay_state:')) return statePayload;
+      return null;
+    });
+    redisSet.mockImplementation(async (key: string, value: string) => {
+      if (key.includes('tracking:trip_delay_state:')) statePayload = value;
+      return 'OK';
+    });
+    outboxCreate
+      .mockRejectedValueOnce(new Error('tracking database unavailable'))
+      .mockResolvedValue({});
+
+    const eta: EtaUpdateEvent = {
+      tripId: TEST_TRIP_ID,
+      stopId: TEST_STOP_ID,
+      etaMinutes: 45,
+      estimatedArrivalTime: DELAYED_DYNAMIC_ETA,
+      distanceMeters: 10_000,
+      updatedAt: '2026-06-04T09:15:00.000Z',
+    };
+
+    await expect(service.handleEtaUpdate(eta)).resolves.toEqual(expect.objectContaining({
+      delayed: true,
+      delayStatus: 'DELAYED',
+      delayMinutes: 31,
+      statusTransition: 'DELAYED',
+    }));
+    expect(redisSet).not.toHaveBeenCalledWith(
+      expect.stringContaining('tracking:trip_delayed:'),
+      '1',
+      'EX',
+      expect.any(Number),
+    );
+
+    await expect(service.handleEtaUpdate(eta)).resolves.toEqual(expect.objectContaining({
+      delayed: true,
+      delayStatus: 'DELAYED',
+      delayMinutes: 31,
+    }));
+    expect(outboxCreate).toHaveBeenCalledTimes(2);
+    expect(redisSet).toHaveBeenCalledWith(
+      expect.stringContaining('tracking:trip_delayed:'),
+      '1',
+      'EX',
+      TRIP_DELAY_DEDUPE_TTL_SECONDS,
+    );
+  });
+
+  it('serializes concurrent evaluations so only one request creates the Outbox event and transition', async () => {
+    let statePayload: string | null = null;
+    let lockOwner: string | null = null;
+    redisGet.mockImplementation(async (key: string) => {
+      if (key.includes('tracking:trip_delay_state:')) return statePayload;
+      return null;
+    });
+    redisSet.mockImplementation(async (
+      key: string,
+      value: string,
+      _mode: string,
+      _ttl: number,
+      condition?: string,
+    ) => {
+      if (key === trackingTripDelayLockKey(TEST_TRIP_ID)) {
+        if (condition === 'NX' && lockOwner !== null) return null;
+        lockOwner = value;
+        return 'OK';
+      }
+      if (key.includes('tracking:trip_delay_state:')) statePayload = value;
+      return 'OK';
+    });
+    redisEval.mockImplementation(async (_script: unknown, _keys: unknown, key: unknown) => {
+      if (key === trackingTripDelayLockKey(TEST_TRIP_ID)) lockOwner = null;
+      return 1;
+    });
+    outboxCreate.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return {};
+    });
+
+    const eta: EtaUpdateEvent = {
+      tripId: TEST_TRIP_ID,
+      stopId: TEST_STOP_ID,
+      etaMinutes: 45,
+      estimatedArrivalTime: DELAYED_DYNAMIC_ETA,
+      distanceMeters: 10_000,
+      updatedAt: '2026-06-04T09:15:00.000Z',
+    };
+
+    const [first, second] = await Promise.all([
+      service.handleEtaUpdate(eta),
+      service.handleEtaUpdate(eta),
+    ]);
+    const updates = [first, second];
+
+    expect(outboxCreate).toHaveBeenCalledTimes(1);
+    expect(updates.filter((update) => update.statusTransition === 'DELAYED')).toHaveLength(1);
+    expect(updates.some((update) => update.delayStatus === 'UNKNOWN')).toBe(true);
+    expect(redisSet).toHaveBeenCalledWith(
+      trackingTripDelayLockKey(TEST_TRIP_ID),
+      expect.any(String),
+      'EX',
+      TRIP_DELAY_LOCK_TTL_SECONDS,
+      'NX',
+    );
+  });
+
+  it('emits DELAY_CLEARED once when a delayed stop returns on time', async () => {
+    let statePayload = JSON.stringify({
+      tripId: TEST_TRIP_ID,
+      stopId: TEST_STOP_ID,
+      delayStatus: 'DELAYED',
+      delayMinutes: 31,
+      evaluatedAt: '2026-06-04T09:00:00.000Z',
+    });
+    redisGet.mockImplementation(async (key: string) =>
+      key.includes('tracking:trip_delay_state:') ? statePayload : null);
+    redisSet.mockImplementation(async (key: string, value: string) => {
+      if (key.includes('tracking:trip_delay_state:')) statePayload = value;
+      return 'OK';
+    });
+
+    const eta: EtaUpdateEvent = {
+      tripId: TEST_TRIP_ID,
+      stopId: TEST_STOP_ID,
+      etaMinutes: 30,
+      estimatedArrivalTime: ON_TIME_DYNAMIC_ETA,
+      distanceMeters: 10_000,
+      updatedAt: '2026-06-04T09:15:00.000Z',
+    };
+
+    const cleared = await service.handleEtaUpdate(eta);
+    const repeated = await service.handleEtaUpdate(eta);
+
+    expect(cleared).toEqual(expect.objectContaining({
+      delayed: false,
+      delayStatus: 'ON_TIME',
+      delayMinutes: 30,
+      statusTransition: 'DELAY_CLEARED',
+    }));
+    expect(repeated).toEqual(expect.objectContaining({
+      delayed: false,
+      delayStatus: 'ON_TIME',
+    }));
+    expect(repeated).not.toHaveProperty('statusTransition');
+  });
+
+  it('does not emit DELAY_CLEARED when an on-time evaluation belongs to another stop', async () => {
+    const previousStopId = TEST_STOP_ID;
+    const currentStopId = '33333333-3333-4333-8333-333333333333';
+    let statePayload = JSON.stringify({
+      tripId: TEST_TRIP_ID,
+      stopId: previousStopId,
+      delayStatus: 'DELAYED',
+      delayMinutes: 31,
+      evaluatedAt: '2026-06-04T09:00:00.000Z',
+    });
+    redisGet.mockImplementation(async (key: string) =>
+      key.includes('tracking:trip_delay_state:') ? statePayload : null);
+    redisSet.mockImplementation(async (key: string, value: string) => {
+      if (key.includes('tracking:trip_delay_state:')) statePayload = value;
+      return 'OK';
+    });
+    tripDataProvider.getRouteStops.mockResolvedValue([createStop({
+      stopId: currentStopId,
+      estimatedArrivalTime: ON_TIME_DYNAMIC_ETA,
+    })]);
+
+    const update = await service.handleEtaUpdate({
+      tripId: TEST_TRIP_ID,
+      stopId: currentStopId,
+      etaMinutes: 30,
+      estimatedArrivalTime: ON_TIME_DYNAMIC_ETA,
+      distanceMeters: 10_000,
+      updatedAt: '2026-06-04T09:15:00.000Z',
+    });
+
+    expect(update).toEqual(expect.objectContaining({
+      delayed: false,
+      delayStatus: 'ON_TIME',
+      delayMinutes: 0,
+    }));
+    expect(update).not.toHaveProperty('statusTransition');
+  });
+
+  it('returns UNKNOWN without a false clear when Trip evaluation fails', async () => {
+    redisGet.mockResolvedValue(JSON.stringify({
+      tripId: TEST_TRIP_ID,
+      stopId: TEST_STOP_ID,
+      delayStatus: 'DELAYED',
+      delayMinutes: 31,
+      evaluatedAt: '2026-06-04T09:00:00.000Z',
+    }));
+    tripDataProvider.getRouteStops.mockRejectedValue(new Error('trip provider unavailable'));
+
+    await expect(service.handleEtaUpdate({
+      tripId: TEST_TRIP_ID,
+      stopId: TEST_STOP_ID,
+      etaMinutes: 30,
+      estimatedArrivalTime: ON_TIME_DYNAMIC_ETA,
+      distanceMeters: 10_000,
+      updatedAt: '2026-06-04T09:15:00.000Z',
+    })).resolves.toEqual(expect.objectContaining({
+      delayed: true,
+      delayStatus: 'UNKNOWN',
+      delayMinutes: 31,
+    }));
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  function createStop(overrides: Partial<TripStopSnapshot> = {}): TripStopSnapshot {
     return {
       stopId: TEST_STOP_ID,
       latitude: 10.762622,
@@ -163,6 +474,7 @@ describe('TripDelayService', () => {
       sequence: 1,
       alertRecipientUserIds: [ALERT_RECIPIENT_USER_ID],
       estimatedArrivalTime: STATIC_ETA,
+      ...overrides,
     };
   }
 

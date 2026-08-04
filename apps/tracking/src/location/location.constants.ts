@@ -31,3 +31,7 @@ export function trackingEtaKey(tripId: string, stopId: string): string {
 export function trackingTripRoom(tripId: string): string {
   return `trip:${tripId}`;
 }
+
+export function trackingTripCrewRoom(tripId: string): string {
+  return `trip:crew:${tripId}`;
+}

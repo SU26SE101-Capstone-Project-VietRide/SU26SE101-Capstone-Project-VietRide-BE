@@ -1,5 +1,5 @@
 import type { Namespace } from 'socket.io';
-import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
+import { TripShareRealtimePublisher, type TripShareEtaSource } from './trip-share-realtime.publisher';
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const GRANT_ID = '22222222-2222-4222-8222-222222222222';
@@ -33,11 +33,11 @@ describe('TripShareRealtimePublisher', () => {
       recordedAt: '2026-08-03T10:00:00.000Z',
       forbidden: 'never-emitted',
     };
-    const etaSource = {
+    const etaSource: TripShareEtaSource = {
       tripId: TRIP_ID,
-      stopId: 'private-stop',
       estimatedArrivalTime: '2026-08-03T11:00:00.000Z',
       etaMinutes: 60,
+      delayStatus: 'DELAYED',
       delayMinutes: 35,
       updatedAt: '2026-08-03T10:00:01.000Z',
     };
@@ -68,6 +68,7 @@ describe('TripShareRealtimePublisher', () => {
         estimatedArrivalAt: '2026-08-03T11:00:00.000Z',
         remainingSeconds: 3_600,
         delayMinutes: 35,
+        delayStatus: 'DELAYED',
         updatedAt: '2026-08-03T10:00:01.000Z',
       },
     });

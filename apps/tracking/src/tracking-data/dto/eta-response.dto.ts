@@ -1,13 +1,19 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
-export const EtaResponseSchema = z.object({
+export const EtaBaseResponseSchema = z.object({
   tripId: z.string().uuid(),
   stopId: z.string().uuid(),
   etaMinutes: z.number().int().positive(),
   estimatedArrivalTime: z.string().datetime(),
   distanceMeters: z.number().int().nonnegative(),
   updatedAt: z.string().datetime(),
+});
+
+export const EtaResponseSchema = EtaBaseResponseSchema.extend({
+  delayed: z.boolean().nullable().default(null),
+  delayStatus: z.enum(['DELAYED', 'ON_TIME', 'UNKNOWN']),
+  delayMinutes: z.number().int().nonnegative().nullable(),
 });
 
 export type EtaResponseDto = z.infer<typeof EtaResponseSchema>;
@@ -30,4 +36,13 @@ export class EtaResponseDataDto {
 
   @ApiProperty({ example: '2026-06-19T12:01:00.000Z' })
   updatedAt!: string;
+
+  @ApiProperty({ nullable: true, example: true })
+  delayed!: boolean | null;
+
+  @ApiProperty({ enum: ['DELAYED', 'ON_TIME', 'UNKNOWN'], example: 'DELAYED' })
+  delayStatus!: 'DELAYED' | 'ON_TIME' | 'UNKNOWN';
+
+  @ApiProperty({ nullable: true, example: 31 })
+  delayMinutes!: number | null;
 }

@@ -4228,7 +4228,7 @@ Server broadcasts to room `trip:{tripId}`:
 - `eta:update`
 - `trip:statusChanged`
 
-Tracking Phase 10 invariants (the public payload above is unchanged):
+Tracking Phase 10 invariants (legacy fields remain compatible; delay fields below are additive):
 
 - GPS is projected onto cached Trip route geometry only when the nearest segment is at most 50 m
   from the raw coordinate. Published coordinates are used by `tracking:latest:{tripId}`, REST and
@@ -4240,9 +4240,77 @@ Tracking Phase 10 invariants (the public payload above is unchanged):
   primary only when `GOOGLE_ROUTES_ENABLED=true`; Local Route ETA is the fallback. Provider calls
   are throttled to 60 seconds, require more than 500 m movement or an ETA under 15 minutes, and
   use a per-trip-stop Redis lock, a 60-second ETA cache and a three-failure/300-second cooldown.
+  A newly selected stop with no cache is calculated immediately even when the previous stop was
+  calculated less than 60 seconds ago. `STOPS_ONLY` geometry is refreshed after 30 seconds;
+  Route polyline geometry uses the configured longer cache TTL.
 - Default E2E uses a fake Google Routes HTTP server. Real Google E2E is opt-in with
   `RUN_REAL_GOOGLE_E2E=true`; no `etaSource`, snap metadata or traffic metadata is added to the
   public response shape.
+
+`eta:update` keeps the legacy boolean `delayed` and adds the following fields:
+
+```json
+{
+  "tripId": "uuid",
+  "stopId": "uuid",
+  "etaMinutes": 12,
+  "estimatedArrivalTime": "2026-08-05T10:12:00.000Z",
+  "distanceMeters": 8500,
+  "updatedAt": "2026-08-05T10:00:01.000Z",
+  "delayed": false,
+  "delayStatus": "ON_TIME",
+  "delayMinutes": 0
+}
+```
+
+`delayStatus` is `DELAYED`, `ON_TIME` or `UNKNOWN`. When evaluation fails, the server returns
+`UNKNOWN`, preserves the last known boolean/delay minutes when available, and does not emit a
+recovery event. `trip:statusChanged` is emitted only on a transition and has this shape:
+
+```json
+{
+  "tripId": "uuid",
+  "stopId": "uuid",
+  "status": "DELAYED",
+  "delayMinutes": 31,
+  "updatedAt": "2026-08-05T10:00:01.000Z"
+}
+```
+
+`status` is `DELAYED` when entering delay or when the current delayed stop changes, and
+`DELAY_CLEARED` when a previously delayed stop is evaluated on time. Repeated ETA updates do not
+repeat the transition. The same payload is used by `shared:eta:update` and
+`shared:trip:statusChanged` after public-field filtering; `statusTransition` is internal and is
+never sent over Socket.IO.
+
+### GET `/v1/tracking/trips/{tripId}/eta`
+
+Auth: Identity User Access Token and the same Tracking authorization used by the trip socket.
+Query: `stopId=<uuid>`.
+
+Response `200` uses the ADR 0004 envelope with `data.eta`. A cache hit preserves the existing ETA
+fields and adds:
+
+```json
+{
+  "eta": {
+    "tripId": "uuid",
+    "stopId": "uuid",
+    "etaMinutes": 12,
+    "estimatedArrivalTime": "2026-08-05T10:12:00.000Z",
+    "distanceMeters": 8500,
+    "updatedAt": "2026-08-05T10:00:01.000Z",
+    "delayed": null,
+    "delayStatus": "UNKNOWN",
+    "delayMinutes": null
+  }
+}
+```
+
+`delayed` is nullable on REST because the current delay cannot be proven. The delay state is used
+only when its `stopId` matches the requested ETA stop; a state belonging to another stop returns
+`UNKNOWN` and does not clear or apply the warning. A reconnecting client should call this endpoint
+to restore the latest known state instead of waiting for another socket event.
 
 ### Shuttle tracking
 
@@ -4347,6 +4415,8 @@ Response `200` dùng ADR 0004 envelope với `data`:
 
 - `geometry` chỉ chứa polyline thật của Route. Khi Route chưa có polyline, trả `geometry: null`
   nhưng vẫn trả các marker station/stop hợp lệ; client không nối các marker thành tuyến giả.
+  Tracking chỉ cache fallback `STOPS_ONLY` trong 30 giây để polyline được Operator bổ sung qua
+  `PUT /v1/operator/routes/{id}/geometry` xuất hiện trong Tracking mà không cần API mới.
 - `originStation` và `destinationStation` nullable khi station chưa có tọa độ hợp lệ.
 - Geometry loại tọa độ ngoài range/trùng liên tiếp, giản lược deterministic tối đa 1.000 điểm và
   luôn giữ điểm đầu/cuối. Public payload không chứa `alertRecipientUserIds`.

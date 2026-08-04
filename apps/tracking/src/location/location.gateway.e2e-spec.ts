@@ -88,6 +88,8 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     tripDelayHandleEtaUpdate = jest.fn(async (event: EtaUpdateEvent) => ({
       ...event,
       delayed: false,
+      delayStatus: 'UNKNOWN' as const,
+      delayMinutes: null,
     }));
     routePeek = jest.fn(() => null);
     shuttleGetContext = jest.fn();
@@ -185,6 +187,8 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     tripDelayHandleEtaUpdate.mockImplementation(async (event: EtaUpdateEvent) => ({
       ...event,
       delayed: false,
+      delayStatus: 'UNKNOWN' as const,
+      delayMinutes: null,
     }));
     routePeek.mockReset();
     routePeek.mockReturnValue(null);
@@ -512,9 +516,24 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const receivedEta = await etaPromise;
 
     expect(ack).toEqual({ success: true });
-    expect(receivedEta).toEqual({ ...etaUpdate, delayed: false });
-    expect(approachingHandleEtaUpdate).toHaveBeenCalledWith({ ...etaUpdate, delayed: false });
-    expect(sharedPublishEta).toHaveBeenCalledWith({ ...etaUpdate, delayed: false });
+    expect(receivedEta).toEqual({
+      ...etaUpdate,
+      delayed: false,
+      delayStatus: 'UNKNOWN',
+      delayMinutes: null,
+    });
+    expect(approachingHandleEtaUpdate).toHaveBeenCalledWith({
+      ...etaUpdate,
+      delayed: false,
+      delayStatus: 'UNKNOWN',
+      delayMinutes: null,
+    });
+    expect(sharedPublishEta).toHaveBeenCalledWith({
+      ...etaUpdate,
+      delayed: false,
+      delayStatus: 'UNKNOWN',
+      delayMinutes: null,
+    });
     expect(sharedPublishStatus).not.toHaveBeenCalled();
     socket.disconnect();
   });
@@ -533,7 +552,9 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const delayedEtaUpdate: TripDelayEtaUpdate = {
       ...etaUpdate,
       delayed: true,
+      delayStatus: 'DELAYED',
       delayMinutes: 35,
+      statusTransition: 'DELAYED',
     };
     etaHandleGpsUpdate.mockResolvedValue(etaUpdate);
     tripDelayHandleEtaUpdate.mockResolvedValue(delayedEtaUpdate);
@@ -548,7 +569,17 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const receivedStatus = await statusPromise;
 
     expect(ack).toEqual({ success: true });
-    expect(receivedEta).toEqual(delayedEtaUpdate);
+    expect(receivedEta).toEqual({
+      tripId: delayedEtaUpdate.tripId,
+      stopId: delayedEtaUpdate.stopId,
+      etaMinutes: delayedEtaUpdate.etaMinutes,
+      estimatedArrivalTime: delayedEtaUpdate.estimatedArrivalTime,
+      distanceMeters: delayedEtaUpdate.distanceMeters,
+      updatedAt: delayedEtaUpdate.updatedAt,
+      delayed: delayedEtaUpdate.delayed,
+      delayStatus: delayedEtaUpdate.delayStatus,
+      delayMinutes: delayedEtaUpdate.delayMinutes,
+    });
     expect(receivedStatus).toEqual({
       tripId: TEST_TRIP_ID,
       stopId: etaUpdate.stopId,
@@ -557,11 +588,79 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       updatedAt: etaUpdate.updatedAt,
     });
     expect(approachingHandleEtaUpdate).toHaveBeenCalledWith(delayedEtaUpdate);
-    expect(sharedPublishEta).toHaveBeenCalledWith(delayedEtaUpdate);
+    expect(sharedPublishEta).toHaveBeenCalledWith({
+      tripId: delayedEtaUpdate.tripId,
+      stopId: delayedEtaUpdate.stopId,
+      etaMinutes: delayedEtaUpdate.etaMinutes,
+      estimatedArrivalTime: delayedEtaUpdate.estimatedArrivalTime,
+      distanceMeters: delayedEtaUpdate.distanceMeters,
+      updatedAt: delayedEtaUpdate.updatedAt,
+      delayed: delayedEtaUpdate.delayed,
+      delayStatus: delayedEtaUpdate.delayStatus,
+      delayMinutes: delayedEtaUpdate.delayMinutes,
+    });
     expect(sharedPublishStatus).toHaveBeenCalledWith({
       tripId: TEST_TRIP_ID,
       status: 'DELAYED',
       delayMinutes: 35,
+      updatedAt: etaUpdate.updatedAt,
+    });
+    socket.disconnect();
+  });
+
+  it('broadcasts DELAY_CLEARED once the delayed state returns on time', async () => {
+    const token = await signIdentityToken('DRIVER', TEST_OPERATOR_ID);
+    const socket = await connectSocket(token);
+    const etaUpdate: EtaUpdateEvent = {
+      tripId: TEST_TRIP_ID,
+      stopId: '44444444-4444-4444-8444-444444444444',
+      etaMinutes: 30,
+      estimatedArrivalTime: '2026-06-03T10:30:00.000Z',
+      distanceMeters: 8_000,
+      updatedAt: '2026-06-03T10:00:02.000Z',
+    };
+    const clearedEtaUpdate: TripDelayEtaUpdate = {
+      ...etaUpdate,
+      delayed: false,
+      delayStatus: 'ON_TIME',
+      delayMinutes: 30,
+      statusTransition: 'DELAY_CLEARED',
+    };
+    etaHandleGpsUpdate.mockResolvedValue(etaUpdate);
+    tripDelayHandleEtaUpdate.mockResolvedValue(clearedEtaUpdate);
+
+    await emitWithAck<JoinTripTrackingAck>(socket, 'joinTripTracking', {
+      tripId: TEST_TRIP_ID,
+    });
+    const etaPromise = waitForEvent<TripDelayEtaUpdate>(socket, 'eta:update');
+    const statusPromise = waitForEvent<Record<string, unknown>>(socket, 'trip:statusChanged');
+    await expect(emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload()))
+      .resolves.toEqual({ success: true });
+    const receivedEta = await etaPromise;
+    const receivedStatus = await statusPromise;
+
+    expect(receivedEta).toEqual({
+      tripId: clearedEtaUpdate.tripId,
+      stopId: clearedEtaUpdate.stopId,
+      etaMinutes: clearedEtaUpdate.etaMinutes,
+      estimatedArrivalTime: clearedEtaUpdate.estimatedArrivalTime,
+      distanceMeters: clearedEtaUpdate.distanceMeters,
+      updatedAt: clearedEtaUpdate.updatedAt,
+      delayed: clearedEtaUpdate.delayed,
+      delayStatus: clearedEtaUpdate.delayStatus,
+      delayMinutes: clearedEtaUpdate.delayMinutes,
+    });
+    expect(receivedStatus).toEqual({
+      tripId: TEST_TRIP_ID,
+      stopId: etaUpdate.stopId,
+      status: 'DELAY_CLEARED',
+      delayMinutes: 30,
+      updatedAt: etaUpdate.updatedAt,
+    });
+    expect(sharedPublishStatus).toHaveBeenCalledWith({
+      tripId: TEST_TRIP_ID,
+      status: 'DELAY_CLEARED',
+      delayMinutes: 30,
       updatedAt: etaUpdate.updatedAt,
     });
     socket.disconnect();

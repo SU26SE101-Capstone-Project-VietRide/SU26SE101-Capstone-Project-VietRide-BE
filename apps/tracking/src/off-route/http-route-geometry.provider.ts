@@ -13,6 +13,7 @@ import type {
   RouteGeometryPoint,
   RouteGeometrySnapshot,
 } from './route-geometry.provider';
+import { ETA_STOPS_ONLY_CACHE_TTL_SECONDS } from '../eta/eta.constants';
 
 const routeGeometryPointSchema = z.object({
   latitude: z.number(),
@@ -169,7 +170,11 @@ export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider 
 
       this.cache.set(tripId, {
         result: fetchResult,
-        expiresAt: Date.now() + this.env.TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS * 1000,
+        expiresAt: Date.now() + (
+          result.geometrySource === 'STOPS_ONLY'
+            ? ETA_STOPS_ONLY_CACHE_TTL_SECONDS
+            : this.env.TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS
+        ) * 1000,
       });
 
       return fetchResult;

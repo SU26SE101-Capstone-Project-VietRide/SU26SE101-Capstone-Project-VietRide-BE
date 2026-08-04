@@ -13,6 +13,7 @@ import { ApproachingAlertService } from '../approaching-alert/approaching-alert.
 import type { TrackingUser } from '../auth/tracking-user.types';
 import type { UserJwtVerifier } from '../auth/user-jwt.verifier';
 import type { TrackingAuthorizationAdapter } from '../authorization/tracking-authorization.adapter';
+import type { BookingCreatedEvent } from '@vietride/contracts';
 import { EtaService } from '../eta/eta.service';
 import { OffRouteService } from '../off-route/off-route.service';
 import { TripDelayService, type TripDelayEtaUpdate } from '../trip-delay/trip-delay.service';
@@ -20,7 +21,7 @@ import { shuttleRoom } from '../shuttle/shuttle.constants';
 import { JoinShuttleTrackingSchema, ShuttleGpsUpdateSchema } from '../shuttle/shuttle.dto';
 import { ShuttleService } from '../shuttle/shuttle.service';
 import { ShuttleEtaService } from '../shuttle/shuttle-eta.service';
-import { TRACKING_SOCKET_PATH, trackingTripRoom } from './location.constants';
+import { TRACKING_SOCKET_PATH, trackingTripCrewRoom, trackingTripRoom } from './location.constants';
 import { JoinTripTrackingSchema } from './dto/join-trip-tracking.dto';
 import { UpdateLocationSchema } from './dto/update-location.dto';
 import { LocationService, type GpsUpdateEvent } from './location.service';
@@ -174,12 +175,19 @@ export class LocationGateway implements OnGatewayInit {
 
     const room = trackingTripRoom(parsed.data.tripId);
     await socket.join(room);
+    if (authorization.scope === 'DRIVER' || authorization.scope === 'ASSISTANT') {
+      await socket.join(trackingTripCrewRoom(parsed.data.tripId));
+    }
     return {
       success: true,
       tripId: parsed.data.tripId,
       room,
       scope: authorization.scope,
     };
+  }
+
+  emitBookingCreated(event: BookingCreatedEvent): void {
+    this.server.to(trackingTripCrewRoom(event.tripId)).emit('booking:created', event);
   }
 
   @SubscribeMessage('gps:update')
@@ -244,17 +252,18 @@ export class LocationGateway implements OnGatewayInit {
     const etaUpdate = await this.etaService.handleGpsUpdate(event);
     if (etaUpdate) {
       const tripDelayEtaUpdate = await this.tripDelayService.handleEtaUpdate(etaUpdate);
-      this.server.to(trackingTripRoom(event.tripId)).emit('eta:update', tripDelayEtaUpdate);
-      this.publishSharedEta(tripDelayEtaUpdate);
-      if (tripDelayEtaUpdate.delayed) {
+      const { statusTransition, ...etaPayload } = tripDelayEtaUpdate;
+      this.server.to(trackingTripRoom(event.tripId)).emit('eta:update', etaPayload);
+      this.publishSharedEta(etaPayload);
+      if (statusTransition) {
         this.server.to(trackingTripRoom(event.tripId)).emit('trip:statusChanged', {
           tripId: tripDelayEtaUpdate.tripId,
           stopId: tripDelayEtaUpdate.stopId,
-          status: 'DELAYED',
+          status: statusTransition,
           delayMinutes: tripDelayEtaUpdate.delayMinutes,
           updatedAt: tripDelayEtaUpdate.updatedAt,
         });
-        this.publishSharedStatus(tripDelayEtaUpdate);
+        this.publishSharedStatus(etaPayload, statusTransition);
       }
       await this.approachingAlertService.handleEtaUpdate(tripDelayEtaUpdate);
     }
@@ -276,12 +285,15 @@ export class LocationGateway implements OnGatewayInit {
     }
   }
 
-  private publishSharedStatus(event: TripDelayEtaUpdate): void {
+  private publishSharedStatus(
+    event: Omit<TripDelayEtaUpdate, 'statusTransition'>,
+    status: 'DELAYED' | 'DELAY_CLEARED',
+  ): void {
     try {
       this.tripShareRealtime.publishStatus({
         tripId: event.tripId,
-        status: 'DELAYED',
-        ...(event.delayMinutes !== undefined ? { delayMinutes: event.delayMinutes } : {}),
+        status,
+        delayMinutes: event.delayMinutes,
         updatedAt: event.updatedAt,
       });
     } catch (error) {
