@@ -93,7 +93,7 @@ public sealed class OperatorAnalyticsRepositoryTests
 
     private static string CreateConnectionString(string databaseName)
     {
-        const string fallback = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+        const string fallback = "Host=127.0.0.1;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
         var template = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(template))
         {

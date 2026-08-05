@@ -45,6 +45,12 @@ CREATE TYPE incident_category AS ENUM (
     'TRAFFIC_JAM', 'VEHICLE_BREAKDOWN', 'ACCIDENT', 'WEATHER', 'OTHER'
 );
 
+CREATE TYPE route_change_proposal_type AS ENUM ('EXISTING', 'CUSTOM');
+
+CREATE TYPE route_change_proposal_status AS ENUM (
+    'PENDING', 'APPROVED', 'REJECTED', 'SUPERSEDED', 'EXPIRED'
+);
+
 CREATE TYPE outbox_event_status AS ENUM (
     'PENDING', 'PUBLISHING', 'PUBLISHED', 'FAILED'
 );
@@ -305,7 +311,7 @@ COMMENT ON TABLE route_stop_fare_templates IS
     'Exception only — entries exist solely for stops where Operator wants a fare different from Route.baseFare.';
 
 -- -----------------------------------------------------------------------------
--- alternative_routes (max 2 per Route — enforced app-layer)
+-- alternative_routes
 -- -----------------------------------------------------------------------------
 CREATE TABLE alternative_routes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -836,6 +842,81 @@ CREATE INDEX idx_incidents_reported_by ON incidents (reported_by_user_id);
 CREATE INDEX idx_incidents_reported_at ON incidents (reported_at DESC);
 
 -- -----------------------------------------------------------------------------
+-- route_change_proposals (immutable Driver/Assistant route snapshots)
+-- -----------------------------------------------------------------------------
+CREATE TABLE route_change_proposals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE RESTRICT,
+    operator_id UUID NOT NULL,
+    proposed_by_user_id UUID NOT NULL, -- logical FK -> identity.users.id
+    type route_change_proposal_type NOT NULL,
+    status route_change_proposal_status NOT NULL DEFAULT 'PENDING',
+    source_alternative_route_id UUID NULL REFERENCES alternative_routes (id) ON DELETE RESTRICT,
+    source_updated_at TIMESTAMPTZ NULL,
+    incident_id UUID NULL REFERENCES incidents (id) ON DELETE RESTRICT,
+    reason VARCHAR(500) NOT NULL,
+    snapshot_name VARCHAR(255) NOT NULL,
+    snapshot_description TEXT NULL,
+    snapshot_destination_station_id UUID NOT NULL,
+    snapshot_total_distance_km DECIMAL(8,2) NULL,
+    snapshot_estimated_duration_minutes INT NULL,
+    snapshot_path_polyline TEXT NULL,
+    decided_by_user_id UUID NULL, -- logical FK -> identity.users.id
+    decided_at TIMESTAMPTZ NULL,
+    rejection_reason VARCHAR(500) NULL,
+    superseded_by_proposal_id UUID NULL REFERENCES route_change_proposals (id) ON DELETE RESTRICT,
+    approved_alternative_route_id UUID NULL REFERENCES alternative_routes (id) ON DELETE RESTRICT,
+    resolution_code VARCHAR(64) NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_route_change_proposals_reason
+        CHECK (char_length(btrim(reason)) BETWEEN 1 AND 500),
+    CONSTRAINT chk_route_change_proposals_rejection_reason
+        CHECK (rejection_reason IS NULL OR char_length(rejection_reason) <= 500),
+    CONSTRAINT chk_route_change_proposals_custom_geometry
+        CHECK (type <> 'CUSTOM' OR (snapshot_path_polyline IS NOT NULL AND char_length(btrim(snapshot_path_polyline)) > 0)),
+    CONSTRAINT chk_route_change_proposals_source CHECK (
+        (type = 'EXISTING' AND source_alternative_route_id IS NOT NULL AND source_updated_at IS NOT NULL)
+        OR (type = 'CUSTOM' AND source_alternative_route_id IS NULL AND source_updated_at IS NULL)
+    )
+);
+
+CREATE INDEX idx_route_change_proposals_trip_status
+    ON route_change_proposals (trip_id, status);
+CREATE INDEX idx_route_change_proposals_operator_status_created
+    ON route_change_proposals (operator_id, status, created_at DESC);
+CREATE INDEX idx_route_change_proposals_proposer_created
+    ON route_change_proposals (proposed_by_user_id, created_at DESC);
+CREATE INDEX idx_route_change_proposals_source
+    ON route_change_proposals (source_alternative_route_id)
+    WHERE source_alternative_route_id IS NOT NULL AND status = 'PENDING';
+CREATE INDEX idx_route_change_proposals_superseded_by
+    ON route_change_proposals (superseded_by_proposal_id)
+    WHERE superseded_by_proposal_id IS NOT NULL;
+CREATE INDEX idx_route_change_proposals_approved_route
+    ON route_change_proposals (approved_alternative_route_id)
+    WHERE approved_alternative_route_id IS NOT NULL;
+
+CREATE TABLE route_change_proposal_stops (
+    proposal_id UUID NOT NULL REFERENCES route_change_proposals (id) ON DELETE CASCADE,
+    stop_id UUID NOT NULL REFERENCES stops (id) ON DELETE RESTRICT,
+    order_index INT NOT NULL,
+    estimated_duration_from_origin_minutes INT NOT NULL,
+    distance_from_origin_km DECIMAL(8,2) NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (proposal_id, stop_id),
+    CONSTRAINT chk_route_change_proposal_stops_order_positive CHECK (order_index > 0),
+    CONSTRAINT chk_route_change_proposal_stops_duration_non_negative
+        CHECK (estimated_duration_from_origin_minutes >= 0),
+    CONSTRAINT chk_route_change_proposal_stops_distance_non_negative
+        CHECK (distance_from_origin_km IS NULL OR distance_from_origin_km >= 0)
+);
+
+CREATE UNIQUE INDEX uq_route_change_proposal_stops_order
+    ON route_change_proposal_stops (proposal_id, order_index);
+
+-- -----------------------------------------------------------------------------
 -- outbox_events
 -- -----------------------------------------------------------------------------
 -- -----------------------------------------------------------------------------
@@ -895,6 +976,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION trg_set_route_change_proposal_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TRIGGER trg_stations_updated_at BEFORE UPDATE ON stations
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_operator_stations_updated_at BEFORE UPDATE ON operator_stations
@@ -933,6 +1022,10 @@ CREATE TRIGGER trg_shuttle_passengers_updated_at BEFORE UPDATE ON shuttle_passen
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_incidents_updated_at BEFORE UPDATE ON incidents
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_route_change_proposals_updated_at BEFORE UPDATE ON route_change_proposals
+    FOR EACH ROW EXECUTE FUNCTION trg_set_route_change_proposal_updated_at();
+CREATE TRIGGER trg_route_change_proposal_stops_updated_at BEFORE UPDATE ON route_change_proposal_stops
+    FOR EACH ROW EXECUTE FUNCTION trg_set_route_change_proposal_updated_at();
 
 -- =============================================================================
 -- Hangfire schema lives in this DB under `hangfire.*` — auto-created at startup.

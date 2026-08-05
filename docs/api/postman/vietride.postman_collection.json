@@ -10,6 +10,42 @@
       "value": "http://localhost:3000"
     },
     {
+      "key": "routeProposalTripId",
+      "value": "<assigned-trip-id>"
+    },
+    {
+      "key": "routeProposalDestinationStationId",
+      "value": "<destination-station-id>"
+    },
+    {
+      "key": "routeProposalStopId",
+      "value": "<stop-id>"
+    },
+    {
+      "key": "routeProposalPathPolyline",
+      "value": "<google-encoded-polyline-precision-5>"
+    },
+    {
+      "key": "routeProposalId",
+      "value": "<proposal-id>"
+    },
+    {
+      "key": "routeProposalRejectId",
+      "value": "<separate-pending-proposal-id>"
+    },
+    {
+      "key": "routeProposalCreateKey",
+      "value": "00000000-0000-4000-8000-000000000201"
+    },
+    {
+      "key": "routeProposalApproveKey",
+      "value": "00000000-0000-4000-8000-000000000202"
+    },
+    {
+      "key": "routeProposalRejectKey",
+      "value": "00000000-0000-4000-8000-000000000203"
+    },
+    {
       "key": "day41ReportFrom",
       "value": "2026-07-01"
     },
@@ -3287,18 +3323,18 @@
           }
         },
         {
-          "name": "15. Third active AlternativeRoute is rejected",
+          "name": "15. Create third active AlternativeRoute",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "const body = pm.response.json();",
-                  "pm.test('Status code is 422', function () { pm.response.to.have.status(422); });",
-                  "pm.test('AlternativeRoute limit envelope', function () {",
-                  "  pm.expect(body.success).to.equal(false);",
-                  "  pm.expect(body.statusCode).to.equal(422);",
-                  "  pm.expect(body.error).to.have.property('code', 'ALTERNATIVE_ROUTE_LIMIT_EXCEEDED');",
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Third active AlternativeRoute is allowed', function () {",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.statusCode).to.equal(201);",
+                  "  pm.expect(body.data.id || body.data.alternativeRouteId).to.be.a('string').and.is.not.empty;",
                   "  pm.expect(body.meta).to.have.property('traceId');",
                   "});"
                 ],
@@ -3325,9 +3361,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Day 8 Alternative Route 3 Blocked\",\n  \"description\": \"Third active alternative should fail.\",\n  \"destinationStationId\": \"{{day8AlternativeDestinationStationId}}\",\n  \"totalDistanceKm\": 323.0,\n  \"estimatedDurationMinutes\": 457,\n  \"stops\": []\n}"
+              "raw": "{\n  \"name\": \"Day 8 Alternative Route 3\",\n  \"description\": \"Third active alternative is allowed.\",\n  \"destinationStationId\": \"{{day8AlternativeDestinationStationId}}\",\n  \"totalDistanceKm\": 323.0,\n  \"estimatedDurationMinutes\": 457,\n  \"stops\": []\n}"
             },
-            "description": "Each main Route can have at most two active AlternativeRoutes."
+            "description": "There is no global per-Route cap on active AlternativeRoutes."
           }
         },
         {
@@ -3364,11 +3400,11 @@
               "host": ["{{baseUrl}}"],
               "path": ["v1", "operator", "alternative-routes", "{{day8AlternativeRouteId1}}"]
             },
-            "description": "DELETE sets isActive=false and frees one active AlternativeRoute slot."
+            "description": "DELETE sets isActive=false without hard-deleting the AlternativeRoute."
           }
         },
         {
-          "name": "17. Create AlternativeRoute after deactivation succeeds",
+          "name": "17. Create another AlternativeRoute after deactivation",
           "event": [
             {
               "listen": "test",
@@ -3376,7 +3412,7 @@
                 "exec": [
                   "const body = pm.response.json();",
                   "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
-                  "pm.test('AlternativeRoute slot freed', function () {",
+                  "pm.test('AlternativeRoute create remains independent of active count', function () {",
                   "  pm.expect(body.success).to.equal(true);",
                   "  pm.expect(body.statusCode).to.equal(201);",
                   "  pm.expect(body.data.id || body.data.alternativeRouteId).to.be.a('string').and.is.not.empty;",
@@ -3406,9 +3442,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Day 8 Alternative Route 3 After Delete\",\n  \"description\": \"Third alternative succeeds after one deactivate.\",\n  \"destinationStationId\": \"{{day8AlternativeDestinationStationId}}\",\n  \"totalDistanceKm\": 323.0,\n  \"estimatedDurationMinutes\": 457,\n  \"stops\": []\n}"
+              "raw": "{\n  \"name\": \"Day 8 Alternative Route After Delete\",\n  \"description\": \"A later alternative succeeds independently of active count.\",\n  \"destinationStationId\": \"{{day8AlternativeDestinationStationId}}\",\n  \"totalDistanceKm\": 324.0,\n  \"estimatedDurationMinutes\": 458,\n  \"stops\": []\n}"
             },
-            "description": "A subsequent create succeeds after DELETE deactivates an existing AlternativeRoute."
+            "description": "A subsequent create succeeds; deactivation is not a quota-slot operation."
           }
         },
         {
@@ -9830,6 +9866,195 @@
               "host": ["{{baseUrl}}"],
               "path": ["v1", "operator", "trips", "{{day33RouteTripId}}", "change-route"]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Route-change proposals - Gateway",
+      "description": "Representative Gateway-only requests. Supply runtime assigned-driver/operator-admin JWTs and isolated Trip/Route/Station/Stop fixtures; routeProposalRejectId must be a separate pending proposal so approve and reject can both succeed in one collection run.",
+      "item": [
+        {
+          "name": "1. Driver lists active route candidates",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.test('Assigned crew receives paged active candidates', () => {",
+                "  pm.response.to.have.status(200);",
+                "  pm.expect(body.success).to.equal(true);",
+                "  pm.expect(body.data.items).to.be.an('array');",
+                "  pm.expect(body.data.page).to.equal(1);",
+                "});"
+              ]
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/driver/trips/{{routeProposalTripId}}/alternative-routes?page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "2. Driver creates a CUSTOM snapshot proposal",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.test('Custom proposal freezes a pending snapshot', () => {",
+                "  pm.response.to.have.status(201);",
+                "  pm.expect(body.success).to.equal(true);",
+                "  pm.expect(body.data.type).to.equal('CUSTOM');",
+                "  pm.expect(body.data.status).to.equal('PENDING');",
+                "  pm.expect(body.data.sourceAlternativeRouteId).to.equal(null);",
+                "  pm.expect(body.data.snapshot.destinationStationId).to.equal(pm.variables.get('routeProposalDestinationStationId'));",
+                "});",
+                "pm.collectionVariables.set('routeProposalId', body.data.id);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{driverAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{routeProposalCreateKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"CUSTOM\",\n  \"route\": {\n    \"name\": \"Crew-proposed bypass\",\n    \"description\": \"Avoid the blocked pass.\",\n    \"destinationStationId\": \"{{routeProposalDestinationStationId}}\",\n    \"totalDistanceKm\": 318.5,\n    \"estimatedDurationMinutes\": 440,\n    \"pathPolyline\": \"{{routeProposalPathPolyline}}\",\n    \"stops\": [{\n      \"stopId\": \"{{routeProposalStopId}}\",\n      \"orderIndex\": 1,\n      \"estimatedDurationFromOriginMinutes\": 75,\n      \"distanceFromOriginKm\": 68.5\n    }]\n  },\n  \"incidentId\": null,\n  \"reason\": \"Road closure reported by local authority\"\n}"
+            },
+            "url": "{{baseUrl}}/v1/driver/trips/{{routeProposalTripId}}/route-change-proposals"
+          }
+        },
+        {
+          "name": "3. Driver lists Trip proposals",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.test('Assigned crew sees paged proposal history', () => {",
+                "  pm.response.to.have.status(200);",
+                "  pm.expect(body.success).to.equal(true);",
+                "  pm.expect(body.data.items).to.be.an('array');",
+                "  pm.expect(body.data.items.map(x => x.id)).to.include(pm.variables.get('routeProposalId'));",
+                "});"
+              ]
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{driverAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/driver/trips/{{routeProposalTripId}}/route-change-proposals?type=CUSTOM&page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "4. Operator lists pending proposals",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.test('Operator list is paged and tenant-scoped', () => {",
+                "  pm.response.to.have.status(200);",
+                "  pm.expect(body.success).to.equal(true);",
+                "  pm.expect(body.data.items).to.be.an('array');",
+                "});"
+              ]
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/route-change-proposals?tripId={{routeProposalTripId}}&status=PENDING&type=CUSTOM&page=1&pageSize=20"
+          }
+        },
+        {
+          "name": "5. Operator gets proposal detail",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.test('Operator detail returns the frozen snapshot', () => {",
+                "  pm.response.to.have.status(200);",
+                "  pm.expect(body.success).to.equal(true);",
+                "  pm.expect(body.data.id).to.equal(pm.variables.get('routeProposalId'));",
+                "  pm.expect(body.data.snapshot).to.be.an('object');",
+                "});"
+              ]
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/route-change-proposals/{{routeProposalId}}"
+          }
+        },
+        {
+          "name": "6. Operator approves proposal",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.test('Approval returns proposal plus route-change result', () => {",
+                "  pm.response.to.have.status(200);",
+                "  pm.expect(body.success).to.equal(true);",
+                "  pm.expect(body.data.proposal.status).to.equal('APPROVED');",
+                "  pm.expect(body.data.routeChange.tripId).to.equal(pm.variables.get('routeProposalTripId'));",
+                "  pm.expect(body.data.routeChange.alternativeRouteId).to.equal(body.data.proposal.approvedAlternativeRouteId);",
+                "});"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{routeProposalApproveKey}}" }
+            ],
+            "url": "{{baseUrl}}/v1/operator/route-change-proposals/{{routeProposalId}}/approve"
+          }
+        },
+        {
+          "name": "7. Operator rejects a separate pending proposal",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.test('Rejection records the optional reason', () => {",
+                "  pm.response.to.have.status(200);",
+                "  pm.expect(body.success).to.equal(true);",
+                "  pm.expect(body.data.status).to.equal('REJECTED');",
+                "  pm.expect(body.data.rejectionReason).to.equal('Unsafe during current traffic conditions');",
+                "});"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" },
+              { "key": "Idempotency-Key", "value": "{{routeProposalRejectKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Unsafe during current traffic conditions\"\n}"
+            },
+            "url": "{{baseUrl}}/v1/operator/route-change-proposals/{{routeProposalRejectId}}/reject"
           }
         }
       ]

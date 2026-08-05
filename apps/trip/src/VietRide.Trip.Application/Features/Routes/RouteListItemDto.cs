@@ -15,5 +15,6 @@ public sealed record RouteListItemDto(
     bool IsActive,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
+    IReadOnlyCollection<RouteDepartureScheduleDto> DepartureSchedules,
     StationDto? OriginStation = null,
     StationDto? DestinationStation = null);

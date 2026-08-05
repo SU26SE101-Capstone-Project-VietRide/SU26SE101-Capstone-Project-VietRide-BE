@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Security.Claims;
+using System.Text.Json;
 using FluentAssertions;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
@@ -181,12 +182,97 @@ public sealed class RouteHandlersTests
     {
         var route = CreateRoute(OperatorId, "Da Nang to Hue");
         var other = CreateRoute(OtherOperatorId, "Da Nang to Hue");
-        var handler = new ListRoutesHandler(new FakeRouteRepository([route, other]));
+        var handler = new ListRoutesHandler(
+            new FakeRouteRepository([route, other]),
+            new FakeDriverScheduleRepository([]));
 
         var result = await handler.Handle(new ListRoutesQuery(OperatorId, 1, 20, "Hue"), CancellationToken.None);
 
         result.Items.Should().ContainSingle(item => item.Id == route.Id);
+        result.Items.Single().DepartureSchedules.Should().BeEmpty();
         result.TotalItems.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ListRoutes_ReturnsAllOwnedSchedulesForRoutesOnCurrentPageInStableOrder()
+    {
+        var route = CreateRoute(OperatorId, "A route");
+        var routeOutsidePage = CreateRoute(OperatorId, "Z route");
+        var activeSchedule = CreateDriverSchedule(
+            OperatorId,
+            route.Id,
+            new TimeOnly(8, 0),
+            new DateOnly(2026, 1, 1),
+            null,
+            true,
+            [1, 3, 5]);
+        var inactiveSchedule = CreateDriverSchedule(
+            OperatorId,
+            route.Id,
+            new TimeOnly(6, 0),
+            new DateOnly(2026, 1, 1),
+            null,
+            false,
+            [2]);
+        var expiredSchedule = CreateDriverSchedule(
+            OperatorId,
+            route.Id,
+            new TimeOnly(7, 0),
+            new DateOnly(2025, 1, 1),
+            new DateOnly(2025, 12, 31),
+            true,
+            [4]);
+        var futureSchedule = CreateDriverSchedule(
+            OperatorId,
+            route.Id,
+            new TimeOnly(9, 0),
+            new DateOnly(2027, 1, 1),
+            null,
+            true,
+            [6, 7]);
+        var otherOperatorSchedule = CreateDriverSchedule(
+            OtherOperatorId,
+            route.Id,
+            new TimeOnly(5, 0),
+            new DateOnly(2026, 1, 1),
+            null,
+            true,
+            [1]);
+        var scheduleOutsidePage = CreateDriverSchedule(
+            OperatorId,
+            routeOutsidePage.Id,
+            new TimeOnly(10, 0),
+            new DateOnly(2026, 1, 1),
+            null,
+            true,
+            [1]);
+        var handler = new ListRoutesHandler(
+            new FakeRouteRepository([route, routeOutsidePage]),
+            new FakeDriverScheduleRepository([
+                activeSchedule,
+                inactiveSchedule,
+                expiredSchedule,
+                futureSchedule,
+                otherOperatorSchedule,
+                scheduleOutsidePage,
+            ]));
+
+        var result = await handler.Handle(
+            new ListRoutesQuery(OperatorId, 1, 1, null),
+            CancellationToken.None);
+
+        var item = result.Items.Should().ContainSingle().Subject;
+        item.Id.Should().Be(route.Id);
+        item.DepartureSchedules.Select(schedule => schedule.Id).Should().Equal(
+            inactiveSchedule.Id,
+            expiredSchedule.Id,
+            activeSchedule.Id,
+            futureSchedule.Id);
+        item.DepartureSchedules.Should().Contain(schedule => !schedule.IsActive);
+        item.DepartureSchedules.Should().Contain(schedule => schedule.ValidUntil == new DateOnly(2025, 12, 31));
+        item.DepartureSchedules.Should().Contain(schedule => schedule.ValidFrom == new DateOnly(2027, 1, 1));
+        item.DepartureSchedules.Should().NotContain(schedule => schedule.Id == otherOperatorSchedule.Id);
+        item.DepartureSchedules.Should().NotContain(schedule => schedule.Id == scheduleOutsidePage.Id);
     }
 
     [Fact]
@@ -441,6 +527,26 @@ public sealed class RouteHandlersTests
         return route;
     }
 
+    private static DriverSchedule CreateDriverSchedule(
+        Guid operatorId,
+        Guid routeId,
+        TimeOnly departureTime,
+        DateOnly validFrom,
+        DateOnly? validUntil,
+        bool isActive,
+        IReadOnlyCollection<int> dayOfWeek) =>
+        DriverSchedule.Create(
+            operatorId,
+            routeId,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            null,
+            JsonSerializer.SerializeToElement(dayOfWeek),
+            departureTime,
+            validFrom,
+            validUntil,
+            isActive);
+
     private static Station CreateStation(string name, string slug)
         => Station.Create(name, slug, "Da Nang", "Da Nang");
 
@@ -508,6 +614,42 @@ public sealed class RouteHandlersTests
         public void Remove(Route entity) => Entities.Remove(entity);
 
         public void Update(Route entity) { }
+    }
+
+    private sealed class FakeDriverScheduleRepository : IDriverScheduleRepository
+    {
+        private readonly List<DriverSchedule> schedules;
+
+        public FakeDriverScheduleRepository(IReadOnlyCollection<DriverSchedule> schedules)
+        {
+            this.schedules = schedules.ToList();
+        }
+
+        public Task<DriverSchedule> AddAsync(DriverSchedule entity, CancellationToken cancellationToken)
+        {
+            schedules.Add(entity);
+            return Task.FromResult(entity);
+        }
+
+        public Task<DriverSchedule?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+            => Task.FromResult(schedules.FirstOrDefault(schedule => schedule.Id == id));
+
+        public Task<bool> HasDriverConflictAsync(
+            Guid driverUserId,
+            IReadOnlyCollection<int> dayOfWeek,
+            TimeOnly departureTime,
+            DateOnly validFrom,
+            DateOnly? validUntil,
+            Guid? excludeScheduleId = null,
+            CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+        public IQueryable<DriverSchedule> Query() => schedules.AsQueryable();
+
+        public IQueryable<DriverSchedule> QueryNoTracking() => schedules.AsQueryable();
+
+        public void Remove(DriverSchedule entity) => schedules.Remove(entity);
+
+        public void Update(DriverSchedule entity) { }
     }
 
     private sealed class FakeStationRepository : IStationRepository

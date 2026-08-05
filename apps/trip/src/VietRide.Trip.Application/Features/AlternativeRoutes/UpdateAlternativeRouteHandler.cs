@@ -1,8 +1,10 @@
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Stops;
 using VietRide.Trip.Domain.Entities;
 
@@ -10,26 +12,30 @@ namespace VietRide.Trip.Application.Features.AlternativeRoutes;
 
 public sealed class UpdateAlternativeRouteHandler : IRequestHandler<UpdateAlternativeRouteCommand, AlternativeRouteDto>
 {
-    private const int MaxActiveAlternativeRoutesPerRoute = 2;
-
     private readonly IAlternativeRouteRepository alternativeRouteRepository;
     private readonly IIdentityInternalClient identityInternalClient;
     private readonly IStationRepository stationRepository;
     private readonly IStopRepository stopRepository;
     private readonly IUnitOfWork unitOfWork;
+    private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
+    private readonly IClock? clock;
 
     public UpdateAlternativeRouteHandler(
         IAlternativeRouteRepository alternativeRouteRepository,
         IIdentityInternalClient identityInternalClient,
         IStationRepository stationRepository,
         IStopRepository stopRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null,
+        IClock? clock = null)
     {
         this.alternativeRouteRepository = alternativeRouteRepository;
         this.identityInternalClient = identityInternalClient;
         this.stationRepository = stationRepository;
         this.stopRepository = stopRepository;
         this.unitOfWork = unitOfWork;
+        this.routeChangeProposals = routeChangeProposals;
+        this.clock = clock;
     }
 
     public async Task<AlternativeRouteDto> Handle(UpdateAlternativeRouteCommand request, CancellationToken cancellationToken)
@@ -43,11 +49,6 @@ public sealed class UpdateAlternativeRouteHandler : IRequestHandler<UpdateAltern
         if (alternativeRoute is null)
         {
             throw new CodedNotFoundException("ROUTE_NOT_FOUND", "Alternative route was not found.");
-        }
-
-        if (!alternativeRoute.IsActive && request.IsActive == true)
-        {
-            await ValidateActiveLimitAsync(alternativeRoute.RouteId, cancellationToken);
         }
 
         if (request.HasDestinationStationId && request.DestinationStationId.HasValue)
@@ -104,21 +105,11 @@ public sealed class UpdateAlternativeRouteHandler : IRequestHandler<UpdateAltern
         }
 
         alternativeRouteRepository.Update(alternativeRoute);
+        if (routeChangeProposals is not null)
+            await routeChangeProposals.ExpirePendingForSourceAsync(alternativeRoute.Id, clock?.UtcNow ?? DateTimeOffset.UtcNow, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         return AlternativeRouteMapper.ToDto(alternativeRoute, stops);
-    }
-
-    private async Task ValidateActiveLimitAsync(Guid routeId, CancellationToken cancellationToken)
-    {
-        var activeCount = await alternativeRouteRepository.CountActiveByRouteAsync(routeId, cancellationToken);
-        if (activeCount >= MaxActiveAlternativeRoutesPerRoute)
-        {
-            throw new CodedValidationException(
-                "ALTERNATIVE_ROUTE_LIMIT_EXCEEDED",
-                "A route can have at most two active alternative routes.",
-                [new ValidationError("alternativeRoutes", "A route can have at most two active alternative routes.")]);
-        }
     }
 
     private async Task ValidateStationExistsAsync(Guid stationId, CancellationToken cancellationToken)

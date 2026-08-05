@@ -14,8 +14,6 @@ public interface IAlternativeRouteRepository : IRepository<AlternativeRoute, Gui
         CancellationToken cancellationToken)
         => throw new NotSupportedException("Alternative-route locking is not supported by this repository implementation.");
 
-    Task<int> CountActiveByRouteAsync(Guid routeId, CancellationToken cancellationToken);
-
     Task<bool> ExistsStopAsync(Guid alternativeRouteId, Guid stopId, CancellationToken cancellationToken);
 
     Task<bool> ExistsStopOrderIndexAsync(Guid alternativeRouteId, int orderIndex, CancellationToken cancellationToken);
@@ -29,6 +27,15 @@ public interface IAlternativeRouteRepository : IRepository<AlternativeRoute, Gui
         => throw new NotSupportedException("Route-change candidate snapshots are not supported by this repository implementation.");
 
     Task ReplaceStopsAsync(Guid alternativeRouteId, IReadOnlyCollection<AlternativeRouteStop> stops, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<Guid>> ListIdsByDestinationAsync(
+        Guid destinationStationId,
+        CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<Guid>>(QueryNoTracking()
+            .Where(route => route.DestinationStationId == destinationStationId)
+            .OrderBy(route => route.Id)
+            .Select(route => route.Id)
+            .ToArray());
 
     Task<int> RelinkDestinationForStationMergeAsync(
         Guid duplicateStationId,

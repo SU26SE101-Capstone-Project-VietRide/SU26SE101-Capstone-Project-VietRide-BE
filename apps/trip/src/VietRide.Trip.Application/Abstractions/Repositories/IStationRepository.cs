@@ -18,6 +18,9 @@ public interface IStationRepository : IRepository<Station, Guid>
     Task<Station?> GetForUpdateAsync(Guid id, CancellationToken cancellationToken = default)
         => GetByIdAsync(id, cancellationToken);
 
+    Task<Station?> AcquireForRouteProposalApprovalAsync(Guid id, CancellationToken cancellationToken)
+        => throw new NotSupportedException("Route-proposal approval locking is not implemented by this repository.");
+
     Task<bool> SlugExistsAsync(
         string slug,
         Guid excludedStationId,

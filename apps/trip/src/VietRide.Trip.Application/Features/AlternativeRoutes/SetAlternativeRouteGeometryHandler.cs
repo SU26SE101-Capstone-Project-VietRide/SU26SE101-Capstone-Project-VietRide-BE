@@ -2,8 +2,10 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Common.Geometry;
 using VietRide.Trip.Application.Features.Stops;
 
@@ -18,6 +20,8 @@ public sealed class SetAlternativeRouteGeometryHandler
     private readonly IStationRepository stationRepository;
     private readonly IStopRepository stopRepository;
     private readonly IUnitOfWork unitOfWork;
+    private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
+    private readonly IClock? clock;
 
     public SetAlternativeRouteGeometryHandler(
         IAlternativeRouteRepository alternativeRouteRepository,
@@ -25,7 +29,9 @@ public sealed class SetAlternativeRouteGeometryHandler
         IRouteRepository routeRepository,
         IStationRepository stationRepository,
         IStopRepository stopRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null,
+        IClock? clock = null)
     {
         this.alternativeRouteRepository = alternativeRouteRepository;
         this.identityInternalClient = identityInternalClient;
@@ -33,6 +39,8 @@ public sealed class SetAlternativeRouteGeometryHandler
         this.stationRepository = stationRepository;
         this.stopRepository = stopRepository;
         this.unitOfWork = unitOfWork;
+        this.routeChangeProposals = routeChangeProposals;
+        this.clock = clock;
     }
 
     public async Task<AlternativeRouteDto> Handle(
@@ -80,6 +88,8 @@ public sealed class SetAlternativeRouteGeometryHandler
 
         alternativeRoute.SetPathGeometry(request.PathPolyline);
         alternativeRouteRepository.Update(alternativeRoute);
+        if (routeChangeProposals is not null)
+            await routeChangeProposals.ExpirePendingForSourceAsync(alternativeRoute.Id, clock?.UtcNow ?? DateTimeOffset.UtcNow, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         return AlternativeRouteMapper.ToDto(alternativeRoute, routeStops);
     }

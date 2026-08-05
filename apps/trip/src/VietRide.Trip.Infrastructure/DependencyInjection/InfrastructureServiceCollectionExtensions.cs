@@ -71,6 +71,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITripStopFareRepository, TripStopFareRepository>();
         services.AddScoped<ITripGenerationSkipLogRepository, TripGenerationSkipLogRepository>();
         services.AddScoped<IIncidentRepository, IncidentRepository>();
+        services.AddScoped<IRouteChangeProposalRepository, RouteChangeProposalRepository>();
+        services.AddScoped<ITripRouteChangeService, TripRouteChangeService>();
+        services.AddScoped<IRouteChangeProposalService, RouteChangeProposalService>();
+        services.AddScoped<IRouteChangeProposalLifecycleService, RouteChangeProposalLifecycleService>();
         if (backgroundWorkersEnabled)
         {
             services.AddScoped<ITripGenerationJobScheduler, HangfireTripGenerationJobScheduler>();

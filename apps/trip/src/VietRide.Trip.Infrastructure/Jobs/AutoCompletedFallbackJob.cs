@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Trips.Operations;
 using VietRide.Trip.Domain.Entities;
 
@@ -17,17 +18,20 @@ public sealed class AutoCompletedFallbackJob
     private readonly ITripRepository tripRepository;
     private readonly IIntegrationEventOutbox outbox;
     private readonly IClock clock;
+    private readonly IRouteChangeProposalService? routeChangeProposals;
 
     public AutoCompletedFallbackJob(
         TripDbContext dbContext,
         ITripRepository tripRepository,
         IIntegrationEventOutbox outbox,
-        IClock clock)
+        IClock clock,
+        IRouteChangeProposalService? routeChangeProposals = null)
     {
         this.dbContext = dbContext;
         this.tripRepository = tripRepository;
         this.outbox = outbox;
         this.clock = clock;
+        this.routeChangeProposals = routeChangeProposals;
     }
 
     [Queue("trip")]
@@ -56,6 +60,8 @@ public sealed class AutoCompletedFallbackJob
         }
 
         trip.CompleteAutomatically(now);
+        if (routeChangeProposals is not null)
+            await routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
         var integrationEvent = new TripCompletedIntegrationEvent(
             trip.Id,
             trip.OperatorId,

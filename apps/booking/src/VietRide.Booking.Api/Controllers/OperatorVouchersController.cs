@@ -127,7 +127,10 @@ public sealed class OperatorVouchersController : ControllerBase
     /// <remarks>
     /// Auth: OPERATOR_ADMIN (RS256 user token via JWKS). No Idempotency-Key.
     /// code, type, fundingType, ownerOperatorId are ALWAYS immutable.
-    /// Once ≥1 usage exists: value, minOrderAmount, maxDiscountAmount are FROZEN → 409 VOUCHER_LOCKED.
+    /// Before the first usage, all request fields are editable.
+    /// Once ≥1 usage exists: value, minOrderAmount, maxDiscountAmount, and validFrom are frozen;
+    /// validUntil may only be extended, usage limits may only be loosened, while name,
+    /// applicableRouteIds, and deactivate remain editable. Invalid locked edits return 409 VOUCHER_LOCKED.
     /// Cross-operator access → 404 VOUCHER_NOT_FOUND.
     /// </remarks>
     [HttpPatch("{id:guid}")]

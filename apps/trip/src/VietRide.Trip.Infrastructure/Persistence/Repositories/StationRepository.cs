@@ -31,6 +31,17 @@ internal sealed class StationRepository : IStationRepository
             .SingleOrDefaultAsync(cancellationToken);
     }
 
+    public Task<Station?> AcquireForRouteProposalApprovalAsync(Guid id, CancellationToken cancellationToken)
+    {
+        if (_dbContext.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("A transaction is required.");
+        DetachLocalStations([id]);
+        return _dbContext.Stations
+            .FromSqlInterpolated($"SELECT * FROM vietride_trip.stations WHERE id = {id} FOR UPDATE")
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     public Task<bool> SlugExistsAsync(
         string slug,
         Guid excludedStationId,

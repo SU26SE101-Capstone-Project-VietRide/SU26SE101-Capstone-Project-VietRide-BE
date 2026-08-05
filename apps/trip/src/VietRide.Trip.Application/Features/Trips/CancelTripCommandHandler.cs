@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Events;
 using VietRide.Trip.Domain.Entities;
 
@@ -17,17 +18,20 @@ public sealed class CancelTripCommandHandler : IRequestHandler<CancelTripCommand
     private readonly IIntegrationEventOutbox outbox;
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
+    private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
 
     public CancelTripCommandHandler(
         ITripRepository trips,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
-        IClock clock)
+        IClock clock,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
     {
         this.trips = trips;
         this.outbox = outbox;
         this.unitOfWork = unitOfWork;
         this.clock = clock;
+        this.routeChangeProposals = routeChangeProposals;
     }
 
     public async Task<CancelTripResponse> Handle(
@@ -43,6 +47,8 @@ public sealed class CancelTripCommandHandler : IRequestHandler<CancelTripCommand
             CancelTripPreviewQueryHandler.EnsureEditable(trip.Status);
             var now = clock.UtcNow;
             trip.Cancel(now, request.ActorUserId, request.Reason);
+            if (routeChangeProposals is not null)
+                await routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
 
             var evt = new TripCancelledByOperatorIntegrationEvent(
                 trip.Id,

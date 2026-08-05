@@ -315,6 +315,31 @@ Booking Outbox propagation, full Booking + Parcel Wallet refunds, frozen route-c
 metadata, and one-event idempotency. Its `finally` path removes its exact DB and Redis fixtures and
 restores the platform Wallet baseline. Tokens are never printed or committed.
 
+## Driver/Assistant route-change proposals
+
+The cumulative `Route-change proposals - Gateway` folder documents the additive proposal flow.
+Every request uses `{{baseUrl}}` and therefore goes through the Gateway; it never targets the Trip
+service port directly. Populate the generic runtime `driverAccessToken` and
+`operatorAdminAccessToken`, plus these isolated fixture placeholders before running the folder:
+
+- `routeProposalTripId`: a `SCHEDULED|BOARDING|IN_PROGRESS` Trip assigned to the driver token.
+- `routeProposalDestinationStationId` and `routeProposalStopId`: active same-operator CUSTOM
+  snapshot references; the destination must also have an active OperatorStation mapping.
+- `routeProposalPathPolyline`: required valid Google encoded polyline precision 5 passing within
+  500 metres of the parent Route origin, destination Station, and every supplied Stop.
+- `routeProposalId`: populated automatically by the CUSTOM-create request.
+- `routeProposalRejectId`: a separate pending proposal. It must not share the Trip whose proposal
+  is approved earlier in the folder, because approval intentionally supersedes all other pending
+  proposals for that Trip.
+- `routeProposalCreateKey`, `routeProposalApproveKey`, and `routeProposalRejectKey`: isolated UUID-v4
+  idempotency keys. Never reuse them across fixture resets with different bodies.
+
+The folder covers assigned-crew candidate listing, CUSTOM snapshot creation and proposal history,
+then operator tenant list/detail/approve/reject. Its assertions check ADR 0004 envelopes,
+pagination, persisted snapshot identity, and the composite approve response. These requests are
+representative/manual and do not replace a self-seeding E2E runner; supply valid local fixtures and
+runtime JWTs, and never commit token values.
+
 ## UI-25 — UI gaps qua Gateway và Postman
 
 Folder tích lũy `UI Gaps - Gateway Real Stack` bao phủ các public facade/projection được bổ sung

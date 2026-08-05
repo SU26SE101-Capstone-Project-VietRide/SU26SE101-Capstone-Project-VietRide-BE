@@ -5,7 +5,11 @@ namespace VietRide.Trip.Application.Features.Routes;
 
 internal static class RouteMapper
 {
-    public static RouteListItemDto ToListItemDto(Route route, StationDto? originStation = null, StationDto? destinationStation = null)
+    public static RouteListItemDto ToListItemDto(
+        Route route,
+        IReadOnlyCollection<RouteDepartureScheduleDto> departureSchedules,
+        StationDto? originStation = null,
+        StationDto? destinationStation = null)
         => new(
             route.Id,
             route.OperatorId,
@@ -19,6 +23,7 @@ internal static class RouteMapper
             route.IsActive,
             route.CreatedAt,
             route.UpdatedAt,
+            departureSchedules,
             originStation,
             destinationStation);
 

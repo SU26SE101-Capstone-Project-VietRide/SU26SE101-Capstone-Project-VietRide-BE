@@ -338,8 +338,8 @@ public sealed class ChangeTripRouteEndpointTests
                 .UseSetting("Trip:BackgroundWorkers:Enabled", "false")
                 .UseSetting(
                     "ConnectionStrings:Default",
-                    "Host=localhost;Port=5432;Database=test;Username=vietride;Password=vietride_dev")
-                .UseSetting("REDIS_URL", "localhost:6379");
+                    "Host=127.0.0.1;Port=5432;Database=test;Username=vietride;Password=vietride_dev")
+                .UseSetting("REDIS_URL", "127.0.0.1:6379");
             builder.ConfigureTestServices(services => { services.RemoveAll<IMediator>(); services.AddSingleton(mediator); });
         }
     }

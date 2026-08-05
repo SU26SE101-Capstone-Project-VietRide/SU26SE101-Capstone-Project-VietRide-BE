@@ -23,7 +23,8 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `RouteStopFareTemplate` | **Exception only** override `baseFare` per stop với half-open time window. | `effectiveFrom`/`effectiveUntil`; DB exclusion guard chống overlap |
 | `OperatorFareSurchargeSetting` | Global holiday-fare switch per logical operator. | `operatorId` PK, `isEnabled`; missing row = disabled |
 | `OperatorFareSurchargePeriod` | Named holiday surcharge window. | Inclusive ICT dates, percent `1..100`, active + soft-delete; DB exclusion guard chống active overlap |
-| `AlternativeRoute` | Tuyến thay thế (max 2 per Route, enforced app). | Stop sequence riêng — KHÔNG reuse `RouteStop` |
+| `AlternativeRoute` | Tuyến thay thế của Route; không giới hạn số tuyến active. | Stop sequence riêng — KHÔNG reuse `RouteStop` |
+| `RouteChangeProposal` | Snapshot đổi tuyến do Driver/Assistant đề xuất. | `EXISTING` giữ source version; `CUSTOM` được promote khi Operator duyệt |
 | `AlternativeRouteStop` | Junction AlternativeRoute↔Stop. | composite PK, `orderIndex` |
 | `VehicleType` | Loại xe catalog. | `code` UNIQUE, `isSystemDefined` (block delete cho 3 platform seed) |
 | `Vehicle` | Xe operator. | `licensePlate` UNIQUE, `seatLayoutJson`, `maxCargoWeightKg`, `status` enum |
@@ -66,6 +67,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 - **Day-23 schedule-change producer:** PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING` is the only contract that may cascade a generated Trip departure; only `ALL_PENDING` mutates Trips, and no dedicated Trip schedule endpoint/Gateway route exists. One captured clock requires `oldDeparture - now >= 2h` and computed `newDeparture - now >= 2h` for every affected Trip with a `CONFIRMED` Booking; equality is valid and either strict-less value rejects the whole batch. Absolute delta on ICT dates classifies same-date `<= 2h` as MINOR, same-date `> 2h && < 6h` as MEDIUM, and `>= 6h` or an ICT date change as MAJOR. Each committed change emits exact `trip.trip.schedule_changed {eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity}` atomically through Outbox with the same payload/row/MessageId identity.
 - **`ShuttlePassenger.shuttle_trip_id` nullable** — passenger có thể đăng ký shuttle trước khi operator tạo ShuttleTrip (`PENDING_ASSIGNMENT` status).
 - **`Incident.photo_urls` JSONB** thay vì junction table — max 3 URLs, đơn giản, không có query cần JOIN.
+- **`RouteChangeProposalStop` composite PK `(proposal_id, stop_id)`** lưu snapshot stop bất biến ở dạng chuẩn hóa; UNIQUE `(proposal_id, order_index)` giữ thứ tự xác định. Proposal lưu `approved_alternative_route_id` và `resolution_code` để không phải suy diễn ngữ cảnh terminal về sau.
 - **`OutboxEvent`** trong cùng service DB — atomic INSERT với business write trong 1 transaction (Outbox pattern). Worker poll mỗi 5s, dùng `BackgroundService` (.NET).
 - **`platform_trip_stats`** được trigger đồng bộ cùng transaction và job `trip.platform-stats-backfill` rebuild idempotent từ earned live; platform report chỉ cache sau khi projection khớp live theo operator/range.
 
@@ -102,6 +104,10 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `idx_driver_schedule_audit_logs_schedule_occurred` | `(driver_schedule_id, occurred_at DESC)` | B-tree | Audit timeline per driver schedule |
 | `idx_driver_schedule_audit_logs_actor_occurred` | `(actor_user_id, occurred_at DESC)` | partial B-tree | Driver schedule audit timeline per actor |
 | `idx_driver_schedule_audit_logs_action_occurred` | `(action, occurred_at DESC)` | B-tree | Driver schedule audit lookup per action |
+| `idx_route_change_proposals_trip_status` | `(trip_id, status)` | B-tree | Pending proposal reconciliation per Trip |
+| `idx_route_change_proposals_operator_status_created` | `(operator_id, status, created_at DESC)` | B-tree | Filtered Operator proposal inbox pagination |
+| `idx_route_change_proposals_proposer_created` | `(proposed_by_user_id, created_at DESC)` | B-tree | Proposer history and terminal notification lookup |
+| `uq_route_change_proposal_stops_order` | `(proposal_id, order_index)` | unique | Deterministic normalized snapshot ordering |
 | `idx_trip_gen_skip_logs_operator_date` | `(operator_id, skipped_date DESC)` | B-tree | Dashboard "skipped this month" |
 | `idx_shuttle_passengers_main_trip_status` | `(main_trip_id, status)` | B-tree | "Shuttle requests pending" view |
 | `idx_outbox_events_status_created` | `(status, created_at)` partial | B-tree | Outbox worker polling |

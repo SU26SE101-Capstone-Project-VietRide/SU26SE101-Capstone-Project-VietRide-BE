@@ -2395,10 +2395,10 @@ Background job (BullMQ scheduled job — chạy mỗi 5–10 phút trong Trackin
 ### 6.4 Thay đổi lộ trình giữa chuyến
 
 **Cấu trúc Alternative Route:**
-- Mỗi Route chính có **tối đa 2 tuyến phụ** (alternative routes) — đủ cho 1 phương án kẹt xe nhẹ và 1 phương án sự cố lớn
+- Mỗi Route chính có thể có nhiều tuyến phụ (alternative routes). V1 **không áp dụng giới hạn toàn cục về số AlternativeRoute active**; quota gói dịch vụ, nếu có, phải được kiểm tra bằng entitlement riêng chứ không phải hard-cap theo Route.
 - Alternative Route có **danh sách Stop riêng hoàn toàn** — không dùng lại stop của tuyến chính vì lộ trình khác nhau có thể không đi qua các điểm cũ
-- Relationship: `Route (1) → (0..2) AlternativeRoute`, mỗi `AlternativeRoute` có stop sequence độc lập qua junction table `AlternativeRouteStop (alternativeRouteId, stopId, orderIndex, estimatedDuration)`
-- Operator định nghĩa alternative routes trước (trong lúc quản lý tuyến), không tạo mới trong lúc sự cố
+- Relationship: `Route (1) → (0..n) AlternativeRoute`, mỗi `AlternativeRoute` có stop sequence độc lập qua junction table `AlternativeRouteStop (alternativeRouteId, stopId, orderIndex, estimatedDuration)`.
+- Operator có thể định nghĩa AlternativeRoute trước trong màn quản lý tuyến. Ngoài ra Driver/Assistant được phân công có thể đề xuất snapshot lộ trình tùy chỉnh trong lúc vận hành; snapshot chỉ trở thành AlternativeRoute chính thức khi `OPERATOR_ADMIN` approve.
 
 **Làm sao operator biết cần đổi tuyến:** Hệ thống kết hợp 2 cơ chế:
 
@@ -2418,7 +2418,38 @@ Background job (BullMQ scheduled job — chạy mỗi 5–10 phút trong Trackin
    ```
 2. **Tài xế/phụ xe báo:** Nhận thấy đường tắc hoặc sự cố, tài xế báo trực tiếp qua app (nút "Báo sự cố") → operator nhận notification
 
-Sau khi nhận alert, operator xem vị trí xe, chọn alternative route phù hợp và confirm đổi tuyến.
+Sau khi nhận alert, operator có thể tiếp tục đổi tuyến trực tiếp như trước. Song song, Driver hoặc
+Assistant đang được phân công cho Trip có thể gửi một hoặc nhiều route-change proposal khi Trip ở
+`SCHEDULED`, `BOARDING`, hoặc `IN_PROGRESS`:
+
+- `EXISTING`: chọn một AlternativeRoute active thuộc đúng Route/operator. Hệ thống freeze toàn bộ
+  snapshot và `updatedAt` của nguồn tại thời điểm đề xuất; chỉnh sửa/deactivate nguồn sau đó làm
+  proposal cũ thành `EXPIRED` với `SOURCE_ROUTE_CHANGED`.
+- `CUSTOM`: gửi snapshot riêng gồm tên, destination Station, geometry bắt buộc và stop sequence.
+  Geometry phải là Google encoded polyline precision 5 hợp lệ và vượt qua validator waypoint
+  500m hiện có; destination Station phải có OperatorStation active của đúng nhà xe.
+  Snapshot không thay đổi Route/AlternativeRoute catalog khi tạo proposal. Khi approve, hệ thống
+  promote snapshot thành một AlternativeRoute chính thức rồi áp dụng nó cho Trip.
+- `incidentId` là tùy chọn; nếu có phải trỏ đến Incident thuộc chính Trip đó. Incident không tự tạo,
+  tự approve hoặc tự áp dụng proposal.
+- Proposal mới bắt đầu ở `PENDING`; nhiều proposal `PENDING` cho cùng Trip được phép cùng tồn tại.
+  Chỉ `OPERATOR_ADMIN` cùng operator được list/detail toàn tenant và approve/reject. Approve một
+  proposal áp dụng route change atomically và chuyển mọi proposal `PENDING` còn lại của Trip sang
+  `SUPERSEDED` với `ANOTHER_PROPOSAL_APPROVED`. Direct admin change-route vẫn là contract hợp lệ
+  và supersede các proposal đang pending với `ROUTE_CHANGED_DIRECTLY`.
+- Proposal chỉ được quyết định một lần. Trip rời `SCHEDULED|BOARDING|IN_PROGRESS` thì proposal
+  pending thành `EXPIRED` với `TRIP_NO_LONGER_EDITABLE`. Status đầy đủ:
+  `PENDING|APPROVED|REJECTED|SUPERSEDED|EXPIRED`.
+- Mỗi transition publish một event tương ứng. `trip.route_change_proposal.created` làm
+  Notification Service resolve toàn bộ active `OPERATOR_ADMIN` thuộc `operatorId` và tạo
+  `ROUTE_CHANGE_PROPOSAL_CREATED` cho từng admin. Bốn terminal events `approved|rejected|superseded|expired`
+  gửi đúng một notification về `proposedByUserId`, lần lượt dùng type
+  `ROUTE_CHANGE_PROPOSAL_APPROVED|ROUTE_CHANGE_PROPOSAL_REJECTED|ROUTE_CHANGE_PROPOSAL_SUPERSEDED|ROUTE_CHANGE_PROPOSAL_EXPIRED`.
+  Consumer idempotent theo `eventId`/RabbitMQ `MessageId`; redelivery không tạo thêm notification
+  hoặc push.
+
+Sau khi operator approve proposal hoặc đổi tuyến trực tiếp, flow xử lý hành khách bên dưới là như
+nhau và vẫn dựa trên event `trip.trip.route_changed`.
 
 **Xử lý hành khách khi đổi tuyến:**
 
@@ -2543,7 +2574,7 @@ fallback occurs at equality (no synchronous fallback); only a later scheduler pa
 
 | | ROUTE_CHANGE (6.4) | STOP_DISABLED (6.4.1) |
 |---|---|---|
-| Trigger | Operator confirm Alternative Route trong/trước trip | Operator disable Stop entity |
+| Trigger | Operator đổi tuyến trực tiếp hoặc approve route-change proposal trong/trước trip | Operator disable Stop entity |
 | Scope | Stop không còn trên tuyến mới (tuyến thay đổi) | Stop bị xóa khỏi hệ thống (không hoạt động nữa) |
 | Refund khi cancel | Theo cancellation policy (route change do bất khả kháng) | 100% (lỗi operator) |
 | Shuttle fallback | Có (shuttle đưa về stop ban đầu) | Không |
@@ -4863,7 +4894,8 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **Trip fare** | `Trip.baseFare` = giá vé theo chặng/tuyến (áp dụng từ đầu tuyến hoặc bất kỳ along-route stop nào). Booking capture/reuse một handler-start `pricingAt` và dùng `fareFromThisStop` đã được Trip resolve trong snapshot cho pickup stop; explicit precedence là persisted `TripStopFare` có `source=MANUAL_OVERRIDE` → active `RouteStopFareTemplate` half-open tại `pricingAt` → `Trip.baseFare`. Legacy `TEMPLATE_SNAPSHOT` vẫn readable, non-authoritative khi có `pricingAt`, và chỉ tham gia resolution cho legacy compatibility khi omitted `pricingAt`; Day 22 không tạo snapshot row mới. Dropoff miễn phí tại mọi stop, không ảnh hưởng giá. |
 | **Seat lock along-route** | Ghế lock từ đầu chuyến, không phân theo segment. Chi phí operator chấp nhận. |
 | **DriverSchedule** | `dayOfWeek` JSON array + `departureTime TIME`. Hangfire generate Trip 14 ngày kế tiếp qua 2 trigger: (1) immediate on-create/activate, (2) weekly job CN 23:00. Idempotent check (driverId + departureDateTime). Không cho 2 schedule active cùng driverId overlap giờ. Vehicle conflict cũng check. |
-| **Alternative Route** | Tối đa 2 per Route chính. Stop sequence riêng hoàn toàn — không reuse `RouteStop`. Quan hệ: `Route → AlternativeRoute → AlternativeRouteStop → Stop`. |
+| **Alternative Route** | Không có hard-cap toàn cục theo Route chính. Stop sequence riêng hoàn toàn — không reuse `RouteStop`. Quan hệ: `Route → AlternativeRoute → AlternativeRouteStop → Stop`; CUSTOM proposal chỉ tạo AlternativeRoute chính thức khi được approve. |
+| **RouteChangeProposal** | Snapshot đề xuất đổi tuyến của Driver/Assistant được phân công. Type `EXISTING|CUSTOM`; status `PENDING|APPROVED|REJECTED|SUPERSEDED|EXPIRED`; có thể liên kết optional Incident cùng Trip. Nhiều pending cùng Trip được phép, approve một proposal supersede các pending khác. |
 | **Stop độc lập** | Một Stop có thể thuộc nhiều Route. Canonical disable là bodyless `DELETE /v1/operator/stops/{stopId}?replacedByStopId=` cho `OPERATOR_ADMIN`, required UUID-v4 `Idempotency-Key`; set `isActive=false`, giữ `deletedAt`, không xóa RouteStop, và publish `trip.stop.disabled`. `replacedByStopId` nullable self-FK phải active/cùng operator/non-self/cycle-free. Retained PATCH là details-update-only, không đổi `isActive`/`deletedAt` và không emit disable event. Async `booking.stop_disabled.affected` là sole impact source; không có synchronous count/warning seam. Auto-suggest geo proximity defer v2. |
 | **Trip cargo counters** | `Trip.totalLoadedWeightKg/VolumeM3` là cargo vật lý trên xe: Task load chuyển actual reservation → loaded cargo; unload/recovery release như flow hiện hữu. `Trip.reservedParcelWeightKg/VolumeM3` giữ mềm estimated cargo khi deposit payment bắt đầu, giữ qua `RESERVED`, rồi Task reweigh chuyển estimated → actual; payment/check-in/final-payment timeout hoặc terminal trước load release. **Available capacity = Vehicle max - estimated passenger luggage - reserved parcel cargo - loaded cargo**. Parcel/Trip dùng local transaction + CAS/idempotent internal mutation, không có cross-DB transaction. |
 | **TripStop** | `{tripId, stopId, orderIndex, estimatedArrivalTime (static planned baseline), actualArrivalTime nullable, actualDepartureTime nullable, status PENDING\|ARRIVED\|SKIPPED, distanceFromOriginKm nullable}`. `actualDepartureTime` is the durable Day-24 stop-departure anchor; arrival/status remain authoritative for no-show. Approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING` cascade có thể recompute baseline; GPS/Tracking dynamic ETA không bao giờ update field này. Copy `distanceFromOriginKm` từ RouteStop khi generate — dùng cho DISRUPTED refund mà không cần join ngược. |
@@ -5070,7 +5102,8 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **`RouteStopFareTemplate`** — Exception override `baseFare` per stop với effective time window (effectiveFrom/Until).
 - **`OperatorFareSurchargeSetting`** — One Trip-local row per logical Identity operator; global `isEnabled` switch, with a missing row treated as disabled.
 - **`OperatorFareSurchargePeriod`** — Named holiday window with inclusive ICT `startDate`/`endDate`, integer percent, activation flag and soft delete; active windows cannot overlap per operator.
-- **`AlternativeRoute`** + **`AlternativeRouteStop`** — Tuyến thay thế khi route change. Max 2 alternative per Route chính. Stop sequence riêng.
+- **`AlternativeRoute`** + **`AlternativeRouteStop`** — Tuyến thay thế khi route change. Không có hard-cap toàn cục về số active AlternativeRoute per Route chính. Stop sequence riêng.
+- **`RouteChangeProposal`** + **`RouteChangeProposalStop`** — Snapshot EXISTING/CUSTOM do assigned Driver/Assistant đề xuất; Operator Admin approve/reject, CUSTOM được promote thành AlternativeRoute khi approve.
 - **`VehicleType`** — Loại xe: code unique, displayName, `estimatedPassengerLuggageKgPerSeat` override (optional), `isSystemDefined` block delete. Seed STANDARD_BUS / LIMOUSINE / SLEEPER_BUS.
 - **`Vehicle`** — Xe của operator: vehicleType, licensePlate, `seatLayoutJson` (xem 6.1 contract), totalSeats, maxCargoWeightKg, status (xem VehicleStatus enum).
 - **`Trip`** — Chuyến cụ thể. Source: MANUAL | AUTO_FROM_SCHEDULE | VEHICLE_SUBSTITUTION. Snapshot baseFare + cargo limits từ Vehicle/Route; `notes VARCHAR(2000) NULL` trim/blank-to-null. 2 cargo counter: `reservedParcelWeightKg` + `totalLoadedWeightKg`. `estimatedPassengerLuggageKg` snapshot immutable. `hasSubstitution` flag cho reporting.
@@ -5119,7 +5152,7 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **`NotificationDelivery`** — Track FCM push attempt per notification: fcmToken, status SENT | FAILED | RETRYING, retryCount, lastError.
 - **Không có `OutboxEvent`** — Notification chỉ consume RabbitMQ, không publish.
 
-**`Notification.type` enum:** `BOOKING_CONFIRMED | BOOKING_CANCELLED | BOOKING_DISRUPTED | BOOKING_REFUNDED | PASSENGER_NO_SHOW | TRIP_BOARDING_REMINDER | TRIP_VEHICLE_APPROACHING | TRIP_ROUTE_CHANGED | TRIP_SCHEDULE_CHANGED | TRIP_CANCELLED | TRIP_DELAYED | TRIP_DISRUPTED | STOP_DISABLED | VEHICLE_SUBSTITUTED | VEHICLE_SWAPPED | PARCEL_LOADED | PARCEL_IN_TRANSIT | PARCEL_DELIVERED_PENDING_CONFIRM | PARCEL_REJECTED | PARCEL_RETURNED | WALLET_CREDITED | WALLET_DEBITED | INCIDENT_REPORTED | OFF_ROUTE_ALERT | TRIP_DELAYED_ALERT | CARGO_NEAR_FULL_ALERT | PARCEL_REVIEW_REQUESTED | PARCEL_REVIEW_APPROVED | PARCEL_FINAL_PAYMENT_REQUIRED | PARCEL_SETTLEMENT_RECOVERED | VOUCHER_CONSENT_REQUESTED | VOUCHER_CONSENT_ACCEPTED | VOUCHER_CONSENT_REJECTED | SUBSCRIPTION_LIMIT_EXCEEDED | SUBSCRIPTION_USAGE_WARNING | SUBSCRIPTION_TRIAL_EXPIRING | SUBSCRIPTION_EXPIRED | SUBSCRIPTION_APPROVED | SUBSCRIPTION_PAYMENT_PENDING_WARN | SUBSCRIPTION_PAYMENT_AUTO_REVERTED | INVOICE_ISSUED | DRIVER_SCHEDULE_EDITED | PAYOUT_PROCESSED | PAYOUT_FAILED | OPERATOR_APPROVED | OPERATOR_SUSPENDED | OPERATOR_REGISTRATION_SUBMITTED | TRIP_ASSIGNED | TRIP_ASSIGNMENT_REMOVED | OPERATOR_ANNOUNCEMENT | SHUTTLE_ASSIGNED | SHUTTLE_UNFULFILLED | SHUTTLE_WARNING | DRIVER_STOP_DEPARTED_WITH_PENDING`.
+**`Notification.type` enum:** `BOOKING_CONFIRMED | BOOKING_CANCELLED | BOOKING_DISRUPTED | BOOKING_REFUNDED | PASSENGER_NO_SHOW | TRIP_BOARDING_REMINDER | TRIP_VEHICLE_APPROACHING | TRIP_ROUTE_CHANGED | TRIP_SCHEDULE_CHANGED | TRIP_CANCELLED | TRIP_DELAYED | TRIP_DISRUPTED | STOP_DISABLED | VEHICLE_SUBSTITUTED | VEHICLE_SWAPPED | PARCEL_LOADED | PARCEL_IN_TRANSIT | PARCEL_DELIVERED_PENDING_CONFIRM | PARCEL_REJECTED | PARCEL_RETURNED | WALLET_CREDITED | WALLET_DEBITED | INCIDENT_REPORTED | OFF_ROUTE_ALERT | TRIP_DELAYED_ALERT | CARGO_NEAR_FULL_ALERT | PARCEL_REVIEW_REQUESTED | PARCEL_REVIEW_APPROVED | PARCEL_FINAL_PAYMENT_REQUIRED | PARCEL_SETTLEMENT_RECOVERED | VOUCHER_CONSENT_REQUESTED | VOUCHER_CONSENT_ACCEPTED | VOUCHER_CONSENT_REJECTED | SUBSCRIPTION_LIMIT_EXCEEDED | SUBSCRIPTION_USAGE_WARNING | SUBSCRIPTION_TRIAL_EXPIRING | SUBSCRIPTION_EXPIRED | SUBSCRIPTION_APPROVED | SUBSCRIPTION_PAYMENT_PENDING_WARN | SUBSCRIPTION_PAYMENT_AUTO_REVERTED | INVOICE_ISSUED | DRIVER_SCHEDULE_EDITED | PAYOUT_PROCESSED | PAYOUT_FAILED | OPERATOR_APPROVED | OPERATOR_SUSPENDED | OPERATOR_REGISTRATION_SUBMITTED | TRIP_ASSIGNED | TRIP_ASSIGNMENT_REMOVED | OPERATOR_ANNOUNCEMENT | SHUTTLE_ASSIGNED | SHUTTLE_UNFULFILLED | SHUTTLE_WARNING | DRIVER_STOP_DEPARTED_WITH_PENDING | ROUTE_CHANGE_PROPOSAL_CREATED | ROUTE_CHANGE_PROPOSAL_APPROVED | ROUTE_CHANGE_PROPOSAL_REJECTED | ROUTE_CHANGE_PROPOSAL_SUPERSEDED | ROUTE_CHANGE_PROPOSAL_EXPIRED`.
 
 #### FCM Token Lifecycle (Identity Service)
 

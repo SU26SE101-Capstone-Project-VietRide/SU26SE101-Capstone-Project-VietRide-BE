@@ -456,7 +456,7 @@ public sealed class Day24DepartStopWebApplicationFactory : WebApplicationFactory
         builder.UseSetting(
             "ConnectionStrings:Default",
             VietRideWebApplicationFactory.ResolveConnectionString("postgres"));
-        builder.UseSetting("REDIS_URL", "localhost:6379");
+        builder.UseSetting("REDIS_URL", "127.0.0.1:6379");
         builder.UseEnvironment("Testing");
         builder.ConfigureTestServices(services =>
         {

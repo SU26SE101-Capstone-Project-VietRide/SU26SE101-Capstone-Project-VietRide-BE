@@ -14,33 +14,6 @@ public sealed class AlternativeRouteRepositoryPersistenceTests
     private static readonly Guid OtherOperatorId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
     [Fact]
-    public async Task CountActiveByRouteAsync_CountsOnlyActiveAlternativeRoutes()
-    {
-        var databaseName = $"vietride_trip_alt_route_active_{Guid.NewGuid():N}";
-        await using var dbContext = CreateDbContext(databaseName);
-        var repository = CreateRepository(dbContext);
-
-        try
-        {
-            await dbContext.Database.MigrateAsync();
-            var (route, destination, _) = await SeedRouteAsync(dbContext, OperatorId);
-            var active = AlternativeRoute.Create(route.Id, "Active bypass", destination.Id, null, null);
-            var inactive = AlternativeRoute.Create(route.Id, "Inactive bypass", destination.Id, null, null);
-            inactive.Deactivate();
-            dbContext.AlternativeRoutes.AddRange(active, inactive);
-            await dbContext.SaveChangesAsync();
-
-            var count = await repository.CountActiveByRouteAsync(route.Id, CancellationToken.None);
-
-            count.Should().Be(1);
-        }
-        finally
-        {
-            await dbContext.Database.EnsureDeletedAsync();
-        }
-    }
-
-    [Fact]
     public async Task DeactivateAlternativeRoute_KeepsRowPresent()
     {
         var databaseName = $"vietride_trip_alt_route_deactivate_{Guid.NewGuid():N}";
@@ -161,7 +134,7 @@ public sealed class AlternativeRouteRepositoryPersistenceTests
 
     private static string CreateConnectionString(string databaseName)
     {
-        const string defaultConnectionString = "Host=localhost;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
+        const string defaultConnectionString = "Host=127.0.0.1;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
         var connectionString = Environment.GetEnvironmentVariable("VIETRIDE_TRIP_TEST_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(connectionString))
         {

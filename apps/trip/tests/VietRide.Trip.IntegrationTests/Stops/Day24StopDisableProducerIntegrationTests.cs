@@ -151,7 +151,7 @@ public sealed class Day24StopDisableProducerIntegrationTests
             Environment.SetEnvironmentVariable("INTERNAL_JWT_SECRET", "test-secret-at-least-32-characters-long");
             builder.UseSetting("INTERNAL_JWT_SECRET", "test-secret-at-least-32-characters-long");
             builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
-            builder.UseSetting("REDIS_URL", "localhost:6379");
+            builder.UseSetting("REDIS_URL", "127.0.0.1:6379");
             builder.UseEnvironment("Testing");
             builder.ConfigureTestServices(services => { services.RemoveAll<IMediator>(); services.AddSingleton(mediator); });
         }
@@ -164,7 +164,7 @@ public sealed class Day24StopDisableProducerIntegrationTests
             builder.UseSetting("INTERNAL_JWT_SECRET", "test-secret-at-least-32-characters-long");
             builder.UseSetting("Trip:BackgroundWorkers:Enabled", "false");
             builder.UseSetting("ConnectionStrings:Default", VietRideWebApplicationFactory.ResolveConnectionString("postgres"));
-            builder.UseSetting("REDIS_URL", "localhost:6379");
+            builder.UseSetting("REDIS_URL", "127.0.0.1:6379");
             builder.UseEnvironment("Testing");
             builder.ConfigureTestServices(services =>
             {

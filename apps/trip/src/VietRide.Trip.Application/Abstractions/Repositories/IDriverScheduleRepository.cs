@@ -5,6 +5,15 @@ namespace VietRide.Trip.Application.Abstractions.Repositories;
 
 public interface IDriverScheduleRepository : IRepository<DriverSchedule, Guid>
 {
+    Task<IReadOnlyList<DriverSchedule>> ListByRouteIdsAsync(
+        Guid operatorId,
+        IReadOnlyCollection<Guid> routeIds,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<DriverSchedule>>(
+            QueryNoTracking()
+                .Where(schedule => schedule.OperatorId == operatorId && routeIds.Contains(schedule.RouteId))
+                .ToList());
+
     Task<DriverSchedule?> AcquireOwnedForUpdateAsync(
         Guid scheduleId,
         Guid operatorId,

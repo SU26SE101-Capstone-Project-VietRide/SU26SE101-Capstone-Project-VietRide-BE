@@ -34,6 +34,8 @@ namespace VietRide.Trip.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vehicle_status", new[] { "ACTIVE", "MAINTENANCE", "OFF_DUTY", "RETIRED" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_trip", "incident_category", new[] { "TRAFFIC_JAM", "VEHICLE_BREAKDOWN", "ACCIDENT", "WEATHER", "OTHER" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_trip", "outbox_event_status", new[] { "PENDING", "PUBLISHING", "PUBLISHED", "FAILED" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_trip", "route_change_proposal_status", new[] { "PENDING", "APPROVED", "REJECTED", "SUPERSEDED", "EXPIRED" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_trip", "route_change_proposal_type", new[] { "EXISTING", "CUSTOM" });
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "btree_gist");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
@@ -849,6 +851,207 @@ namespace VietRide.Trip.Infrastructure.Migrations
                             t.HasCheckConstraint("chk_routes_base_fare_non_negative", "base_fare >= 0");
 
                             t.HasCheckConstraint("chk_routes_origin_dest_different", "origin_station_id <> destination_station_id");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.RouteChangeProposal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid?>("ApprovedAlternativeRouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("approved_alternative_route_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("decided_by_user_id");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("snapshot_description");
+
+                    b.Property<Guid>("DestinationStationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("snapshot_destination_station_id");
+
+                    b.Property<int?>("EstimatedDurationMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("snapshot_estimated_duration_minutes");
+
+                    b.Property<Guid?>("IncidentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("incident_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("snapshot_name");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operator_id");
+
+                    b.Property<string>("PathPolyline")
+                        .HasColumnType("text")
+                        .HasColumnName("snapshot_path_polyline");
+
+                    b.Property<Guid>("ProposedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("proposed_by_user_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("rejection_reason");
+
+                    b.Property<string>("ResolutionCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("resolution_code");
+
+                    b.Property<Guid?>("SourceAlternativeRouteId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_alternative_route_id");
+
+                    b.Property<DateTimeOffset?>("SourceUpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("source_updated_at");
+
+                    b.Property<RouteChangeProposalStatus>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("vietride_trip.route_change_proposal_status")
+                        .HasDefaultValueSql("'PENDING'::vietride_trip.route_change_proposal_status")
+                        .HasColumnName("status");
+
+                    b.Property<Guid?>("SupersededByProposalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("superseded_by_proposal_id");
+
+                    b.Property<decimal?>("TotalDistanceKm")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("snapshot_total_distance_km");
+
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("trip_id");
+
+                    b.Property<RouteChangeProposalType>("Type")
+                        .HasColumnType("vietride_trip.route_change_proposal_type")
+                        .HasColumnName("type");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_route_change_proposals");
+
+                    b.HasIndex("ApprovedAlternativeRouteId")
+                        .HasDatabaseName("idx_route_change_proposals_approved_route")
+                        .HasFilter("approved_alternative_route_id IS NOT NULL");
+
+                    b.HasIndex("SourceAlternativeRouteId")
+                        .HasDatabaseName("idx_route_change_proposals_source")
+                        .HasFilter("source_alternative_route_id IS NOT NULL AND status = 'PENDING'");
+
+                    b.HasIndex("SupersededByProposalId")
+                        .HasDatabaseName("idx_route_change_proposals_superseded_by")
+                        .HasFilter("superseded_by_proposal_id IS NOT NULL");
+
+                    b.HasIndex("OperatorId", "Status", "CreatedAt")
+                        .IsDescending(false, false, true)
+                        .HasDatabaseName("idx_route_change_proposals_operator_status_created");
+
+                    b.HasIndex("ProposedByUserId", "CreatedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("idx_route_change_proposals_proposer_created");
+
+                    b.HasIndex("TripId", "Status")
+                        .HasDatabaseName("idx_route_change_proposals_trip_status");
+
+                    b.ToTable("route_change_proposals", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_route_change_proposals_reason", "char_length(btrim(reason)) BETWEEN 1 AND 500");
+
+                            t.HasCheckConstraint("chk_route_change_proposals_custom_geometry", "type <> 'CUSTOM' OR (snapshot_path_polyline IS NOT NULL AND char_length(btrim(snapshot_path_polyline)) > 0)");
+
+                            t.HasCheckConstraint("chk_route_change_proposals_rejection_reason", "rejection_reason IS NULL OR char_length(rejection_reason) <= 500");
+
+                            t.HasCheckConstraint("chk_route_change_proposals_source", "(type = 'EXISTING' AND source_alternative_route_id IS NOT NULL AND source_updated_at IS NOT NULL) OR (type = 'CUSTOM' AND source_alternative_route_id IS NULL AND source_updated_at IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.RouteChangeProposalStop", b =>
+                {
+                    b.Property<Guid>("ProposalId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("proposal_id");
+
+                    b.Property<Guid>("StopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stop_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<decimal?>("DistanceFromOriginKm")
+                        .HasColumnType("decimal(8,2)")
+                        .HasColumnName("distance_from_origin_km");
+
+                    b.Property<int>("EstimatedDurationFromOriginMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("estimated_duration_from_origin_minutes");
+
+                    b.Property<int>("OrderIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("order_index");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("ProposalId", "StopId")
+                        .HasName("pk_route_change_proposal_stops");
+
+                    b.HasIndex("ProposalId", "OrderIndex")
+                        .IsUnique()
+                        .HasDatabaseName("uq_route_change_proposal_stops_order");
+
+                    b.ToTable("route_change_proposal_stops", "vietride_trip", t =>
+                        {
+                            t.HasCheckConstraint("chk_route_change_proposal_stops_distance_non_negative", "distance_from_origin_km IS NULL OR distance_from_origin_km >= 0");
+
+                            t.HasCheckConstraint("chk_route_change_proposal_stops_duration_non_negative", "estimated_duration_from_origin_minutes >= 0");
+
+                            t.HasCheckConstraint("chk_route_change_proposal_stops_order_positive", "order_index > 0");
                         });
                 });
 
@@ -2283,6 +2486,57 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.RouteChangeProposal", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.AlternativeRoute", null)
+                        .WithMany()
+                        .HasForeignKey("ApprovedAlternativeRouteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_route_change_proposals_approved_alternative_route");
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Incident", null)
+                        .WithMany()
+                        .HasForeignKey("IncidentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_route_change_proposals_incident");
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.AlternativeRoute", null)
+                        .WithMany()
+                        .HasForeignKey("SourceAlternativeRouteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_route_change_proposals_source_alternative_route");
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.RouteChangeProposal", null)
+                        .WithMany()
+                        .HasForeignKey("SupersededByProposalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_route_change_proposals_superseded_by");
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Trip", null)
+                        .WithMany()
+                        .HasForeignKey("TripId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_route_change_proposals_trip");
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.RouteChangeProposalStop", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.RouteChangeProposal", null)
+                        .WithMany("Stops")
+                        .HasForeignKey("ProposalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_route_change_proposal_stops_proposal");
+
+                    b.HasOne("VietRide.Trip.Domain.Entities.Stop", null)
+                        .WithMany()
+                        .HasForeignKey("StopId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_route_change_proposal_stops_stop");
+                });
+
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.RouteStop", b =>
                 {
                     b.HasOne("VietRide.Trip.Domain.Entities.Route", null)
@@ -2483,6 +2737,11 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasForeignKey("VehicleTypeId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.RouteChangeProposal", b =>
+                {
+                    b.Navigation("Stops");
                 });
 
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.Trip", b =>

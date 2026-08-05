@@ -7,6 +7,7 @@ using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Events;
 using VietRide.Trip.Application.Features.Vehicles;
 using VietRide.Trip.Domain.Constants;
@@ -30,6 +31,7 @@ public sealed class SubstituteVehicleCommandHandler
     private readonly IIntegrationEventOutbox outbox;
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
+    private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
 
     public SubstituteVehicleCommandHandler(
         ITripRepository trips,
@@ -42,7 +44,8 @@ public sealed class SubstituteVehicleCommandHandler
         IIdentityInternalClient identity,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
-        IClock clock)
+        IClock clock,
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
     {
         this.trips = trips;
         this.vehicles = vehicles;
@@ -55,6 +58,7 @@ public sealed class SubstituteVehicleCommandHandler
         this.outbox = outbox;
         this.unitOfWork = unitOfWork;
         this.clock = clock;
+        this.routeChangeProposals = routeChangeProposals;
     }
 
     public async Task<SubstituteVehicleResponse> Handle(
@@ -175,6 +179,8 @@ public sealed class SubstituteVehicleCommandHandler
                 cancellationToken);
 
             oldTrip.SubstituteVehicle(disruptedAt, request.Reason);
+            if (routeChangeProposals is not null)
+                await routeChangeProposals.ExpirePendingForTripAsync(oldTrip.Id, disruptedAt, cancellationToken);
             await auditLogs.AddAsync(
                 TripAuditLog.Create(
                     Guid.NewGuid(),

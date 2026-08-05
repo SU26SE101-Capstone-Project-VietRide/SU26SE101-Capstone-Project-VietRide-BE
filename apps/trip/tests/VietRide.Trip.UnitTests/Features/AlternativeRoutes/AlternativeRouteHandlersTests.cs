@@ -47,24 +47,23 @@ public sealed class AlternativeRouteHandlersTests
     }
 
     [Fact]
-    public async Task CreateAlternativeRoute_ThrowsLimitExceeded_WhenTwoActiveAlternativesAlreadyExist()
+    public async Task CreateAlternativeRoute_AllowsMoreThanTwoActiveAlternatives()
     {
         var route = CreateRoute(OperatorId);
         var destination = CreateStation();
         var stop = CreateStop(OperatorId);
         var existingOne = AlternativeRoute.Create(route.Id, "Alt 1", destination.Id, null, null);
         var existingTwo = AlternativeRoute.Create(route.Id, "Alt 2", destination.Id, null, null);
+        var repository = new FakeAlternativeRouteRepository([existingOne, existingTwo]);
         var handler = CreateCreateHandler(
-            new FakeAlternativeRouteRepository([existingOne, existingTwo]),
+            repository,
             new FakeRouteRepository([route]),
             new FakeStationRepository([destination]),
             new FakeStopRepository([stop]));
 
-        var act = () => handler.Handle(CreateCommand(route.Id, destination.Id, stop.Id), CancellationToken.None);
+        await handler.Handle(CreateCommand(route.Id, destination.Id, stop.Id), CancellationToken.None);
 
-        var exception = await act.Should().ThrowAsync<CodedValidationException>();
-        exception.Which.ErrorCode.Should().Be("ALTERNATIVE_ROUTE_LIMIT_EXCEEDED");
-        exception.Which.Errors.Should().Contain(error => error.Field == "alternativeRoutes");
+        repository.Entities.Count(alternativeRoute => alternativeRoute.IsActive).Should().Be(3);
     }
 
     [Fact]
@@ -282,7 +281,7 @@ public sealed class AlternativeRouteHandlersTests
     }
 
     [Fact]
-    public async Task UpdateAlternativeRoute_ThrowsLimitExceeded_WhenReactivatingWouldExceedMaxActiveRoutes()
+    public async Task UpdateAlternativeRoute_AllowsReactivationWithMoreThanTwoActiveRoutes()
     {
         var route = CreateRoute(OperatorId);
         var destination = CreateStation();
@@ -295,7 +294,7 @@ public sealed class AlternativeRouteHandlersTests
             new FakeStationRepository([destination]),
             new FakeStopRepository([]));
 
-        var act = () => handler.Handle(new UpdateAlternativeRouteCommand(
+        var result = await handler.Handle(new UpdateAlternativeRouteCommand(
             OperatorId,
             inactiveAlternativeRoute.Id,
             null,
@@ -312,8 +311,7 @@ public sealed class AlternativeRouteHandlersTests
             false,
             null), CancellationToken.None);
 
-        var exception = await act.Should().ThrowAsync<CodedValidationException>();
-        exception.Which.ErrorCode.Should().Be("ALTERNATIVE_ROUTE_LIMIT_EXCEEDED");
+        result.IsActive.Should().BeTrue();
     }
 
     [Fact]
@@ -517,9 +515,6 @@ public sealed class AlternativeRouteHandlersTests
             Entities.Add(entity);
             return Task.FromResult(entity);
         }
-
-        public Task<int> CountActiveByRouteAsync(Guid routeId, CancellationToken cancellationToken)
-            => Task.FromResult(Entities.Count(alternativeRoute => alternativeRoute.RouteId == routeId && alternativeRoute.IsActive));
 
         public Task<bool> ExistsStopAsync(Guid alternativeRouteId, Guid stopId, CancellationToken cancellationToken)
             => Task.FromResult(Stops.Any(stop => stop.AlternativeRouteId == alternativeRouteId && stop.StopId == stopId));
