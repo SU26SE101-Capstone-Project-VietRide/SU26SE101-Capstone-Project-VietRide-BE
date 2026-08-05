@@ -13,7 +13,6 @@ import { ApproachingAlertService } from '../approaching-alert/approaching-alert.
 import type { TrackingUser } from '../auth/tracking-user.types';
 import type { UserJwtVerifier } from '../auth/user-jwt.verifier';
 import type { TrackingAuthorizationAdapter } from '../authorization/tracking-authorization.adapter';
-import type { BookingCreatedEvent } from '@vietride/contracts';
 import { EtaService } from '../eta/eta.service';
 import { OffRouteService } from '../off-route/off-route.service';
 import { TripDelayService, type TripDelayEtaUpdate } from '../trip-delay/trip-delay.service';
@@ -186,7 +185,7 @@ export class LocationGateway implements OnGatewayInit {
     };
   }
 
-  emitBookingCreated(event: BookingCreatedEvent): void {
+  emitBookingCreated(event: { tripId: string }): void {
     this.server.to(trackingTripCrewRoom(event.tripId)).emit('booking:created', event);
   }
 

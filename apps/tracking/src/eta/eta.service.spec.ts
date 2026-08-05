@@ -8,7 +8,6 @@ import { ROUTE_GEOMETRY_PROVIDER } from '../off-route/off-route.constants';
 import type { RouteGeometryProvider } from '../off-route/route-geometry.provider';
 import {
   ETA_CACHE_TTL_SECONDS,
-  ETA_STOPS_ONLY_CACHE_TTL_SECONDS,
   ETA_STATE_TTL_SECONDS,
   GOOGLE_ETA_PROVIDER,
   LOCAL_ETA_PROVIDER,
@@ -275,7 +274,12 @@ describe('EtaService', () => {
         status: 'PENDING',
       }),
     ]);
-    seedState({ latitude: 10.7627, longitude: 106.6602, etaMinutes: 30 });
+    seedState({
+      latitude: 10.7627,
+      longitude: 106.6602,
+      etaMinutes: 30,
+      lastProviderCallAt: new Date(Date.now() - 10_000).toISOString(),
+    });
 
     const result = await service.handleGpsUpdate(createGps());
 
@@ -292,7 +296,21 @@ describe('EtaService', () => {
     );
   });
 
-  it('uses the 30-second fallback cache TTL even when Trip stop status is absent', async () => {
+  it('does not call a provider for a same-stop cache miss before the minimum interval', async () => {
+    seedState({
+      latitude: 10.7627,
+      longitude: 106.6602,
+      etaMinutes: 30,
+      lastProviderCallAt: new Date(Date.now() - 10_000).toISOString(),
+    });
+
+    await expect(service.handleGpsUpdate(createGps())).resolves.toBeNull();
+
+    expect(googleProvider.calculate).not.toHaveBeenCalled();
+    expect(localProvider.calculate).not.toHaveBeenCalled();
+  });
+
+  it('keeps the 60-second ETA cache TTL when geometry uses the stops-only fallback', async () => {
     routePeek.mockReturnValue({
       tripId: TEST_TRIP_ID,
       geometrySource: 'STOPS_ONLY',
@@ -309,11 +327,13 @@ describe('EtaService', () => {
       trackingEtaKey(TEST_TRIP_ID, TEST_STOP_ID),
       expect.any(String),
       'EX',
-      ETA_STOPS_ONLY_CACHE_TTL_SECONDS,
+      ETA_CACHE_TTL_SECONDS,
     );
   });
 
-  function seedState(overrides: Partial<Record<'latitude' | 'longitude' | 'etaMinutes', number>>): void {
+  function seedState(
+    overrides: Partial<Record<'latitude' | 'longitude' | 'etaMinutes', number>> & { lastProviderCallAt?: string },
+  ): void {
     store.set(trackingEtaStateKey(TEST_TRIP_ID), JSON.stringify({
       stopId: TEST_STOP_ID,
       stopSequence: 1,

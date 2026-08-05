@@ -287,14 +287,18 @@ describe('TrackingDataController REST fallback (e2e)', () => {
       },
     });
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
-    const response = await getJson<ApiEnvelope<{
+    const response = await fetch(`http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = (await response.json()) as ApiEnvelope<{
       geometry: null;
       originStation: { stationId: string };
-    }>>(`/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`, token);
+    }>;
 
     expect(response.status).toBe(200);
-    expect(response.body.data?.geometry).toBeNull();
-    expect(response.body.data?.originStation.stationId).toBe('77777777-7777-4777-8777-777777777777');
+    expect(response.headers.get('cache-control')).toBe('private, max-age=30');
+    expect(body.data?.geometry).toBeNull();
+    expect(body.data?.originStation.stationId).toBe('77777777-7777-4777-8777-777777777777');
   });
 
   it.each([

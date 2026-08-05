@@ -50,6 +50,7 @@ interface CachedEta {
 interface TripDelayState {
   tripId: string;
   stopId: string;
+  stopSequence?: number;
   delayStatus: Exclude<TripDelayStatus, 'UNKNOWN'>;
   delayMinutes: number;
   evaluatedAt: string;
@@ -61,6 +62,8 @@ interface DelayEvaluation {
   payload?: TripDelayedPayload;
   eventCreated: boolean;
 }
+
+type DelayEvaluationMode = 'background' | 'realtime';
 
 const TERMINAL_STOP_STATUSES = new Set(['ARRIVED', 'SKIPPED']);
 const RELEASE_DELAY_LOCK_SCRIPT =
@@ -111,7 +114,7 @@ export class TripDelayService {
       };
       const evaluation = await this.withDelayStateLock(
         eta.tripId,
-        () => this.evaluateStopEta(stop, cachedEta),
+        () => this.evaluateStopEta(stop, cachedEta, 'realtime'),
       );
       if (!evaluation) return await this.buildUnknownUpdate(eta);
 
@@ -143,7 +146,7 @@ export class TripDelayService {
 
       const evaluation = await this.withDelayStateLock(
         tripId,
-        () => this.evaluateStopEta(stop, eta),
+        () => this.evaluateStopEta(stop, eta, 'background'),
       );
       if (evaluation?.eventCreated) created += 1;
     }
@@ -170,31 +173,49 @@ export class TripDelayService {
     }
   }
 
-  private async readDelayState(tripId: string, stopId: string): Promise<TripDelayState | null> {
-    const stateKeys = [
-      trackingTripDelayStateKey(tripId, stopId),
-      trackingTripDelayStateKey(tripId),
-    ];
-    for (const stateKey of stateKeys) {
-      const raw = await this.redis.getClient().get(stateKey);
-      if (!raw) continue;
+  private async readRealtimeDelayState(
+    tripId: string,
+    requestedStopId: string,
+  ): Promise<TripDelayState | null> {
+    const pointer = await this.readDelayStateAtKey(trackingTripDelayStateKey(tripId), tripId);
+    if (pointer) return pointer;
 
-      try {
-        const parsed = JSON.parse(raw) as Partial<TripDelayState>;
-        if (
-          parsed.tripId === tripId &&
-          parsed.stopId === stopId &&
-          (parsed.delayStatus === 'DELAYED' || parsed.delayStatus === 'ON_TIME') &&
-          typeof parsed.delayMinutes === 'number' &&
-          Number.isFinite(parsed.delayMinutes) &&
-          parsed.delayMinutes >= 0 &&
-          typeof parsed.evaluatedAt === 'string'
-        ) {
-          return parsed as TripDelayState;
-        }
-      } catch {
-        // Try the legacy trip-level key before treating the state as unknown.
+    return this.readDelayStateAtKey(
+      trackingTripDelayStateKey(tripId, requestedStopId),
+      tripId,
+      requestedStopId,
+    );
+  }
+
+  private async readDelayStateAtKey(
+    key: string,
+    tripId: string,
+    expectedStopId?: string,
+  ): Promise<TripDelayState | null> {
+    const raw = await this.redis.getClient().get(key);
+    if (!raw) return null;
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<TripDelayState>;
+      if (
+        parsed.tripId === tripId &&
+        typeof parsed.stopId === 'string' &&
+        (expectedStopId === undefined || parsed.stopId === expectedStopId) &&
+        (parsed.stopSequence === undefined || (
+          typeof parsed.stopSequence === 'number' &&
+          Number.isInteger(parsed.stopSequence) &&
+          parsed.stopSequence >= 0
+        )) &&
+        (parsed.delayStatus === 'DELAYED' || parsed.delayStatus === 'ON_TIME') &&
+        typeof parsed.delayMinutes === 'number' &&
+        Number.isFinite(parsed.delayMinutes) &&
+        parsed.delayMinutes >= 0 &&
+        typeof parsed.evaluatedAt === 'string'
+      ) {
+        return parsed as TripDelayState;
       }
+    } catch {
+      return null;
     }
     return null;
   }
@@ -202,6 +223,7 @@ export class TripDelayService {
   private async evaluateStopEta(
     stop: TripStopSnapshot,
     eta: CachedEta,
+    mode: DelayEvaluationMode,
   ): Promise<DelayEvaluation | null> {
     if (!stop.estimatedArrivalTime) return null;
 
@@ -216,10 +238,13 @@ export class TripDelayService {
     const delayStatus: Exclude<TripDelayStatus, 'UNKNOWN'> =
       delayMinutes > TRIP_DELAY_THRESHOLD_MINUTES ? 'DELAYED' : 'ON_TIME';
     const evaluatedAt = new Date().toISOString();
-    const previous = await this.readDelayState(eta.tripId, eta.stopId);
+    const previous = mode === 'realtime'
+      ? await this.readRealtimeDelayState(eta.tripId, eta.stopId)
+      : null;
     const state: TripDelayState = {
       tripId: eta.tripId,
       stopId: eta.stopId,
+      stopSequence: stop.sequence,
       delayStatus,
       delayMinutes,
       evaluatedAt,
@@ -234,7 +259,22 @@ export class TripDelayService {
         TRIP_DELAY_STATE_TTL_SECONDS,
       );
 
-    const statusTransition = this.resolveTransition(previous, state);
+    const staleRealtimeState = mode === 'realtime' && previous?.stopSequence !== undefined
+      && stop.sequence < previous.stopSequence;
+    if (mode === 'realtime' && !staleRealtimeState) {
+      await this.redis
+        .getClient()
+        .set(
+          trackingTripDelayStateKey(eta.tripId),
+          JSON.stringify(state),
+          'EX',
+          TRIP_DELAY_STATE_TTL_SECONDS,
+        );
+    }
+
+    const statusTransition = mode === 'realtime' && !staleRealtimeState
+      ? this.resolveTransition(previous, state)
+      : undefined;
     if (delayStatus !== 'DELAYED') {
       return {
         state,
@@ -243,7 +283,7 @@ export class TripDelayService {
       };
     }
 
-    const windowId = this.resolveWindowId(dynamicEtaMs);
+    const windowId = this.resolveWindowId(new Date(evaluatedAt).getTime());
     const dedupeKey = `trip-delay:${eta.tripId}:${eta.stopId}:${windowId}`;
     const payload: TripDelayedPayload = {
       tripId: eta.tripId,
@@ -259,13 +299,26 @@ export class TripDelayService {
     };
 
     let eventCreated = false;
+    let markerExists = false;
     try {
-      eventCreated = await this.createOutboxEvent(payload);
+      markerExists = (await this.redis.getClient().get(
+        trackingTripDelayedDedupeKey(eta.tripId, eta.stopId, windowId),
+      )) === '1';
     } catch (error) {
       this.logger.warn(
         { err: error, tripId: eta.tripId, stopId: eta.stopId, dedupeKey },
-        'Trip delayed Outbox insert failed; retaining delay state for retry',
+        'Trip delayed Redis marker read failed; falling back to durable Outbox dedupe',
       );
+    }
+    if (!markerExists) {
+      try {
+        eventCreated = await this.createOutboxEvent(payload);
+      } catch (error) {
+        this.logger.warn(
+          { err: error, tripId: eta.tripId, stopId: eta.stopId, dedupeKey },
+          'Trip delayed Outbox insert failed; retaining delay state for retry',
+        );
+      }
     }
     if (eventCreated) {
       await this.redis
@@ -358,7 +411,7 @@ export class TripDelayService {
   }
 
   private async buildUnknownUpdate(eta: EtaUpdateEvent): Promise<TripDelayEtaUpdate> {
-    const previous = await this.readDelayState(eta.tripId, eta.stopId).catch(() => null);
+    const previous = await this.readRealtimeDelayState(eta.tripId, eta.stopId).catch(() => null);
     return {
       ...eta,
       delayed: previous?.delayStatus === 'DELAYED',

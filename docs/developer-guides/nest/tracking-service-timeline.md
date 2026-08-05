@@ -409,8 +409,8 @@ Redis state, Google Routes và delay recovery, vẫn giữ toàn bộ field cũ 
   và stop lên polyline, tính khoảng cách tích lũy, giữ sequence/progress không lùi; không dùng
   Haversine làm ETA chính. Google Routes là primary khi `GOOGLE_ROUTES_ENABLED=true`, Local là
   fallback; lỗi Google liên tiếp ba lần mở cooldown 300 giây.
-- Redis ETA: cache `tracking:eta:{tripId}:{stopId}` 60 giây (30 giây khi geometry là `STOPS_ONLY`),
-  ETA state 24 giờ, delay state 24 giờ, lock từng trip/stop và delay-state lock,
+- Redis ETA: cache `tracking:eta:{tripId}:{stopId}` 60 giây; geometry fallback `STOPS_ONLY` được
+  refresh sau 30 giây. ETA state 24 giờ, delay state 24 giờ, lock từng trip/stop và delay-state lock,
   khoảng cách di chuyển 500 m hoặc ETA dưới 15 phút, và tối thiểu 60 giây giữa hai lần gọi provider.
 - Cấu hình: `GOOGLE_ROUTES_API_KEY` bắt buộc khi bật flag; E2E mặc định dùng fake Google HTTP server.
   Real Google E2E chỉ chạy khi `RUN_REAL_GOOGLE_E2E=true`.

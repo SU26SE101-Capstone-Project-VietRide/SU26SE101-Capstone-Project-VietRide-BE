@@ -4420,8 +4420,10 @@ Response `200` dùng ADR 0004 envelope với `data`:
 - `originStation` và `destinationStation` nullable khi station chưa có tọa độ hợp lệ.
 - Geometry loại tọa độ ngoài range/trùng liên tiếp, giản lược deterministic tối đa 1.000 điểm và
   luôn giữ điểm đầu/cuối. Public payload không chứa `alertRecipientUserIds`.
-- Response đặt `Cache-Control: private, max-age=600`, `Vary: Authorization` và strong `ETag`
-  tính từ DTO public sau sanitize/simplify. `If-None-Match` khớp trả `304` body rỗng sau khi auth.
+- Response đặt `Cache-Control: private, max-age=600` khi có geometry `ROUTE_POLYLINE`; fallback
+  `geometry: null` đặt `private, max-age=30`. Cả hai response đều đặt `Vary: Authorization` và
+  strong `ETag` tính từ DTO public sau sanitize/simplify. `If-None-Match` khớp trả `304` body rỗng sau
+  khi auth.
 - Errors: `400 VALIDATION_FAILED`; `401 UNAUTHORIZED`; `403 ACCESS_DENIED`; `404 TRIP_NOT_FOUND`;
   `503 TRACKING_AUTH_UNAVAILABLE`; `503 TRACKING_ROUTE_CONTEXT_UNAVAILABLE`.
 
