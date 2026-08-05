@@ -159,7 +159,9 @@ npx nx run tracking:build
 - Mỗi endpoint phải check trip authorization qua `TrackingAuthorizationAdapter`.
 - `latest` đọc Redis `tracking:latest:{tripId}`.
 - `trail` đọc PostgreSQL `gps_trails`, giới hạn time range hoặc pagination.
-- `eta` đọc Redis `tracking:eta:{tripId}:{stopId}` theo dữ liệu cached.
+- `eta` đọc Redis `tracking:eta:{tripId}:{stopId}` theo dữ liệu cached và ghép delay state chỉ khi
+  `stopId` của state trùng stop được hỏi; nếu chưa chứng minh được trạng thái thì trả
+  `delayStatus=UNKNOWN`, `delayed=null`, `delayMinutes=null`.
 - E2E:
   - missing/invalid auth -> 401.
   - unauthorized trip -> 403.
@@ -295,10 +297,13 @@ npx nx run tracking:build
   - chạy repeat mỗi 5 phút.
   - đọc dynamic ETA Redis.
   - so với static ETA từ `TripDataProvider`.
-  - nếu dynamic ETA - static ETA > 30 phút -> Outbox `TripDelayed` voi `etaNew`, `delayMinutes`, `userIds?` neu provider biet recipients.
-- Dedupe delayed event theo trip/stop/window để tránh spam.
+- nếu dynamic ETA - static ETA > 30 phút -> Outbox `TripDelayed` với `etaNew`, `delayMinutes`,
+  `userIds?` nếu provider biết recipients.
+- Dedupe delayed event theo `tripId/stopId/window` bằng unique `dedupeKey` của Outbox; Redis chỉ
+  là hot cache và chỉ ghi marker sau khi insert Outbox thành công.
 - Broadcast Socket.IO:
-  - `trip:statusChanged` hoặc `eta:update` kèm delayed flag, theo contract hiện tại.
+  - `eta:update` giữ `delayed` boolean và bổ sung `delayStatus`/`delayMinutes`.
+  - `trip:statusChanged` chỉ phát khi transition: `DELAYED` hoặc `DELAY_CLEARED`.
 - E2E/unit:
   - delay <= 30 phút -> không publish.
   - delay > 30 phút -> publish.
@@ -392,7 +397,7 @@ npx nx run tracking:build
 
 **Thời lượng:** 1 ngày
 **Mục tiêu:** Ổn định đường GPS realtime và hoàn tất chấp nhận production cho route snap, ETA,
-Redis state và Google Routes mà không thay đổi payload Socket/REST công khai.
+Redis state, Google Routes và delay recovery, vẫn giữ toàn bộ field cũ và chỉ bổ sung field delay.
 
 ### Scope
 
@@ -404,10 +409,13 @@ Redis state và Google Routes mà không thay đổi payload Socket/REST công k
   và stop lên polyline, tính khoảng cách tích lũy, giữ sequence/progress không lùi; không dùng
   Haversine làm ETA chính. Google Routes là primary khi `GOOGLE_ROUTES_ENABLED=true`, Local là
   fallback; lỗi Google liên tiếp ba lần mở cooldown 300 giây.
-- Redis ETA: cache `tracking:eta:{tripId}:{stopId}` 60 giây, state 24 giờ, lock từng trip/stop,
+- Redis ETA: cache `tracking:eta:{tripId}:{stopId}` 60 giây; geometry fallback `STOPS_ONLY` được
+  refresh sau 30 giây. ETA state 24 giờ, delay state 24 giờ, lock từng trip/stop và delay-state lock,
   khoảng cách di chuyển 500 m hoặc ETA dưới 15 phút, và tối thiểu 60 giây giữa hai lần gọi provider.
 - Cấu hình: `GOOGLE_ROUTES_API_KEY` bắt buộc khi bật flag; E2E mặc định dùng fake Google HTTP server.
   Real Google E2E chỉ chạy khi `RUN_REAL_GOOGLE_E2E=true`.
+- Khi Google/Trip/Redis không đánh giá được delay, Tracking trả `UNKNOWN`, giữ trạng thái tốt gần
+  nhất và không phát `DELAY_CLEARED` giả. Client reconnect dùng REST `/eta` để khôi phục trạng thái.
 - Tương thích Trip: chấp nhận và chuẩn hóa `null` cho `alertRecipientUserIds`, `estimatedArrivalTime`
   và các field tùy chọn liên quan; unit test phải dùng JSON envelope thực tế của Trip.
 - Swagger trên production: chỉ đăng ký `/docs` và `/docs-json` khi `TRACKING_SWAGGER_ENABLED=true`.

@@ -73,6 +73,13 @@ public sealed class CreateBookingCommandValidator : AbstractValidator<CreateBook
             RuleFor(x => x.ShuttlePickup!.Latitude).InclusiveBetween(-90m, 90m);
             RuleFor(x => x.ShuttlePickup!.Longitude).InclusiveBetween(-180m, 180m);
         });
+
+        When(x => x.ShuttleDropoff is not null, () =>
+        {
+            RuleFor(x => x.ShuttleDropoff!.Address).NotEmpty().MaximumLength(500);
+            RuleFor(x => x.ShuttleDropoff!.Latitude).InclusiveBetween(-90m, 90m);
+            RuleFor(x => x.ShuttleDropoff!.Longitude).InclusiveBetween(-180m, 180m);
+        });
     }
 
     private static bool HaveDistinctSeatNumbers(IReadOnlyList<SeatRequest> seats)

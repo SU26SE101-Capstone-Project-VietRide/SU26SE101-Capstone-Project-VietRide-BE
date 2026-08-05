@@ -588,7 +588,9 @@ public sealed class StationMergeSerializationTests
             new TripStationSnapshot(destinationStationId, "Destination"),
             [],
             new TripSeatSummary(40, 40),
-            returnRouteId);
+            returnRouteId,
+            DriverUserId: Guid.NewGuid(),
+            AssistantUserId: Guid.NewGuid());
 
     private static async Task<Guid> SeedTerminalBookingAsync(
         TestDatabase database,

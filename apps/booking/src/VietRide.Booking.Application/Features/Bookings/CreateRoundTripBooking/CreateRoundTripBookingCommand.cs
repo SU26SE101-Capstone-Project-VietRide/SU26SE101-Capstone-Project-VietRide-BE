@@ -43,9 +43,15 @@ public sealed record CreateRoundTripBookingCommand : IRequest<CreateRoundTripBoo
         Guid? DropoffStationId,
         Guid? DropoffStopId,
         IReadOnlyList<RoundTripSeatRequest> Seats,
-        RoundTripShuttlePickupCommand? ShuttlePickup = null);
+        RoundTripShuttlePickupCommand? ShuttlePickup = null,
+        RoundTripShuttleDropoffCommand? ShuttleDropoff = null);
 
     public sealed record RoundTripShuttlePickupCommand(
+        string Address,
+        decimal Latitude,
+        decimal Longitude);
+
+    public sealed record RoundTripShuttleDropoffCommand(
         string Address,
         decimal Latitude,
         decimal Longitude);

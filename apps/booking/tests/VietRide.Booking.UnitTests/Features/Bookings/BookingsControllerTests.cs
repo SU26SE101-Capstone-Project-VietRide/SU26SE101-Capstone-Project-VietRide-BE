@@ -67,6 +67,18 @@ public sealed class BookingsControllerTests
             .Should().Be(typeof(ApiResponse<GetBookingStatusResult>));
     }
 
+    [Theory]
+    [InlineData(nameof(BookingsController.CreateBooking))]
+    [InlineData(nameof(BookingsController.CreateRoundTripBooking))]
+    public void CreateEndpoints_DocumentUpstreamUnavailable(string methodName)
+    {
+        var endpoint = typeof(BookingsController).GetMethod(methodName)!;
+
+        endpoint.GetCustomAttributes<ProducesResponseTypeAttribute>()
+            .Select(attribute => attribute.StatusCode)
+            .Should().Contain(StatusCodes.Status502BadGateway);
+    }
+
     private static BookingsController CreatePassengerController(ISender sender, Guid passengerUserId)
         => new(sender)
         {

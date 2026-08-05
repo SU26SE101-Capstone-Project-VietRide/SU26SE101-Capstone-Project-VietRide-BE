@@ -1547,6 +1547,13 @@ updates the column.
 | | `SHUTTLE_PICKUP_LOCKED` | 409 | Edit pickup khi Booking còn shuttle intent active |
 | | `SHUTTLE_REQUEST_SET_CHANGED` | 409 | Booking subset đã đổi trạng thái trong lúc operator dispatch |
 | | `SHUTTLE_CAPACITY_EXCEEDED` | 409 | Tổng ticket của subset vượt sức chứa vehicle |
+| | `SHUTTLE_DISTANCE_EXCEEDED` | 422 | Road distance snapshot lớn hơn 5.000 mét; đúng 5.000 mét vẫn hợp lệ |
+| | `SHUTTLE_DISTANCE_UNAVAILABLE` | 503 | Google Routes thiếu key, timeout, upstream error hoặc response không hợp lệ |
+| | `SHUTTLE_REQUEST_NOT_CANCELLABLE` | 409 | Request đã assign hoặc không còn ở trạng thái chưa assign |
+| | `SHUTTLE_TRIP_INVALID_STATE` | 409 | ShuttleTrip không cho phép lifecycle transition được yêu cầu |
+| | `SHUTTLE_PASSENGER_INVALID_STATE` | 409 | ShuttlePassenger không cho phép lifecycle transition được yêu cầu |
+| | `SHUTTLE_PASSENGERS_INCOMPLETE` | 409 | Nhóm passenger shuttle chưa ở trạng thái phù hợp để hoàn tất hoặc huỷ thao tác |
+| | `SHUTTLE_PASSENGER_NOT_FOUND` | 404 | Không tìm thấy passenger/service order trong ShuttleTrip |
 | | `SHUTTLE_DRIVER_CONFLICT` | 409 | Driver overlap main Trip hoặc ShuttleTrip khác |
 | | `SHUTTLE_VEHICLE_CONFLICT` | 409 | Vehicle overlap main Trip hoặc ShuttleTrip khác |
 | | `DRIVER_NOT_FOUND` | 404 | Driver không active, không cùng operator hoặc thiếu snapshot liên hệ bắt buộc |
@@ -1966,6 +1973,9 @@ with `requireShuttleModule=false`; neither endpoint depends on `enableShuttle`.
 subscription → `402 SUBSCRIPTION_EXPIRED`, disabled Shuttle module → `403
 SUBSCRIPTION_MODULE_DISABLED` (Shuttle only), non-eligible operator/role → `403 FORBIDDEN`, and
 Identity unavailable/unusable response → `503 UPSTREAM_UNAVAILABLE`.
+Mọi mutation Shuttle (cancel request, cancel ShuttleTrip, driver start/pickup/delivered/no-show/
+complete) áp dụng lại cùng hai guard này; replay lifecycle chỉ phát Outbox khi domain thực sự
+chuyển trạng thái.
 
 ### 6.11 Day-40 Identity per-user serialization
 
@@ -2067,6 +2077,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | Method + Path | Caller | Mục đích |
 |---|---|---|
 | `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves ordinary Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`, then applies the matching active operator holiday surcharge by the Trip departure ICT date. Omitted preserves persisted legacy snapshot semantics and applies no new surcharge. No event/projection is added. |
+| `GET /internal/v1/trips/{tripId}/shuttle-road-distance?direction=&latitude=&longitude=` | Booking | Internal-JWT-only road distance to origin Station (`INBOUND_TO_STATION`) or destination Station (`OUTBOUND_FROM_STATION`). Trip validates Station active/supportsShuttle/coordinates and calls Google Routes `travelMode=DRIVE`; raw success is `{ distanceMeters }`. Google/configuration/timeout/invalid response maps to `503 SHUTTLE_DISTANCE_UNAVAILABLE`; direction/coordinates/station eligibility maps to `422`. |
 | `POST /internal/v1/trips/summaries/batch` | Parcel | Read-only `{ tripIds }`, 1..100 distinct UUIDs; one Trip query returns route/station/vehicle/crew/timing summaries; missing IDs are omitted |
 | `POST /internal/v1/operators/vehicle-counts/batch` | Payment | Read-only `{ operatorIds }`, 1..100 distinct UUIDs; raw current vehicle counts by operator |
 | `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Payment | Raw ICT-month trip/completed-trip aggregates grouped by route for the explicit operator tenant |
@@ -2082,7 +2093,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `POST /internal/v1/trips/{sourceTripId}/cargo/transfer` | Parcel | Exact `{parcelId,targetTripId,targetState:RESERVED\|LOADED,allowCapacityOverflow}`; lock source/target by ascending UUID and atomically release source plus reserve/load target in one Trip-local transaction. `RESERVED` always enforces capacity; `LOADED` permits explicit overflow only for approved substitution recovery. |
 | `GET /internal/v1/trips/{tripId}/route-geometry` | Tracking | Additive route-map context `{tripId,geometrySource:ROUTE_POLYLINE\|STOPS_ONLY,points,originStation?,intermediateStops,destinationStation?,alertRecipientUserIds?}`. Polyline malformed/null dùng ordered stop fallback; public Tracking chỉ render line cho `ROUTE_POLYLINE`. |
 | `GET /internal/v1/trips/{tripId}/route-stops` | Tracking | Ordered ETA stops gồm additive `status`; Tracking vẫn chấp nhận thiếu/null status khi rolling deploy. |
-| `GET /internal/v1/shuttle-trips/{shuttleTripId}/tracking-context` | Tracking | Additive `isOwnPickup` theo queried `userId` và public station metadata. Passenger allowed khi own manifest là `PENDING\|PICKED_UP`; full stops chỉ là internal input cho Driver/ETA và không được phát public. |
+| `GET /internal/v1/shuttle-trips/{shuttleTripId}/tracking-context` | Tracking | Additive `direction`, ShuttleTrip `status`, `isOwnPickup` theo queried `userId` và public station metadata. Passenger allowed khi own manifest là `PENDING\|PICKED_UP`; full stops chỉ là internal input cho Driver/ETA và không được phát public. Outbound Station stop chuyển terminal sau khi ShuttleTrip rời bến để ETA tiến tới passenger đầu tiên. |
 
 #### Booking Service
 
@@ -2159,7 +2170,8 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `identity.operator.approved` | Identity | Payment (init OperatorWallet) | `{ eventId, operatorId, approvedAt }`; new approvals generate an eventId in the approval transaction; legacy backfill reuses the stable eventId persisted in `operator_wallet_backfill_markers` |
 | `identity.operator.suspended` | Identity | Trip, Booking | `{ operatorId, suspendedAt }` |
 | `identity.firebase_session.revoke_requested` | Identity | Identity | `{ eventId, occurredAt, userId, reason }`; user lock emits one request, operator suspend emits one per scoped `OPERATOR_ADMIN`; consumer calls Firebase refresh-token revocation, treats missing Firebase users as no-op, and lets transient failures retry/DLQ |
-| `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttlePickup?: { address, latitude, longitude } }` |
+| `booking.booking.created` | Booking | Tracking, Notification | Exact `{ eventId, occurredAt, bookingId, bookingCode, tripId, status: "CONFIRMED", ticketCodes[], passengerCount, pickup: { stationId, stopId, address }, dropoff: { stationId, stopId, address }, driverUserId, assistantUserId }`; emitted atomically with the CONFIRMED transition; `eventId == OutboxMessage.Id == RabbitMQ MessageId`. |
+| `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttleRequests?: [{ direction, address, latitude, longitude, roadDistanceMeters }], shuttlePickup?: { address, latitude, longitude } }`; `shuttlePickup` is legacy inbound compatibility. |
 | `booking.booking.cancelled` | Booking | Notification, Trip, Payment, Booking | `{ eventId, occurredAt, bookingId, userId, refundAmount, refundOverride, cancellationReason, bookingCode?, ticketCodes?, ticketCount? }`. When `cancellationReason=OPERATOR_DISRUPTED_IN_PROGRESS`, Notification MUST suppress the generic cancellation message; Payment/Trip/Booking still process the fact. |
 | `booking.booking.disrupted` | Booking | Notification | Exact `{ eventId, occurredAt, bookingId, bookingCode, tripId, operatorId, userId, traveledRatio, refundAmount, cancellationReason }`; sole passenger-facing notification fact for no-substitution disruption. Payment MUST NOT bind it; canonical `booking.booking.cancelled` remains the sole Booking refund trigger. Booking writes status plus both facts atomically with distinct stable EventIds, each equal to its own Outbox id/MessageId. |
 | `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount, bookingCode?, ticketCodes?, ticketCount? }` |
@@ -2199,12 +2211,13 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
 | `trip.stop.arrived` | Trip | Notification | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, actorUserId, actualArrivalTime }`; Trip và TripStop lock theo thứ tự, `PENDING -> ARRIVED`, static ETA không đổi, business row + Outbox commit atomic; Parcel reads the Trip snapshot synchronously and has no arrival projection |
 | `trip.destination.arrived` | Trip | — (no v1 consumer) | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ; event does not drive Parcel state |
-| `trip.trip.delayed` | Tracking | Notification | `{ eventId, occurredAt, tripId, stopId, stopName, delayMinutes, etaNew }`; Notification resolves active passengers and operator admins |
+| `trip.trip.delayed` | Tracking | Notification | `{ eventId, occurredAt, tripId, stopId, delayMinutes, etaNew, staticEstimatedArrivalTime, dynamicEstimatedArrivalTime, userIds? }`; one durable Outbox fact per `tripId/stopId/5-minute-window`, deduped by unique `dedupeKey`; Notification resolves active passengers and operator admins |
 | `trip.incident.reported` | Trip | Notification | `{ eventId, occurredAt, incidentId, tripId, operatorId, reporterUserId, category, description?, photoUrls?, latitude?, longitude?, reportedAt }`; optional fields được omit khi null; Notification resolve active `OPERATOR_ADMIN` theo `operatorId` |
 | `trip.cargo.threshold_crossed` | Trip | Notification | Exact `{ eventId, occurredAt, tripId, operatorId, loadedWeightKg, maxCargoWeightKg, percentFull }`; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
-| `trip.shuttle.assigned` | Trip | Notification | `{ shuttleTripId, mainTripId, bookingId, passengerUserId, ticketIds, pickupOrder, scheduledDepartureTime, scheduledEndTime, driver: { userId, displayName, phone }, vehicle: { id, licensePlate } }` |
+| `trip.shuttle.assigned` | Trip | Notification | `{ eventId?, shuttleTripId, mainTripId, operatorId?, bookingId, passengerUserId, direction, ticketIds, pickupOrder, scheduledDepartureTime, scheduledEndTime, driver: { userId, displayName, phone }, vehicle: { id, licensePlate } }` |
 | `trip.shuttle.warning_issued` | Trip | Notification | `{ mainTripId, operatorId, alertType: WARNING_120|WARNING_60, pendingBookingCount, pendingPassengerCount, hardCutoffAt }` |
 | `trip.shuttle.unfulfilled` | Trip | Notification | `{ mainTripId, bookingId, passengerUserId, stationId, reason: AUTO_UNFULFILLED_CUTOFF }` |
+| `trip.shuttle.cancelled` · `trip.shuttle.picked_up` · `trip.shuttle.delivered` · `trip.shuttle.no_show` · `trip.shuttle.completed` | Trip | Notification | Common `{ eventId, occurredAt, shuttleTripId?, mainTripId, operatorId, bookingId?, passengerUserId?, direction, serviceAddress?, serviceOrder?, status, roadDistanceMeters?, reason? }`; Notification dedupes by `eventId/MessageId`, sends only to the affected Passenger and same-tenant Operator recipients. |
 | `tracking.gps.off_route` | Tracking | Notification | `{ eventId, occurredAt, tripId, durationSeconds }`; Notification resolves assigned driver, assistant, and operator admins |
 | `tracking.gps.approaching_stop` | Tracking | Notification | `{ tripId, stopId, bookingIds, wave, etaMinutes }` |
 | `payment.payment.succeeded` | Payment | Booking, Parcel | `{ eventId, occurredAt, paymentId, referenceType, referenceId, amount, method, paidAt, dueAt?, context }`; `paidAt` is authoritative `Payment.succeededAt`, not publish/consume time; context is the immutable server snapshot and may contain multiple allocations |
@@ -3263,6 +3276,8 @@ Mọi key dùng pattern `<service>:<purpose>:<id>` để namespace per service. 
 | `tracking:latest:{tripId}` | Tracking | Last known GPS position | 5p |
 | `tracking:gps_buffer:{tripId}` | Tracking | GPS trail buffer (list) | đến flush |
 | `tracking:eta:{tripId}:{stopId}` | Tracking | Dynamic ETA cached | 60s |
+| `tracking:trip_delay_state:{tripId}:{stopId}` | Tracking | Evaluated delay state (`stopId`, `delayStatus`, `delayMinutes`, `evaluatedAt`); reads legacy trip-level key during rolling deploy | 24h |
+| `tracking:trip_delay_lock:{tripId}` | Tracking | Owner-safe delay state evaluation lock | 10s |
 | `tracking:off_route_since:{tripId}` | Tracking | Off-route timer start | đến clear |
 | `tracking:active_trips` | Tracking | Set of active tripIds | — |
 | `tracking:approaching_notified:{tripId}:{bookingId}:w{1\|2}` | Tracking | Dedupe approaching alert | đến hết chuyến |
@@ -3834,6 +3849,9 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.57.0** | 2026-08-05 | Codex | **MINOR** — Hoàn thiện Tracking Phase 12: giữ fallback `STOPS_ONLY` cho Route thiếu polyline, làm rõ Google/Local ETA fallback và UNKNOWN, khóa quy tắc chọn stop/recalculate, bổ sung delay state 24h, Outbox `dedupeKey` unique, transition `DELAYED`/`DELAY_CLEARED` và contract ETA additive tương thích ngược. |
+| **1.56.0** | 2026-08-05 | Codex | **MINOR** — Bổ sung event `booking.booking.created` cho Tracking/Notification, payload crew-facing strict và phát Outbox nguyên tử cùng chuyển Booking sang CONFIRMED; giữ nguyên event `booking.booking.confirmed` tương thích ngược. |
+| **1.55.0** | 2026-08-04 | Codex | **MINOR** — Hoàn thiện Shuttle hai chiều inbound/outbound, snapshot road distance Google Routes tối đa 5 km, internal distance contract, manifest/lifecycle event registry, operator subscription guard và fail-safe migration rollback. |
 | **1.55.1** | 2026-08-04 | Codex | **PATCH** — Freeze the route-change proposal transaction lock protocol as source advisory lock → Trip → pending proposal UUIDs → dependency rows, and require proposal creation, audit, and Outbox persistence in that transaction. |
 | **1.55.0** | 2026-08-04 | Codex | **MINOR** — Add assigned Driver/Assistant EXISTING/CUSTOM route-change proposal snapshots, tenant-scoped Operator Admin decision flow, approval promotion/supersession/expiry semantics, five Trip lifecycle facts, four canonical errors and five audit actions. Notification consumes all five facts with active-admin fan-out for create, proposer delivery for terminal outcomes, five dedicated types and EventId/MessageId dedupe. Preserve direct admin route change and existing passenger impact, retire the global AlternativeRoute active-count cap and `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`, and add three UUID-v4-required mutations (188/171/17). |
 | **1.54.0** | 2026-08-03 | Codex | **MINOR** — Add System-Admin operator detail projection and Trip-owned operator holiday fare surcharge settings/periods. Inclusive ICT departure dates, active-window overlap protection, pre-voucher nearest-VND adjustment, additive search/detail breakdown and Booking-time snapshot semantics are canonical. Adds four UUID-v4-required mutation surfaces, raising the inventory to 185/168/17; no dependency, integration event or background job. |

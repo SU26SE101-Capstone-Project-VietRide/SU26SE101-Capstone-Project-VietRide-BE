@@ -84,6 +84,11 @@ public static class InfrastructureServiceCollectionExtensions
             services.AddScoped<ITripGenerationJobScheduler, DisabledTripGenerationJobScheduler>();
         }
         services.AddScoped<IShuttleDispatchService, ShuttleDispatchService>();
+        services.AddHttpClient<IShuttleDistanceClient, GoogleRoutesShuttleDistanceClient>(client =>
+            {
+                var baseUrl = configuration["GOOGLE_ROUTES_BASE_URL"] ?? "https://routes.googleapis.com";
+                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+            });
         services.AddScoped<ShuttleDispatchSafetyJob>();
         services.AddScoped<AutoBoardingJob>();
         services.AddScoped<AutoStartFallbackJob>();

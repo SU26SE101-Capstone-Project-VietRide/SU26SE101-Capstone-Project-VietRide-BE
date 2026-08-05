@@ -64,6 +64,7 @@ model TripShareGrant {
 model OutboxEvent {
   id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   eventType   String            @map("event_type") @db.VarChar(100)
+  dedupeKey   String?           @unique(map: "uq_outbox_events_dedupe_key") @map("dedupe_key") @db.VarChar(255)
   payload     Json
   status      OutboxEventStatus @default(PENDING)
   retryCount  Int               @default(0) @map("retry_count")

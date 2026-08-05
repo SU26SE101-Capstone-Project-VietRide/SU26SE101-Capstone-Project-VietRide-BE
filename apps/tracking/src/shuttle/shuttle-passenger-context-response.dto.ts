@@ -7,6 +7,15 @@ class ShuttlePassengerPickupSwaggerDto {
   @ApiProperty({ example: 3 })
   pickupOrder!: number;
 
+  @ApiProperty({ example: '123 Nguyen Hue, Quan 1', required: false })
+  serviceAddress?: string;
+
+  @ApiProperty({ example: 3, required: false })
+  serviceOrder?: number;
+
+  @ApiProperty({ example: 4200, required: false })
+  roadDistanceMeters?: number;
+
   @ApiProperty({ example: 10.762622 })
   latitude!: number;
 
@@ -43,6 +52,9 @@ class ShuttlePassengerContextDataSwaggerDto {
 
   @ApiProperty({ format: 'uuid' })
   mainTripId!: string;
+
+  @ApiProperty({ enum: ['INBOUND_TO_STATION', 'OUTBOUND_FROM_STATION'] })
+  direction!: 'INBOUND_TO_STATION' | 'OUTBOUND_FROM_STATION';
 
   @ApiProperty({ type: [ShuttlePassengerPickupSwaggerDto] })
   ownPickups!: ShuttlePassengerPickupSwaggerDto[];

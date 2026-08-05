@@ -13,6 +13,7 @@ using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
+using VietRide.Shared.Messaging.Abstractions;
 
 namespace VietRide.Booking.UnitTests.Features.Bookings;
 
@@ -27,6 +28,10 @@ public sealed class PaymentEventHandlersTests
     private static readonly Guid BookingGroupId = Guid.Parse("88888888-8888-8888-8888-888888888888");
     private static readonly Guid SecondTripId = Guid.Parse("99999999-9999-9999-9999-999999999999");
     private static readonly Guid SecondSeatLockToken = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    private static readonly Guid DriverUserId = Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    private static readonly Guid SecondDriverUserId = Guid.Parse("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+    private static readonly Guid PickupStationId = Guid.Parse("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+    private static readonly Guid DropoffStopId = Guid.Parse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-06-24T10:00:00Z");
 
     private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
@@ -49,6 +54,8 @@ public sealed class PaymentEventHandlersTests
         _bookings.QueryNoTracking().Returns(new[] { booking }.AsQueryable());
         _bookings.GetPendingPaymentTransitionSnapshotAsync(booking.Id, Arg.Any<CancellationToken>())
             .Returns(snapshot);
+        _tripClient.GetTripSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(CreateTripSnapshot(TripId, DriverUserId));
         _tripClient.ConfirmBookedSeatsAsync(
                 TripId,
                 SeatLockToken,
@@ -81,10 +88,8 @@ public sealed class PaymentEventHandlersTests
                 && history.ReasonCode == null),
             Arg.Any<CancellationToken>());
         _ = _clock.Received(1).UtcNow;
-        await _tripClient.DidNotReceiveWithAnyArgs()
-            .GetTripSnapshotAsync(default, default);
-        await _tripClient.DidNotReceiveWithAnyArgs()
-            .GetTripSnapshotAsync(default, default, default);
+        await _tripClient.Received(1)
+            .GetTripSnapshotAsync(TripId, Arg.Any<CancellationToken>());
         await _tripClient.DidNotReceiveWithAnyArgs()
             .LockSeatsAsync(default, default!, default, default!, default, default);
         await _outbox.Received(1)
@@ -92,6 +97,49 @@ public sealed class PaymentEventHandlersTests
                 "booking.booking.confirmed",
                 Arg.Is<string>(json => json.Contains(booking.Id.ToString(), StringComparison.OrdinalIgnoreCase)),
                 Arg.Any<CancellationToken>());
+        await _outbox.Received(1)
+            .EnqueueAsync(
+                "booking.booking.created",
+                Arg.Is<string>(json =>
+                    json.Contains(booking.Id.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && json.Contains(TripId.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && json.Contains(DriverUserId.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && json.Contains(PickupStationId.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && json.Contains(DropoffStopId.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && json.Contains("\"status\":\"CONFIRMED\"", StringComparison.Ordinal)),
+                Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ConfirmBookingOnPayment_WhenCrewSnapshotHasNoDriver_RetriesBeforeSeatConfirmation()
+    {
+        var booking = CreateBookingProjection(Guid.NewGuid(), 200_000);
+        var snapshot = CreateSnapshot(bookingId: booking.Id);
+        _bookings.QueryNoTracking().Returns(new[] { booking }.AsQueryable());
+        _bookings.GetPendingPaymentTransitionSnapshotAsync(booking.Id, Arg.Any<CancellationToken>())
+            .Returns(snapshot);
+        _tripClient.GetTripSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(CreateTripSnapshot(TripId, DriverUserId) with { DriverUserId = null });
+
+        var handler = new ConfirmBookingOnPaymentCommandHandler(
+            _bookings,
+            _tripClient,
+            _outbox,
+            _clock,
+            NullLogger<ConfirmBookingOnPaymentCommandHandler>.Instance,
+            _statusHistory);
+
+        var act = () => handler.Handle(
+            new ConfirmBookingOnPaymentCommand(PaymentId, "BOOKING", booking.Id, 200_000),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<TransientIntegrationEventException>();
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .ConfirmBookedSeatsAsync(default, default, default, default!, default);
+        await _bookings.DidNotReceiveWithAnyArgs()
+            .TryConfirmPendingPaymentAsync(default, default, default);
+        await _outbox.DidNotReceiveWithAnyArgs()
+            .EnqueueAsync(default!, default!, default);
     }
 
     [Fact]
@@ -236,6 +284,10 @@ public sealed class PaymentEventHandlersTests
             .Returns(firstSnapshot);
         _bookings.GetPendingPaymentTransitionSnapshotAsync(secondBooking.Id, Arg.Any<CancellationToken>())
             .Returns(secondSnapshot);
+        _tripClient.GetTripSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(CreateTripSnapshot(TripId, DriverUserId));
+        _tripClient.GetTripSnapshotAsync(SecondTripId, Arg.Any<CancellationToken>())
+            .Returns(CreateTripSnapshot(SecondTripId, SecondDriverUserId));
         _tripClient.ConfirmBookedRoundTripSeatsAsync(
                 Arg.Any<RoundTripBookSeatsLeg>(),
                 Arg.Any<RoundTripBookSeatsLeg>(),
@@ -277,6 +329,10 @@ public sealed class PaymentEventHandlersTests
             Arg.Any<CancellationToken>());
         await _outbox.Received(2).EnqueueAsync(
             "booking.booking.confirmed",
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+        await _outbox.Received(2).EnqueueAsync(
+            "booking.booking.created",
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
     }
@@ -508,5 +564,24 @@ public sealed class PaymentEventHandlersTests
             totalAmount,
             VoucherUsageId: null,
             [new PassengerSeatAssignment(PassengerId, seatNumber)],
-            ["VT-20260630-ABCDEFGH"]);
+            ["VT-20260630-ABCDEFGH"],
+            BookingCode: $"VR-{(bookingId ?? BookingId):N}",
+            PickupStationId: PickupStationId,
+            DropoffStopId: DropoffStopId);
+
+    private static TripSnapshot CreateTripSnapshot(Guid tripId, Guid driverUserId)
+        => new(
+            tripId,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "SCHEDULED",
+            Now.AddHours(1),
+            Now.AddHours(3),
+            200_000,
+            new TripStationSnapshot(Guid.NewGuid(), "Origin"),
+            new TripStationSnapshot(Guid.NewGuid(), "Destination"),
+            [],
+            new TripSeatSummary(40, 38),
+            DriverUserId: driverUserId);
 }

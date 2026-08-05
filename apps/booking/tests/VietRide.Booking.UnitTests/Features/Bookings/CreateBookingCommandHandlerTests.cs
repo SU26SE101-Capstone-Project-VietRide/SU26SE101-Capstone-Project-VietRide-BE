@@ -6,6 +6,7 @@ using NSubstitute.ExceptionExtensions;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Application.Exceptions;
 using VietRide.Booking.Application.Features.Bookings.CreateBooking;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
@@ -34,6 +35,8 @@ public class CreateBookingCommandHandlerTests
     private static readonly Guid StationId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
     private static readonly Guid SeatLockToken = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
     private static readonly Guid PaymentId = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
+    private static readonly Guid DriverUserId = Guid.Parse("11111111-1111-4111-8111-111111111111");
+    private static readonly Guid AssistantUserId = Guid.Parse("22222222-2222-4222-8222-222222222222");
 
     private static readonly TripSnapshot ValidTrip = new(
         TripId: TripId,
@@ -47,7 +50,9 @@ public class CreateBookingCommandHandlerTests
         OriginStation: new TripStationSnapshot(StationId, "Hà Nội"),
         DestinationStation: new TripStationSnapshot(Guid.NewGuid(), "TP.HCM"),
         Stops: [],
-        SeatSummary: new TripSeatSummary(40, 38));
+        SeatSummary: new TripSeatSummary(40, 38),
+        DriverUserId: DriverUserId,
+        AssistantUserId: AssistantUserId);
 
     private static readonly SeatLockResult LockData = new(
         SeatLockToken: SeatLockToken,
@@ -63,6 +68,17 @@ public class CreateBookingCommandHandlerTests
     private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IIdentityUserServiceClient _identityUsers = CreateIdentityClient();
+
+    public CreateBookingCommandHandlerTests()
+    {
+        _tripClient.GetShuttleRoadDistanceAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<string>(),
+                Arg.Any<decimal>(),
+                Arg.Any<decimal>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new ShuttleRoadDistanceOutcome.Success(1_000));
+    }
 
     private CreateBookingCommandHandler BuildSut(IBookingStationCanonicalizer? stationCanonicalizer = null) => new(
         _bookings, _tripClient, _paymentClient, _bookingService, _voucherService, _outbox, _clock,
@@ -156,6 +172,16 @@ public class CreateBookingCommandHandlerTests
             .EnqueueAsync(
                 Arg.Is("booking.booking.confirmed"),
                 Arg.Any<string>(),
+                Arg.Any<CancellationToken>());
+        await _outbox.Received(1)
+            .EnqueueAsync(
+                Arg.Is("booking.booking.created"),
+                Arg.Is<string>(json =>
+                    json.Contains(result.BookingId.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && json.Contains(TripId.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && json.Contains(DriverUserId.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && json.Contains(AssistantUserId.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && json.Contains("\"status\":\"CONFIRMED\"", StringComparison.Ordinal)),
                 Arg.Any<CancellationToken>());
 
         // Confirm BookSeats was called (seats booked after payment)
@@ -320,6 +346,20 @@ public class CreateBookingCommandHandlerTests
 
         await act.Should().ThrowAsync<CodedNotFoundException>()
             .Where(e => e.ErrorCode == "TRIP_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task Handle_TripWithoutAssignedDriver_FailsBeforeLockingSeats()
+    {
+        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        _tripClient.GetTripSnapshotAsync(TripId, default, default)
+            .ReturnsForAnyArgs(ValidTrip with { DriverUserId = null });
+
+        var act = () => BuildSut().Handle(BuildCommand(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<BookingUpstreamUnavailableException>();
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .LockSeatsAsync(default, default!, default, default!, default, default);
     }
 
     // -----------------------------------------------------------------------
@@ -639,7 +679,14 @@ public class CreateBookingCommandHandlerTests
         string? capturedJson = null;
         await _outbox.EnqueueAsync(
             Arg.Any<string>(),
-            Arg.Do<string>(json => capturedJson = json),
+            Arg.Do<string>(json =>
+            {
+                using var payload = JsonDocument.Parse(json);
+                if (payload.RootElement.TryGetProperty("voucherUsageId", out _))
+                {
+                    capturedJson = json;
+                }
+            }),
             Arg.Any<CancellationToken>());
 
         var handler = BuildSut();

@@ -17,7 +17,7 @@ public sealed class Booking : BaseEntity<Guid>
     private readonly List<Passenger> _passengers = [];
     private readonly List<Ticket> _tickets = [];
     private readonly List<BookingPendingAction> _pendingActions = [];
-    private BookingShuttleIntent? _shuttleIntent;
+    private readonly List<BookingShuttleIntent> _shuttleIntents = [];
 
     public BookingCode BookingCode { get; private set; }
 
@@ -70,7 +70,11 @@ public sealed class Booking : BaseEntity<Guid>
     public IReadOnlyList<Passenger> Passengers => _passengers.AsReadOnly();
     public IReadOnlyList<Ticket> Tickets => _tickets.AsReadOnly();
     public IReadOnlyList<BookingPendingAction> PendingActions => _pendingActions.AsReadOnly();
-    public BookingShuttleIntent? ShuttleIntent => _shuttleIntent;
+    public IReadOnlyList<BookingShuttleIntent> ShuttleIntents => _shuttleIntents.AsReadOnly();
+    public BookingShuttleIntent? ShuttleIntent => _shuttleIntents
+        .FirstOrDefault(intent => intent.IsActive && intent.Direction == BookingShuttleIntent.InboundDirection);
+    public BookingShuttleIntent? ShuttleDropoffIntent => _shuttleIntents
+        .FirstOrDefault(intent => intent.IsActive && intent.Direction == BookingShuttleIntent.OutboundDirection);
 
     private Booking() { }
 
@@ -230,18 +234,44 @@ public sealed class Booking : BaseEntity<Guid>
     }
 
     public void RequestShuttle(string address, decimal latitude, decimal longitude)
+        => RequestShuttle(
+            BookingShuttleIntent.InboundDirection,
+            address,
+            latitude,
+            longitude,
+            roadDistanceMeters: null);
+
+    public void RequestShuttle(
+        string direction,
+        string address,
+        decimal latitude,
+        decimal longitude,
+        int? roadDistanceMeters)
     {
-        if (_shuttleIntent is not null)
+        if (_shuttleIntents.Any(intent => intent.IsActive && intent.Direction == direction))
         {
-            throw new InvalidOperationException("A shuttle intent already exists for this booking.");
+            throw new InvalidOperationException("An active shuttle intent already exists for this direction.");
         }
 
-        if (!PickupStationId.HasValue || PickupStopId.HasValue)
+        if (direction == BookingShuttleIntent.InboundDirection
+            && (!PickupStationId.HasValue || PickupStopId.HasValue))
         {
             throw new InvalidOperationException("Shuttle is available only for station pickup.");
         }
 
-        _shuttleIntent = BookingShuttleIntent.Create(Id, address, latitude, longitude);
+        if (direction == BookingShuttleIntent.OutboundDirection
+            && (!DropoffStationId.HasValue || DropoffStopId.HasValue))
+        {
+            throw new InvalidOperationException("Shuttle is available only for station dropoff.");
+        }
+
+        _shuttleIntents.Add(BookingShuttleIntent.Create(
+            Id,
+            address,
+            latitude,
+            longitude,
+            direction,
+            roadDistanceMeters));
     }
 
     /// <summary>
@@ -299,7 +329,7 @@ public sealed class Booking : BaseEntity<Guid>
     {
         EnsureConfirmedForEdit();
 
-        if (_shuttleIntent?.IsActive == true)
+        if (ShuttleIntent?.IsActive == true)
         {
             throw new InvalidOperationException("Pickup is locked while a shuttle intent is active.");
         }
@@ -317,6 +347,11 @@ public sealed class Booking : BaseEntity<Guid>
     public void ChangeDropoff(Guid? dropoffStationId, Guid? dropoffStopId)
     {
         EnsureConfirmedForEdit();
+
+        if (ShuttleDropoffIntent?.IsActive == true)
+        {
+            throw new InvalidOperationException("Dropoff is locked while an outbound shuttle intent is active.");
+        }
 
         if (CountProvided(dropoffStationId, dropoffStopId) > 1)
             throw new ArgumentException("At most one of dropoffStationId or dropoffStopId may be provided.");
@@ -362,7 +397,10 @@ public sealed class Booking : BaseEntity<Guid>
         CancellationReason = reason;
         CancelledAt = cancelledAt;
         RefundOverride = refundOverride;
-        _shuttleIntent?.Cancel(cancelledAt);
+        foreach (var shuttleIntent in _shuttleIntents.Where(intent => intent.IsActive))
+        {
+            shuttleIntent.Cancel(cancelledAt);
+        }
 
         foreach (var ticket in _tickets.Where(ticket =>
             ticket.Status is TicketStatus.PENDING_PAYMENT or TicketStatus.ISSUED))
@@ -383,7 +421,10 @@ public sealed class Booking : BaseEntity<Guid>
         CancellationReason = BookingCancellationReason.OPERATOR_DISRUPTED_IN_PROGRESS;
         CancelledAt = disruptedAt;
         RefundOverride = true;
-        _shuttleIntent?.Cancel(disruptedAt);
+        foreach (var shuttleIntent in _shuttleIntents.Where(intent => intent.IsActive))
+        {
+            shuttleIntent.Cancel(disruptedAt);
+        }
 
         foreach (var ticket in _tickets.Where(ticket =>
             ticket.Status is TicketStatus.PENDING_PAYMENT or TicketStatus.ISSUED))

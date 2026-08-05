@@ -101,6 +101,22 @@ describe('HttpRouteGeometryProvider', () => {
     expect(provider.peekCachedRouteGeometry(TRIP_ID)).not.toBeNull();
   });
 
+  it('refreshes two-point STOPS_ONLY geometry after the 30-second fallback TTL', async () => {
+    global.fetch = jest.fn(async () => jsonResponse(200, validEnvelope({
+      geometrySource: 'STOPS_ONLY',
+    }))) as typeof fetch;
+    const provider = createProvider();
+
+    await provider.getDetailedRouteGeometry(TRIP_ID);
+    now += 29_999;
+    await provider.getDetailedRouteGeometry(TRIP_ID);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    now += 2;
+    await provider.getDetailedRouteGeometry(TRIP_ID);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('uses the configured positive cache TTL', async () => {
     global.fetch = jest.fn(async () => jsonResponse(200, validEnvelope())) as typeof fetch;
     const provider = createProvider();

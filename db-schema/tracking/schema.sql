@@ -96,6 +96,7 @@ COMMENT ON TABLE trip_share_grants IS
 CREATE TABLE outbox_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_type VARCHAR(100) NOT NULL,
+    dedupe_key VARCHAR(255) NULL,
     payload JSONB NOT NULL,
     status outbox_event_status NOT NULL DEFAULT 'PENDING',
     retry_count INT NOT NULL DEFAULT 0,
@@ -105,6 +106,10 @@ CREATE TABLE outbox_events (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     published_at TIMESTAMPTZ NULL
 );
+
+CREATE UNIQUE INDEX uq_outbox_events_dedupe_key
+    ON outbox_events (dedupe_key)
+    WHERE dedupe_key IS NOT NULL;
 
 CREATE INDEX idx_outbox_events_status_created
     ON outbox_events (status, created_at);

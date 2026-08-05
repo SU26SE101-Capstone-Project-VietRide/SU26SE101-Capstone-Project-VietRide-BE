@@ -24,7 +24,11 @@ import {
   shuttleEtaStateKey,
 } from './shuttle.constants';
 import type { ShuttleGpsUpdateDto } from './shuttle.dto';
-import type { ShuttleTrackingContext, ShuttleTrackingStop } from './shuttle.service';
+import type {
+  ShuttleDirection,
+  ShuttleTrackingContext,
+  ShuttleTrackingStop,
+} from './shuttle.service';
 
 export interface ShuttleEtaEvent {
   shuttleTripId: string;
@@ -93,7 +97,7 @@ export class ShuttleEtaService {
     context: ShuttleTrackingContext,
   ): Promise<ShuttleEtaEvent | undefined> {
     const state = await this.readState(gps.shuttleTripId);
-    const nextStop = this.findNextStop(context.stops, state?.order);
+    const nextStop = this.findNextStop(context.stops, state?.order, context.direction);
     if (!nextStop) return undefined;
     const cached = await this.readCachedEta(gps.shuttleTripId, nextStop.pickupOrder);
     if (!this.shouldRecalculate(gps, nextStop, state, cached)) return undefined;
@@ -219,9 +223,16 @@ export class ShuttleEtaService {
   private findNextStop(
     stops: ShuttleTrackingStop[],
     minimumOrder?: number,
+    direction: ShuttleDirection = 'INBOUND_TO_STATION',
   ): ShuttleTrackingStop | undefined {
     return [...stops]
-      .sort((left, right) => left.pickupOrder - right.pickupOrder)
+      .sort((left, right) => {
+        if (left.isStation !== right.isStation) {
+          const stationFirst = direction === 'OUTBOUND_FROM_STATION';
+          return left.isStation === stationFirst ? -1 : 1;
+        }
+        return left.pickupOrder - right.pickupOrder;
+      })
       .find(
         (stop) =>
           !TERMINAL_PICKUP_STATUSES.has(stop.status) &&

@@ -3,7 +3,7 @@ using VietRide.Trip.Application.Abstractions.ExternalClients;
 
 namespace VietRide.Trip.Application.Features.Stops;
 
-internal static class StopWriteEligibilityGuard
+public static class StopWriteEligibilityGuard
 {
     public static async Task ValidateOperatorCanWriteAsync(
         IIdentityInternalClient identityInternalClient,

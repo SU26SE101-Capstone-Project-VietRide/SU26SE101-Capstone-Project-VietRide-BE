@@ -56,6 +56,19 @@ public sealed record TripStopSnapshot(
 /// <summary>Seat availability summary embedded in <see cref="TripSnapshot"/>.</summary>
 public sealed record TripSeatSummary(int TotalSeats, int AvailableSeats);
 
+public abstract record ShuttleRoadDistanceOutcome
+{
+    private ShuttleRoadDistanceOutcome() { }
+
+    public sealed record Success(int DistanceMeters) : ShuttleRoadDistanceOutcome;
+
+    public sealed record Exceeded(int DistanceMeters) : ShuttleRoadDistanceOutcome;
+
+    public sealed record Rejected(string ErrorCode, string Message) : ShuttleRoadDistanceOutcome;
+
+    public sealed record Unavailable(string Message) : ShuttleRoadDistanceOutcome;
+}
+
 // ---------------------------------------------------------------------------
 // Lock-seats result — discriminated union
 // ---------------------------------------------------------------------------
@@ -183,6 +196,19 @@ public interface ITripServiceClient
         Guid tripId,
         DateTimeOffset pricingAt,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gets the Trip-owned Google Routes road distance between the direction-specific
+    /// Station and the passenger shuttle coordinate. The Trip service owns Station
+    /// resolution and the fail-closed provider policy.
+    /// </summary>
+    Task<ShuttleRoadDistanceOutcome> GetShuttleRoadDistanceAsync(
+        Guid tripId,
+        string direction,
+        decimal latitude,
+        decimal longitude,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<ShuttleRoadDistanceOutcome>(new ShuttleRoadDistanceOutcome.Success(1_000));
 
     /// <summary>
     /// POST /internal/v1/trips/{tripId}/lock-seats — all-or-nothing seat hold.

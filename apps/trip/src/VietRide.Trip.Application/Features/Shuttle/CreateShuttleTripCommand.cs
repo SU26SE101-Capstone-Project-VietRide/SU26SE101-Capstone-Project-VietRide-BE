@@ -13,4 +13,5 @@ public sealed record CreateShuttleTripCommand(
     DateTimeOffset ScheduledDepartureTime,
     DateTimeOffset ScheduledEndTime,
     IReadOnlyList<Guid> OrderedBookingIds,
-    string? Notes) : IRequest<CreateShuttleTripResult>;
+    string? Notes,
+    string Direction = "INBOUND_TO_STATION") : IRequest<CreateShuttleTripResult>;

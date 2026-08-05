@@ -35,6 +35,7 @@ describe('EtaService', () => {
   let localProvider: jest.Mocked<EtaProvider>;
   let googleProvider: jest.Mocked<EtaProvider>;
   let tripDataProvider: jest.Mocked<TripDataProvider>;
+  let routePeek: jest.Mock;
   let env: Env;
 
   beforeEach(async () => {
@@ -76,14 +77,15 @@ describe('EtaService', () => {
         return [createStop()];
       }),
     };
-    const routeProvider: RouteGeometryProvider = {
-      peekCachedRouteGeometry: () => ({
+    routePeek = jest.fn(() => ({
         tripId: TEST_TRIP_ID,
         points: [
           { latitude: 10.7, longitude: 106.66 },
           { latitude: 10.9, longitude: 106.66 },
         ],
-      }),
+      }));
+    const routeProvider: RouteGeometryProvider = {
+      peekCachedRouteGeometry: routePeek,
       getRouteGeometry: async () => null,
     };
 
@@ -169,6 +171,19 @@ describe('EtaService', () => {
     expect(localProvider.calculate).not.toHaveBeenCalled();
   });
 
+  it('uses Google when no route polyline is cached', async () => {
+    routePeek.mockReturnValue(null);
+    env.GOOGLE_ROUTES_ENABLED = true;
+    env.GOOGLE_ROUTES_API_KEY = 'fake-key';
+
+    await expect(service.handleGpsUpdate(createGps())).resolves.toEqual(
+      expect.objectContaining({ etaMinutes: 10 }),
+    );
+
+    expect(googleProvider.calculate).toHaveBeenCalledTimes(1);
+    expect(localProvider.calculate).not.toHaveBeenCalled();
+  });
+
   it('falls back locally and opens cooldown after three Google failures', async () => {
     env.GOOGLE_ROUTES_ENABLED = true;
     env.GOOGLE_ROUTES_API_KEY = 'fake-key';
@@ -244,7 +259,81 @@ describe('EtaService', () => {
     );
   });
 
-  function seedState(overrides: Partial<Record<'latitude' | 'longitude' | 'etaMinutes', number>>): void {
+  it('recalculates immediately when the selected stop changes before the 60-second interval', async () => {
+    const nextStopId = '33333333-3333-4333-8333-333333333333';
+    tripDataProvider.getRouteStops.mockResolvedValue([
+      createStop({
+        stopId: '44444444-4444-4444-8444-444444444444',
+        sequence: 1,
+        status: 'ARRIVED',
+      }),
+      createStop({
+        stopId: nextStopId,
+        sequence: 2,
+        latitude: 10.85,
+        status: 'PENDING',
+      }),
+    ]);
+    seedState({
+      latitude: 10.7627,
+      longitude: 106.6602,
+      etaMinutes: 30,
+      lastProviderCallAt: new Date(Date.now() - 10_000).toISOString(),
+    });
+
+    const result = await service.handleGpsUpdate(createGps());
+
+    expect(result).toEqual(expect.objectContaining({ stopId: nextStopId }));
+    expect(localProvider.calculate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ stopId: nextStopId, sequence: 2 }),
+    );
+    expect(multiSet).toHaveBeenCalledWith(
+      trackingEtaKey(TEST_TRIP_ID, nextStopId),
+      expect.any(String),
+      'EX',
+      ETA_CACHE_TTL_SECONDS,
+    );
+  });
+
+  it('does not call a provider for a same-stop cache miss before the minimum interval', async () => {
+    seedState({
+      latitude: 10.7627,
+      longitude: 106.6602,
+      etaMinutes: 30,
+      lastProviderCallAt: new Date(Date.now() - 10_000).toISOString(),
+    });
+
+    await expect(service.handleGpsUpdate(createGps())).resolves.toBeNull();
+
+    expect(googleProvider.calculate).not.toHaveBeenCalled();
+    expect(localProvider.calculate).not.toHaveBeenCalled();
+  });
+
+  it('keeps the 60-second ETA cache TTL when geometry uses the stops-only fallback', async () => {
+    routePeek.mockReturnValue({
+      tripId: TEST_TRIP_ID,
+      geometrySource: 'STOPS_ONLY',
+      points: [
+        { latitude: 10.7, longitude: 106.66 },
+        { latitude: 10.9, longitude: 106.66 },
+      ],
+    });
+    tripDataProvider.getRouteStops.mockResolvedValue([createStop()]);
+
+    await service.handleGpsUpdate(createGps());
+
+    expect(multiSet).toHaveBeenCalledWith(
+      trackingEtaKey(TEST_TRIP_ID, TEST_STOP_ID),
+      expect.any(String),
+      'EX',
+      ETA_CACHE_TTL_SECONDS,
+    );
+  });
+
+  function seedState(
+    overrides: Partial<Record<'latitude' | 'longitude' | 'etaMinutes', number>> & { lastProviderCallAt?: string },
+  ): void {
     store.set(trackingEtaStateKey(TEST_TRIP_ID), JSON.stringify({
       stopId: TEST_STOP_ID,
       stopSequence: 1,

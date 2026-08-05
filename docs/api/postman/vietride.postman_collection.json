@@ -5378,32 +5378,19 @@
       "name": "Day 36 - Shuttle Backend",
       "item": [
         {
-          "name": "Create booking with shuttle pickup",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{passengerAccessToken}}"
-              },
-              {
-                "key": "Idempotency-Key",
-                "value": "day36-booking-{{$guid}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": { \"stationId\": \"{{day36OriginStationId}}\" },\n  \"dropoff\": { \"stationId\": \"{{day36DestinationStationId}}\" },\n  \"shuttlePickup\": { \"address\": \"123 Nguyễn Huệ, Quận 1\", \"latitude\": 10.7731, \"longitude\": 106.7032 },\n  \"seats\": [{ \"seatNumber\": \"D01\" }],\n  \"paymentMethod\": \"WALLET\"\n}"
-            },
-            "url": "{{baseUrl}}/v1/bookings"
-          }
-        },
-        {
           "name": "Reject unsupported shuttle station",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Unsupported station fails with ADR-0004 envelope', () => { pm.response.to.have.status(422); pm.expect(body.success).to.eql(false); pm.expect(body.statusCode).to.eql(422); pm.expect(body.error.code).to.eql('SHUTTLE_STATION_NOT_SUPPORTED'); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -5428,20 +5415,95 @@
           }
         },
         {
-          "name": "List grouped pending shuttle requests",
+          "name": "Create booking with inbound + outbound shuttle intents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Booking accepts both shuttle directions', () => { pm.expect([200, 201]).to.include(pm.response.code); pm.expect(body.success).to.eql(true); pm.expect(body.data.bookingId).to.be.a('string'); });",
+                  "if (body.data?.bookingId) pm.environment.set('day36BookingId', body.data.bookingId);"
+                ]
+              }
+            }
+          ],
           "request": {
-            "method": "GET",
+            "method": "POST",
             "header": [
               {
                 "key": "Authorization",
-                "value": "Bearer {{operatorAccessToken}}"
+                "value": "Bearer {{passengerAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-booking-dual-1"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/v1/operator/shuttle-requests?page=1&pageSize=20"
+            "url": "{{baseUrl}}/v1/bookings",
+            "body": {
+              "mode": "raw",
+      "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day36OriginStationId}}\"\n  },\n  \"dropoff\": {\n    \"stationId\": \"{{day36DestinationStationId}}\"\n  },\n  \"shuttlePickup\": {\n    \"address\": \"{{day36PickupAddress}}\",\n    \"latitude\": {{day36PickupLatitude}},\n    \"longitude\": {{day36PickupLongitude}}\n  },\n  \"shuttleDropoff\": {\n    \"address\": \"{{day36DropoffAddress}}\",\n    \"latitude\": {{day36DropoffLatitude}},\n    \"longitude\": {{day36DropoffLongitude}}\n  },\n  \"seats\": [\n    {\n      \"seatNumber\": \"D03\"\n    }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
+            }
           }
         },
         {
-          "name": "Create subset ShuttleTrip",
+          "name": "Reject shuttle road distance above 5 km",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Road distance limit is enforced', () => { pm.response.to.have.status(422); pm.expect(body.error.code).to.eql('SHUTTLE_DISTANCE_EXCEEDED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passengerAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-distance-5001-1"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tripId\": \"{{day36MainTripId}}\",\n  \"pickup\": {\n    \"stationId\": \"{{day36OriginStationId}}\"\n  },\n  \"shuttlePickup\": {\n    \"address\": \"Outside shuttle radius\",\n    \"latitude\": {{day36OverDistanceLatitude}},\n    \"longitude\": {{day36OverDistanceLongitude}}\n  },\n  \"seats\": [\n    {\n      \"seatNumber\": \"D02\"\n    }\n  ],\n  \"paymentMethod\": \"WALLET\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Dispatch inbound ShuttleTrip with explicit direction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Inbound dispatch created', () => { pm.response.to.have.status(201); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(201); pm.expect(body.data.shuttleTripId).to.be.a('string'); });",
+                  "if (body.data?.shuttleTripId) pm.environment.set('day36InboundShuttleTripId', body.data.shuttleTripId);"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -5451,22 +5513,34 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "day36-dispatch-1"
+                "value": "day36-dispatch-inbound-1"
               },
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
+            "url": "{{baseUrl}}/v1/operator/shuttle-trips",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}"
-            },
-            "url": "{{baseUrl}}/v1/operator/shuttle-trips"
+              "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"direction\": \"INBOUND_TO_STATION\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36InboundShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36InboundShuttleEnd}}\",\n  \"orderedBookingIds\": [\n    \"{{day36BookingId}}\"\n  ]\n}"
+            }
           }
         },
         {
-          "name": "Replay subset dispatch idempotently",
+          "name": "Replay inbound dispatch idempotently",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Replay returns same shuttle', () => { pm.expect([200, 201]).to.include(pm.response.code); pm.expect(body.data.shuttleTripId).to.eql(pm.environment.get('day36InboundShuttleTripId')); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -5476,22 +5550,101 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "day36-dispatch-1"
+                "value": "day36-dispatch-inbound-1"
               },
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
+            "url": "{{baseUrl}}/v1/operator/shuttle-trips",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36ShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36ShuttleEnd}}\",\n  \"orderedBookingIds\": [\"{{day36BookingId}}\"]\n}"
-            },
-            "url": "{{baseUrl}}/v1/operator/shuttle-trips"
+              "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"direction\": \"INBOUND_TO_STATION\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36InboundShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36InboundShuttleEnd}}\",\n  \"orderedBookingIds\": [\n    \"{{day36BookingId}}\"\n  ]\n}"
+            }
           }
         },
         {
-          "name": "Get shuttle latest GPS",
+          "name": "Dispatch outbound ShuttleTrip with explicit direction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Outbound dispatch created', () => { pm.response.to.have.status(201); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(201); pm.expect(body.data.shuttleTripId).to.be.a('string'); });",
+                  "if (body.data?.shuttleTripId) pm.environment.set('day36OutboundShuttleTripId', body.data.shuttleTripId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-dispatch-outbound-1"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/shuttle-trips",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"direction\": \"OUTBOUND_FROM_STATION\",\n  \"driverUserId\": \"{{day36DriverId}}\",\n  \"vehicleId\": \"{{day36ShuttleVehicleId}}\",\n  \"scheduledDepartureTime\": \"{{day36OutboundShuttleDeparture}}\",\n  \"scheduledEndTime\": \"{{day36OutboundShuttleEnd}}\",\n  \"orderedBookingIds\": [\n    \"{{day36BookingId}}\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Driver starts outbound ShuttleTrip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Outbound start uses ADR-0004 envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data.status).to.eql('IN_PROGRESS'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-driver-start-outbound-1"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/driver/shuttle-trips/{{day36OutboundShuttleTripId}}/start"
+          }
+        },
+        {
+          "name": "Passenger sees outbound Station as first tracking stop",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Outbound tracking is direction-aware', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data.direction).to.eql('OUTBOUND_FROM_STATION'); pm.expect(body.data.station).to.be.an('object'); pm.expect(body.data.station.pickupOrder).to.eql(1); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [
@@ -5500,11 +5653,23 @@
                 "value": "Bearer {{passengerAccessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36ShuttleTripId}}/latest"
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36OutboundShuttleTripId}}/passenger-context"
           }
         },
         {
-          "name": "Get shuttle ETA",
+          "name": "Get outbound shuttle latest GPS while active",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Active outbound latest GPS uses ADR-0004 envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data === null || typeof body.data === 'object').to.eql(true); });"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [
@@ -5513,7 +5678,421 @@
                 "value": "Bearer {{passengerAccessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36ShuttleTripId}}/eta"
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36OutboundShuttleTripId}}/latest"
+          }
+        },
+        {
+          "name": "Get outbound shuttle ETA while active",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Active outbound ETA uses ADR-0004 envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data === null || typeof body.data === 'object').to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passengerAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36OutboundShuttleTripId}}/eta"
+          }
+        },
+        {
+          "name": "Driver picks up outbound passenger",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Outbound pickup uses ADR-0004 envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data.status).to.eql('PICKED_UP'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-driver-pickup-outbound-1"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/driver/shuttle-trips/{{day36OutboundShuttleTripId}}/stops/{{day36PickupOrder}}/pickup"
+          }
+        },
+        {
+          "name": "Driver marks outbound passenger delivered",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Outbound delivery uses ADR-0004 envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data.status).to.eql('DELIVERED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-driver-delivered-outbound-1"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/driver/shuttle-trips/{{day36OutboundShuttleTripId}}/stops/{{day36PickupOrder}}/delivered"
+          }
+        },
+        {
+          "name": "Driver completes outbound ShuttleTrip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Outbound completion uses ADR-0004 envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data.status).to.eql('COMPLETED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-driver-complete-outbound-1"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/driver/shuttle-trips/{{day36OutboundShuttleTripId}}/complete"
+          }
+        },
+        {
+          "name": "Driver starts inbound ShuttleTrip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Assigned driver can start shuttle', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data.status).to.eql('IN_PROGRESS'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-driver-start-inbound-1"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/driver/shuttle-trips/{{day36InboundShuttleTripId}}/start"
+          }
+        },
+        {
+          "name": "Driver picks up passenger",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Pickup lifecycle mutation succeeds', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data.status).to.eql('PICKED_UP'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-driver-pickup-inbound-1"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/driver/shuttle-trips/{{day36InboundShuttleTripId}}/stops/{{day36PickupOrder}}/pickup"
+          }
+        },
+        {
+          "name": "Driver marks passenger delivered",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Delivered transition succeeds', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data.status).to.eql('DELIVERED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-driver-delivered-inbound-1"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/driver/shuttle-trips/{{day36InboundShuttleTripId}}/stops/{{day36PickupOrder}}/delivered"
+          }
+        },
+        {
+          "name": "Driver completes inbound ShuttleTrip",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Completed transition succeeds', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data.status).to.eql('COMPLETED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-driver-complete-inbound-1"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/driver/shuttle-trips/{{day36InboundShuttleTripId}}/complete"
+          }
+        },
+        {
+          "name": "Passenger context is denied after terminal completion",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Passenger terminal context is denied', () => { pm.response.to.have.status(403); pm.expect(body.error.code).to.eql('TRACKING_ACCESS_DENIED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passengerAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36InboundShuttleTripId}}/passenger-context"
+          }
+        },
+        {
+          "name": "Passenger latest GPS is denied after completion",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Passenger latest GPS is denied after completion', () => { pm.response.to.have.status(403); pm.expect(body.success).to.eql(false); pm.expect(body.statusCode).to.eql(403); pm.expect(body.error.code).to.eql('TRACKING_ACCESS_DENIED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passengerAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36InboundShuttleTripId}}/latest"
+          }
+        },
+        {
+          "name": "Passenger ETA is denied after completion",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Passenger ETA is denied after completion', () => { pm.response.to.have.status(403); pm.expect(body.success).to.eql(false); pm.expect(body.statusCode).to.eql(403); pm.expect(body.error.code).to.eql('TRACKING_ACCESS_DENIED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{passengerAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/tracking/shuttle-trips/{{day36InboundShuttleTripId}}/eta"
+          }
+        },
+        {
+          "name": "Cancel pending shuttle request (seeded branch)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Pending request cancellation succeeds', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data.status).to.eql('CANCELLED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-cancel-request-1"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/shuttle-requests/{{day36MainTripId}}/{{day36PendingCancelBookingId}}/cancel?direction=INBOUND_TO_STATION",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Passenger no longer needs shuttle\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Cancel scheduled ShuttleTrip (seeded branch)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Scheduled shuttle cancellation succeeds', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(body.data.status).to.eql('CANCELLED'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-cancel-trip-1"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/shuttle-trips/{{day36CancellableShuttleTripId}}/cancel",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Operator cannot staff this shuttle run\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Driver no-show (seeded branch)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('No-show requires reason', () => { pm.response.to.have.status(200); pm.expect(body.data.status).to.eql('NO_SHOW'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "day36-no-show-1"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/driver/shuttle-trips/{{day36NoShowShuttleTripId}}/stops/{{day36NoShowPickupOrder}}/no-show",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Passenger absent at pickup point\"\n}"
+            }
           }
         }
       ]

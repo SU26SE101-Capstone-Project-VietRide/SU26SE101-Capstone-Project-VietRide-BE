@@ -5,7 +5,11 @@ namespace VietRide.Trip.Domain.Entities;
 public sealed class ShuttleTrip : BaseEntity<Guid>
 {
     public const string InboundDirection = "INBOUND_TO_STATION";
+    public const string OutboundDirection = "OUTBOUND_FROM_STATION";
     public const string ScheduledStatus = "SCHEDULED";
+    public const string InProgressStatus = "IN_PROGRESS";
+    public const string CompletedStatus = "COMPLETED";
+    public const string CancelledStatus = "CANCELLED";
     public Guid OperatorId { get; private set; }
     public Guid MainTripId { get; private set; }
     public Guid StationId { get; private set; }
@@ -29,7 +33,8 @@ public sealed class ShuttleTrip : BaseEntity<Guid>
         Guid vehicleId,
         DateTimeOffset scheduledDepartureTime,
         DateTimeOffset scheduledEndTime,
-        string? notes)
+        string? notes,
+        string direction = InboundDirection)
     {
         ValidateId(operatorId, nameof(operatorId));
         ValidateId(mainTripId, nameof(mainTripId));
@@ -41,19 +46,82 @@ public sealed class ShuttleTrip : BaseEntity<Guid>
             throw new ArgumentException("Scheduled end time must be after departure time.", nameof(scheduledEndTime));
         }
 
+        if (direction is not (InboundDirection or OutboundDirection))
+        {
+            throw new ArgumentOutOfRangeException(nameof(direction));
+        }
+
         return new ShuttleTrip
         {
             Id = Guid.NewGuid(),
             OperatorId = operatorId,
             MainTripId = mainTripId,
             StationId = stationId,
-            Direction = InboundDirection,
+            Direction = direction,
             DriverUserId = driverUserId,
             VehicleId = vehicleId,
             ScheduledDepartureTime = scheduledDepartureTime,
             ScheduledEndTime = scheduledEndTime,
             Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim(),
         };
+    }
+
+    public bool Start(DateTimeOffset startedAt)
+    {
+        if (Status == InProgressStatus)
+        {
+            return false;
+        }
+
+        if (Status != ScheduledStatus)
+        {
+            throw new InvalidOperationException("Only scheduled Shuttle trips can start.");
+        }
+
+        Status = InProgressStatus;
+        ActualDepartureTime = startedAt;
+        return true;
+    }
+
+    public bool Complete(DateTimeOffset completedAt)
+    {
+        if (Status == CompletedStatus)
+        {
+            return false;
+        }
+
+        if (Status != InProgressStatus)
+        {
+            throw new InvalidOperationException("Only in-progress Shuttle trips can complete.");
+        }
+
+        Status = CompletedStatus;
+        CompletedAt = completedAt;
+        return true;
+    }
+
+    public bool Cancel(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("A cancellation reason is required.", nameof(reason));
+        }
+
+        if (Status == CancelledStatus)
+        {
+            return false;
+        }
+
+        if (Status is not (ScheduledStatus or InProgressStatus))
+        {
+            throw new InvalidOperationException("Only scheduled or in-progress Shuttle trips can be cancelled.");
+        }
+
+        Status = CancelledStatus;
+        Notes = string.IsNullOrWhiteSpace(Notes)
+            ? $"Cancelled: {reason.Trim()}"
+            : $"{Notes}; Cancelled: {reason.Trim()}";
+        return true;
     }
 
     private static void ValidateId(Guid value, string parameterName)

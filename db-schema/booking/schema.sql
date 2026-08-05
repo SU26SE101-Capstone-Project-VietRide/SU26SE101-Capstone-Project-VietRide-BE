@@ -564,19 +564,23 @@ CREATE INDEX idx_operator_voucher_consents_voucher_id
 CREATE TABLE booking_shuttle_intents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     booking_id UUID NOT NULL REFERENCES bookings (id) ON DELETE CASCADE,
+    direction VARCHAR(30) NOT NULL DEFAULT 'INBOUND_TO_STATION',
     pickup_address TEXT NOT NULL,
     pickup_latitude DECIMAL(10,7) NOT NULL,
     pickup_longitude DECIMAL(10,7) NOT NULL,
+    road_distance_meters INT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     cancelled_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_booking_shuttle_intents_latitude CHECK (pickup_latitude BETWEEN -90 AND 90),
-    CONSTRAINT chk_booking_shuttle_intents_longitude CHECK (pickup_longitude BETWEEN -180 AND 180)
+    CONSTRAINT chk_booking_shuttle_intents_longitude CHECK (pickup_longitude BETWEEN -180 AND 180),
+    CONSTRAINT chk_booking_shuttle_intents_direction CHECK (direction IN ('INBOUND_TO_STATION', 'OUTBOUND_FROM_STATION')),
+    CONSTRAINT chk_booking_shuttle_intents_road_distance CHECK (road_distance_meters IS NULL OR road_distance_meters >= 0)
 );
 
-CREATE UNIQUE INDEX uq_booking_shuttle_intents_booking
-    ON booking_shuttle_intents (booking_id);
+CREATE UNIQUE INDEX uq_booking_shuttle_intents_booking_direction
+    ON booking_shuttle_intents (booking_id, direction) WHERE is_active = TRUE;
 
 -- -----------------------------------------------------------------------------
 -- outbox_events

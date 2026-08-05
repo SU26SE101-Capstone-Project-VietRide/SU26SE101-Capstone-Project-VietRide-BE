@@ -95,7 +95,7 @@ export class EtaService {
     if (!nextStop) return null;
 
     const cached = await this.readCachedEta(gps.tripId, nextStop.stopId);
-    if (!this.shouldRecalculate(gps, state, cached)) return null;
+    if (!this.shouldRecalculate(gps, state, cached, nextStop.stopId)) return null;
     const lockKey = trackingEtaLockKey(gps.tripId, nextStop.stopId);
     const owner = randomUUID();
     const acquired = await this.redis.getClient().set(lockKey, owner, 'EX', ETA_LOCK_TTL_SECONDS, 'NX');
@@ -144,8 +144,9 @@ export class EtaService {
         googleFailureCount: calculation.googleFailureCount,
         ...(calculation.cooldownUntil ? { cooldownUntil: calculation.cooldownUntil } : {}),
       };
+      const etaCacheTtl = this.env.TRACKING_ETA_CACHE_TTL_SECONDS ?? ETA_CACHE_TTL_SECONDS;
       await this.redis.getClient().multi()
-        .set(trackingEtaKey(gps.tripId, nextStop.stopId), JSON.stringify(event), 'EX', this.env.TRACKING_ETA_CACHE_TTL_SECONDS ?? ETA_CACHE_TTL_SECONDS)
+        .set(trackingEtaKey(gps.tripId, nextStop.stopId), JSON.stringify(event), 'EX', etaCacheTtl)
         .set(trackingEtaStateKey(gps.tripId), JSON.stringify(nextState), 'EX', ETA_STATE_TTL_SECONDS)
         .exec();
       return event;
@@ -216,8 +217,14 @@ export class EtaService {
     }
   }
 
-  private shouldRecalculate(gps: GpsUpdateEvent, state: EtaState | null, cached: EtaUpdateEvent | null): boolean {
+  private shouldRecalculate(
+    gps: GpsUpdateEvent,
+    state: EtaState | null,
+    cached: EtaUpdateEvent | null,
+    selectedStopId: string,
+  ): boolean {
     if (!state?.lastProviderCallAt) return true;
+    if (!cached && state.stopId !== selectedStopId) return true;
     const interval = this.env.TRACKING_ETA_MIN_INTERVAL_SECONDS ?? ETA_MIN_INTERVAL_SECONDS;
     if (Date.now() - new Date(state.lastProviderCallAt).getTime() < interval * 1000) return false;
     if (!cached) return true;

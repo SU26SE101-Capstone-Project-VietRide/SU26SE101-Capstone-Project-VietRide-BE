@@ -13,6 +13,7 @@ using VietRide.Trip.Application.Features.Internal.Trips.BatchTripSummaries;
 using VietRide.Trip.Application.Features.Internal.Trips.BookRoundTripSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.BookSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
+using VietRide.Trip.Application.Features.Internal.Trips.GetShuttleRoadDistance;
 using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 using VietRide.Trip.Application.Features.Internal.Trips.LockRoundTripSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.LockSeats;
@@ -88,6 +89,23 @@ public sealed class InternalTripsController : ControllerBase
         }
 
         var result = await mediator.Send(new GetTripSnapshotQuery(tripId, parsedPricingAt), cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("{tripId:guid}/shuttle-road-distance")]
+    [ProducesResponseType(typeof(ShuttleRoadDistanceDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ShuttleRoadDistanceDto>> GetShuttleRoadDistanceAsync(
+        Guid tripId,
+        [FromQuery] string direction,
+        [FromQuery] decimal latitude,
+        [FromQuery] decimal longitude,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(
+            new GetShuttleRoadDistanceQuery(tripId, direction, latitude, longitude),
+            cancellationToken);
         return Ok(result);
     }
 

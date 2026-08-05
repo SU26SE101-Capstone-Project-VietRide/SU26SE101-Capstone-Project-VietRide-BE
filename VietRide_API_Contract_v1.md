@@ -1296,6 +1296,10 @@ For VNPay, Booking passes the exact Trip seat-lock `expiresAt` as Payment `dueAt
 has already passed during checkout, the request fails with `422 PAYMENT_DEADLINE_PASSED` and
 Booking runs its existing seat-release compensation.
 
+Errors include the existing validation/not-found/conflict responses plus:
+
+- `502 UPSTREAM_UNAVAILABLE`: the Trip crew snapshot is unavailable or the Trip has no assigned Driver. Booking returns this before locking seats or creating a payment.
+
 ### POST `/v1/bookings/round-trip`
 
 Auth: `PASSENGER`. Idempotency: required.
@@ -1344,6 +1348,10 @@ Rules:
 - `BOOKING_GROUP` is VNPay-only for this endpoint; WALLET success remains two per-booking payments.
 - `paymentRedirectUrl` is `null` for WALLET and populated only when VNPay returns a redirect.
 - VNPay `Payment.dueAt` is the earlier exact `expiresAt` of the outbound and return seat locks.
+
+Errors include the existing validation/not-found/conflict responses plus:
+
+- `502 UPSTREAM_UNAVAILABLE`: either leg's Trip crew snapshot is unavailable or has no assigned Driver. Booking returns this before the atomic round-trip seat lock or any payment side effect.
 
 ### GET `/v1/bookings/history`
 
@@ -4455,7 +4463,33 @@ Server broadcasts to room `trip:{tripId}`:
 - `eta:update`
 - `trip:statusChanged`
 
-Tracking Phase 10 invariants (the public payload above is unchanged):
+Driver và Assistant được Tracking tự động tham gia thêm room nội bộ
+`tracking:trip:{tripId}:crew`. Khi Booking chuyển sang `CONFIRMED`, Booking phát fact
+`booking.booking.created`; Tracking validate fact này và chỉ broadcast `booking:created` vào
+crew room. Passenger room không nhận sự kiện này.
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-08-05T10:00:01.000Z",
+  "bookingId": "uuid",
+  "bookingCode": "VR-20260805-ABCDEFGH",
+  "tripId": "uuid",
+  "status": "CONFIRMED",
+  "ticketCodes": ["VT-20260805-ABCDEFGH"],
+  "passengerCount": 1,
+  "pickup": { "stationId": "uuid", "stopId": null, "address": null },
+  "dropoff": { "stationId": null, "stopId": "uuid", "address": null },
+  "driverUserId": "uuid",
+  "assistantUserId": "uuid"
+}
+```
+
+`eventId` là identity bền vững cho Outbox, RabbitMQ, Notification và Tracking dedupe.
+Notification lưu type `BOOKING_CREATED` cho từng crew recipient hiện có với dedupe riêng theo
+`eventId + recipientUserId`. Các field và event mới đều additive; client cũ có thể bỏ qua.
+
+Tracking Phase 10 invariants (legacy fields remain compatible; delay fields below are additive):
 
 - GPS is projected onto cached Trip route geometry only when the nearest segment is at most 50 m
   from the raw coordinate. Published coordinates are used by `tracking:latest:{tripId}`, REST and
@@ -4467,9 +4501,77 @@ Tracking Phase 10 invariants (the public payload above is unchanged):
   primary only when `GOOGLE_ROUTES_ENABLED=true`; Local Route ETA is the fallback. Provider calls
   are throttled to 60 seconds, require more than 500 m movement or an ETA under 15 minutes, and
   use a per-trip-stop Redis lock, a 60-second ETA cache and a three-failure/300-second cooldown.
+  A newly selected stop with no cache is calculated immediately even when the previous stop was
+  calculated less than 60 seconds ago. `STOPS_ONLY` geometry is refreshed after 30 seconds;
+  Route polyline geometry uses the configured longer cache TTL.
 - Default E2E uses a fake Google Routes HTTP server. Real Google E2E is opt-in with
   `RUN_REAL_GOOGLE_E2E=true`; no `etaSource`, snap metadata or traffic metadata is added to the
   public response shape.
+
+`eta:update` keeps the legacy boolean `delayed` and adds the following fields:
+
+```json
+{
+  "tripId": "uuid",
+  "stopId": "uuid",
+  "etaMinutes": 12,
+  "estimatedArrivalTime": "2026-08-05T10:12:00.000Z",
+  "distanceMeters": 8500,
+  "updatedAt": "2026-08-05T10:00:01.000Z",
+  "delayed": false,
+  "delayStatus": "ON_TIME",
+  "delayMinutes": 0
+}
+```
+
+`delayStatus` is `DELAYED`, `ON_TIME` or `UNKNOWN`. When evaluation fails, the server returns
+`UNKNOWN`, preserves the last known boolean/delay minutes when available, and does not emit a
+recovery event. `trip:statusChanged` is emitted only on a transition and has this shape:
+
+```json
+{
+  "tripId": "uuid",
+  "stopId": "uuid",
+  "status": "DELAYED",
+  "delayMinutes": 31,
+  "updatedAt": "2026-08-05T10:00:01.000Z"
+}
+```
+
+`status` is `DELAYED` when entering delay or when the current delayed stop changes, and
+`DELAY_CLEARED` when a previously delayed stop is evaluated on time. Repeated ETA updates do not
+repeat the transition. The same payload is used by `shared:eta:update` and
+`shared:trip:statusChanged` after public-field filtering; `statusTransition` is internal and is
+never sent over Socket.IO.
+
+### GET `/v1/tracking/trips/{tripId}/eta`
+
+Auth: Identity User Access Token and the same Tracking authorization used by the trip socket.
+Query: `stopId=<uuid>`.
+
+Response `200` uses the ADR 0004 envelope with `data.eta`. A cache hit preserves the existing ETA
+fields and adds:
+
+```json
+{
+  "eta": {
+    "tripId": "uuid",
+    "stopId": "uuid",
+    "etaMinutes": 12,
+    "estimatedArrivalTime": "2026-08-05T10:12:00.000Z",
+    "distanceMeters": 8500,
+    "updatedAt": "2026-08-05T10:00:01.000Z",
+    "delayed": null,
+    "delayStatus": "UNKNOWN",
+    "delayMinutes": null
+  }
+}
+```
+
+`delayed` is nullable on REST because the current delay cannot be proven. The delay state is used
+only when its `stopId` matches the requested ETA stop; a state belonging to another stop returns
+`UNKNOWN` and does not clear or apply the warning. A reconnecting client should call this endpoint
+to restore the latest known state instead of waiting for another socket event.
 
 ### Shuttle tracking
 
@@ -4574,11 +4676,15 @@ Response `200` dùng ADR 0004 envelope với `data`:
 
 - `geometry` chỉ chứa polyline thật của Route. Khi Route chưa có polyline, trả `geometry: null`
   nhưng vẫn trả các marker station/stop hợp lệ; client không nối các marker thành tuyến giả.
+  Tracking chỉ cache fallback `STOPS_ONLY` trong 30 giây để polyline được Operator bổ sung qua
+  `PUT /v1/operator/routes/{id}/geometry` xuất hiện trong Tracking mà không cần API mới.
 - `originStation` và `destinationStation` nullable khi station chưa có tọa độ hợp lệ.
 - Geometry loại tọa độ ngoài range/trùng liên tiếp, giản lược deterministic tối đa 1.000 điểm và
   luôn giữ điểm đầu/cuối. Public payload không chứa `alertRecipientUserIds`.
-- Response đặt `Cache-Control: private, max-age=600`, `Vary: Authorization` và strong `ETag`
-  tính từ DTO public sau sanitize/simplify. `If-None-Match` khớp trả `304` body rỗng sau khi auth.
+- Response đặt `Cache-Control: private, max-age=600` khi có geometry `ROUTE_POLYLINE`; fallback
+  `geometry: null` đặt `private, max-age=30`. Cả hai response đều đặt `Vary: Authorization` và
+  strong `ETag` tính từ DTO public sau sanitize/simplify. `If-None-Match` khớp trả `304` body rỗng sau
+  khi auth.
 - Errors: `400 VALIDATION_FAILED`; `401 UNAUTHORIZED`; `403 ACCESS_DENIED`; `404 TRIP_NOT_FOUND`;
   `503 TRACKING_AUTH_UNAVAILABLE`; `503 TRACKING_ROUTE_CONTEXT_UNAVAILABLE`.
 
@@ -4593,10 +4699,14 @@ Response `200` dùng ADR 0004 envelope với `data`:
 {
   "shuttleTripId": "uuid",
   "mainTripId": "uuid",
+  "direction": "INBOUND_TO_STATION",
   "ownPickups": [
     {
       "bookingId": "uuid",
       "pickupOrder": 3,
+      "serviceAddress": "123 Nguyen Hue, Quan 1",
+      "serviceOrder": 3,
+      "roadDistanceMeters": 4200,
       "latitude": 10.0,
       "longitude": 106.0,
       "status": "PENDING",
@@ -5830,19 +5940,33 @@ Errors: `402 SUBSCRIPTION_EXPIRED`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 SUB
 
 Auth: Internal JWT. Idempotency-Key: required. Caller: Trip service after its local persistence fails or after a resource is soft-deleted. Releasing an already released allocation is a `200` idempotent no-op. A scheduled Identity reconciliation may release only allocations whose resource is verified absent through the owning service's internal lookup.
 
+### GET `/internal/v1/trips/{tripId}/shuttle-road-distance`
+
+Auth: valid Internal JWT only. Booking calls this endpoint before creating each shuttle intent.
+Query `direction=INBOUND_TO_STATION|OUTBOUND_FROM_STATION`, `latitude`, and `longitude` are
+required. Inbound measures to the route origin Station; outbound measures to the destination
+Station. Trip uses Google Routes `travelMode=DRIVE` and returns raw `{ "distanceMeters": 5000 }`.
+Errors are `422 VALIDATION_ERROR`/`422 SHUTTLE_STATION_NOT_SUPPORTED` or
+`503 SHUTTLE_DISTANCE_UNAVAILABLE`; there is no Haversine fallback.
+
 ### GET `/v1/operator/shuttle-requests`
+
+Shuttle được nhóm theo `mainTripId + direction`, trong đó `direction` là `INBOUND_TO_STATION` hoặc `OUTBOUND_FROM_STATION`. Khoảng cách hiển thị là `roadDistanceMeters` snapshot từ Google Routes; không dùng Haversine cho điều kiện đủ điều kiện. Giới hạn toàn nền tảng là 5.000 mét, bao gồm cả điểm đúng 5.000 mét.
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant lấy từ JWT. Query phân trang theo main Trip.
 
-Response trả `mainTripId`, origin Station, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `distanceToStationMeters`, `requestedAt`) và `suggestedBookingOrder`. Gợi ý dùng Haversine, xa nhất trước, hòa thì `requestedAt ASC`; operator có thể đổi thứ tự.
+Response trả `mainTripId`, Station theo direction, `direction`, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `roadDistanceMeters`, `requestedAt`) và `suggestedBookingOrder`. Thứ tự gợi ý dùng road-distance snapshot, xa nhất trước, hòa thì `requestedAt ASC`; không dùng Haversine để quyết định eligibility.
 
 ### POST `/v1/operator/shuttle-trips`
+
+Request bắt buộc có thêm `direction`. Inbound dùng origin Station và `scheduledEndTime <= departureDateTime - 30 phút`; outbound dùng destination Station và `scheduledDepartureTime >= estimatedArrivalTime + 30 phút`.
 
 Auth: `OPERATOR_ADMIN`. `Idempotency-Key` bắt buộc.
 
 ```json
 {
   "mainTripId": "uuid",
+  "direction": "INBOUND_TO_STATION",
   "driverUserId": "uuid",
   "vehicleId": "uuid",
   "scheduledDepartureTime": "2026-07-13T01:00:00Z",
@@ -5863,9 +5987,91 @@ Errors: `402 SUBSCRIPTION_EXPIRED`; `403 FORBIDDEN`; `403 SUBSCRIPTION_MODULE_DI
 `404 TRIP_NOT_FOUND`; `404 VEHICLE_NOT_FOUND`; `404 DRIVER_NOT_FOUND`; `409
 SHUTTLE_REQUEST_SET_CHANGED`; `409 SHUTTLE_CAPACITY_EXCEEDED`; `409
 SHUTTLE_DRIVER_CONFLICT`; `409 SHUTTLE_VEHICLE_CONFLICT`; `409
-SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 VALIDATION_ERROR`; `503 UPSTREAM_UNAVAILABLE`.
+SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 SHUTTLE_DISTANCE_EXCEEDED`; `422 VALIDATION_ERROR`;
+`503 SHUTTLE_DISTANCE_UNAVAILABLE`; `503 UPSTREAM_UNAVAILABLE`.
+
+### GET `/v1/driver/shuttle-trips`
+
+Auth: `DRIVER` only. Chỉ trả ShuttleTrip có `driverUserId` trùng với `sub` trong JWT và bỏ qua
+trạng thái `CANCELLED`.
+
+Query tùy chọn: `from=YYYY-MM-DD`, `to=YYYY-MM-DD`. Khi không truyền, cửa sổ mặc định là ngày
+hiện tại đến ngày hiện tại + 14 ngày theo ICT. `to` không được trước `from`; khoảng truy vấn tối
+đa 32 ngày.
+
+Response `200`:
+
+```json
+{
+  "from": "2026-08-05",
+  "to": "2026-08-19",
+  "items": [
+    {
+      "shuttleTripId": "uuid",
+      "mainTripId": "uuid",
+      "direction": "INBOUND_TO_STATION",
+      "status": "SCHEDULED",
+      "vehicleId": "uuid",
+      "licensePlate": "51B-123.45",
+      "scheduledDepartureTime": "2026-08-05T01:00:00Z",
+      "scheduledEndTime": "2026-08-05T02:00:00Z",
+      "passengerCount": 2,
+      "stopCount": 1
+    }
+  ]
+}
+```
+
+Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN`; `422 VALIDATION_ERROR`.
+
+### GET `/v1/driver/shuttle-trips/{shuttleTripId}/manifest`
+
+Auth: `DRIVER` only và chỉ Driver được gán cho ShuttleTrip được đọc. Driver khác nhận `403
+FORBIDDEN`; ShuttleTrip không tồn tại nhận `404 SHUTTLE_TRIP_NOT_FOUND`.
+
+Response `200` gồm ShuttleTrip, main Trip, direction, trạng thái, Station, lịch chạy và danh sách
+`stops` tăng dần theo `pickupOrder`. Các ShuttlePassenger cùng `bookingId + pickupOrder` được gom
+thành một pickup group. Một group phải có cùng trạng thái; dữ liệu mixed status trả `409
+SHUTTLE_MANIFEST_INCONSISTENT_STATUS` thay vì báo sai `PENDING`.
+
+```json
+{
+  "shuttleTripId": "uuid",
+  "mainTripId": "uuid",
+  "direction": "INBOUND_TO_STATION",
+  "status": "SCHEDULED",
+  "stationId": "uuid",
+  "stationName": "Bến xe Miền Đông",
+  "stationLatitude": 10.8012,
+  "stationLongitude": 106.7144,
+  "scheduledDepartureTime": "2026-08-05T01:00:00Z",
+  "scheduledEndTime": "2026-08-05T02:00:00Z",
+  "stops": [
+    {
+      "pickupOrder": 1,
+      "bookingId": "uuid",
+      "ticketIds": ["uuid"],
+      "passengerCount": 1,
+      "pickupAddress": "12 Nguyễn Huệ, Quận 1",
+      "pickupLatitude": 10.7731,
+      "pickupLongitude": 106.7032,
+      "status": "PENDING",
+      "pickedUpAt": null,
+      "deliveredAt": null,
+      "passengerDisplayName": "Nguyễn Văn A",
+      "passengerPhone": "0900000000"
+    }
+  ]
+}
+```
+
+Không trả ID giấy tờ, dữ liệu thanh toán hoặc thông tin ngoài nghiệp vụ. Errors: `401
+UNAUTHORIZED`; `403 FORBIDDEN`; `404 SHUTTLE_TRIP_NOT_FOUND`; `404
+SHUTTLE_STATION_NOT_FOUND`; `409 SHUTTLE_MANIFEST_INCONSISTENT_STATUS`.
 
 ### POST `/v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup`
+
+Các endpoint driver bổ sung là `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/delivered`, `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/no-show`, `POST /v1/driver/shuttle-trips/{shuttleTripId}/start` và `POST /v1/driver/shuttle-trips/{shuttleTripId}/complete`. Chỉ driver được gán có quyền mutation và mọi mutation yêu cầu `Idempotency-Key`.
 
 Auth: assigned `DRIVER` only. `Idempotency-Key` is required. The request has no body.
 
@@ -5888,9 +6094,20 @@ Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN`; `404 SHUTTLE_TRIP_NOT_FOUND`; `404
 SHUTTLE_PICKUP_NOT_FOUND`; `409 SHUTTLE_TRIP_TERMINAL`; `409 SHUTTLE_PICKUP_NOT_PENDING`; `422
 VALIDATION_ERROR`; `422 IDEMPOTENCY_KEY_MISMATCH`.
 
+Delivered/no-show/start/complete/cancel transitions that do not match the state machine return
+`409 SHUTTLE_TRIP_INVALID_STATE` or `409 SHUTTLE_PASSENGER_INVALID_STATE`; a blank reason returns
+`422 VALIDATION_ERROR`. All Shuttle mutations repeat the active/approved operator and
+`enableShuttle=true` subscription guard and are idempotent.
+
 ### Shuttle fields trong Booking
 
-`POST /v1/bookings` và mỗi leg của round-trip nhận optional `shuttlePickup: { address, latitude, longitude }`. Chỉ origin Station active có `supportsShuttle=true` và đủ tọa độ được nhận. Booking dùng `TripSnapshot.departureDateTime` để từ chối request tại/sau T-30 với `409 SHUTTLE_REQUEST_CUTOFF_PASSED`. Khi intent còn active, `edit-pickup` trả `409 SHUTTLE_PICKUP_LOCKED`.
+Booking hỗ trợ đồng thời `shuttlePickup` cho inbound và `shuttleDropoff` cho outbound, bao gồm từng leg round-trip. Mỗi booking có tối đa một intent active cho mỗi direction. Trip gọi Google Routes với `travelMode=DRIVE`: `distanceMeters <= 5000` được phép, lớn hơn 5000 trả `422 SHUTTLE_DISTANCE_EXCEEDED`, còn lỗi upstream/timeout/thiếu key/response sai trả `503 SHUTTLE_DISTANCE_UNAVAILABLE`. Event mới dùng `shuttleRequests[]`; consumer vẫn đọc `shuttlePickup` cũ như inbound.
+
+Trip configuration is `SHUTTLE_MAX_DISTANCE_KM=5`, `GOOGLE_ROUTES_ENABLED=true`,
+`GOOGLE_ROUTES_API_KEY`, `GOOGLE_ROUTES_BASE_URL=https://routes.googleapis.com`, and
+`TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS=1500`. Missing configuration fails closed.
+
+`POST /v1/bookings` và mỗi leg của round-trip nhận optional `shuttlePickup: { address, latitude, longitude }` cho inbound và `shuttleDropoff: { address, latitude, longitude }` cho outbound. Chỉ origin/destination Station tương ứng, active, có `supportsShuttle=true` và đủ tọa độ được nhận; Stop dọc tuyến không được dùng làm điểm shuttle. Booking dùng `TripSnapshot.departureDateTime` để từ chối request tại/sau T-30 với `409 SHUTTLE_REQUEST_CUTOFF_PASSED`. Khi intent còn active, `edit-pickup`/`edit-dropoff` bị khóa theo direction.
 
 ### GET `/v1/stations/search`
 

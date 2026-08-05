@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Application.Events;
 using VietRide.Booking.Application.Exceptions;
 using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
@@ -42,6 +43,7 @@ public sealed class CreateBookingCommandHandler
 {
     private const string EventType = "booking.booking.confirmed";
     private const int SeatLockTtlSeconds = 10 * 60; // SEAT_LOCK_TTL_MINUTES=10 (BSOT §10 line 2360)
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IBookingRepository _bookings;
     private readonly IBookingStatusHistoryRepository _statusHistory;
@@ -116,6 +118,12 @@ public sealed class CreateBookingCommandHandler
                 $"Trip '{request.TripId}' is not in SCHEDULED status.");
         }
 
+        if (!trip.DriverUserId.HasValue)
+        {
+            throw new BookingUpstreamUnavailableException(
+                $"Trip '{request.TripId}' does not have an assigned driver.");
+        }
+
         var stationCanonicalization = await _stationCanonicalizer.LockAndResolveAsync(
             BookingStationCanonicalization.Collect(
                 request.PickupStationId,
@@ -131,7 +139,7 @@ public sealed class CreateBookingCommandHandler
         trip = BookingStationCanonicalization.ResolveTrip(trip, stationCanonicalization);
 
         ValidateStopSelections(trip, request.PickupStopId, request.DropoffStopId);
-        ValidateShuttleRequest(request, trip, now);
+        var shuttleDistances = await ValidateShuttleRequestAsync(request, trip, now, cancellationToken);
         var buyerProfile = await GetRequiredBuyerProfileAsync(
             request.PassengerUserId,
             cancellationToken);
@@ -259,9 +267,21 @@ public sealed class CreateBookingCommandHandler
             if (request.ShuttlePickup is not null)
             {
                 booking.RequestShuttle(
+                    BookingShuttleIntent.InboundDirection,
                     request.ShuttlePickup.Address,
                     request.ShuttlePickup.Latitude,
-                    request.ShuttlePickup.Longitude);
+                    request.ShuttlePickup.Longitude,
+                    shuttleDistances.InboundDistanceMeters);
+            }
+
+            if (request.ShuttleDropoff is not null)
+            {
+                booking.RequestShuttle(
+                    BookingShuttleIntent.OutboundDirection,
+                    request.ShuttleDropoff.Address,
+                    request.ShuttleDropoff.Latitude,
+                    request.ShuttleDropoff.Longitude,
+                    shuttleDistances.OutboundDistanceMeters);
             }
 
             await _bookings.AddAsync(booking, cancellationToken);
@@ -446,11 +466,37 @@ public sealed class CreateBookingCommandHandler
                 latitude = booking.ShuttleIntent.PickupLatitude,
                 longitude = booking.ShuttleIntent.PickupLongitude,
             },
+            shuttleRequests = booking.ShuttleIntents
+                .Where(intent => intent.IsActive)
+                .Select(intent => new
+                {
+                    direction = intent.Direction,
+                    address = intent.PickupAddress,
+                    latitude = intent.PickupLatitude,
+                    longitude = intent.PickupLongitude,
+                    roadDistanceMeters = intent.RoadDistanceMeters,
+                })
+                .ToArray(),
         };
 
         await _outbox.EnqueueAsync(
             EventType,
-            JsonSerializer.Serialize(confirmedEvent),
+            JsonSerializer.Serialize(confirmedEvent, JsonOptions),
+            cancellationToken);
+
+        var createdEvent = new BookingCreatedIntegrationEvent(
+            booking.Id,
+            booking.BookingCode.Value,
+            booking.TripId,
+            booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
+            new BookingLocationSnapshot(booking.PickupStationId, booking.PickupStopId, null),
+            new BookingLocationSnapshot(booking.DropoffStationId, booking.DropoffStopId, null),
+            trip.DriverUserId,
+            trip.AssistantUserId,
+            now);
+        await _outbox.EnqueueAsync(
+            createdEvent.EventType,
+            JsonSerializer.Serialize(createdEvent, JsonOptions),
             cancellationToken);
 
         _logger.LogInformation(
@@ -593,31 +639,68 @@ public sealed class CreateBookingCommandHandler
             ?? trip.BaseFare;
     }
 
-    private static void ValidateShuttleRequest(
+    private async Task<(int? InboundDistanceMeters, int? OutboundDistanceMeters)> ValidateShuttleRequestAsync(
         CreateBookingCommand request,
         TripSnapshot trip,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
     {
-        if (request.ShuttlePickup is null)
+        if (request.ShuttlePickup is null && request.ShuttleDropoff is null)
         {
-            return;
+            return (null, null);
         }
 
-        if (request.PickupStopId.HasValue || request.PickupStationId != trip.OriginStation.Id)
+        if (request.ShuttlePickup is not null
+            && (string.IsNullOrWhiteSpace(request.ShuttlePickup.Address)
+                || request.ShuttlePickup.Latitude is < -90m or > 90m
+                || request.ShuttlePickup.Longitude is < -180m or > 180m))
+        {
+            throw new CodedValidationException("VALIDATION_ERROR", "Shuttle pickup address and coordinates are invalid.");
+        }
+        if (request.ShuttleDropoff is not null
+            && (string.IsNullOrWhiteSpace(request.ShuttleDropoff.Address)
+                || request.ShuttleDropoff.Latitude is < -90m or > 90m
+                || request.ShuttleDropoff.Longitude is < -180m or > 180m))
+        {
+            throw new CodedValidationException("VALIDATION_ERROR", "Shuttle dropoff address and coordinates are invalid.");
+        }
+
+        if (request.ShuttlePickup is not null
+            && (request.PickupStopId.HasValue || request.PickupStationId != trip.OriginStation.Id))
         {
             throw new CodedValidationException(
                 "SHUTTLE_STATION_NOT_SUPPORTED",
                 "Shuttle is available only for pickup at the trip origin Station.");
         }
 
-        if (!trip.OriginStation.IsActive
-            || !trip.OriginStation.SupportsShuttle
-            || !trip.OriginStation.Latitude.HasValue
-            || !trip.OriginStation.Longitude.HasValue)
+        if (request.ShuttleDropoff is not null
+            && (request.DropoffStopId.HasValue || request.DropoffStationId != trip.DestinationStation.Id))
+        {
+            throw new CodedValidationException(
+                "SHUTTLE_STATION_NOT_SUPPORTED",
+                "Shuttle is available only for dropoff at the trip destination Station.");
+        }
+
+        if (request.ShuttlePickup is not null
+            && (!trip.OriginStation.IsActive
+                || !trip.OriginStation.SupportsShuttle
+                || !trip.OriginStation.Latitude.HasValue
+                || !trip.OriginStation.Longitude.HasValue))
         {
             throw new CodedValidationException(
                 "SHUTTLE_STATION_NOT_SUPPORTED",
                 "The trip origin Station does not support shuttle service.");
+        }
+
+        if (request.ShuttleDropoff is not null
+            && (!trip.DestinationStation.IsActive
+                || !trip.DestinationStation.SupportsShuttle
+                || !trip.DestinationStation.Latitude.HasValue
+                || !trip.DestinationStation.Longitude.HasValue))
+        {
+            throw new CodedValidationException(
+                "SHUTTLE_STATION_NOT_SUPPORTED",
+                "The trip destination Station does not support shuttle service.");
         }
 
         if (now >= trip.DepartureDateTime.AddMinutes(-30))
@@ -626,6 +709,36 @@ public sealed class CreateBookingCommandHandler
                 "SHUTTLE_REQUEST_CUTOFF_PASSED",
                 "The shuttle request cutoff has passed.");
         }
+
+        var inboundDistance = request.ShuttlePickup is null
+            ? (int?)null
+            : await ResolveShuttleDistanceAsync(
+                request.TripId,
+                BookingShuttleIntent.InboundDirection,
+                request.ShuttlePickup.Latitude,
+                request.ShuttlePickup.Longitude,
+                cancellationToken);
+        var outboundDistance = request.ShuttleDropoff is null
+            ? (int?)null
+            : await ResolveShuttleDistanceAsync(
+                request.TripId,
+                BookingShuttleIntent.OutboundDirection,
+                request.ShuttleDropoff.Latitude,
+                request.ShuttleDropoff.Longitude,
+                cancellationToken);
+        return (inboundDistance, outboundDistance);
+    }
+
+    private async Task<int> ResolveShuttleDistanceAsync(
+        Guid tripId,
+        string direction,
+        decimal latitude,
+        decimal longitude,
+        CancellationToken cancellationToken)
+    {
+        var outcome = await _tripClient.GetShuttleRoadDistanceAsync(
+            tripId, direction, latitude, longitude, cancellationToken);
+        return ShuttleDistancePolicy.Resolve(outcome);
     }
 
     private async Task<BookingBuyerSnapshotProfile> GetRequiredBuyerProfileAsync(

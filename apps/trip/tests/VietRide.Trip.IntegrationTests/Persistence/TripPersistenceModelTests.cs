@@ -117,7 +117,7 @@ public sealed class TripPersistenceModelTests
         shuttleTrip.GetCheckConstraints().Should().Contain(x => x.Name == "chk_shuttle_trips_schedule");
 
         passenger.GetTableName().Should().Be("shuttle_passengers");
-        passenger.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "uq_shuttle_passengers_booking_ticket" && x.IsUnique);
+        passenger.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "uq_shuttle_passengers_booking_ticket_direction" && x.IsUnique);
         passenger.GetForeignKeys().Should().Contain(x => x.PrincipalEntityType.ClrType == typeof(ShuttleTrip)
             && x.DeleteBehavior == DeleteBehavior.SetNull);
         passenger.GetCheckConstraints().Should().Contain(x => x.Name == "chk_shuttle_passengers_status");

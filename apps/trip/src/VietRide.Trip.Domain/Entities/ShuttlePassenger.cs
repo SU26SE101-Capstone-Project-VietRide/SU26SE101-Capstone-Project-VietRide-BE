@@ -5,10 +5,12 @@ namespace VietRide.Trip.Domain.Entities;
 public sealed class ShuttlePassenger : BaseEntity<Guid>
 {
     public const string InboundDirection = "INBOUND_TO_STATION";
+    public const string OutboundDirection = "OUTBOUND_FROM_STATION";
     public const string PendingAssignmentStatus = "PENDING_ASSIGNMENT";
     public const string PendingStatus = "PENDING";
     public const string PickedUpStatus = "PICKED_UP";
     public const string DeliveredStatus = "DELIVERED";
+    public const string NoShowStatus = "NO_SHOW";
     public const string CancelledStatus = "CANCELLED";
     public Guid? ShuttleTripId { get; private set; }
     public Guid MainTripId { get; private set; }
@@ -19,6 +21,7 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
     public string PickupAddress { get; private set; } = string.Empty;
     public decimal PickupLat { get; private set; }
     public decimal PickupLng { get; private set; }
+    public int? RoadDistanceMeters { get; private set; }
     public DateTimeOffset? ScheduledPickupTime { get; private set; }
     public int? PickupOrder { get; private set; }
     public string Status { get; private set; } = PendingAssignmentStatus;
@@ -35,7 +38,9 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
         Guid passengerUserId,
         string pickupAddress,
         decimal pickupLat,
-        decimal pickupLng)
+        decimal pickupLng,
+        string direction = InboundDirection,
+        int? roadDistanceMeters = null)
     {
         ValidateId(mainTripId, nameof(mainTripId));
         ValidateId(bookingId, nameof(bookingId));
@@ -51,6 +56,16 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
             throw new ArgumentOutOfRangeException(nameof(pickupLat), "Pickup coordinates are invalid.");
         }
 
+        if (direction is not (InboundDirection or OutboundDirection))
+        {
+            throw new ArgumentOutOfRangeException(nameof(direction));
+        }
+
+        if (roadDistanceMeters < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(roadDistanceMeters));
+        }
+
         return new ShuttlePassenger
         {
             Id = Guid.NewGuid(),
@@ -58,10 +73,11 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
             BookingId = bookingId,
             TicketId = ticketId,
             PassengerUserId = passengerUserId,
-            Direction = InboundDirection,
+            Direction = direction,
             PickupAddress = pickupAddress.Trim(),
             PickupLat = pickupLat,
             PickupLng = pickupLng,
+            RoadDistanceMeters = roadDistanceMeters,
         };
     }
 
@@ -84,15 +100,21 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
         Status = PendingStatus;
     }
 
-    public void Cancel(string reason)
+    public bool Cancel(string reason)
     {
-        if (Status is DeliveredStatus or CancelledStatus)
+        if (string.IsNullOrWhiteSpace(reason))
         {
-            return;
+            throw new ArgumentException("A cancellation reason is required.", nameof(reason));
+        }
+
+        if (Status is DeliveredStatus or NoShowStatus or CancelledStatus)
+        {
+            return false;
         }
 
         Status = CancelledStatus;
-        CancelReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        CancelReason = reason.Trim();
+        return true;
     }
 
     public bool MarkPickedUp(DateTimeOffset pickedUpAt)
@@ -109,6 +131,45 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
 
         Status = PickedUpStatus;
         PickedUpAt = pickedUpAt;
+        return true;
+    }
+
+    public bool MarkDelivered(DateTimeOffset deliveredAt)
+    {
+        if (Status == DeliveredStatus)
+        {
+            return false;
+        }
+
+        if (Status != PickedUpStatus)
+        {
+            throw new InvalidOperationException("Only picked-up Shuttle passengers can be delivered.");
+        }
+
+        Status = DeliveredStatus;
+        DeliveredAt = deliveredAt;
+        return true;
+    }
+
+    public bool MarkNoShow(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("A no-show reason is required.", nameof(reason));
+        }
+
+        if (Status == NoShowStatus)
+        {
+            return false;
+        }
+
+        if (Status != PendingStatus)
+        {
+            throw new InvalidOperationException("Only pending Shuttle passengers can be marked no-show.");
+        }
+
+        Status = NoShowStatus;
+        CancelReason = reason.Trim();
         return true;
     }
 

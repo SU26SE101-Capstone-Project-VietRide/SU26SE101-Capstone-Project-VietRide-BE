@@ -84,6 +84,56 @@ public sealed class TripServiceClient : ITripServiceClient
         }
     }
 
+    public async Task<ShuttleRoadDistanceOutcome> GetShuttleRoadDistanceAsync(
+        Guid tripId,
+        string direction,
+        decimal latitude,
+        decimal longitude,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var uri = $"/internal/v1/trips/{tripId:D}/shuttle-road-distance"
+                + $"?direction={Uri.EscapeDataString(direction)}"
+                + $"&latitude={latitude.ToString(CultureInfo.InvariantCulture)}"
+                + $"&longitude={longitude.ToString(CultureInfo.InvariantCulture)}";
+            using var response = await _httpClient.GetAsync(uri, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                var error = await response.Content
+                    .ReadFromJsonAsync<ApiErrorEnvelope>(JsonOptions, cancellationToken)
+                    .ConfigureAwait(false);
+                if (error?.Error?.Code is "SHUTTLE_STATION_NOT_SUPPORTED" or "VALIDATION_ERROR")
+                {
+                    return new ShuttleRoadDistanceOutcome.Rejected(
+                        error.Error.Code,
+                        error.Error.Message);
+                }
+
+                return new ShuttleRoadDistanceOutcome.Unavailable(
+                    $"Trip distance endpoint returned {(int)response.StatusCode}.");
+            }
+
+            var data = await response.Content.ReadFromJsonAsync<ShuttleRoadDistanceResponse>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            return data?.DistanceMeters is >= 0
+                ? new ShuttleRoadDistanceOutcome.Success(data.DistanceMeters)
+                : new ShuttleRoadDistanceOutcome.Unavailable("Trip distance response is malformed.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException exception)
+        {
+            return new ShuttleRoadDistanceOutcome.Unavailable(exception.Message);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or NotSupportedException)
+        {
+            return new ShuttleRoadDistanceOutcome.Unavailable(exception.Message);
+        }
+    }
+
     /// <inheritdoc/>
     public async Task<TripSnapshot?> GetTripSnapshotAsync(
         Guid tripId,
@@ -528,6 +578,8 @@ public sealed class TripServiceClient : ITripServiceClient
         IReadOnlyList<string> SeatNumbers,
         Guid HoldOwnerId,
         int? TtlSeconds);
+
+    private sealed record ShuttleRoadDistanceResponse(int DistanceMeters);
 
     private sealed record LockRoundTripSeatsRequest(
         LockRoundTripLegRequest Outbound,

@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.Configuration;
 using Npgsql;
 using Npgsql.NameTranslation;
 using VietRide.Shared.Application.Exceptions;
@@ -390,7 +391,8 @@ public sealed class ShuttlePersistenceIntegrationTests
                     passengerId,
                     "12 Nguyen Hue, District 1",
                     10.7731m,
-                    106.7032m));
+                    106.7032m,
+                    roadDistanceMeters: 1_000));
             }
 
             await db.SaveChangesAsync();
@@ -412,6 +414,10 @@ public sealed class ShuttlePersistenceIntegrationTests
                 CancellationToken.None);
             await wrongDriver.Should().ThrowAsync<ForbiddenException>();
 
+            await service.StartAsync(
+                created.ShuttleTripId,
+                seed.ShuttleDriverId,
+                CancellationToken.None);
             var first = await service.MarkPickupAsync(
                 created.ShuttleTripId,
                 1,
@@ -457,6 +463,141 @@ public sealed class ShuttlePersistenceIntegrationTests
         {
             await db.Database.EnsureDeletedAsync();
         }
+    }
+
+    [Fact]
+    public async Task DriverAssignmentsAndManifest_FilterAuthorizeAndGroupPassengers()
+    {
+        var databaseName = $"vietride_trip_shuttle_driver_reads_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond));
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var (seed, service, created) = await SeedAssignedShuttleAsync(db, clock, now);
+
+            var assignments = await service.GetDriverAssignmentsAsync(
+                seed.ShuttleDriverId,
+                null,
+                null,
+                CancellationToken.None);
+            var foreignAssignments = await service.GetDriverAssignmentsAsync(
+                Guid.NewGuid(),
+                assignments.From,
+                assignments.To,
+                CancellationToken.None);
+            var manifest = await service.GetDriverManifestAsync(
+                created.ShuttleTripId,
+                seed.ShuttleDriverId,
+                CancellationToken.None);
+            var forbidden = async () => await service.GetDriverManifestAsync(
+                created.ShuttleTripId,
+                Guid.NewGuid(),
+                CancellationToken.None);
+            var missing = async () => await service.GetDriverManifestAsync(
+                Guid.NewGuid(),
+                seed.ShuttleDriverId,
+                CancellationToken.None);
+
+            assignments.Items.Should().ContainSingle(item =>
+                item.ShuttleTripId == created.ShuttleTripId
+                && item.MainTripId == seed.MainTripId
+                && item.PassengerCount == 2
+                && item.StopCount == 1);
+            foreignAssignments.Items.Should().BeEmpty();
+            manifest.Stops.Should().ContainSingle(stop =>
+                stop.PickupOrder == 1
+                && stop.PassengerCount == 2
+                && stop.TicketIds.Count == 2
+                && stop.Status == ShuttlePassenger.PendingStatus);
+            await forbidden.Should().ThrowAsync<ForbiddenException>();
+            await missing.Should().ThrowAsync<CodedNotFoundException>()
+                .Where(error => error.ErrorCode == "SHUTTLE_TRIP_NOT_FOUND");
+
+            var shuttleTrip = await db.ShuttleTrips.SingleAsync(item => item.Id == created.ShuttleTripId);
+            shuttleTrip.Cancel("test cancellation");
+            await db.SaveChangesAsync();
+            var afterCancellation = await service.GetDriverAssignmentsAsync(
+                seed.ShuttleDriverId,
+                assignments.From,
+                assignments.To,
+                CancellationToken.None);
+            afterCancellation.Items.Should().BeEmpty();
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task DriverManifest_MixedPickupGroupStatuses_ReturnsConflictInsteadOfPending()
+    {
+        var databaseName = $"vietride_trip_shuttle_manifest_status_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond));
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var (seed, service, created) = await SeedAssignedShuttleAsync(db, clock, now);
+            var passenger = await db.ShuttlePassengers
+                .Where(item => item.ShuttleTripId == created.ShuttleTripId)
+                .OrderBy(item => item.Id)
+                .FirstAsync();
+            passenger.MarkPickedUp(now);
+            await db.SaveChangesAsync();
+
+            var read = async () => await service.GetDriverManifestAsync(
+                created.ShuttleTripId,
+                seed.ShuttleDriverId,
+                CancellationToken.None);
+
+            await read.Should().ThrowAsync<CodedConflictException>()
+                .Where(error => error.ErrorCode == "SHUTTLE_MANIFEST_INCONSISTENT_STATUS");
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    private static async Task<(BaseSeed Seed, IShuttleDispatchService Service, CreateShuttleTripResult Created)>
+        SeedAssignedShuttleAsync(TripDbContext db, IClock clock, DateTimeOffset now)
+    {
+        var seed = await SeedBaseAsync(db, now.AddHours(4));
+        var bookingId = Guid.NewGuid();
+        var passengerId = Guid.NewGuid();
+        for (var index = 0; index < 2; index++)
+        {
+            db.ShuttlePassengers.Add(ShuttlePassenger.Request(
+                seed.MainTripId,
+                bookingId,
+                Guid.NewGuid(),
+                passengerId,
+                "12 Nguyen Hue, District 1",
+                10.7731m,
+                106.7032m,
+                roadDistanceMeters: 1_000));
+        }
+
+        await db.SaveChangesAsync();
+        var service = CreateDispatchService(db, clock, seed.OperatorId);
+        var created = await service.CreateAsync(new CreateShuttleTripInput(
+            seed.OperatorId,
+            seed.MainTripId,
+            seed.ShuttleDriverId,
+            seed.ShuttleVehicleId,
+            now.AddHours(1),
+            now.AddHours(2),
+            [bookingId],
+            null), CancellationToken.None);
+        return (seed, service, created);
     }
 
     private static async Task<BaseSeed> SeedBaseAsync(TripDbContext db, DateTimeOffset departure)
@@ -563,7 +704,8 @@ public sealed class ShuttlePersistenceIntegrationTests
         return (IIntegrationEventHandler<BookingShuttleConfirmedIntegrationEvent>)Activator.CreateInstance(
             type,
             db,
-            unitOfWork ?? new EfUnitOfWork(db))!;
+            unitOfWork ?? new EfUnitOfWork(db),
+            new StubShuttleDistanceClient())!;
     }
 
     private static IShuttleDispatchService CreateDispatchService(
@@ -578,7 +720,18 @@ public sealed class ShuttlePersistenceIntegrationTests
             type,
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
             binder: null,
-            [db, new StubIdentityClient(operatorId), CreateOutbox(db, clock), clock],
+            [
+                db,
+                new StubIdentityClient(operatorId),
+                CreateOutbox(db, clock),
+                clock,
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["SHUTTLE_MAX_DISTANCE_KM"] = "5",
+                    })
+                    .Build(),
+            ],
             culture: null)!;
     }
 
@@ -684,5 +837,16 @@ public sealed class ShuttlePersistenceIntegrationTests
             {
                 Phone = "0900000000",
             });
+    }
+
+    private sealed class StubShuttleDistanceClient : IShuttleDistanceClient
+    {
+        public Task<ShuttleDistanceOutcome> CalculateAsync(
+            decimal originLatitude,
+            decimal originLongitude,
+            decimal destinationLatitude,
+            decimal destinationLongitude,
+            CancellationToken cancellationToken)
+            => Task.FromResult<ShuttleDistanceOutcome>(new ShuttleDistanceOutcome.Success(1_000));
     }
 }

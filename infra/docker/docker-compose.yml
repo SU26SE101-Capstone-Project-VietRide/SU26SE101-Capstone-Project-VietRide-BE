@@ -183,6 +183,11 @@ services:
       Identity__BaseUrl: http://identity:5001
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
       BOOKING_BASE_URL: http://booking:5003
+      SHUTTLE_MAX_DISTANCE_KM: ${SHUTTLE_MAX_DISTANCE_KM:-5}
+      GOOGLE_ROUTES_ENABLED: ${GOOGLE_ROUTES_ENABLED:-false}
+      GOOGLE_ROUTES_API_KEY: ${GOOGLE_ROUTES_API_KEY:-}
+      GOOGLE_ROUTES_BASE_URL: ${GOOGLE_ROUTES_BASE_URL:-https://routes.googleapis.com}
+      TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS: ${TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS:-1500}
       RabbitMq__HostName: rabbitmq
       RabbitMq__Port: '5672'
       RabbitMq__UserName: ${RABBITMQ_USER:-vietride}

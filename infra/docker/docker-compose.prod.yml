@@ -162,6 +162,11 @@ services:
       FIREBASE_WEB_STORAGE_BUCKET: ${FIREBASE_WEB_STORAGE_BUCKET:?FIREBASE_WEB_STORAGE_BUCKET is required in production}
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
       BOOKING_BASE_URL: http://booking:5003
+      SHUTTLE_MAX_DISTANCE_KM: ${SHUTTLE_MAX_DISTANCE_KM:-5}
+      GOOGLE_ROUTES_ENABLED: ${GOOGLE_ROUTES_ENABLED:?GOOGLE_ROUTES_ENABLED is required in production}
+      GOOGLE_ROUTES_API_KEY: ${GOOGLE_ROUTES_API_KEY:?GOOGLE_ROUTES_API_KEY is required in production}
+      GOOGLE_ROUTES_BASE_URL: ${GOOGLE_ROUTES_BASE_URL:-https://routes.googleapis.com}
+      TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS: ${TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS:-1500}
       # Trip runs the outbox publisher and RabbitMQ consumers. Inside Docker it
       # must use the Compose service hostname, never the localhost fallback.
       RabbitMq__HostName: rabbitmq

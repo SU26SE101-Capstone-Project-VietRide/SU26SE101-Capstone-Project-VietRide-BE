@@ -56,7 +56,9 @@ public class CreateRoundTripBookingIntegrationTests
             new TripStationSnapshot(Guid.NewGuid(), "Đà Nẵng"),
             [],
             new TripSeatSummary(40, 38),
-            returnRouteId);
+            returnRouteId,
+            DriverUserId: Guid.NewGuid(),
+            AssistantUserId: Guid.NewGuid());
 
         var returnTrip = new TripSnapshot(
             returnTripId,
@@ -71,7 +73,9 @@ public class CreateRoundTripBookingIntegrationTests
             new TripStationSnapshot(Guid.NewGuid(), "Hà Nội"),
             [],
             new TripSeatSummary(40, 39),
-            null);
+            null,
+            DriverUserId: Guid.NewGuid(),
+            AssistantUserId: Guid.NewGuid());
 
         _factory.TripClient.GetTripSnapshotAsync(
                 outboundTripId,
@@ -221,7 +225,9 @@ public class CreateRoundTripBookingIntegrationTests
                 new TripStationSnapshot(Guid.NewGuid(), "Đà Nẵng"),
                 [],
                 new TripSeatSummary(40, 38),
-                null));
+                null,
+                DriverUserId: Guid.NewGuid(),
+                AssistantUserId: Guid.NewGuid()));
         _factory.TripClient.GetTripSnapshotAsync(
                 returnTripId,
                 Arg.Any<DateTimeOffset>(),
@@ -239,7 +245,9 @@ public class CreateRoundTripBookingIntegrationTests
                 new TripStationSnapshot(Guid.NewGuid(), "Hà Nội"),
                 [],
                 new TripSeatSummary(40, 39),
-                null));
+                null,
+                DriverUserId: Guid.NewGuid(),
+                AssistantUserId: Guid.NewGuid()));
 
         var client = _factory.CreateAuthenticatedClient(Guid.NewGuid());
         var body = JsonSerializer.Serialize(new
@@ -321,7 +329,9 @@ public class CreateRoundTripBookingIntegrationTests
                 new TripStationSnapshot(Guid.NewGuid(), "Đà Nẵng"),
                 [],
                 new TripSeatSummary(40, 38),
-                null));
+                null,
+                DriverUserId: Guid.NewGuid(),
+                AssistantUserId: Guid.NewGuid()));
         _factory.TripClient.GetTripSnapshotAsync(
                 returnTripId,
                 Arg.Any<DateTimeOffset>(),
@@ -339,7 +349,9 @@ public class CreateRoundTripBookingIntegrationTests
                 new TripStationSnapshot(Guid.NewGuid(), "Hà Nội"),
                 [],
                 new TripSeatSummary(40, 39),
-                null));
+                null,
+                DriverUserId: Guid.NewGuid(),
+                AssistantUserId: Guid.NewGuid()));
 
         var client = _factory.CreateAuthenticatedClient(Guid.NewGuid());
         var body = JsonSerializer.Serialize(new

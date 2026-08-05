@@ -25,14 +25,15 @@ export interface TripShareEtaSource {
   tripId: string;
   estimatedArrivalTime: string;
   etaMinutes: number;
-  delayMinutes?: number;
+  delayStatus?: 'DELAYED' | 'ON_TIME' | 'UNKNOWN';
+  delayMinutes?: number | null;
   updatedAt: string;
 }
 
 export interface TripShareStatusSource {
   tripId: string;
   status: string;
-  delayMinutes?: number;
+  delayMinutes?: number | null;
   updatedAt: string;
 }
 
@@ -62,6 +63,7 @@ export class TripShareRealtimePublisher {
         estimatedArrivalAt: source.estimatedArrivalTime,
         remainingSeconds: source.etaMinutes * SECONDS_PER_MINUTE,
         delayMinutes: source.delayMinutes ?? null,
+        delayStatus: source.delayStatus ?? 'UNKNOWN',
         updatedAt: source.updatedAt,
       },
     });

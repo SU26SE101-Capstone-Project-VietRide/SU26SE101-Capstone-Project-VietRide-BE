@@ -29,6 +29,9 @@ import {
   TripRouteContextService,
 } from './trip-route-context.service';
 
+const PUBLIC_ROUTE_POLYLINE_CACHE_MAX_AGE_SECONDS = 600;
+const PUBLIC_ROUTE_FALLBACK_CACHE_MAX_AGE_SECONDS = 30;
+
 @ApiTags('Tracking')
 @ApiBearerAuth()
 @UseGuards(TrackingDataAuthGuard)
@@ -55,7 +58,10 @@ export class TrackingDataController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<PublicTripRouteContextDto | undefined> {
     const result = await this.tripRouteContextService.getRouteContext(params.tripId);
-    response.setHeader('Cache-Control', 'private, max-age=600');
+    const cacheMaxAge = result.data.geometry?.source === 'ROUTE_POLYLINE'
+      ? PUBLIC_ROUTE_POLYLINE_CACHE_MAX_AGE_SECONDS
+      : PUBLIC_ROUTE_FALLBACK_CACHE_MAX_AGE_SECONDS;
+    response.setHeader('Cache-Control', `private, max-age=${cacheMaxAge}`);
     response.setHeader('Vary', 'Authorization');
     response.setHeader('ETag', result.etag);
     if (ifNoneMatch?.split(',').some((candidate) => candidate.trim() === result.etag)) {

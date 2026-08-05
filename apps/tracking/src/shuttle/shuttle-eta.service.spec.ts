@@ -181,6 +181,67 @@ describe('ShuttleEtaService', () => {
     );
   });
 
+  it('targets the Station first for outbound shuttle ETA even when service stops sort first', async () => {
+    const context = createContext();
+    context.direction = 'OUTBOUND_FROM_STATION';
+    context.stops = [
+      {
+        pickupOrder: 2,
+        bookingId: '36000000-0000-4000-8000-000000000006',
+        latitude: 10.9,
+        longitude: 106.9,
+        status: 'PENDING',
+        isStation: false,
+      },
+      {
+        pickupOrder: 1,
+        bookingId: null,
+        latitude: 10.8,
+        longitude: 106.8,
+        status: 'PENDING',
+        isStation: true,
+      },
+    ];
+
+    await service.handleGpsUpdate(createGps(), context);
+
+    expect(google.calculateCoordinates).toHaveBeenCalledWith(
+      { latitude: 10.7, longitude: 106.65 },
+      { latitude: 10.8, longitude: 106.8 },
+    );
+  });
+
+  it('advances outbound ETA from the departed Station to the first passenger', async () => {
+    const context = createContext();
+    context.direction = 'OUTBOUND_FROM_STATION';
+    context.status = 'IN_PROGRESS';
+    context.stops = [
+      {
+        pickupOrder: 1,
+        bookingId: null,
+        latitude: 10.8,
+        longitude: 106.8,
+        status: 'PICKED_UP',
+        isStation: true,
+      },
+      {
+        pickupOrder: 2,
+        bookingId: '36000000-0000-4000-8000-000000000006',
+        latitude: 10.9,
+        longitude: 106.9,
+        status: 'PENDING',
+        isStation: false,
+      },
+    ];
+
+    await service.handleGpsUpdate(createGps(), context);
+
+    expect(google.calculateCoordinates).toHaveBeenCalledWith(
+      { latitude: 10.7, longitude: 106.65 },
+      { latitude: 10.9, longitude: 106.9 },
+    );
+  });
+
   it('does not regress to a lower pickup order from stale context', async () => {
     const context = createContext();
     context.stops = context.stops.map((stop, index) => ({

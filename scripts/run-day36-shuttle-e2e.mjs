@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { importPKCS8, SignJWT } from 'jose';
-import { io } from 'socket.io-client';
+import { io as createSocket } from 'socket.io-client';
 import { day36IdempotencyKey } from './day36-idempotency-keys.mjs';
 import { day36StopSnapshotFixtureSql } from './day36-stop-snapshot-fixture.mjs';
 import {
@@ -60,6 +60,18 @@ const ids = {
   ...day36SubscriptionFixtureIds,
 };
 const results = [];
+const sockets = new Set();
+
+function io(...args) {
+  const socket = createSocket(...args);
+  sockets.add(socket);
+  return socket;
+}
+
+function closeSockets() {
+  for (const socket of sockets) socket.close();
+  sockets.clear();
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -697,6 +709,7 @@ async function verifySafetyAndRace() {
     adminToken,
     {
       mainTripId: ids.raceTrip,
+      direction: 'INBOUND_TO_STATION',
       driverUserId: ids.driverA,
       vehicleId: ids.shuttle4,
       scheduledDepartureTime: new Date(Date.now() - 10 * 60_000).toISOString(),
@@ -802,6 +815,7 @@ async function dispatchAndTrack(bookingIds) {
   const conflictEnd = new Date(Date.now() + 165 * 60_000).toISOString();
   const firstBody = {
     mainTripId: ids.mainTrip,
+    direction: 'INBOUND_TO_STATION',
     driverUserId: ids.driverA,
     vehicleId: ids.shuttle12,
     scheduledDepartureTime: departure,
@@ -1250,6 +1264,7 @@ try {
   });
   console.error(error);
 } finally {
+  closeSockets();
   if (!useDev) {
     try {
       run('docker', [...compose, 'down', '-v', '--remove-orphans']);

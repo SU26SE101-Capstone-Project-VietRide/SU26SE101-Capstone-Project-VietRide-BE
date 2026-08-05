@@ -263,6 +263,14 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
     {
+      prefix: '/v1/operator/shuttle-trips/{shuttleTripId}/cancel',
+      pathPattern:
+        /^\/v1\/operator\/shuttle-trips\/[0-9a-fA-F-]{36}\/cancel$/,
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
       prefix: '/v1/operator/shuttle-trips',
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
@@ -381,6 +389,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
     { prefix: '/v1/vehicles', target: env.TRIP_BASE_URL, authRequired: 'user' },
+    {
+      prefix: '/v1/driver/shuttle-trips',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER'],
+    },
     {
       prefix: '/v1/driver',
       target: env.TRIP_BASE_URL,

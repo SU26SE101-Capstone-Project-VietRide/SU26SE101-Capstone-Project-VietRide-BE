@@ -11,6 +11,7 @@ import { InternalJwtAuthGuard } from '../auth/internal-jwt-auth.guard';
 import { JoseNotificationUserJwtVerifier } from '../auth/user-jwt.verifier';
 import { UserJwtAuthGuard } from '../auth/user-jwt-auth.guard';
 import { CoreEventsConsumer } from './core-events.consumer';
+import { BookingCreatedEventsConsumer } from './booking-created-events.consumer';
 import { EmailSendQueue } from './email-send.queue';
 import { EmailSendWorker } from './email-send.worker';
 import { EmailDeliveryRecoveryService } from './email-delivery-recovery.service';
@@ -65,6 +66,7 @@ import { RouteChangeProposalEventsConsumer } from './route-change-proposal-event
     EmailTemplateRenderer,
     MessageIdempotencyService,
     CoreEventsConsumer,
+    BookingCreatedEventsConsumer,
     BookingTripChangeEventsConsumer,
     Day24StopDisabledAutoFallbackEventsConsumer,
     Day24NoShowEventsConsumer,
