@@ -74,8 +74,7 @@ internal static class StationAuditEventValidation
             || snapshot.Id != expectedStationId
             || string.IsNullOrWhiteSpace(snapshot.Name)
             || string.IsNullOrWhiteSpace(snapshot.Slug)
-            || string.IsNullOrWhiteSpace(snapshot.City)
-            || string.IsNullOrWhiteSpace(snapshot.Province))
+            || string.IsNullOrWhiteSpace(snapshot.City))
         {
             throw new InvalidOperationException("Station audit event contains an invalid Station snapshot.");
         }

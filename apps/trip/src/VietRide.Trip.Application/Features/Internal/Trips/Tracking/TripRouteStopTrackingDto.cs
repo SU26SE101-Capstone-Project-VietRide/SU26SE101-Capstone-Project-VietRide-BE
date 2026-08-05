@@ -7,4 +7,5 @@ public sealed record TripRouteStopTrackingDto(
     int Sequence,
     IReadOnlyList<Guid>? AlertRecipientUserIds,
     DateTimeOffset? EstimatedArrivalTime,
-    string? Status = null);
+    string? Status = null,
+    string? StopName = null);

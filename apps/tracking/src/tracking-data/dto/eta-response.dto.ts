@@ -11,6 +11,7 @@ export const EtaBaseResponseSchema = z.object({
 });
 
 export const EtaResponseSchema = EtaBaseResponseSchema.extend({
+  stopName: z.string().nullable().optional(),
   delayed: z.boolean().nullable().default(null),
   delayStatus: z.enum(['DELAYED', 'ON_TIME', 'UNKNOWN']),
   delayMinutes: z.number().int().nonnegative().nullable(),
@@ -24,6 +25,9 @@ export class EtaResponseDataDto {
 
   @ApiProperty({ example: '22222222-2222-4222-8222-222222222222' })
   stopId!: string;
+
+  @ApiProperty({ nullable: true, example: 'Bến xe Miền Tây' })
+  stopName!: string | null;
 
   @ApiProperty({ example: 12 })
   etaMinutes!: number;

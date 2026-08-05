@@ -41,7 +41,7 @@ public sealed class StationRepositorySearchTests
                 name: "Bến xe Miền Tây",
                 slug: "ben-xe-mien-tay-ho-chi-minh",
                 city: "Ho Chi Minh City",
-                province: "Ho Chi Minh",
+                ward: "An Lac",
                 addressStreet: "Kinh Dương Vương",
                 latitude: 10.7212345m,
                 longitude: 106.6267890m,

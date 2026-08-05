@@ -23,7 +23,7 @@ public sealed class ListAdminStationsHandler(IStationRepository stations)
             var search = request.Search.Trim().ToLower();
             query = query.Where(x => x.Name.ToLower().Contains(search)
                 || x.City.ToLower().Contains(search)
-                || x.Province.ToLower().Contains(search));
+                || (x.Ward != null && x.Ward.ToLower().Contains(search)));
         }
 
         var total = query.Count();

@@ -37,7 +37,7 @@ public sealed class CreateOrLinkOperatorStationValidator : AbstractValidator<Cre
             RuleFor(command => command.City)
                 .NotEmpty()
                 .MaximumLength(100);
-            RuleFor(command => command.Province)
+            RuleFor(command => command.Ward)
                 .NotEmpty()
                 .MaximumLength(100);
             RuleFor(command => command.LocationId)

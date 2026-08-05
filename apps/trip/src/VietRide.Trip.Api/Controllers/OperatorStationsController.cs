@@ -54,7 +54,7 @@ public sealed class OperatorStationsController : ControllerBase
             request.StationId,
             request.Name,
             request.City,
-            request.Province,
+            request.Ward,
             request.Latitude,
             request.Longitude,
             request.AddressStreet,

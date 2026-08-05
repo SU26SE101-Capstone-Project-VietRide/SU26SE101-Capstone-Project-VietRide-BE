@@ -13,6 +13,29 @@ public interface IRouteRepository : IRepository<Route, Guid>
 
     Task<bool> ExistsActiveOwnedByOperatorAsync(Guid operatorId, Guid routeId, CancellationToken cancellationToken);
 
+    Task<Route?> FindDuplicateWithTransactionLockAsync(
+        Guid operatorId,
+        string name,
+        Guid originStationId,
+        Guid destinationStationId,
+        Guid? excludedRouteId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var normalizedName = name.Trim().ToLowerInvariant();
+        return Task.FromResult(QueryNoTracking()
+            .Where(route => route.OperatorId == operatorId
+                && route.DeletedAt == null
+                && route.OriginStationId == originStationId
+                && route.DestinationStationId == destinationStationId
+                && (!excludedRouteId.HasValue || route.Id != excludedRouteId.Value))
+            .AsEnumerable()
+            .Where(route => route.Name.Trim().ToLowerInvariant() == normalizedName)
+            .OrderBy(route => route.CreatedAt)
+            .ThenBy(route => route.Id)
+            .FirstOrDefault());
+    }
+
     Task<bool> HasStationMergeConflictAsync(
         Guid duplicateStationId,
         Guid primaryStationId,

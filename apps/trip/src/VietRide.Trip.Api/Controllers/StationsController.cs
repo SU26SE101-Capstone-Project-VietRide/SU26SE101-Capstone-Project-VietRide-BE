@@ -31,10 +31,10 @@ public sealed class StationsController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<StationSearchResult>>> SearchAsync(
         [FromQuery(Name = "q")] string? q,
         [FromQuery] string? city,
-        [FromQuery] string? province,
+        [FromQuery] string? ward,
         [FromQuery] Guid? locationId,
         CancellationToken cancellationToken)
     {
-        return Ok(await mediator.Send(new SearchStationsQuery(q, city, province, locationId), cancellationToken));
+        return Ok(await mediator.Send(new SearchStationsQuery(q, city, ward, locationId), cancellationToken));
     }
 }

@@ -471,7 +471,7 @@ public sealed class TripHandlerProjectionTests
                 OriginStation.Name,
                 OriginStation.Slug,
                 OriginStation.City,
-                OriginStation.Province,
+                OriginStation.Ward,
                 OriginStation.AddressStreet,
                 OriginLocation.Id,
                 OriginStation.Latitude,
@@ -485,7 +485,7 @@ public sealed class TripHandlerProjectionTests
                 DestinationStation.Name,
                 DestinationStation.Slug,
                 DestinationStation.City,
-                DestinationStation.Province,
+                DestinationStation.Ward,
                 DestinationStation.AddressStreet,
                 DestinationLocation.Id,
                 DestinationStation.Latitude,
@@ -781,7 +781,7 @@ public sealed class TripHandlerProjectionTests
         public Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
             string? q,
             string? city,
-            string? province,
+            string? ward,
             Guid? locationId,
             CancellationToken cancellationToken)
         {

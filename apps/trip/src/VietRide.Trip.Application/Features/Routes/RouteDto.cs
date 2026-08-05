@@ -17,4 +17,5 @@ public sealed record RouteDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     StationDto? OriginStation = null,
-    StationDto? DestinationStation = null);
+    StationDto? DestinationStation = null,
+    IReadOnlyList<RouteMapStopDto>? Stops = null);

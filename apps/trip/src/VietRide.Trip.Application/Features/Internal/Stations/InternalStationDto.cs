@@ -5,7 +5,7 @@ public sealed record InternalStationDto(
     string Name,
     string Slug,
     string City,
-    string Province,
+    string? Ward,
     decimal? Latitude,
     decimal? Longitude,
     bool SupportsShuttle,

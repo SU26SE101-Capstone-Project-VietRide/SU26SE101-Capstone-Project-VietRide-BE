@@ -79,36 +79,39 @@ export function parseRouteChangeProposalEvent(
 export function mapRouteChangeProposalToNotifications(
   routingKey: RouteChangeProposalRoutingKey,
   event: RouteChangeProposalEvent,
-  createdRecipientUserIds: string[] = [],
+  resolvedRecipientUserIds: string[] = [],
 ): CreateNotificationDto[] {
-  const recipientUserIds =
-    routingKey === TRIP_ROUTE_CHANGE_PROPOSAL_CREATED_ROUTING_KEY
-      ? createdRecipientUserIds
-      : [event.proposedByUserId];
+  const recipientUserIds = [...resolvedRecipientUserIds, event.proposedByUserId];
   const content = contentByRoutingKey[routingKey];
 
-  return [...new Set(recipientUserIds)].map((userId) => ({
-    userId,
-    type: notificationTypeByRoutingKey[routingKey],
-    title: content.title,
-    body: content.body(event),
-    data: {
-      eventId: event.eventId,
-      occurredAt: event.occurredAt,
-      proposalId: event.proposalId,
-      tripId: event.tripId,
-      operatorId: event.operatorId,
-      proposedByUserId: event.proposedByUserId,
-      actorUserId: event.actorUserId,
-      proposalType: event.proposalType,
-      status: event.status,
-      sourceAlternativeRouteId: event.sourceAlternativeRouteId,
-      approvedAlternativeRouteId: event.approvedAlternativeRouteId,
-      incidentId: event.incidentId,
-      reason: event.reason,
-      rejectionReason: event.rejectionReason,
-      resolutionCode: event.resolutionCode,
-      supersededByProposalId: event.supersededByProposalId,
-    },
-  }));
+  return [...new Set(recipientUserIds)].map((userId) => {
+    const isCreatedConfirmation = routingKey === TRIP_ROUTE_CHANGE_PROPOSAL_CREATED_ROUTING_KEY
+      && userId === event.proposedByUserId;
+    return {
+      userId,
+      type: notificationTypeByRoutingKey[routingKey],
+      title: isCreatedConfirmation ? 'Đã gửi đề xuất đổi lộ trình' : content.title,
+      body: isCreatedConfirmation
+        ? `Đề xuất đổi lộ trình cho chuyến ${event.tripId} đã được gửi thành công.`
+        : content.body(event),
+      data: {
+        eventId: event.eventId,
+        occurredAt: event.occurredAt,
+        proposalId: event.proposalId,
+        tripId: event.tripId,
+        operatorId: event.operatorId,
+        proposedByUserId: event.proposedByUserId,
+        actorUserId: event.actorUserId,
+        proposalType: event.proposalType,
+        status: event.status,
+        sourceAlternativeRouteId: event.sourceAlternativeRouteId,
+        approvedAlternativeRouteId: event.approvedAlternativeRouteId,
+        incidentId: event.incidentId,
+        reason: event.reason,
+        rejectionReason: event.rejectionReason,
+        resolutionCode: event.resolutionCode,
+        supersededByProposalId: event.supersededByProposalId,
+      },
+    };
+  });
 }

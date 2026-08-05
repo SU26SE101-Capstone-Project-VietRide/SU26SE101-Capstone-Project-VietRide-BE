@@ -28,9 +28,9 @@ public sealed class UpdateAdminStationCommandValidator : AbstractValidator<Updat
         RuleFor(command => command.City)
             .NotEmpty()
             .When(command => command.City is not null);
-        RuleFor(command => command.Province)
+        RuleFor(command => command.Ward)
             .NotEmpty()
-            .When(command => command.Province is not null);
+            .When(command => command.Ward is not null);
         RuleFor(command => command.LocationId)
             .NotEqual(Guid.Empty)
             .When(command => command.LocationId.HasValue);
@@ -41,7 +41,7 @@ public sealed class UpdateAdminStationCommandValidator : AbstractValidator<Updat
             || command.AddressStreet is not null
             || command.LocationId.HasValue
             || command.City is not null
-            || command.Province is not null
+            || command.Ward is not null
             || command.Latitude.HasValue
             || command.Longitude.HasValue
             || command.ContactPhone is not null

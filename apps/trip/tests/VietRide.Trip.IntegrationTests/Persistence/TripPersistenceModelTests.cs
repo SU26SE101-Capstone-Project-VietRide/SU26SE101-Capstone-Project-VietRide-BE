@@ -80,7 +80,7 @@ public sealed class TripPersistenceModelTests
         var stop = model.FindEntityType(typeof(Stop))!;
 
         station.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "uq_stations_slug" && x.IsUnique);
-        station.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stations_city_province");
+        station.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stations_city_ward");
         station.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stations_location_id");
         station.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stations_supports_shuttle");
         station.GetIndexes().Should().Contain(x => x.GetDatabaseName() == "idx_stations_name_trgm");

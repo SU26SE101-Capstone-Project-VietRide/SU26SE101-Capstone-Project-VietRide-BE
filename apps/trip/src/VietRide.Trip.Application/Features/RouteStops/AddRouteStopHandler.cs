@@ -85,7 +85,8 @@ public sealed class AddRouteStopHandler : IRequestHandler<AddRouteStopCommand, R
     {
         if (await routeStopRepository.GetByRouteAndStopAsync(routeId, stopId, cancellationToken) is not null)
         {
-            throw new ValidationException(
+            throw new CodedValidationException(
+                "ROUTE_STOP_DUPLICATED",
                 "Stop is already configured on this route.",
                 [new ValidationError("stopId", "Stop is already configured on this route.")]);
         }
@@ -96,7 +97,7 @@ public sealed class AddRouteStopHandler : IRequestHandler<AddRouteStopCommand, R
         if (await routeStopRepository.ExistsByRouteAndOrderIndexAsync(routeId, orderIndex, cancellationToken))
         {
             throw new CodedValidationException(
-                "ROUTE_STOP_ORDER_CONFLICT",
+                "ROUTE_STOP_ORDER_INVALID",
                 "Route stop order index is already used on this route.",
                 [new ValidationError("orderIndex", "Order index is already used on this route.")]);
         }

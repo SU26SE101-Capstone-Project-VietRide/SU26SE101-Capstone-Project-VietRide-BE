@@ -8,7 +8,7 @@ public interface IStationRepository : IRepository<Station, Guid>
     Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
         string? q,
         string? city,
-        string? province,
+        string? ward,
         Guid? locationId,
         CancellationToken cancellationToken);
 

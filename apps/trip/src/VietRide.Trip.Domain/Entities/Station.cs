@@ -14,7 +14,7 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
     public string? AddressStreet { get; private set; }
     public Guid? LocationId { get; private set; }
     public string City { get; private set; } = string.Empty;
-    public string Province { get; private set; } = string.Empty;
+    public string? Ward { get; private set; }
     public decimal? Latitude { get; private set; }
     public decimal? Longitude { get; private set; }
     public string? ContactPhone { get; private set; }
@@ -32,7 +32,7 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
         string name,
         string slug,
         string city,
-        string province,
+        string ward,
         string? addressStreet = null,
         decimal? latitude = null,
         decimal? longitude = null,
@@ -46,7 +46,7 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
         ValidateRequired(name, nameof(name));
         ValidateRequired(slug, nameof(slug));
         ValidateRequired(city, nameof(city));
-        ValidateRequired(province, nameof(province));
+        ValidateRequired(ward, nameof(ward));
         ValidateOptionalGuid(locationId, nameof(locationId));
 
         return new Station
@@ -55,7 +55,7 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
             Name = name.Trim(),
             Slug = slug.Trim(),
             City = city.Trim(),
-            Province = province.Trim(),
+            Ward = ward.Trim(),
             AddressStreet = NormalizeOptional(addressStreet),
             LocationId = locationId,
             Latitude = latitude,
@@ -73,7 +73,7 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
         string name,
         string slug,
         string city,
-        string province,
+        string? ward,
         string? addressStreet,
         Guid? locationId,
         decimal? latitude,
@@ -87,13 +87,12 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
         ValidateRequired(name, nameof(name));
         ValidateRequired(slug, nameof(slug));
         ValidateRequired(city, nameof(city));
-        ValidateRequired(province, nameof(province));
         ValidateOptionalGuid(locationId, nameof(locationId));
 
         Name = name.Trim();
         Slug = slug.Trim();
         City = city.Trim();
-        Province = province.Trim();
+        Ward = NormalizeOptional(ward);
         AddressStreet = NormalizeOptional(addressStreet);
         LocationId = locationId;
         Latitude = latitude;
@@ -123,6 +122,7 @@ public sealed class Station : BaseEntity<Guid>, ISoftDeletable, IActivatable
 
         AddressStreet ??= duplicate.AddressStreet;
         LocationId ??= duplicate.LocationId;
+        Ward ??= duplicate.Ward;
         ContactPhone ??= duplicate.ContactPhone;
         ContactEmail ??= duplicate.ContactEmail;
         OperatingHours ??= duplicate.OperatingHours;
