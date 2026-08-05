@@ -71,7 +71,7 @@ public sealed class RouteStopHandlersTests
         var act = () => handler.Handle(CreateAddCommand(route.Id, newStop.Id, orderIndex: 2), CancellationToken.None);
 
         var exception = await act.Should().ThrowAsync<CodedValidationException>();
-        exception.Which.ErrorCode.Should().Be("ROUTE_STOP_ORDER_CONFLICT");
+        exception.Which.ErrorCode.Should().Be("ROUTE_STOP_ORDER_INVALID");
         exception.Which.Errors.Should().Contain(error => error.Field == "orderIndex");
     }
 
@@ -88,7 +88,8 @@ public sealed class RouteStopHandlersTests
 
         var act = () => handler.Handle(CreateAddCommand(route.Id, stop.Id), CancellationToken.None);
 
-        var exception = await act.Should().ThrowAsync<ValidationException>();
+        var exception = await act.Should().ThrowAsync<CodedValidationException>();
+        exception.Which.ErrorCode.Should().Be("ROUTE_STOP_DUPLICATED");
         exception.Which.Errors.Should().Contain(error => error.Field == "stopId");
     }
 

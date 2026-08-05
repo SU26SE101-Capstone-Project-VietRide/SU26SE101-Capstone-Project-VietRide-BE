@@ -11,6 +11,7 @@ import type { TripDataProvider, TripStopSnapshot } from './trip-data.provider';
 
 const RouteStopSchema = z.object({
   stopId: z.string(),
+  stopName: z.string().nullish(),
   latitude: z.number(),
   longitude: z.number(),
   sequence: z.number().int().min(0),
@@ -83,6 +84,7 @@ export class HttpTripDataProvider implements TripDataProvider {
 
       const stops: TripStopSnapshot[] = parsed.data.stops.map((stop) => ({
         stopId: stop.stopId,
+        ...(stop.stopName != null ? { stopName: stop.stopName } : {}),
         latitude: stop.latitude,
         longitude: stop.longitude,
         sequence: stop.sequence,

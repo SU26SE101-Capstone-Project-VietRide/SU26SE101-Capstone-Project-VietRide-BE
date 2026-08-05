@@ -7,7 +7,7 @@ namespace VietRide.Trip.Domain.Entities;
 /// <summary>
 /// Recurring driver assignment. Identity user references remain logical cross-service keys.
 /// </summary>
-public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable
+public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable, ISoftDeletable
 {
     public Guid OperatorId { get; private set; }
     public Guid RouteId { get; private set; }
@@ -19,6 +19,7 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable
     public DateOnly ValidFrom { get; private set; }
     public DateOnly? ValidUntil { get; private set; }
     public bool IsActive { get; private set; } = true;
+    public DateTimeOffset? DeletedAt { get; private set; }
 
     private DriverSchedule() { }
 
@@ -99,6 +100,12 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable
     public void Activate() => IsActive = true;
 
     public void Deactivate() => IsActive = false;
+
+    public void SoftDelete(DateTimeOffset deletedAt)
+    {
+        DeletedAt ??= deletedAt;
+        IsActive = false;
+    }
 
     private static void ValidateGuid(Guid value, string parameterName)
     {

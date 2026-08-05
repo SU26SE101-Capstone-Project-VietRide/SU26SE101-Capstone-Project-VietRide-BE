@@ -76,10 +76,10 @@ internal sealed class StationRepository : IStationRepository
     public async Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
         string? q,
         string? city,
-        string? province,
+        string? ward,
         Guid? locationId,
         CancellationToken cancellationToken)
-        => await BuildSearchActiveByNameQuery(q, city, province, locationId).ToListAsync(cancellationToken);
+        => await BuildSearchActiveByNameQuery(q, city, ward, locationId).ToListAsync(cancellationToken);
 
     public async Task<IReadOnlyList<Station>> GetForMergeAsync(
         Guid primaryStationId,
@@ -123,7 +123,7 @@ internal sealed class StationRepository : IStationRepository
         return shuttleTrips.Count;
     }
 
-    private IQueryable<Station> BuildSearchActiveByNameQuery(string? q, string? city, string? province, Guid? locationId)
+    private IQueryable<Station> BuildSearchActiveByNameQuery(string? q, string? city, string? ward, Guid? locationId)
     {
         var search = !string.IsNullOrWhiteSpace(q)
             ? _dbContext.Stations
@@ -151,10 +151,10 @@ internal sealed class StationRepository : IStationRepository
             search = search.Where(station => station.City == cityFilter);
         }
 
-        if (!string.IsNullOrWhiteSpace(province))
+        if (!string.IsNullOrWhiteSpace(ward))
         {
-            var provinceFilter = province.Trim();
-            search = search.Where(station => station.Province == provinceFilter);
+            var wardFilter = ward.Trim();
+            search = search.Where(station => station.Ward == wardFilter);
         }
 
         return search;

@@ -1,5 +1,6 @@
 export interface TripStopSnapshot {
   stopId: string;
+  stopName?: string;
   latitude: number;
   longitude: number;
   sequence: number;

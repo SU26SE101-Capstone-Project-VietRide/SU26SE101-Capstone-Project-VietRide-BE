@@ -36,7 +36,7 @@ public sealed class StationMergeTests
         primary.Name.Should().Be("Primary");
         primary.Slug.Should().Be("primary");
         primary.City.Should().Be("Primary City");
-        primary.Province.Should().Be("Primary Province");
+        primary.Ward.Should().Be("Primary Province");
         primary.AddressStreet.Should().Be("12 Duplicate Street");
         primary.ContactPhone.Should().Be("0900000001");
         primary.ContactEmail.Should().Be("duplicate@example.com");

@@ -8,7 +8,7 @@ public sealed record UpdateAdminStationCommand(
     string? AddressStreet,
     Guid? LocationId,
     string? City,
-    string? Province,
+    string? Ward,
     decimal? Latitude,
     decimal? Longitude,
     string? ContactPhone,

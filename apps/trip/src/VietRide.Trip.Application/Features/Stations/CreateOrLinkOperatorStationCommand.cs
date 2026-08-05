@@ -7,7 +7,7 @@ public sealed record CreateOrLinkOperatorStationCommand(
     Guid? StationId,
     string? Name,
     string? City,
-    string? Province,
+    string? Ward,
     decimal? Latitude,
     decimal? Longitude,
     string? AddressStreet,

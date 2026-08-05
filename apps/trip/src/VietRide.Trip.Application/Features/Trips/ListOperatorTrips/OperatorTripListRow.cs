@@ -15,4 +15,5 @@ public sealed record OperatorTripListRow(
     Guid DriverUserId,
     Guid? AssistantUserId,
     DateTimeOffset DepartureAt,
-    DateTimeOffset ArrivalEstimate);
+    DateTimeOffset ArrivalEstimate,
+    Guid? SourceScheduleId = null);

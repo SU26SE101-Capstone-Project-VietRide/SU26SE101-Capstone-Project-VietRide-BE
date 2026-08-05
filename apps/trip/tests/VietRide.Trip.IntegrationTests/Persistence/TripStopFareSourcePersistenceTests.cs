@@ -68,7 +68,7 @@ public sealed class TripStopFareSourcePersistenceTests
         var stopId = Guid.NewGuid();
 
         await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO vietride_trip.stations (id, name, slug, city, province)
+            INSERT INTO vietride_trip.stations (id, name, slug, city, ward)
             VALUES
                 ({originId}, 'Fare source origin', {$"fare-source-origin-{originId:N}"}, 'Da Nang', 'Da Nang'),
                 ({destinationId}, 'Fare source destination', {$"fare-source-destination-{destinationId:N}"}, 'Hue', 'Hue');

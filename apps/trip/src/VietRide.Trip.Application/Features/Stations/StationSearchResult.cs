@@ -5,7 +5,7 @@ public sealed record StationSearchResult(
     string Name,
     Guid? LocationId,
     string City,
-    string Province,
+    string? Ward,
     decimal? Latitude,
     decimal? Longitude,
     string? AddressStreet,

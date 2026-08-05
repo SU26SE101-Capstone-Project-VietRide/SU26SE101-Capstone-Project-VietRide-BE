@@ -112,9 +112,9 @@ export class TrackingDataController {
   }
 
   @Get(':tripId/eta')
-  @ApiOperation({ summary: 'Get ETA for a specific stop' })
+  @ApiOperation({ summary: 'Get ETA for a specific stop or the inferred next stop' })
   @ApiParam({ name: 'tripId', type: 'string', format: 'uuid', description: 'The ID of the trip' })
-  @ApiQuery({ name: 'stopId', type: 'string', format: 'uuid', description: 'The ID of the stop' })
+  @ApiQuery({ name: 'stopId', type: 'string', format: 'uuid', required: false, description: 'Optional stop ID; omitted selects the next stop' })
   @ApiResponse({ status: 200, description: 'ETA data.', type: TrackingEtaEnvelopeDto })
   @ApiResponse({ status: 400, description: 'Validation error.', type: ApiErrorEnvelopeDto })
   @ApiResponse({ status: 401, description: 'Unauthorized.', type: ApiErrorEnvelopeDto })

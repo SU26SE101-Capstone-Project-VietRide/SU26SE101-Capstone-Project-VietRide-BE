@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-01 (Days 30–43 repair contract reconciliation)
+> **Cập nhật:** 2026-08-05 (Route/operations API and two-level Station address extension)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -2967,7 +2967,7 @@ Query params:
 
 Flow search:
   1. User nhập tên tỉnh/thành phố (text input với autocomplete city list)
-  2. Backend query Station WHERE city/province ILIKE :originCity → trả list Station tại khu vực đó
+  2. Backend query Station WHERE city ILIKE :originCity → trả list Station tại khu vực đó
      (cùng lúc hoặc lazy load tùy UX)
   3. User chọn Station cụ thể (ví dụ: "Bến xe Miền Đông" hoặc "Bến xe An Sương")
      → FE update query với stationId cụ thể
@@ -3760,7 +3760,7 @@ VietRide tách Station/Stop riêng biệt và thêm mapping OperatorStation:
 
 **Station (Bến xe lớn — đầu/cuối tuyến, canonical cấp platform) — requirements:**
 - Tên canonical, slug/code unique, KHÔNG có `operatorId` (một bến vật lý có thể được nhiều nhà xe khai thác)
-- Địa chỉ chi tiết (address, city, province) + tọa độ (latitude, longitude)
+- Địa chỉ chi tiết (address, city, ward) + tọa độ (latitude, longitude)
 - `operatingHours` JSON theo định dạng `{"mon": "06:00-22:00", "tue": "...", ...}` — thời gian **local ICT**
 - Liên hệ: contactPhone, contactEmail
 - `facilities` JSON array nullable — vd `["waiting_room", "parking", "ticket_counter"]`
@@ -4622,12 +4622,12 @@ PostgreSQL trigger chặn direct `UPDATE`/`DELETE`. Action mới: `UNLOCK_USER`,
 
 #### Station normalize/merge
 
-Admin Station PATCH giữ request hiện hữu và deterministic slug từ `name+city+province`; collision
+Admin Station PATCH giữ request hiện hữu và deterministic slug từ `name+city+ward`; collision
 dùng station-ID hash suffix. Normalize Station đã merged bị từ chối. Update và
 `trip.station.normalized` Outbox là một transaction.
 
 Merge nhận primary + duplicate, lock cả hai theo UUID ascending và recheck. Primary thắng
-`name,slug,city,province`; `addressStreet,locationId,contactPhone,contactEmail,operatingHours,
+`name,slug,city,ward`; `addressStreet,locationId,contactPhone,contactEmail,operatingHours,
 facilities` chỉ fill khi primary null; coordinates là một cặp; `supportsShuttle` dùng OR. Cùng Trip
 DB transaction relink OperatorStation, Route origin/destination,
 AlternativeRoute destination, ShuttleTrip Station và redirect cũ. OperatorStation collision giữ
@@ -5211,3 +5211,18 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **Parcel delivery tại Stop dọc tuyến** — `Parcel.dropoffStopId` nullable. Sender chọn Stop trong RouteStop của trip; UNLOADED trigger check stop của parcel.
 - **`RouteStop` là single source of truth cho pickup/dropoff control** — bỏ hoàn toàn `Trip.allowAlongRoutePickup`/`Dropoff` và `Route.defaultAllowAlongRoute*`. Operator kiểm soát qua việc thêm/bỏ RouteStop entries.
 - **`RouteStop.allowPickup` + `RouteStop.allowDropoff`** — phân loại stop pickup-only / dropoff-only / both, phản ánh thực tế operator gom khách đầu tuyến và trả khách dần cuối tuyến. Snapshot vào TripStop.
+
+## Điều chỉnh Route/Operations và địa chỉ Station — 2026-08-05
+
+- Địa chỉ Station dùng đúng hai cấp `city + ward`: `city` là tỉnh/thành phố trực thuộc trung
+  ương, `ward` là xã/phường/đặc khu. Không lưu `legacy_city`; dữ liệu cũ chưa xác định ward được
+  phép để `ward=null`, còn Station tạo/cập nhật mới bắt buộc đủ hai field.
+- Route detail và các response mutation phải trả ordered stops đủ tên, địa chỉ, tọa độ để FE vẽ
+  bản đồ; Route list vẫn là projection nhẹ. Composite Route write là atomic và full update không
+  được đổi cặp bến.
+- Route metrics có polyline do server tính; stop metrics thiếu được chiếu lên polyline. Route trùng
+  bị chặn đồng thời nhưng dữ liệu trùng legacy không tự động xóa.
+- Notification đề xuất đổi tuyến: CREATED gửi admin operator và người đề xuất; trạng thái terminal
+  gửi Driver hiện tại, Assistant hiện tại và người đề xuất, có dedupe.
+- Fleet tracking, ETA next-stop, DriverSchedule deactivate/soft-delete và proposal socket events
+  tuân theo API Contract extension cùng ngày.

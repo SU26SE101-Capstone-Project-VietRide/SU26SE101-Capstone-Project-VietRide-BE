@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.55.1
+> **Phiên bản:** 1.56.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-04
+> **Cập nhật lần cuối:** 2026-08-05
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1639,6 +1639,11 @@ updates the column.
 | | `ROUTE_NOT_FOUND` | 404 | |
 | | `ROUTE_STOP_ORDER_CONFLICT` | 422 | Day-8 config-time RouteStop `orderIndex` conflict within the same Route |
 | | `ROUTE_STOP_FLAGS_INVALID` | 422 | Day-8 config-time RouteStop `allowPickup=false` and `allowDropoff=false` |
+| | `ROUTE_DUPLICATED` | 409 | A non-deleted Route with the same normalized name, origin Station, destination Station, and operator already exists; `error.fields.existingRouteId` identifies the oldest matching Route |
+| | `ROUTE_STATION_INVALID` | 422 | A composite Route station/stop does not exist, is inactive, or is outside the operator tenant |
+| | `ROUTE_STATION_IMMUTABLE` | 422 | Full Route update attempted to change the origin/destination pair; a new Route must be created |
+| | `ROUTE_STOP_DUPLICATED` | 422 | A composite Route request repeats a Stop identity |
+| | `ROUTE_STOP_ORDER_INVALID` | 422 | A composite Route request has duplicate, non-positive, or non-contiguous stop order indexes |
 | | `ROUTE_GEOMETRY_TOO_LARGE` | 422 | Encoded route polyline exceeds 100 KiB |
 | | `ROUTE_GEOMETRY_INVALID` | 422 | Encoded route polyline cannot be decoded as Google precision-5 or has points/count outside accepted bounds |
 | | `ROUTE_GEOMETRY_STOP_MISMATCH` | 422 | One or more configured Stop/Station coordinates are farther than 500 m from the submitted route polyline; `error.fields` uses `stopIds`/`stationIds` |
@@ -1647,6 +1652,7 @@ updates the column.
 | **Station** | `STATION_NOT_FOUND` | 404 | Day-7 Trip Station handlers use coded 404 path |
 | | `STATION_DUPLICATE_NEARBY` | 200 (warning) | Operator tạo Station < 100m gần Station hiện có |
 | | `STATION_MERGE_CONFLICT` | 409 | Merge làm Route origin=destination, vi phạm domain invariant hoặc precondition thay đổi sau khi lock; transaction không được partial relink |
+| **DriverSchedule** | `SCHEDULE_HAS_TRIPS` | 409 | Soft-delete is blocked because generated Trips reference the schedule; `error.fields.tripCount` contains the count |
 | **Location** | `LOCATION_NOT_FOUND` | 404 | Admin Location update/deactivate target does not exist |
 | | `LOCATION_CODE_CONFLICT` | 409 | Admin Location code already exists |
 | **Invoice** | `INVOICE_NOT_FOUND` | 404 | |
@@ -2195,7 +2201,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.trip.vehicle_swapped` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldVehicleId,newVehicleId,oldVehiclePlateNumber,newVehiclePlateNumber,departureDateTime,driverUserId,assistantUserId,seatImpacts:[{bookingId,seatNumbers,reason}] }`; `assistantUserId` present nullable, reasons exactly `SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED` |
 | `trip.trip.vehicle_substituted` | Trip | Booking, Parcel (Day 35) | Exact `{eventId,occurredAt,substitutionId,disruptedAt,operatorId,oldTripId,oldTripStatus,oldVehicleId,newTripId,newTripStatus,newVehicleId,newVehiclePlateNumber,newTripDepartureDateTime,actorUserId,reason,notifyPassengers,mappings:[{bookingId,passengerId,originalSeatNumber,newSeatNumber,originalBoardingStatus}]}`; exactly one fact per substitution; `occurredAt = disruptedAt`; `substitutionId = eventId`; `oldTripStatus=DISRUPTED`; `newTripStatus=BOARDING`; both `originalSeatNumber` and `newSeatNumber` are nullable; `originalBoardingStatus=BOARDED\|PENDING`; `payload.eventId == Outbox row id == RabbitMQ MessageId`. |
 | `trip.trip.route_changed` | Trip | Booking, Notification | { eventId, occurredAt, tripId, operatorId, tripStatus, alternativeRouteId, affectedBookings } |
-| `trip.route_change_proposal.created` | Trip | Notification | Exact `{ eventId, occurredAt, proposalId, tripId, operatorId, proposedByUserId, actorUserId, proposalType, status, sourceAlternativeRouteId, approvedAlternativeRouteId, incidentId, reason, rejectionReason, resolutionCode, supersededByProposalId }`; nullable fields serialize as null; `actorUserId=proposedByUserId`, `status=PENDING`. Notification resolves every active `OPERATOR_ADMIN` by `operatorId` and creates `ROUTE_CHANGE_PROPOSAL_CREATED` per admin. |
+| `trip.route_change_proposal.created` | Trip | Notification, Tracking | Exact `{ eventId, occurredAt, proposalId, tripId, operatorId, proposedByUserId, actorUserId, proposalType, status, sourceAlternativeRouteId, approvedAlternativeRouteId, incidentId, reason, rejectionReason, resolutionCode, supersededByProposalId }`; nullable fields serialize as null; `actorUserId=proposedByUserId`, `status=PENDING`. Notification resolves every active `OPERATOR_ADMIN` plus `proposedByUserId`; Tracking emits `routeProposal:created` to the authenticated operator fleet room. |
 | `trip.route_change_proposal.approved` | Trip | Notification | Exact `{ eventId, occurredAt, proposalId, tripId, operatorId, proposedByUserId, actorUserId, proposalType, status, sourceAlternativeRouteId, approvedAlternativeRouteId, incidentId, reason, rejectionReason, resolutionCode, supersededByProposalId }`; `actorUserId` is deciding `OPERATOR_ADMIN`, `status=APPROVED`, `approvedAlternativeRouteId` is non-null. Notification sends `ROUTE_CHANGE_PROPOSAL_APPROVED` to `proposedByUserId`; approval also emits canonical `trip.trip.route_changed` atomically. |
 | `trip.route_change_proposal.rejected` | Trip | Notification | Exact `{ eventId, occurredAt, proposalId, tripId, operatorId, proposedByUserId, actorUserId, proposalType, status, sourceAlternativeRouteId, approvedAlternativeRouteId, incidentId, reason, rejectionReason, resolutionCode, supersededByProposalId }`; `actorUserId` is deciding `OPERATOR_ADMIN`, `status=REJECTED`; optional `rejectionReason` is trimmed/null-normalized. Notification sends `ROUTE_CHANGE_PROPOSAL_REJECTED` to `proposedByUserId`. |
 | `trip.route_change_proposal.superseded` | Trip | Notification | Exact `{ eventId, occurredAt, proposalId, tripId, operatorId, proposedByUserId, actorUserId, proposalType, status, sourceAlternativeRouteId, approvedAlternativeRouteId, incidentId, reason, rejectionReason, resolutionCode, supersededByProposalId }`; `status=SUPERSEDED`; `resolutionCode=ANOTHER_PROPOSAL_APPROVED|ROUTE_CHANGED_DIRECTLY`; `supersededByProposalId` is winner id for approval and null for direct route change. Notification sends `ROUTE_CHANGE_PROPOSAL_SUPERSEDED` to `proposedByUserId`. |
@@ -2353,7 +2359,9 @@ required AlternativeRoute/Station/OperatorStation/Stop dependency rows in determ
 Proposal creation runs this full protocol, audit write, and Outbox enqueue in one transaction.
 
 Notification consumes all five `trip.route_change_proposal.*` facts. Created resolves all active
-`OPERATOR_ADMIN` recipients by `operatorId`; each terminal fact targets `proposedByUserId`.
+`OPERATOR_ADMIN` recipients by `operatorId` plus `proposedByUserId`. Each terminal fact resolves
+the current assigned Driver/Assistant from Trip and adds `proposedByUserId`; duplicate users are
+collapsed before persistence and FCM enqueue.
 The exact type mapping is
 `created→ROUTE_CHANGE_PROPOSAL_CREATED`, `approved→ROUTE_CHANGE_PROPOSAL_APPROVED`,
 `rejected→ROUTE_CHANGE_PROPOSAL_REJECTED`, `superseded→ROUTE_CHANGE_PROPOSAL_SUPERSEDED`, and
@@ -2469,13 +2477,13 @@ After retry_count >= 10: alert Sentry, leave FAILED for manual handle
 #### Trip Station normalize/merge
 
 `PATCH /v1/admin/stations/{id}` giữ toàn bộ request hiện hữu (`name`, address/location,
-city/province, coordinate pair, contact, operating hours, facilities, shuttle flag, active flag)
-và deterministic slug từ `name+city+province`; collision dùng station-ID hash suffix, không thêm
+city/ward, coordinate pair, contact, operating hours, facilities, shuttle flag, active flag)
+và deterministic slug từ `name+city+ward`; collision dùng station-ID hash suffix, không thêm
 `STATION_SLUG_CONFLICT`. Station đã merged không được normalize. Update và
 `trip.station.normalized` Outbox commit cùng transaction.
 
 `POST /v1/admin/stations/{primaryStationId}/merge` lock hai Station theo UUID ascending và recheck
-precondition. Primary thắng `name,slug,city,province`; `addressStreet,locationId,contactPhone,
+precondition. Primary thắng `name,slug,city,ward`; `addressStreet,locationId,contactPhone,
 contactEmail,operatingHours,facilities` chỉ fill từ duplicate khi primary null; coordinates là một
 cặp; `supportsShuttle` dùng OR. Cùng một Trip DB transaction relink
 `OperatorStation.stationId`, Route origin/destination, AlternativeRoute destination,
@@ -3853,6 +3861,7 @@ PR fail nếu bất kỳ step nào fail.
 | **1.56.0** | 2026-08-05 | Codex | **MINOR** — Bổ sung event `booking.booking.created` cho Tracking/Notification, payload crew-facing strict và phát Outbox nguyên tử cùng chuyển Booking sang CONFIRMED; giữ nguyên event `booking.booking.confirmed` tương thích ngược. |
 | **1.55.0** | 2026-08-04 | Codex | **MINOR** — Hoàn thiện Shuttle hai chiều inbound/outbound, snapshot road distance Google Routes tối đa 5 km, internal distance contract, manifest/lifecycle event registry, operator subscription guard và fail-safe migration rollback. |
 | **1.55.1** | 2026-08-04 | Codex | **PATCH** — Freeze the route-change proposal transaction lock protocol as source advisory lock → Trip → pending proposal UUIDs → dependency rows, and require proposal creation, audit, and Outbox persistence in that transaction. |
+| **1.56.0** | 2026-08-05 | Codex | **MINOR** — Add Station two-level `city`/`ward` addressing, map-ready Route detail/composite writes and server polyline metrics, duplicate Route serialization, operator fleet REST/realtime tracking, optional next-stop ETA, DriverSchedule deactivate/delete, source schedule projection, and crew-aware route-proposal push/realtime delivery. |
 | **1.55.0** | 2026-08-04 | Codex | **MINOR** — Add assigned Driver/Assistant EXISTING/CUSTOM route-change proposal snapshots, tenant-scoped Operator Admin decision flow, approval promotion/supersession/expiry semantics, five Trip lifecycle facts, four canonical errors and five audit actions. Notification consumes all five facts with active-admin fan-out for create, proposer delivery for terminal outcomes, five dedicated types and EventId/MessageId dedupe. Preserve direct admin route change and existing passenger impact, retire the global AlternativeRoute active-count cap and `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`, and add three UUID-v4-required mutations (188/171/17). |
 | **1.54.0** | 2026-08-03 | Codex | **MINOR** — Add System-Admin operator detail projection and Trip-owned operator holiday fare surcharge settings/periods. Inclusive ICT departure dates, active-window overlap protection, pre-voucher nearest-VND adjustment, additive search/detail breakdown and Booking-time snapshot semantics are canonical. Adds four UUID-v4-required mutation surfaces, raising the inventory to 185/168/17; no dependency, integration event or background job. |
 | **1.53.0** | 2026-08-02 | Codex | **MINOR** — Freeze public Tracking map context: authorized Trip route geometry with safe marker fallback, deterministic 1.000-point cap/ETag, passenger-only Shuttle context without foreign pickup leakage, post-pickup access continuity, and additive TripStop status for terminal-stop ETA selection. No migration, dependency, integration event, Gateway family, or Google configuration change. |

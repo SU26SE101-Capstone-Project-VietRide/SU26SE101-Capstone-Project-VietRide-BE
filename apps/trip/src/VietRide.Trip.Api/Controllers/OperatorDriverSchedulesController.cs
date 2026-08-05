@@ -88,6 +88,28 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPatch("{id:guid}/deactivate")]
+    [SkipIdempotency("DriverSchedule deactivation is behavior-idempotent and requires no Idempotency-Key.")]
+    [ProducesResponseType(typeof(ApiResponse<DriverScheduleDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<DriverScheduleDto>> Deactivate(Guid id, CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage driver schedules.");
+        return Ok(await sender.Send(new DeactivateDriverScheduleCommand(operatorId, id), cancellationToken));
+    }
+
+    [HttpDelete("{id:guid}")]
+    [RequireIdempotency]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyDictionary<string, bool>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<IReadOnlyDictionary<string, bool>>> Delete(Guid id, CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage driver schedules.");
+        return Ok(await sender.Send(new DeleteDriverScheduleCommand(operatorId, id), cancellationToken));
+    }
+
     [HttpPatch("{id:guid}/crew")]
     [RequireIdempotency]
     [ProducesResponseType(typeof(ApiResponse<DriverScheduleDto>), StatusCodes.Status200OK)]

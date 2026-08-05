@@ -13,15 +13,24 @@ public sealed class UpdateRouteHandler : IRequestHandler<UpdateRouteCommand, Rou
     private readonly IIdentityInternalClient identityInternalClient;
     private readonly IRouteRepository routeRepository;
     private readonly IUnitOfWork unitOfWork;
+    private readonly IStationRepository? stationRepository;
+    private readonly IRouteStopRepository? routeStopRepository;
+    private readonly IStopRepository? stopRepository;
 
     public UpdateRouteHandler(
         IIdentityInternalClient identityInternalClient,
         IRouteRepository routeRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IStationRepository? stationRepository = null,
+        IRouteStopRepository? routeStopRepository = null,
+        IStopRepository? stopRepository = null)
     {
         this.identityInternalClient = identityInternalClient;
         this.routeRepository = routeRepository;
         this.unitOfWork = unitOfWork;
+        this.stationRepository = stationRepository;
+        this.routeStopRepository = routeStopRepository;
+        this.stopRepository = stopRepository;
     }
 
     public async Task<RouteDto> Handle(UpdateRouteCommand request, CancellationToken cancellationToken)
@@ -40,9 +49,24 @@ public sealed class UpdateRouteHandler : IRequestHandler<UpdateRouteCommand, Rou
         await ValidateReturnRouteAsync(request.OperatorId, request.ReturnRouteId, cancellationToken);
 
         var returnRouteId = request.HasReturnRouteId ? request.ReturnRouteId : route.ReturnRouteId;
+        var effectiveName = request.Name ?? route.Name;
+        var duplicate = await routeRepository.FindDuplicateWithTransactionLockAsync(
+            request.OperatorId,
+            effectiveName,
+            route.OriginStationId,
+            route.DestinationStationId,
+            route.Id,
+            cancellationToken);
+        if (duplicate is not null)
+        {
+            throw new CodedConflictException(
+                "ROUTE_DUPLICATED",
+                "A Route with the same normalized name and station pair already exists.",
+                [new ValidationError("existingRouteId", duplicate.Id.ToString("D"))]);
+        }
 
         route.UpdateDetails(
-            request.Name ?? route.Name,
+            effectiveName,
             route.OriginStationId,
             route.DestinationStationId,
             Money.FromRaw(request.BaseFare ?? route.BaseFare.Amount),
@@ -65,7 +89,7 @@ public sealed class UpdateRouteHandler : IRequestHandler<UpdateRouteCommand, Rou
         routeRepository.Update(route);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return RouteMapper.ToDto(route);
+        return RouteDetailsProjector.Project(route, stationRepository, routeStopRepository, stopRepository);
     }
 
     private async Task ValidateReturnRouteAsync(Guid operatorId, Guid? returnRouteId, CancellationToken cancellationToken)

@@ -58,6 +58,9 @@ internal sealed class DriverScheduleConfiguration : IEntityTypeConfiguration<Dri
             .HasColumnName("is_active")
             .HasDefaultValue(true);
 
+        builder.Property(schedule => schedule.DeletedAt)
+            .HasColumnName("deleted_at");
+
         builder.Property(schedule => schedule.CreatedAt)
             .HasColumnName("created_at")
             .HasDefaultValueSql("now()");
@@ -90,5 +93,7 @@ internal sealed class DriverScheduleConfiguration : IEntityTypeConfiguration<Dri
 
         builder.HasIndex(schedule => new { schedule.RouteId, schedule.IsActive })
             .HasDatabaseName("idx_driver_schedules_route_active");
+
+        builder.HasQueryFilter(schedule => schedule.DeletedAt == null);
     }
 }

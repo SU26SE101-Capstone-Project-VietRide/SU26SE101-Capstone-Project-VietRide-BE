@@ -31,7 +31,7 @@ export const TrailQuerySchema = z
 export type TrailQueryDto = z.infer<typeof TrailQuerySchema>;
 
 export const EtaQuerySchema = z.object({
-  stopId: z.string().uuid(),
+  stopId: z.string().uuid().optional(),
 });
 
 export type EtaQueryDto = z.infer<typeof EtaQuerySchema>;

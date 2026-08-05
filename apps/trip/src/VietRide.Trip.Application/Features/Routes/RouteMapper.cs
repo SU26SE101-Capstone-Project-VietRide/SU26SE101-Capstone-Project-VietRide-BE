@@ -27,7 +27,11 @@ internal static class RouteMapper
             originStation,
             destinationStation);
 
-    public static RouteDto ToDto(Route route, StationDto? originStation = null, StationDto? destinationStation = null)
+    public static RouteDto ToDto(
+        Route route,
+        StationDto? originStation = null,
+        StationDto? destinationStation = null,
+        IReadOnlyList<RouteMapStopDto>? stops = null)
         => new(
             route.Id,
             route.OperatorId,
@@ -43,5 +47,6 @@ internal static class RouteMapper
             route.CreatedAt,
             route.UpdatedAt,
             originStation,
-            destinationStation);
+            destinationStation,
+            stops);
 }

@@ -117,7 +117,7 @@ public sealed class CreateOrLinkOperatorStationHandler : IRequestHandler<CreateO
             request.Name!,
             CreateCollisionSafeSlug(request),
             request.City!,
-            request.Province!,
+            request.Ward!,
             request.AddressStreet,
             request.Latitude,
             request.Longitude,
@@ -214,13 +214,13 @@ public sealed class CreateOrLinkOperatorStationHandler : IRequestHandler<CreateO
 
     private string CreateCollisionSafeSlug(CreateOrLinkOperatorStationCommand request)
     {
-        var baseSlug = Slugify($"{request.Name} {request.City} {request.Province}");
+        var baseSlug = Slugify($"{request.Name} {request.City} {request.Ward}");
         if (!SlugExists(baseSlug))
         {
             return baseSlug;
         }
 
-        var suffix = StableSuffix($"{request.Name}|{request.AddressStreet}|{request.City}|{request.Province}|{request.Latitude}|{request.Longitude}");
+        var suffix = StableSuffix($"{request.Name}|{request.AddressStreet}|{request.City}|{request.Ward}|{request.Latitude}|{request.Longitude}");
         var maxBaseLength = Math.Min(baseSlug.Length, 100 - suffix.Length - 1);
         return $"{baseSlug[..maxBaseLength]}-{suffix}";
     }

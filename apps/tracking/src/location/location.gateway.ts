@@ -1,4 +1,4 @@
-import { Inject, Logger } from '@nestjs/common';
+import { Inject, Logger, Optional } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -21,11 +21,13 @@ import { shuttleRoom } from '../shuttle/shuttle.constants';
 import { JoinShuttleTrackingSchema, ShuttleGpsUpdateSchema } from '../shuttle/shuttle.dto';
 import { ShuttleService } from '../shuttle/shuttle.service';
 import { ShuttleEtaService } from '../shuttle/shuttle-eta.service';
-import { TRACKING_SOCKET_PATH, trackingTripCrewRoom, trackingTripRoom } from './location.constants';
+import { TRACKING_SOCKET_PATH, trackingOperatorFleetRoom, trackingTripCrewRoom, trackingTripRoom } from './location.constants';
 import { JoinTripTrackingSchema } from './dto/join-trip-tracking.dto';
 import { UpdateLocationSchema } from './dto/update-location.dto';
 import { LocationService, type GpsUpdateEvent } from './location.service';
 import { TripShareRealtimePublisher } from '../trip-sharing/trip-share-realtime.publisher';
+import { OperatorTripProjectionProvider } from '../tracking-data/operator-trip-projection.provider';
+import type { RouteChangeProposalEvent } from '@vietride/contracts';
 
 interface TrackingSocket extends Socket {
   data: {
@@ -69,6 +71,7 @@ export class LocationGateway implements OnGatewayInit {
     private readonly shuttleService: ShuttleService,
     private readonly shuttleEtaService: ShuttleEtaService,
     private readonly tripShareRealtime: TripShareRealtimePublisher,
+    @Optional() private readonly operatorTrips?: OperatorTripProjectionProvider,
   ) {}
 
   afterInit(server: Server): void {
@@ -86,6 +89,18 @@ export class LocationGateway implements OnGatewayInit {
         next(new Error('UNAUTHORIZED'));
       }
     });
+  }
+
+  @SubscribeMessage('joinOperatorFleet')
+  async joinOperatorFleet(@ConnectedSocket() socket: TrackingSocket): Promise<JoinTripTrackingAck> {
+    const user = socket.data.user;
+    if (!user) return { success: false, error: 'UNAUTHORIZED' };
+    if (!['OPERATOR_ADMIN', 'OPERATOR_STAFF'].includes(user.role) || !user.operatorId) {
+      return { success: false, error: 'ACCESS_DENIED' };
+    }
+    const room = trackingOperatorFleetRoom(user.operatorId);
+    await socket.join(room);
+    return { success: true, room, scope: 'OPERATOR' };
   }
 
   @SubscribeMessage('joinShuttleTracking')
@@ -190,6 +205,18 @@ export class LocationGateway implements OnGatewayInit {
     this.server.to(trackingTripCrewRoom(event.tripId)).emit('booking:created', event);
   }
 
+  emitRouteProposal(event: RouteChangeProposalEvent): void {
+    const eventName = event.status === 'PENDING'
+      ? 'routeProposal:created'
+      : 'routeProposal:resolved';
+    this.server.to(trackingOperatorFleetRoom(event.operatorId)).emit(eventName, {
+      proposalId: event.proposalId,
+      tripId: event.tripId,
+      status: event.status,
+      createdAt: event.occurredAt,
+    });
+  }
+
   @SubscribeMessage('gps:update')
   async updateLocation(
     @ConnectedSocket() socket: TrackingSocket,
@@ -237,6 +264,7 @@ export class LocationGateway implements OnGatewayInit {
     const event = result.event;
 
     this.server.to(trackingTripRoom(parsed.data.tripId)).emit('gps:update', event);
+    void this.publishFleetGps(user, event);
     this.publishSharedGps(event);
     void this.runDetection(event, result.rawEvent).catch((error) => {
       this.logger.error(
@@ -245,6 +273,21 @@ export class LocationGateway implements OnGatewayInit {
     });
     this.logger.debug(`Broadcasted gps:update for trip ${parsed.data.tripId}`);
     return { success: true };
+  }
+
+  private async publishFleetGps(user: TrackingUser, event: GpsUpdateEvent): Promise<void> {
+    if (!user.operatorId || !this.operatorTrips) return;
+    try {
+      const projection = (await this.operatorTrips.list(user.operatorId))
+        .find((trip) => trip.tripId === event.tripId);
+      if (!projection) return;
+      this.server.to(trackingOperatorFleetRoom(user.operatorId)).emit('fleet:gps:update', {
+        ...event,
+        status: projection.status,
+      });
+    } catch (error) {
+      this.logger.warn(`Fleet GPS projection failed for ${event.tripId}: ${(error as Error).message}`);
+    }
   }
 
   private async runDetection(event: GpsUpdateEvent, rawEvent: GpsUpdateEvent): Promise<void> {

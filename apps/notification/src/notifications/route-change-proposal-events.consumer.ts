@@ -16,6 +16,7 @@ import {
   parseRouteChangeProposalEvent,
 } from './route-change-proposal-notification.mapper';
 import { createNotificationLogger } from './notification-logger';
+import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
 
 @Injectable()
 export class RouteChangeProposalEventsConsumer implements OnModuleInit {
@@ -27,6 +28,7 @@ export class RouteChangeProposalEventsConsumer implements OnModuleInit {
     private readonly notifications: NotificationsService,
     @Inject(OPERATOR_RECIPIENT_PROVIDER)
     private readonly operatorRecipients: OperatorRecipientProvider,
+    private readonly tripRecipients?: TripAnnouncementRecipientProvider,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -70,14 +72,17 @@ export class RouteChangeProposalEventsConsumer implements OnModuleInit {
         return;
       }
 
-      const createdRecipientUserIds =
+      const resolvedRecipientUserIds =
         routingKey === TRIP_ROUTE_CHANGE_PROPOSAL_CREATED_ROUTING_KEY
           ? await this.operatorRecipients.resolveOperatorRecipientUserIds(parsed.data.operatorId)
-          : [];
+          : await this.tripRecipients?.resolveTripCrewUserIds(
+              parsed.data.tripId,
+              parsed.data.operatorId,
+            ) ?? [];
       const mapped = mapRouteChangeProposalToNotifications(
         routingKey,
         parsed.data,
-        createdRecipientUserIds,
+        resolvedRecipientUserIds,
       );
       await Promise.all(
         mapped.map((notification) =>

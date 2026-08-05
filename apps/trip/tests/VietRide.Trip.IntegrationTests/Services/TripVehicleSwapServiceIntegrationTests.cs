@@ -208,7 +208,7 @@ public sealed class TripVehicleSwapServiceIntegrationTests
             """;
 
         await db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO vietride_trip.stations (id, name, slug, city, province)
+            INSERT INTO vietride_trip.stations (id, name, slug, city, ward)
             VALUES
                 ({originId}, 'Swap Origin', {$"swap-origin-{originId:N}"}, 'HCMC', 'HCMC'),
                 ({destinationId}, 'Swap Destination', {$"swap-destination-{destinationId:N}"}, 'Da Nang', 'Da Nang');

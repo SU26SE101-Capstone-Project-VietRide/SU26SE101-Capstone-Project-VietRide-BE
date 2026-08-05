@@ -35,3 +35,7 @@ export function trackingTripRoom(tripId: string): string {
 export function trackingTripCrewRoom(tripId: string): string {
   return `trip:crew:${tripId}`;
 }
+
+export function trackingOperatorFleetRoom(operatorId: string): string {
+  return `operator:${operatorId}:fleet`;
+}
