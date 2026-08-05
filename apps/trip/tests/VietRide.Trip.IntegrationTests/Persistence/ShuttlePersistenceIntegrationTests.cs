@@ -391,7 +391,8 @@ public sealed class ShuttlePersistenceIntegrationTests
                     passengerId,
                     "12 Nguyen Hue, District 1",
                     10.7731m,
-                    106.7032m));
+                    106.7032m,
+                    roadDistanceMeters: 1_000));
             }
 
             await db.SaveChangesAsync();
