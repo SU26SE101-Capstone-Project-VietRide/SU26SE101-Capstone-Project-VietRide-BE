@@ -67,11 +67,26 @@ public sealed class TripStopFareSourcePersistenceTests
         var routeId = Guid.NewGuid();
         var stopId = Guid.NewGuid();
 
+        if (await StationColumnExistsAsync(dbContext, "ward"))
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO vietride_trip.stations (id, name, slug, city, ward)
+                VALUES
+                    ({originId}, 'Fare source origin', {$"fare-source-origin-{originId:N}"}, 'Da Nang', 'Hai Chau'),
+                    ({destinationId}, 'Fare source destination', {$"fare-source-destination-{destinationId:N}"}, 'Hue', 'Phu Hoi');
+                """);
+        }
+        else
+        {
+            await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO vietride_trip.stations (id, name, slug, city, province)
+                VALUES
+                    ({originId}, 'Fare source origin', {$"fare-source-origin-{originId:N}"}, 'Hai Chau', 'Da Nang'),
+                    ({destinationId}, 'Fare source destination', {$"fare-source-destination-{destinationId:N}"}, 'Hue City', 'Hue');
+                """);
+        }
+
         await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO vietride_trip.stations (id, name, slug, city, ward)
-            VALUES
-                ({originId}, 'Fare source origin', {$"fare-source-origin-{originId:N}"}, 'Da Nang', 'Da Nang'),
-                ({destinationId}, 'Fare source destination', {$"fare-source-destination-{destinationId:N}"}, 'Hue', 'Hue');
             INSERT INTO vietride_trip.stops (id, operator_id, name, latitude, longitude)
             VALUES ({stopId}, {operatorId}, 'Fare source stop', 16.1000000, 108.2000000);
             INSERT INTO vietride_trip.routes
@@ -109,6 +124,32 @@ public sealed class TripStopFareSourcePersistenceTests
             """);
 
         return (tripId, stopId);
+    }
+
+    private static async Task<bool> StationColumnExistsAsync(TripDbContext dbContext, string columnName)
+    {
+        await dbContext.Database.OpenConnectionAsync();
+        try
+        {
+            await using var command = dbContext.Database.GetDbConnection().CreateCommand();
+            command.CommandText = """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'vietride_trip'
+                      AND table_name = 'stations'
+                      AND column_name = @columnName)
+                """;
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "columnName";
+            parameter.Value = columnName;
+            command.Parameters.Add(parameter);
+            return (bool)(await command.ExecuteScalarAsync())!;
+        }
+        finally
+        {
+            await dbContext.Database.CloseConnectionAsync();
+        }
     }
 
     internal static NpgsqlDataSource CreateDataSource(string databaseName)
