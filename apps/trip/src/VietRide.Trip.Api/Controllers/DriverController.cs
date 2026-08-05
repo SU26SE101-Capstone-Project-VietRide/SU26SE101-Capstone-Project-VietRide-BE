@@ -48,6 +48,37 @@ public sealed class DriverController : ControllerBase
             cancellationToken));
     }
 
+    [HttpGet("shuttle-trips")]
+    [Authorize(Roles = "DRIVER")]
+    [ProducesResponseType(typeof(ApiResponse<ShuttleDriverAssignmentPage>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ShuttleDriverAssignmentPage>> GetMyShuttleTripsAsync(
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new GetDriverShuttleAssignmentsQuery(CurrentUserClaims.GetUserId(User), from, to),
+            cancellationToken));
+    }
+
+    [HttpGet("shuttle-trips/{shuttleTripId:guid}/manifest")]
+    [Authorize(Roles = "DRIVER")]
+    [ProducesResponseType(typeof(ApiResponse<ShuttleDriverManifest>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ShuttleDriverManifest>> GetMyShuttleManifestAsync(
+        Guid shuttleTripId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new GetDriverShuttleManifestQuery(shuttleTripId, CurrentUserClaims.GetUserId(User)),
+            cancellationToken));
+    }
+
     [HttpGet("trips/{tripId}/route")]
     [ProducesResponseType(typeof(ApiResponse<DriverTripRouteDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]

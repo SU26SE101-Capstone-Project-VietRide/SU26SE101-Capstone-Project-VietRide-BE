@@ -27,7 +27,7 @@ describe('ShuttleEventsConsumer', () => {
     );
   });
 
-  it('creates one assignment notification per booking event with driver snapshot', async () => {
+  it('creates passenger and driver assignment notifications per booking event', async () => {
     await consumer.handle(
       'trip.shuttle.assigned',
       {
@@ -53,13 +53,26 @@ describe('ShuttleEventsConsumer', () => {
       message,
     );
 
-    expect(notifications.createNotification).toHaveBeenCalledTimes(1);
+    expect(notifications.createNotification).toHaveBeenCalledTimes(2);
     expect(notifications.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({
+        userId: '36000000-0000-4000-8000-000000000004',
         type: NotificationType.SHUTTLE_ASSIGNED,
-        dedupeKey: 'trip.shuttle.assigned:36000000-0000-4000-8000-000000000003',
+        dedupeKey: 'trip.shuttle.assigned:36000000-0000-4000-8000-000000000003:passenger:36000000-0000-4000-8000-000000000004',
       }),
     );
+    expect(notifications.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: '36000000-0000-4000-8000-000000000005',
+        type: NotificationType.SHUTTLE_ASSIGNED,
+        data: expect.objectContaining({
+          shuttleTripId: '36000000-0000-4000-8000-000000000001',
+          mainTripId: '36000000-0000-4000-8000-000000000002',
+        }),
+        dedupeKey: 'trip.shuttle.assigned:36000000-0000-4000-8000-000000000003:driver:36000000-0000-4000-8000-000000000005',
+      }),
+    );
+
   });
 
   it.each([
@@ -159,6 +172,6 @@ describe('ShuttleEventsConsumer', () => {
       eventId,
       undefined,
     );
-    expect(notifications.createNotification).toHaveBeenCalledTimes(1);
+    expect(notifications.createNotification).toHaveBeenCalledTimes(2);
   });
 });

@@ -20,6 +20,7 @@ SET search_path TO vietride_notification, public;
 
 CREATE TYPE notification_type AS ENUM (
     'BOOKING_CONFIRMED',
+    'BOOKING_CREATED',
     'BOOKING_CANCELLED',
     'BOOKING_DISRUPTED',
     'BOOKING_REFUNDED',

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Application.Events;
 using VietRide.Booking.Application.Exceptions;
 using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
@@ -42,6 +43,7 @@ public sealed class CreateBookingCommandHandler
 {
     private const string EventType = "booking.booking.confirmed";
     private const int SeatLockTtlSeconds = 10 * 60; // SEAT_LOCK_TTL_MINUTES=10 (BSOT §10 line 2360)
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IBookingRepository _bookings;
     private readonly IBookingStatusHistoryRepository _statusHistory;
@@ -114,6 +116,12 @@ public sealed class CreateBookingCommandHandler
             throw new ConflictException(
                 "BOOKING_TRIP_NOT_BOOKABLE",
                 $"Trip '{request.TripId}' is not in SCHEDULED status.");
+        }
+
+        if (!trip.DriverUserId.HasValue)
+        {
+            throw new BookingUpstreamUnavailableException(
+                $"Trip '{request.TripId}' does not have an assigned driver.");
         }
 
         var stationCanonicalization = await _stationCanonicalizer.LockAndResolveAsync(
@@ -473,7 +481,22 @@ public sealed class CreateBookingCommandHandler
 
         await _outbox.EnqueueAsync(
             EventType,
-            JsonSerializer.Serialize(confirmedEvent),
+            JsonSerializer.Serialize(confirmedEvent, JsonOptions),
+            cancellationToken);
+
+        var createdEvent = new BookingCreatedIntegrationEvent(
+            booking.Id,
+            booking.BookingCode.Value,
+            booking.TripId,
+            booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
+            new BookingLocationSnapshot(booking.PickupStationId, booking.PickupStopId, null),
+            new BookingLocationSnapshot(booking.DropoffStationId, booking.DropoffStopId, null),
+            trip.DriverUserId,
+            trip.AssistantUserId,
+            now);
+        await _outbox.EnqueueAsync(
+            createdEvent.EventType,
+            JsonSerializer.Serialize(createdEvent, JsonOptions),
             cancellationToken);
 
         _logger.LogInformation(

@@ -1011,10 +1011,15 @@ internal sealed class BookingRepository : IBookingRepository
             .Select(b => new
             {
                 b.Id,
+                BookingCode = b.BookingCode.Value,
                 b.PassengerUserId,
                 b.TripId,
                 b.SeatLockToken,
                 TotalAmount = b.TotalAmount.Amount,
+                b.PickupStationId,
+                b.PickupStopId,
+                b.DropoffStationId,
+                b.DropoffStopId,
             })
             .FirstOrDefaultAsync(ct);
         if (booking is null)
@@ -1082,7 +1087,12 @@ internal sealed class BookingRepository : IBookingRepository
             ticketCodes,
             ticketIds,
             shuttleIntent,
-            shuttleIntents);
+            shuttleIntents,
+            booking.BookingCode,
+            booking.PickupStationId,
+            booking.PickupStopId,
+            booking.DropoffStationId,
+            booking.DropoffStopId);
     }
 
     /// <inheritdoc/>

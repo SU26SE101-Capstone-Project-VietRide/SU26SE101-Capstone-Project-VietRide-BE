@@ -101,6 +101,7 @@ public sealed class BookingsController : ControllerBase
     /// Seat unavailable → 409 BOOKING_SEAT_UNAVAILABLE.
     /// Trip not bookable → 409 BOOKING_TRIP_NOT_BOOKABLE.
     /// Trip not found → 404 TRIP_NOT_FOUND.
+    /// Trip crew snapshot unavailable or missing an assigned driver → 502 UPSTREAM_UNAVAILABLE.
     /// </remarks>
     [HttpPost]
     [Authorize(Roles = PassengerRole)]
@@ -109,6 +110,7 @@ public sealed class BookingsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status502BadGateway)]
     public async Task<IActionResult> CreateBooking(
         [FromBody] CreateBookingRequest request,
         CancellationToken ct)
@@ -152,6 +154,8 @@ public sealed class BookingsController : ControllerBase
     /// Idempotency-Key header required.
     /// WALLET uses one all-or-nothing batch charge for both BOOKING references.
     /// VNPay may use one BOOKING_GROUP redirect.
+    /// A leg whose Trip crew snapshot is unavailable or has no assigned driver returns
+    /// 502 UPSTREAM_UNAVAILABLE before any seat lock or payment side effect.
     /// </remarks>
     [HttpPost("round-trip")]
     [Authorize(Roles = PassengerRole)]
@@ -160,6 +164,7 @@ public sealed class BookingsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status502BadGateway)]
     public async Task<IActionResult> CreateRoundTripBooking(
         [FromBody] CreateRoundTripBookingRequest request,
         CancellationToken ct)

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Application.Events;
 using VietRide.Booking.Application.Exceptions;
 using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
@@ -39,6 +40,7 @@ public sealed class CreateRoundTripBookingCommandHandler
 {
     private const string EventType = "booking.booking.confirmed";
     private const int SeatLockTtlSeconds = 10 * 60;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IBookingRepository _bookings;
     private readonly IBookingStatusHistoryRepository _statusHistory;
@@ -428,6 +430,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         await BookConfirmAndPublishAsync(
             outboundBooking,
             request.Outbound.TripId,
+            outboundTrip,
             outboundLockToken,
             outboundSeatNumbers,
             outboundVoucherUsageId,
@@ -437,6 +440,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         await BookConfirmAndPublishAsync(
             returnBooking,
             request.Return.TripId,
+            returnTrip,
             returnLockToken,
             returnSeatNumbers,
             returnVoucherUsageId,
@@ -526,6 +530,12 @@ public sealed class CreateRoundTripBookingCommandHandler
             throw new ConflictException(
                 "BOOKING_TRIP_NOT_BOOKABLE",
                 $"Trip '{tripId}' is not in SCHEDULED status.");
+        }
+
+        if (!trip.DriverUserId.HasValue)
+        {
+            throw new BookingUpstreamUnavailableException(
+                $"Trip '{tripId}' does not have an assigned driver.");
         }
 
         return trip;
@@ -873,6 +883,7 @@ public sealed class CreateRoundTripBookingCommandHandler
     private async Task BookConfirmAndPublishAsync(
         BookingEntity booking,
         Guid tripId,
+        TripSnapshot trip,
         Guid seatLockToken,
         IReadOnlyList<string> seatNumbers,
         Guid? voucherUsageId,
@@ -948,7 +959,22 @@ public sealed class CreateRoundTripBookingCommandHandler
 
         await _outbox.EnqueueAsync(
             EventType,
-            JsonSerializer.Serialize(confirmedEvent),
+            JsonSerializer.Serialize(confirmedEvent, JsonOptions),
+            cancellationToken);
+
+        var createdEvent = new BookingCreatedIntegrationEvent(
+            booking.Id,
+            booking.BookingCode.Value,
+            booking.TripId,
+            booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
+            new BookingLocationSnapshot(booking.PickupStationId, booking.PickupStopId, null),
+            new BookingLocationSnapshot(booking.DropoffStationId, booking.DropoffStopId, null),
+            trip.DriverUserId,
+            trip.AssistantUserId,
+            now);
+        await _outbox.EnqueueAsync(
+            createdEvent.EventType,
+            JsonSerializer.Serialize(createdEvent, JsonOptions),
             cancellationToken);
     }
 

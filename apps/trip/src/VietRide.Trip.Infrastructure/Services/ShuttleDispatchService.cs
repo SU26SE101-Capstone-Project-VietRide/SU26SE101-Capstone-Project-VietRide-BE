@@ -279,6 +279,170 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         return new CreateShuttleTripResult(shuttleTrip.Id, input.MainTripId, manifests.Length, remaining);
     }
 
+    public async Task<ShuttleDriverAssignmentPage> GetDriverAssignmentsAsync(
+        Guid driverUserId,
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken cancellationToken)
+    {
+        var (resolvedFrom, resolvedTo) = ResolveDriverDateRange(from, to);
+        var startUtc = ToUtcBoundary(resolvedFrom);
+        var endExclusiveUtc = ToUtcBoundary(resolvedTo.AddDays(1));
+        var rows = await _db.ShuttleTrips.AsNoTracking()
+            .Where(trip => trip.DriverUserId == driverUserId
+                && trip.Status != ShuttleTrip.CancelledStatus
+                && trip.ScheduledDepartureTime >= startUtc
+                && trip.ScheduledDepartureTime < endExclusiveUtc)
+            .Join(
+                _db.Vehicles.AsNoTracking(),
+                shuttleTrip => shuttleTrip.VehicleId,
+                vehicle => vehicle.Id,
+                (shuttleTrip, vehicle) => new
+                {
+                    ShuttleTrip = shuttleTrip,
+                    vehicle.LicensePlate,
+                })
+            .Select(row => new
+            {
+                row.ShuttleTrip,
+                row.LicensePlate,
+                PassengerCount = _db.ShuttlePassengers.Count(
+                    passenger => passenger.ShuttleTripId == row.ShuttleTrip.Id),
+                StopCount = _db.ShuttlePassengers
+                    .Where(passenger => passenger.ShuttleTripId == row.ShuttleTrip.Id
+                        && passenger.PickupOrder.HasValue)
+                    .Select(passenger => passenger.PickupOrder)
+                    .Distinct()
+                    .Count(),
+            })
+            .OrderBy(row => row.ShuttleTrip.ScheduledDepartureTime)
+            .ThenBy(row => row.ShuttleTrip.Id)
+            .ToListAsync(cancellationToken);
+
+        var items = rows
+            .Select(row => new ShuttleDriverAssignment(
+                row.ShuttleTrip.Id,
+                row.ShuttleTrip.MainTripId,
+                row.ShuttleTrip.Direction,
+                row.ShuttleTrip.Status,
+                row.ShuttleTrip.VehicleId,
+                row.LicensePlate,
+                row.ShuttleTrip.ScheduledDepartureTime,
+                row.ShuttleTrip.ScheduledEndTime,
+                row.PassengerCount,
+                row.StopCount))
+            .ToArray();
+
+        return new ShuttleDriverAssignmentPage(resolvedFrom, resolvedTo, items);
+    }
+
+    public async Task<ShuttleDriverManifest> GetDriverManifestAsync(
+        Guid shuttleTripId,
+        Guid driverUserId,
+        CancellationToken cancellationToken)
+    {
+        var shuttleTrip = await _db.ShuttleTrips.AsNoTracking()
+            .SingleOrDefaultAsync(trip => trip.Id == shuttleTripId, cancellationToken)
+            ?? throw new CodedNotFoundException("SHUTTLE_TRIP_NOT_FOUND", "Shuttle trip was not found.");
+        if (shuttleTrip.DriverUserId != driverUserId)
+        {
+            throw new ForbiddenException("FORBIDDEN", "Shuttle trip is not assigned to this driver.");
+        }
+
+        var station = await _db.Stations.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == shuttleTrip.StationId, cancellationToken)
+            ?? throw new CodedNotFoundException("SHUTTLE_STATION_NOT_FOUND", "Shuttle station was not found.");
+        var manifests = await _db.ShuttlePassengers.AsNoTracking()
+            .Where(passenger => passenger.ShuttleTripId == shuttleTripId && passenger.PickupOrder.HasValue)
+            .OrderBy(passenger => passenger.PickupOrder)
+            .ThenBy(passenger => passenger.CreatedAt)
+            .ToListAsync(cancellationToken);
+        var passengerUserIds = manifests
+            .Where(passenger => passenger.PassengerUserId.HasValue)
+            .Select(passenger => passenger.PassengerUserId!.Value)
+            .Distinct()
+            .ToArray();
+        var profiles = await _identity.GetUsersAsync(passengerUserIds, cancellationToken);
+
+        var stops = manifests
+            .GroupBy(passenger => new { passenger.PickupOrder, passenger.BookingId })
+            .OrderBy(group => group.Key.PickupOrder)
+            .Select(group =>
+            {
+                var first = group.First();
+                var profile = first.PassengerUserId.HasValue
+                    && profiles.TryGetValue(first.PassengerUserId.Value, out var foundProfile)
+                    ? foundProfile
+                    : null;
+                return new ShuttleDriverManifestStop(
+                    group.Key.PickupOrder!.Value,
+                    group.Key.BookingId,
+                    group.Where(passenger => passenger.TicketId.HasValue)
+                        .Select(passenger => passenger.TicketId!.Value)
+                        .Distinct()
+                        .ToArray(),
+                    group.Count(),
+                    first.PickupAddress,
+                    first.PickupLat,
+                    first.PickupLng,
+                    ResolveManifestGroupStatus(group.Select(passenger => passenger.Status)),
+                    group.Where(passenger => passenger.PickedUpAt.HasValue)
+                        .Select(passenger => passenger.PickedUpAt)
+                        .Min(),
+                    group.Where(passenger => passenger.DeliveredAt.HasValue)
+                        .Select(passenger => passenger.DeliveredAt)
+                        .Max(),
+                    profile?.DisplayName,
+                    profile?.Phone);
+            })
+            .ToArray();
+
+        return new ShuttleDriverManifest(
+            shuttleTrip.Id,
+            shuttleTrip.MainTripId,
+            shuttleTrip.Direction,
+            shuttleTrip.Status,
+            station.Id,
+            station.Name,
+            station.Latitude,
+            station.Longitude,
+            shuttleTrip.ScheduledDepartureTime,
+            shuttleTrip.ScheduledEndTime,
+            stops);
+    }
+
+    private static string ResolveManifestGroupStatus(IEnumerable<string> statuses)
+    {
+        var distinctStatuses = statuses.Distinct(StringComparer.Ordinal).ToArray();
+        if (distinctStatuses.Length != 1)
+        {
+            throw new CodedConflictException(
+                "SHUTTLE_MANIFEST_INCONSISTENT_STATUS",
+                "Passengers in the same Shuttle pickup group must share one status.");
+        }
+
+        return distinctStatuses[0];
+    }
+
+    private static (DateOnly From, DateOnly To) ResolveDriverDateRange(DateOnly? from, DateOnly? to)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(7).Date);
+        var resolvedFrom = from ?? today;
+        var resolvedTo = to ?? today.AddDays(14);
+        if (resolvedTo < resolvedFrom)
+        {
+            throw new CodedValidationException("VALIDATION_ERROR", "The end date must not be before the start date.");
+        }
+        if (resolvedTo.DayNumber - resolvedFrom.DayNumber > 31)
+        {
+            throw new CodedValidationException("VALIDATION_ERROR", "The date range must not exceed 32 days.");
+        }
+        return (resolvedFrom, resolvedTo);
+    }
+
+    private static DateTimeOffset ToUtcBoundary(DateOnly date) =>
+        new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7)).ToUniversalTime();
+
     public async Task<ShuttleTrackingContext> GetTrackingContextAsync(
         Guid shuttleTripId,
         Guid userId,

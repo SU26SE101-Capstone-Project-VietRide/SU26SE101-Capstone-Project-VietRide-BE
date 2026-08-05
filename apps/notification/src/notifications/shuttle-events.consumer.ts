@@ -97,26 +97,37 @@ export class ShuttleEventsConsumer implements OnModuleInit {
   private async createNotifications(routingKey: string, payload: unknown): Promise<number> {
     if (routingKey === TRIP_SHUTTLE_ASSIGNED_ROUTING_KEY) {
       const event = TripShuttleAssignedEventSchema.parse(payload);
-      await this.notifications.createNotification({
-        userId: event.passengerUserId,
-        type: NotificationType.SHUTTLE_ASSIGNED,
-        title: 'Đã xếp chuyến trung chuyển',
-        body: `Xe ${event.vehicle.licensePlate}, tài xế ${event.driver.displayName}, thứ tự đón ${event.pickupOrder}.`,
-        data: {
-          shuttleTripId: event.shuttleTripId,
-          mainTripId: event.mainTripId,
-          bookingId: event.bookingId,
-          ticketIds: event.ticketIds,
-          pickupOrder: event.pickupOrder,
-          scheduledDepartureTime: event.scheduledDepartureTime,
-          scheduledEndTime: event.scheduledEndTime,
-          driver: event.driver,
-          vehicle: event.vehicle,
-          deepLink: `vietride://tracking/shuttle/${event.shuttleTripId}`,
-        },
-        dedupeKey: `${routingKey}:${event.bookingId}`,
-      });
-      return 1;
+      const data = {
+        shuttleTripId: event.shuttleTripId,
+        mainTripId: event.mainTripId,
+        bookingId: event.bookingId,
+        ticketIds: event.ticketIds,
+        pickupOrder: event.pickupOrder,
+        scheduledDepartureTime: event.scheduledDepartureTime,
+        scheduledEndTime: event.scheduledEndTime,
+        driver: event.driver,
+        vehicle: event.vehicle,
+        deepLink: `vietride://tracking/shuttle/${event.shuttleTripId}`,
+      };
+      await Promise.all([
+        this.notifications.createNotification({
+          userId: event.passengerUserId,
+          type: NotificationType.SHUTTLE_ASSIGNED,
+          title: 'Đã xếp chuyến trung chuyển',
+          body: `Xe ${event.vehicle.licensePlate}, tài xế ${event.driver.displayName}, thứ tự đón ${event.pickupOrder}.`,
+          data,
+          dedupeKey: `${routingKey}:${event.bookingId}:passenger:${event.passengerUserId}`,
+        }),
+        this.notifications.createNotification({
+          userId: event.driver.userId,
+          type: NotificationType.SHUTTLE_ASSIGNED,
+          title: 'Bạn được phân công chuyến trung chuyển',
+          body: `Chuyến ${event.shuttleTripId} có điểm đón thứ tự ${event.pickupOrder}.`,
+          data,
+          dedupeKey: `${routingKey}:${event.bookingId}:driver:${event.driver.userId}`,
+        }),
+      ]);
+      return 2;
     }
     if (routingKey === TRIP_SHUTTLE_UNFULFILLED_ROUTING_KEY) {
       const event = TripShuttleUnfulfilledEventSchema.parse(payload);

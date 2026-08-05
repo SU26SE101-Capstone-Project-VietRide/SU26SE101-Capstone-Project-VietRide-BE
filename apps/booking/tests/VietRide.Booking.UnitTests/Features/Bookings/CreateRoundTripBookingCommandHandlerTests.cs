@@ -5,6 +5,7 @@ using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Application.Exceptions;
 using VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
@@ -27,6 +28,8 @@ public class CreateRoundTripBookingCommandHandlerTests
     private static readonly Guid ReturnRouteId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid StationId = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
     private static readonly Guid SeatLockToken = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
+    private static readonly Guid OutboundDriverUserId = Guid.Parse("33333333-3333-4333-8333-333333333333");
+    private static readonly Guid ReturnDriverUserId = Guid.Parse("44444444-4444-4444-8444-444444444444");
 
     private static readonly TripSnapshot OutboundTrip = new(
         TripId: OutboundTripId,
@@ -41,7 +44,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         DestinationStation: new TripStationSnapshot(Guid.NewGuid(), "Đà Nẵng"),
         Stops: [],
         SeatSummary: new TripSeatSummary(40, 38),
-        ReturnRouteId: Guid.NewGuid());
+        ReturnRouteId: Guid.NewGuid(),
+        DriverUserId: OutboundDriverUserId);
 
     private static readonly TripSnapshot ReturnTrip = new(
         TripId: ReturnTripId,
@@ -55,7 +59,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         OriginStation: new TripStationSnapshot(StationId, "Đà Nẵng"),
         DestinationStation: new TripStationSnapshot(Guid.NewGuid(), "Hà Nội"),
         Stops: [],
-        SeatSummary: new TripSeatSummary(40, 39));
+        SeatSummary: new TripSeatSummary(40, 39),
+        DriverUserId: ReturnDriverUserId);
 
     private static readonly SeatLockResult LockData = new(
         SeatLockToken: SeatLockToken,
@@ -73,6 +78,23 @@ public class CreateRoundTripBookingCommandHandlerTests
         SeatLockToken: Guid.Parse("99999999-9999-4999-8999-999999999999"),
         LockedSeats: ["A01"],
         ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(10));
+
+    [Fact]
+    public async Task Handle_LegWithoutAssignedDriver_FailsBeforeLockingSeats()
+    {
+        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        _tripClient.GetTripSnapshotAsync(
+                OutboundTripId,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(OutboundTrip with { DriverUserId = null });
+
+        var act = () => BuildSut().Handle(BuildCommand(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<BookingUpstreamUnavailableException>();
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default);
+    }
 
     private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
     private readonly IBookingStatusHistoryRepository _statusHistory = Substitute.For<IBookingStatusHistoryRepository>();
@@ -223,6 +245,20 @@ public class CreateRoundTripBookingCommandHandlerTests
         await _outbox.Received(2).EnqueueAsync(
             Arg.Is("booking.booking.confirmed"),
             Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+        await _outbox.Received(1).EnqueueAsync(
+            Arg.Is("booking.booking.created"),
+            Arg.Is<string>(json =>
+                json.Contains(result.Outbound.BookingId.ToString(), StringComparison.OrdinalIgnoreCase)
+                && json.Contains(OutboundTripId.ToString(), StringComparison.OrdinalIgnoreCase)
+                && json.Contains(OutboundDriverUserId.ToString(), StringComparison.OrdinalIgnoreCase)),
+            Arg.Any<CancellationToken>());
+        await _outbox.Received(1).EnqueueAsync(
+            Arg.Is("booking.booking.created"),
+            Arg.Is<string>(json =>
+                json.Contains(result.Return.BookingId.ToString(), StringComparison.OrdinalIgnoreCase)
+                && json.Contains(ReturnTripId.ToString(), StringComparison.OrdinalIgnoreCase)
+                && json.Contains(ReturnDriverUserId.ToString(), StringComparison.OrdinalIgnoreCase)),
             Arg.Any<CancellationToken>());
 
         await _statusHistory.Received(4).AddAsync(
@@ -662,9 +698,12 @@ public class CreateRoundTripBookingCommandHandlerTests
             voucherId, PassengerUserId, Arg.Any<Guid>(), result.BookingGroupId,
             Arg.Is<Money>(m => m.Amount == returnDiscount), Arg.Any<CancellationToken>());
 
-        // Assert: outbox enqueued 2 events, each carrying voucherUsageId
-        capturedJsonPayloads.Should().HaveCount(2, "one confirmed event per leg");
-        foreach (var json in capturedJsonPayloads)
+        // Assert: the two legacy confirmed events each carry voucherUsageId.
+        var confirmedPayloads = capturedJsonPayloads
+            .Where(json => JsonDocument.Parse(json).RootElement.TryGetProperty("voucherUsageId", out _))
+            .ToArray();
+        confirmedPayloads.Should().HaveCount(2, "one confirmed event per leg");
+        foreach (var json in confirmedPayloads)
         {
             using var doc = JsonDocument.Parse(json);
             doc.RootElement.TryGetProperty("voucherUsageId", out var prop).Should().BeTrue(

@@ -5,6 +5,7 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Events;
+using VietRide.Booking.Application.Exceptions;
 using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
@@ -127,6 +128,11 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
+        var trip = await _tripClient.GetTripSnapshotAsync(
+            snapshot.TripId,
+            cancellationToken).ConfigureAwait(false);
+        EnsureCrewSnapshotAvailable(trip, snapshot.TripId);
+
         var outcome = await _tripClient.ConfirmBookedSeatsAsync(
             snapshot.TripId,
             snapshot.SeatLockToken.Value,
@@ -139,6 +145,7 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
                 var transitioned = await ConfirmPersistedBookingAsync(
                     request.PaymentId,
                     snapshot,
+                    trip,
                     cancellationToken).ConfigureAwait(false);
                 if (transitioned
                     || !string.Equals(request.Method, VnPayMethod, StringComparison.OrdinalIgnoreCase))
@@ -267,6 +274,16 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
                 snapshots.ToDictionary(snapshot => snapshot.BookingId)).ConfigureAwait(false);
         }
 
+        var tripSnapshots = new Dictionary<Guid, TripSnapshot>(snapshots.Count);
+        foreach (var snapshot in snapshots)
+        {
+            var trip = await _tripClient.GetTripSnapshotAsync(
+                snapshot.TripId,
+                cancellationToken).ConfigureAwait(false);
+            EnsureCrewSnapshotAvailable(trip, snapshot.TripId);
+            tripSnapshots[snapshot.BookingId] = trip!;
+        }
+
         static RoundTripBookSeatsLeg ToLeg(BookingPaymentTransitionSnapshot snapshot) => new(
             snapshot.TripId,
             snapshot.SeatLockToken!.Value,
@@ -308,6 +325,7 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
                     {
                         await RecordConfirmedBookingAsync(
                             snapshot,
+                            tripSnapshots[snapshot.BookingId],
                             now,
                             cancellationToken).ConfigureAwait(false);
                     }
@@ -478,6 +496,7 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
     private async Task<bool> ConfirmPersistedBookingAsync(
         Guid paymentId,
         BookingPaymentTransitionSnapshot snapshot,
+        TripSnapshot? trip,
         CancellationToken cancellationToken)
     {
         var now = _clock.UtcNow;
@@ -502,12 +521,13 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
                 BookingStatusHistorySource.ConfirmOnPayment),
             cancellationToken).ConfigureAwait(false);
 
-        await EnqueueBookingConfirmedAsync(snapshot, cancellationToken).ConfigureAwait(false);
+        await EnqueueBookingConfirmedAsync(snapshot, trip, now, cancellationToken).ConfigureAwait(false);
         return true;
     }
 
     private async Task RecordConfirmedBookingAsync(
         BookingPaymentTransitionSnapshot snapshot,
+        TripSnapshot? trip,
         DateTimeOffset confirmedAt,
         CancellationToken cancellationToken)
     {
@@ -519,11 +539,13 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
                 BookingStatusHistorySource.ConfirmOnPayment),
             cancellationToken).ConfigureAwait(false);
 
-        await EnqueueBookingConfirmedAsync(snapshot, cancellationToken).ConfigureAwait(false);
+        await EnqueueBookingConfirmedAsync(snapshot, trip, confirmedAt, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task EnqueueBookingConfirmedAsync(
         BookingPaymentTransitionSnapshot snapshot,
+        TripSnapshot? trip,
+        DateTimeOffset confirmedAt,
         CancellationToken cancellationToken)
     {
         var confirmedEvent = new
@@ -563,6 +585,30 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
             BookingConfirmedEventType,
             JsonSerializer.Serialize(confirmedEvent, JsonOptions),
             cancellationToken).ConfigureAwait(false);
+
+        var createdEvent = new BookingCreatedIntegrationEvent(
+            snapshot.BookingId,
+            snapshot.BookingCode ?? snapshot.BookingId.ToString("N"),
+            snapshot.TripId,
+            snapshot.TicketCodes,
+            new BookingLocationSnapshot(snapshot.PickupStationId, snapshot.PickupStopId, null),
+            new BookingLocationSnapshot(snapshot.DropoffStationId, snapshot.DropoffStopId, null),
+            trip?.DriverUserId,
+            trip?.AssistantUserId,
+            confirmedAt);
+        await _outbox.EnqueueAsync(
+            createdEvent.EventType,
+            JsonSerializer.Serialize(createdEvent, JsonOptions),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void EnsureCrewSnapshotAvailable(TripSnapshot? trip, Guid tripId)
+    {
+        if (trip?.DriverUserId is null)
+        {
+            throw new TransientIntegrationEventException(
+                $"Trip '{tripId}' crew snapshot is unavailable or has no assigned driver.");
+        }
     }
 
     private static bool IsLateCapture(ConfirmBookingOnPaymentCommand request)

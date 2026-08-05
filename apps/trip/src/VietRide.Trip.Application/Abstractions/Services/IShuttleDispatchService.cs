@@ -19,6 +19,17 @@ public interface IShuttleDispatchService
         Guid? operatorId,
         CancellationToken cancellationToken);
 
+    Task<ShuttleDriverAssignmentPage> GetDriverAssignmentsAsync(
+        Guid driverUserId,
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken cancellationToken);
+
+    Task<ShuttleDriverManifest> GetDriverManifestAsync(
+        Guid shuttleTripId,
+        Guid driverUserId,
+        CancellationToken cancellationToken);
+
     Task<ShuttlePickupResult> MarkPickupAsync(
         Guid shuttleTripId,
         int pickupOrder,
@@ -130,3 +141,47 @@ public sealed record ShuttleTrackingStop(
     string? ServiceAddress = null,
     int? ServiceOrder = null,
     int? RoadDistanceSnapshotMeters = null);
+
+public sealed record ShuttleDriverAssignmentPage(
+    DateOnly From,
+    DateOnly To,
+    IReadOnlyList<ShuttleDriverAssignment> Items);
+
+public sealed record ShuttleDriverAssignment(
+    Guid ShuttleTripId,
+    Guid MainTripId,
+    string Direction,
+    string Status,
+    Guid VehicleId,
+    string LicensePlate,
+    DateTimeOffset ScheduledDepartureTime,
+    DateTimeOffset ScheduledEndTime,
+    int PassengerCount,
+    int StopCount);
+
+public sealed record ShuttleDriverManifest(
+    Guid ShuttleTripId,
+    Guid MainTripId,
+    string Direction,
+    string Status,
+    Guid StationId,
+    string StationName,
+    decimal? StationLatitude,
+    decimal? StationLongitude,
+    DateTimeOffset ScheduledDepartureTime,
+    DateTimeOffset ScheduledEndTime,
+    IReadOnlyList<ShuttleDriverManifestStop> Stops);
+
+public sealed record ShuttleDriverManifestStop(
+    int PickupOrder,
+    Guid? BookingId,
+    IReadOnlyList<Guid> TicketIds,
+    int PassengerCount,
+    string PickupAddress,
+    decimal PickupLatitude,
+    decimal PickupLongitude,
+    string Status,
+    DateTimeOffset? PickedUpAt,
+    DateTimeOffset? DeliveredAt,
+    string? PassengerDisplayName,
+    string? PassengerPhone);

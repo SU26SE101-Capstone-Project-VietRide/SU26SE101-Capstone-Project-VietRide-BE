@@ -1296,6 +1296,10 @@ For VNPay, Booking passes the exact Trip seat-lock `expiresAt` as Payment `dueAt
 has already passed during checkout, the request fails with `422 PAYMENT_DEADLINE_PASSED` and
 Booking runs its existing seat-release compensation.
 
+Errors include the existing validation/not-found/conflict responses plus:
+
+- `502 UPSTREAM_UNAVAILABLE`: the Trip crew snapshot is unavailable or the Trip has no assigned Driver. Booking returns this before locking seats or creating a payment.
+
 ### POST `/v1/bookings/round-trip`
 
 Auth: `PASSENGER`. Idempotency: required.
@@ -1344,6 +1348,10 @@ Rules:
 - `BOOKING_GROUP` is VNPay-only for this endpoint; WALLET success remains two per-booking payments.
 - `paymentRedirectUrl` is `null` for WALLET and populated only when VNPay returns a redirect.
 - VNPay `Payment.dueAt` is the earlier exact `expiresAt` of the outbound and return seat locks.
+
+Errors include the existing validation/not-found/conflict responses plus:
+
+- `502 UPSTREAM_UNAVAILABLE`: either leg's Trip crew snapshot is unavailable or has no assigned Driver. Booking returns this before the atomic round-trip seat lock or any payment side effect.
 
 ### GET `/v1/bookings/history`
 
@@ -4228,6 +4236,32 @@ Server broadcasts to room `trip:{tripId}`:
 - `eta:update`
 - `trip:statusChanged`
 
+Driver và Assistant được Tracking tự động tham gia thêm room nội bộ
+`tracking:trip:{tripId}:crew`. Khi Booking chuyển sang `CONFIRMED`, Booking phát fact
+`booking.booking.created`; Tracking validate fact này và chỉ broadcast `booking:created` vào
+crew room. Passenger room không nhận sự kiện này.
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-08-05T10:00:01.000Z",
+  "bookingId": "uuid",
+  "bookingCode": "VR-20260805-ABCDEFGH",
+  "tripId": "uuid",
+  "status": "CONFIRMED",
+  "ticketCodes": ["VT-20260805-ABCDEFGH"],
+  "passengerCount": 1,
+  "pickup": { "stationId": "uuid", "stopId": null, "address": null },
+  "dropoff": { "stationId": null, "stopId": "uuid", "address": null },
+  "driverUserId": "uuid",
+  "assistantUserId": "uuid"
+}
+```
+
+`eventId` là identity bền vững cho Outbox, RabbitMQ, Notification và Tracking dedupe.
+Notification lưu type `BOOKING_CREATED` cho từng crew recipient hiện có với dedupe riêng theo
+`eventId + recipientUserId`. Các field và event mới đều additive; client cũ có thể bỏ qua.
+
 Tracking Phase 10 invariants (legacy fields remain compatible; delay fields below are additive):
 
 - GPS is projected onto cached Trip route geometry only when the nearest segment is at most 50 m
@@ -5728,6 +5762,85 @@ SHUTTLE_REQUEST_SET_CHANGED`; `409 SHUTTLE_CAPACITY_EXCEEDED`; `409
 SHUTTLE_DRIVER_CONFLICT`; `409 SHUTTLE_VEHICLE_CONFLICT`; `409
 SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 SHUTTLE_DISTANCE_EXCEEDED`; `422 VALIDATION_ERROR`;
 `503 SHUTTLE_DISTANCE_UNAVAILABLE`; `503 UPSTREAM_UNAVAILABLE`.
+
+### GET `/v1/driver/shuttle-trips`
+
+Auth: `DRIVER` only. Chỉ trả ShuttleTrip có `driverUserId` trùng với `sub` trong JWT và bỏ qua
+trạng thái `CANCELLED`.
+
+Query tùy chọn: `from=YYYY-MM-DD`, `to=YYYY-MM-DD`. Khi không truyền, cửa sổ mặc định là ngày
+hiện tại đến ngày hiện tại + 14 ngày theo ICT. `to` không được trước `from`; khoảng truy vấn tối
+đa 32 ngày.
+
+Response `200`:
+
+```json
+{
+  "from": "2026-08-05",
+  "to": "2026-08-19",
+  "items": [
+    {
+      "shuttleTripId": "uuid",
+      "mainTripId": "uuid",
+      "direction": "INBOUND_TO_STATION",
+      "status": "SCHEDULED",
+      "vehicleId": "uuid",
+      "licensePlate": "51B-123.45",
+      "scheduledDepartureTime": "2026-08-05T01:00:00Z",
+      "scheduledEndTime": "2026-08-05T02:00:00Z",
+      "passengerCount": 2,
+      "stopCount": 1
+    }
+  ]
+}
+```
+
+Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN`; `422 VALIDATION_ERROR`.
+
+### GET `/v1/driver/shuttle-trips/{shuttleTripId}/manifest`
+
+Auth: `DRIVER` only và chỉ Driver được gán cho ShuttleTrip được đọc. Driver khác nhận `403
+FORBIDDEN`; ShuttleTrip không tồn tại nhận `404 SHUTTLE_TRIP_NOT_FOUND`.
+
+Response `200` gồm ShuttleTrip, main Trip, direction, trạng thái, Station, lịch chạy và danh sách
+`stops` tăng dần theo `pickupOrder`. Các ShuttlePassenger cùng `bookingId + pickupOrder` được gom
+thành một pickup group. Một group phải có cùng trạng thái; dữ liệu mixed status trả `409
+SHUTTLE_MANIFEST_INCONSISTENT_STATUS` thay vì báo sai `PENDING`.
+
+```json
+{
+  "shuttleTripId": "uuid",
+  "mainTripId": "uuid",
+  "direction": "INBOUND_TO_STATION",
+  "status": "SCHEDULED",
+  "stationId": "uuid",
+  "stationName": "Bến xe Miền Đông",
+  "stationLatitude": 10.8012,
+  "stationLongitude": 106.7144,
+  "scheduledDepartureTime": "2026-08-05T01:00:00Z",
+  "scheduledEndTime": "2026-08-05T02:00:00Z",
+  "stops": [
+    {
+      "pickupOrder": 1,
+      "bookingId": "uuid",
+      "ticketIds": ["uuid"],
+      "passengerCount": 1,
+      "pickupAddress": "12 Nguyễn Huệ, Quận 1",
+      "pickupLatitude": 10.7731,
+      "pickupLongitude": 106.7032,
+      "status": "PENDING",
+      "pickedUpAt": null,
+      "deliveredAt": null,
+      "passengerDisplayName": "Nguyễn Văn A",
+      "passengerPhone": "0900000000"
+    }
+  ]
+}
+```
+
+Không trả ID giấy tờ, dữ liệu thanh toán hoặc thông tin ngoài nghiệp vụ. Errors: `401
+UNAUTHORIZED`; `403 FORBIDDEN`; `404 SHUTTLE_TRIP_NOT_FOUND`; `404
+SHUTTLE_STATION_NOT_FOUND`; `409 SHUTTLE_MANIFEST_INCONSISTENT_STATUS`.
 
 ### POST `/v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup`
 
