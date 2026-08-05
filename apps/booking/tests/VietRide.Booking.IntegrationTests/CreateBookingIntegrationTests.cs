@@ -63,7 +63,9 @@ public class CreateBookingIntegrationTests
             OriginStation: new TripStationSnapshot(stationId, "Hà Nội"),
             DestinationStation: new TripStationSnapshot(Guid.NewGuid(), "TP.HCM"),
             Stops: [],
-            SeatSummary: new TripSeatSummary(40, 38));
+            SeatSummary: new TripSeatSummary(40, 38),
+            DriverUserId: Guid.NewGuid(),
+            AssistantUserId: Guid.NewGuid());
 
         _factory.TripClient.GetTripSnapshotAsync(
                 tripId,
@@ -171,7 +173,9 @@ public class CreateBookingIntegrationTests
             OriginStation: new TripStationSnapshot(stationId, "Hà Nội"),
             DestinationStation: new TripStationSnapshot(Guid.NewGuid(), "TP.HCM"),
             Stops: [],
-            SeatSummary: new TripSeatSummary(40, 0)); // no available seats
+            SeatSummary: new TripSeatSummary(40, 0), // no available seats
+            DriverUserId: Guid.NewGuid(),
+            AssistantUserId: Guid.NewGuid());
 
         _factory.TripClient.GetTripSnapshotAsync(
                 tripId,
@@ -267,7 +271,9 @@ public class CreateBookingIntegrationTests
             OriginStation: new TripStationSnapshot(stationId, "Hà Nội"),
             DestinationStation: new TripStationSnapshot(Guid.NewGuid(), "TP.HCM"),
             Stops: [],
-            SeatSummary: new TripSeatSummary(40, 10));
+            SeatSummary: new TripSeatSummary(40, 10),
+            DriverUserId: Guid.NewGuid(),
+            AssistantUserId: Guid.NewGuid());
 
         _factory.TripClient.GetTripSnapshotAsync(
                 tripId,

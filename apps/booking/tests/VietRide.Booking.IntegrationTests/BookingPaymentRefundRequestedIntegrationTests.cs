@@ -101,6 +101,8 @@ public sealed class BookingPaymentRefundRequestedIntegrationTests
         var bookings = Substitute.For<IBookingRepository>();
         bookings.QueryNoTracking().Returns(new[] { booking }.AsQueryable());
         var trip = Substitute.For<ITripServiceClient>();
+        trip.GetTripSnapshotAsync(booking.TripId, Arg.Any<CancellationToken>())
+            .Returns(CreateTripSnapshot(booking));
         var outbox = Substitute.For<IIntegrationEventOutbox>();
         var handler = new ConfirmBookingOnPaymentCommandHandler(
             bookings,
@@ -203,6 +205,8 @@ public sealed class BookingPaymentRefundRequestedIntegrationTests
                 Arg.Any<CancellationToken>())
             .Returns(true);
         var trip = Substitute.For<ITripServiceClient>();
+        trip.GetTripSnapshotAsync(booking.TripId, Arg.Any<CancellationToken>())
+            .Returns(CreateTripSnapshot(booking));
         trip.ConfirmBookedSeatsAsync(
                 Arg.Any<Guid>(),
                 Arg.Any<Guid>(),
@@ -641,6 +645,8 @@ public sealed class BookingPaymentRefundRequestedIntegrationTests
             var releaseConfirmation = new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var confirmationTrip = Substitute.For<ITripServiceClient>();
+            confirmationTrip.GetTripSnapshotAsync(booking.TripId, Arg.Any<CancellationToken>())
+                .Returns(CreateTripSnapshot(booking));
             confirmationTrip.ConfirmBookedSeatsAsync(
                     Arg.Any<Guid>(),
                     Arg.Any<Guid>(),
@@ -791,6 +797,8 @@ public sealed class BookingPaymentRefundRequestedIntegrationTests
             await cancellationEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
             var confirmationTrip = Substitute.For<ITripServiceClient>();
+            confirmationTrip.GetTripSnapshotAsync(booking.TripId, Arg.Any<CancellationToken>())
+                .Returns(CreateTripSnapshot(booking));
             var paymentId = Guid.NewGuid();
             var confirmation = new ConfirmBookingOnPaymentCommandHandler(
                 CreateBookingRepository(confirmationDb),
@@ -891,6 +899,10 @@ public sealed class BookingPaymentRefundRequestedIntegrationTests
             var releaseConfirmation = new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var trip = Substitute.For<ITripServiceClient>();
+            trip.GetTripSnapshotAsync(first.TripId, Arg.Any<CancellationToken>())
+                .Returns(CreateTripSnapshot(first));
+            trip.GetTripSnapshotAsync(second.TripId, Arg.Any<CancellationToken>())
+                .Returns(CreateTripSnapshot(second));
             trip.ConfirmBookedRoundTripSeatsAsync(
                     Arg.Any<RoundTripBookSeatsLeg>(),
                     Arg.Any<RoundTripBookSeatsLeg>(),
@@ -1099,7 +1111,12 @@ public sealed class BookingPaymentRefundRequestedIntegrationTests
         {
             await using var dataSource = CreateDataSource(connectionString);
             var booking = CreateBooking();
-            booking.AddPassenger("A01");
+            booking.AddTicketedPassenger(
+                "A01",
+                TicketCode.Generate(Now),
+                booking.TotalAmount,
+                Money.Zero,
+                booking.TotalAmount);
             await using (var setup = CreateDbContext(dataSource))
             {
                 await setup.Database.MigrateAsync();
@@ -1114,6 +1131,8 @@ public sealed class BookingPaymentRefundRequestedIntegrationTests
             var releaseConfirmation = new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var trip = Substitute.For<ITripServiceClient>();
+            trip.GetTripSnapshotAsync(booking.TripId, Arg.Any<CancellationToken>())
+                .Returns(CreateTripSnapshot(booking));
             trip.ConfirmBookedSeatsAsync(
                     Arg.Any<Guid>(),
                     Arg.Any<Guid>(),
@@ -1405,7 +1424,9 @@ public sealed class BookingPaymentRefundRequestedIntegrationTests
             new TripStationSnapshot(Guid.NewGuid(), "Ha Noi"),
             new TripStationSnapshot(Guid.NewGuid(), "Da Nang"),
             [],
-            new TripSeatSummary(40, 39));
+            new TripSeatSummary(40, 39),
+            DriverUserId: Guid.NewGuid(),
+            AssistantUserId: Guid.NewGuid());
 
     private static NpgsqlDataSource CreateDataSource(string connectionString)
     {
