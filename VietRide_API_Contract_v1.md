@@ -6320,7 +6320,22 @@ Route create/update money fields are VND BIGINT-compatible JSON numbers. Persist
 
 `returnRouteId` is nullable and one-way: setting Route A `returnRouteId = B` does not mutate Route B.
 
-`pathPolyline` is nullable and appears on Route detail/mutation responses only. `GET /v1/operator/routes` returns `PagedResult<RouteListItemDto>` with the same fields except `pathPolyline`, preventing a large geometry string per list item.
+`pathPolyline` is nullable and appears on Route detail/mutation responses only. `GET /v1/operator/routes` returns `PagedResult<RouteListItemDto>` with the same fields except `pathPolyline`, preventing a large geometry string per list item. Each list item additionally includes `departureSchedules`, containing all recurring DriverSchedules owned by the caller operator for that Route, including inactive, expired, and future schedules. A Route without schedules returns `departureSchedules: []`.
+
+Each `departureSchedules` item has this shape:
+
+```json
+{
+  "id": "uuid",
+  "dayOfWeek": [1, 3, 5],
+  "departureTime": "08:00:00",
+  "validFrom": "2026-07-01",
+  "validUntil": "2026-12-31",
+  "isActive": true
+}
+```
+
+`dayOfWeek` uses `1=Monday` through `7=Sunday`. `departureTime` is a timezone-free `TIME` value with local ICT semantics. `validUntil` is nullable. Items are ordered by `departureTime`, then `validFrom`, then `id`.
 
 ### POST `/v1/operator/routes`
 
@@ -6364,7 +6379,7 @@ Query: `page?`, `pageSize?`, `search?`.
 
 Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Optional `search` follows BSOT §5.8 and is allow-listed to Route `name`.
 
-Response `200`: `PagedResult<RouteDto>` in the ADR 0004 success envelope.
+Response `200`: `PagedResult<RouteListItemDto>` in the ADR 0004 success envelope.
 
 ### GET `/v1/operator/routes/{id}`
 

@@ -24,6 +24,17 @@ public sealed class DriverScheduleRepository : IDriverScheduleRepository
         return await dbContext.DriverSchedules.FindAsync([id], cancellationToken);
     }
 
+    public async Task<IReadOnlyList<DriverSchedule>> ListByRouteIdsAsync(
+        Guid operatorId,
+        IReadOnlyCollection<Guid> routeIds,
+        CancellationToken cancellationToken = default)
+    {
+        return await dbContext.DriverSchedules
+            .AsNoTracking()
+            .Where(schedule => schedule.OperatorId == operatorId && routeIds.Contains(schedule.RouteId))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<DriverSchedule?> AcquireOwnedForUpdateAsync(
         Guid scheduleId,
         Guid operatorId,
