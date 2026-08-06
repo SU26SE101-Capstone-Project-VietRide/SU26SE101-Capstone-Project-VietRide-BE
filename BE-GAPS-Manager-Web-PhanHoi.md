@@ -1,8 +1,8 @@
 # Phản hồi Backend Gaps — Manager Web
 
-**Ngày cập nhật:** 2026-08-06  
-**Trạng thái:** Đã implement và xác minh trên local stack  
-**Service owner:** Trip service (`apps/trip`) và Gateway (`apps/gateway`)  
+**Ngày cập nhật:** 2026-08-06
+**Trạng thái:** Đã implement và xác minh trên local stack
+**Service owner:** Trip service (`apps/trip`) và Gateway (`apps/gateway`)
 **Phạm vi:** Phương tiện, capacity, seat-map theo Trip, disable/enable ghế, shuttle history, pending shuttle và Gateway RBAC.
 
 ## Mục lục
