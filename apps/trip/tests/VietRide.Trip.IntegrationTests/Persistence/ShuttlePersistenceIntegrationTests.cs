@@ -267,7 +267,8 @@ public sealed class ShuttlePersistenceIntegrationTests
                     TripSource.MANUAL,
                     Money.FromRaw(100_000),
                     500m,
-                    5m);
+                    5m,
+                    seatLayoutSnapshotJson: seed.MainSeatLayoutJson);
                 setup.Trips.Add(trip);
                 var bookingId = Guid.NewGuid();
                 var passengerId = Guid.NewGuid();
@@ -658,7 +659,8 @@ public sealed class ShuttlePersistenceIntegrationTests
             TripSource.MANUAL,
             Money.FromRaw(100_000),
             500m,
-            5m);
+            5m,
+            seatLayoutSnapshotJson: layout.RootElement);
 
         db.AddRange(origin, destination, route, vehicleType, mainVehicle, shuttleVehicle, mainTrip);
         await db.SaveChangesAsync();
@@ -669,7 +671,8 @@ public sealed class ShuttlePersistenceIntegrationTests
             mainDriverId,
             shuttleVehicle.Id,
             shuttleDriverId,
-            mainTrip.Id);
+            mainTrip.Id,
+            mainVehicle.SeatLayoutJson);
     }
 
     private static BookingShuttleConfirmedIntegrationEvent CreateConfirmedEvent(
@@ -798,7 +801,8 @@ public sealed class ShuttlePersistenceIntegrationTests
         Guid MainDriverId,
         Guid ShuttleVehicleId,
         Guid ShuttleDriverId,
-        Guid MainTripId);
+        Guid MainTripId,
+        JsonElement MainSeatLayoutJson);
 
     private sealed class FrozenClock : IClock
     {
