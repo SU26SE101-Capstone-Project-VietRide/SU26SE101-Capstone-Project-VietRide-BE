@@ -469,6 +469,7 @@ CREATE TABLE trips (
     route_id UUID NOT NULL REFERENCES routes (id) ON DELETE RESTRICT,
     alternative_route_id UUID NULL REFERENCES alternative_routes (id),
     vehicle_id UUID NOT NULL REFERENCES vehicles (id) ON DELETE RESTRICT,
+    seat_layout_snapshot_json JSONB NOT NULL,
     driver_user_id UUID NOT NULL,    -- logical FK
     assistant_user_id UUID NULL,     -- logical FK
     driver_schedule_id UUID NULL REFERENCES driver_schedules (id) ON DELETE SET NULL,
@@ -512,6 +513,9 @@ CREATE UNIQUE INDEX uq_trips_driver_departure
 CREATE UNIQUE INDEX uq_trips_vehicle_departure
     ON trips (vehicle_id, departure_date_time)
     WHERE status NOT IN ('CANCELLED');
+
+COMMENT ON COLUMN trips.seat_layout_snapshot_json IS
+    'Immutable Vehicle seat-layout snapshot for this Trip; replaced only by approved vehicle swap/substitution flows.';
 CREATE INDEX idx_trips_operator_status ON trips (operator_id, status);
 CREATE INDEX idx_trips_route_departure ON trips (route_id, departure_date_time);
 CREATE INDEX idx_trips_alternative_route_id ON trips (alternative_route_id);

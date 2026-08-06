@@ -1265,7 +1265,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
 endpoint có behavior-idempotent hay không, trừ đúng 17 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `188 mutation surfaces / 171 required / 17 exempt`;
+bảng sau. Inventory executable phải giữ tổng `190 mutation surfaces / 173 required / 17 exempt`;
 thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
 
 **Canonical 17 exemptions (không yêu cầu `Idempotency-Key`):**
@@ -1353,6 +1353,8 @@ Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable
 | 42 | `POST /v1/driver/trips/{tripId}/route-change-proposals` | Trip |
 | 43 | `POST /v1/operator/route-change-proposals/{proposalId}/approve` | Trip |
 | 44 | `POST /v1/operator/route-change-proposals/{proposalId}/reject` | Trip |
+| 45 | `POST /v1/operator/trips/{tripId}/seats/{seatNumber}/disable` | Trip |
+| 46 | `POST /v1/operator/trips/{tripId}/seats/{seatNumber}/enable` | Trip |
 
 `POST /v1/operator/trips` is deferred outside current v1 and MUST remain absent from the public
 API and Gateway inventories. `Trip.source=MANUAL` is compatibility/readiness only; it does not
@@ -1433,6 +1435,26 @@ not a passenger seat. Absent is `SEAT_REMOVED`; same-number disabled or `DRIVER_
 HELD/BOOKED. In `SCHEDULED`, incompatible HELD blocks; incompatible BOOKED may create
 `PENDING_SEAT_ASSIGNMENT` only when `min(now+4h, departure-30m) > now`. In `BOARDING`, any
 incompatible HELD/BOOKED is too late. Disabled/`DRIVER_AREA` entries never create TripSeats.
+
+**Manager Web seat and shuttle contract:** Trip stores `seat_layout_snapshot_json` as the
+immutable per-Trip layout used by detail/seat-map projections. Vehicle template edits do not
+rewrite an existing Trip snapshot; only approved vehicle substitution/swap flows may replace it.
+`usablePassengerCapacity` is computed from non-disabled layout seats whose type is not
+`DRIVER_AREA`; `Vehicle.totalSeats` remains for compatibility. The two seat mutations are
+`OPERATOR_ADMIN`-only, UUID-v4 idempotent, tenant-scoped endpoints:
+`POST /v1/operator/trips/{tripId}/seats/{seatNumber}/disable` and `/enable`. They lock the
+TripSeat with `SELECT ... FOR UPDATE`, audit `TRIP_SEAT_DISABLED`/`TRIP_SEAT_ENABLED` in the
+same transaction, return the latest seat-map, and emit no integration event. Disable requires a
+reason and only permits `AVAILABLE -> UNAVAILABLE`; enable only permits `UNAVAILABLE -> AVAILABLE`
+and clears the reason. `HELD`/`BOOKED` disable returns `409 TRIP_SEAT_IN_USE`.
+
+`GET /v1/operator/shuttle-trips` is tenant-scoped for `OPERATOR_ADMIN`/`OPERATOR_STAFF`.
+ICT `from/to` filters are inclusive, absent status filter means all statuses including
+`CANCELLED`, and ordering is scheduled departure descending then ShuttleTrip UUID descending.
+Passenger/stop counts are SQL projections and driver profiles are fetched in one batched Identity
+call. Pending shuttle groups keep `mainTripId + direction` grouping and add nested passenger
+profiles with aggregated ticket IDs; missing profiles expose null display fields and Identity
+transport failure maps to `503 UPSTREAM_UNAVAILABLE`.
 
 **Day-22 DriverSchedule PATCH domain contract:** canonical body is exactly
 `{departureTime?,dayOfWeek?,driverUserId?,assistantUserId?,vehicleId?,validUntil?,isActive?}`;
@@ -1579,6 +1601,9 @@ updates the column.
 | | `WALLET_TOP_UP_FAILED` | 502 | TopUp VNPay failed |
 | | `WALLET_TOP_UP_AMOUNT_TOO_LOW` | 422 | < 10,000 VND |
 | **Trip** | `TRIP_NOT_FOUND` | 404 | |
+| | `TRIP_SEAT_NOT_FOUND` | 404 | TripSeat không tồn tại trong Trip; `DRIVER_AREA` không tạo TripSeat |
+| | `TRIP_SEAT_IN_USE` | 409 | Không được disable seat đang `HELD` hoặc `BOOKED` |
+| | `TRIP_SEAT_STATE_CONFLICT` | 409 | TripSeat không ở state hợp lệ cho transition disable/enable |
 | | `FARE_SURCHARGE_PERIOD_NOT_FOUND` | 404 | Holiday surcharge period không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
 | | `FARE_SURCHARGE_PERIOD_OVERLAP` | 422 | Active holiday surcharge period overlap một active non-deleted period của cùng operator |
 | | `TRIP_INVALID_TRANSITION` | 409 | Day-21 start/complete lifecycle precondition fails; do not introduce or use `INVALID_TRIP_STATUS` |
@@ -3849,6 +3874,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.58.0** | 2026-08-06 | Codex | **MINOR** — Hoàn thiện Manager Web Trip gaps: immutable Trip seat-layout snapshot, canonical usable passenger capacity, case-insensitive seat validation, operator-admin TripSeat disable/enable with row locking/audit/idempotency, operator shuttle history, batched pending-shuttle passenger enrichment, and method-aware Gateway routing. |
 | **1.57.0** | 2026-08-05 | Codex | **MINOR** — Hoàn thiện Tracking Phase 12: giữ fallback `STOPS_ONLY` cho Route thiếu polyline, làm rõ Google/Local ETA fallback và UNKNOWN, khóa quy tắc chọn stop/recalculate, bổ sung delay state 24h, Outbox `dedupeKey` unique, transition `DELAYED`/`DELAY_CLEARED` và contract ETA additive tương thích ngược. |
 | **1.56.0** | 2026-08-05 | Codex | **MINOR** — Bổ sung event `booking.booking.created` cho Tracking/Notification, payload crew-facing strict và phát Outbox nguyên tử cùng chuyển Booking sang CONFIRMED; giữ nguyên event `booking.booking.confirmed` tương thích ngược. |
 | **1.55.0** | 2026-08-04 | Codex | **MINOR** — Hoàn thiện Shuttle hai chiều inbound/outbound, snapshot road distance Google Routes tối đa 5 km, internal distance contract, manifest/lifecycle event registry, operator subscription guard và fail-safe migration rollback. |

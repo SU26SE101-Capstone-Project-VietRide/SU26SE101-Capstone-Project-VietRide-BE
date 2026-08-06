@@ -9,4 +9,10 @@ public interface ITripSeatRepository : IRepository<TripSeat, Guid>
         Guid tripId,
         CancellationToken cancellationToken)
         => throw new NotSupportedException("Vehicle-swap locking is not supported by this repository implementation.");
+
+    Task<TripSeat?> AcquireForUpdateAsync(
+        Guid tripId,
+        string seatNumber,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Trip-seat locking is not supported by this repository implementation.");
 }

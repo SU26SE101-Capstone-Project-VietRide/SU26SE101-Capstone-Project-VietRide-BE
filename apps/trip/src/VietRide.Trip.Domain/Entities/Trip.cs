@@ -1,3 +1,4 @@
+using System.Text.Json;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 
@@ -14,6 +15,7 @@ public sealed class Trip : BaseEntity<Guid>
     public Guid RouteId { get; private set; }
     public Guid? AlternativeRouteId { get; private set; }
     public Guid VehicleId { get; private set; }
+    public JsonElement? SeatLayoutSnapshotJson { get; private set; }
     public Guid DriverUserId { get; private set; }
     public Guid? AssistantUserId { get; private set; }
     public Guid? DriverScheduleId { get; private set; }
@@ -90,7 +92,8 @@ public sealed class Trip : BaseEntity<Guid>
         decimal? maxCargoVolumeM3,
         decimal estimatedPassengerLuggageKg,
         bool hasSubstitution = false,
-        string? notes = null)
+        string? notes = null,
+        JsonElement? seatLayoutSnapshotJson = null)
     {
         ValidateGuid(operatorId, nameof(operatorId));
         ValidateGuid(routeId, nameof(routeId));
@@ -102,6 +105,7 @@ public sealed class Trip : BaseEntity<Guid>
         ValidateOptionalNonNegative(maxCargoWeightKg, nameof(maxCargoWeightKg));
         ValidateOptionalNonNegative(maxCargoVolumeM3, nameof(maxCargoVolumeM3));
         ValidateNonNegative(estimatedPassengerLuggageKg, nameof(estimatedPassengerLuggageKg));
+        ValidateOptionalSeatLayoutSnapshot(seatLayoutSnapshotJson);
 
         return new Trip
         {
@@ -109,6 +113,9 @@ public sealed class Trip : BaseEntity<Guid>
             OperatorId = operatorId,
             RouteId = routeId,
             VehicleId = vehicleId,
+            SeatLayoutSnapshotJson = seatLayoutSnapshotJson.HasValue
+                ? seatLayoutSnapshotJson.Value.Clone()
+                : null,
             DriverUserId = driverUserId,
             AssistantUserId = assistantUserId,
             DriverScheduleId = driverScheduleId,
@@ -282,6 +289,12 @@ public sealed class Trip : BaseEntity<Guid>
         return true;
     }
 
+    public void UpdateSeatLayoutSnapshot(JsonElement seatLayoutSnapshotJson)
+    {
+        ValidateOptionalSeatLayoutSnapshot(seatLayoutSnapshotJson);
+        SeatLayoutSnapshotJson = seatLayoutSnapshotJson.Clone();
+    }
+
     public bool Reschedule(DateTimeOffset departureDateTime, DateTimeOffset estimatedArrivalTime)
     {
         ValidateArrivalAfterDeparture(departureDateTime, estimatedArrivalTime);
@@ -443,6 +456,14 @@ public sealed class Trip : BaseEntity<Guid>
         if (value == Guid.Empty)
         {
             throw new ArgumentException("Value cannot be empty.", parameterName);
+        }
+    }
+
+    private static void ValidateOptionalSeatLayoutSnapshot(JsonElement? value)
+    {
+        if (value.HasValue && value.Value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            throw new ArgumentException("Seat layout snapshot cannot be null or undefined.", nameof(value));
         }
     }
 }

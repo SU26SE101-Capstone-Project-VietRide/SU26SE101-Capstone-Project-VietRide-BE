@@ -6,4 +6,5 @@ public sealed record TripSeatMapSeatDto(
     string Type,
     int Row,
     int Col,
-    int Deck);
+    int Deck,
+    string? DisabledReason = null);
