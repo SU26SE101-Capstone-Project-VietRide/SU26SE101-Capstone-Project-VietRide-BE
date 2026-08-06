@@ -15,6 +15,8 @@ import { ShuttleTrackingController } from '../shuttle/shuttle-tracking.controlle
 import { ShuttleTrackingAuthGuard } from '../shuttle/shuttle-tracking-auth.guard';
 import { TripSharingModule } from '../trip-sharing/trip-sharing.module';
 import { BookingCreatedRealtimeConsumer } from './booking-created-realtime.consumer';
+import { OperatorTripProjectionProvider } from '../tracking-data/operator-trip-projection.provider';
+import { RouteChangeProposalRealtimeConsumer } from './route-change-proposal-realtime.consumer';
 
 @Module({
   imports: [EtaModule, ApproachingAlertModule, OffRouteModule, TripDelayModule, TripSharingModule],
@@ -28,6 +30,8 @@ import { BookingCreatedRealtimeConsumer } from './booking-created-realtime.consu
     ShuttleEtaService,
     ShuttleTrackingAuthGuard,
     BookingCreatedRealtimeConsumer,
+    OperatorTripProjectionProvider,
+    RouteChangeProposalRealtimeConsumer,
   ],
   controllers: [ShuttleTrackingController],
   exports: [LocationService],

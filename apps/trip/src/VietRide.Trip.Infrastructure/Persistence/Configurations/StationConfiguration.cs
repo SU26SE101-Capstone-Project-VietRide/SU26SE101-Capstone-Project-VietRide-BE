@@ -48,10 +48,10 @@ internal sealed class StationConfiguration : IEntityTypeConfiguration<Station>
             .HasMaxLength(100)
             .IsRequired();
 
-        builder.Property(x => x.Province)
-            .HasColumnName("province")
+        builder.Property(x => x.Ward)
+            .HasColumnName("ward")
             .HasMaxLength(100)
-            .IsRequired();
+            .IsRequired(false);
 
         builder.Property(x => x.Latitude)
             .HasColumnName("latitude")
@@ -121,8 +121,8 @@ internal sealed class StationConfiguration : IEntityTypeConfiguration<Station>
             .IsUnique()
             .HasFilter("deleted_at IS NULL");
 
-        builder.HasIndex(x => new { x.City, x.Province })
-            .HasDatabaseName("idx_stations_city_province")
+        builder.HasIndex(x => new { x.City, x.Ward })
+            .HasDatabaseName("idx_stations_city_ward")
             .HasFilter("is_active = TRUE");
 
         builder.HasIndex(x => x.LocationId)

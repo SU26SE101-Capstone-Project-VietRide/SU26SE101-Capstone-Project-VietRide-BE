@@ -10,7 +10,7 @@ public sealed record CreateOrLinkOperatorStationRequest(
     string? Instructions,
     string? Name,
     string? City,
-    string? Province,
+    string? Ward,
     decimal? Latitude,
     decimal? Longitude,
     string? AddressStreet,

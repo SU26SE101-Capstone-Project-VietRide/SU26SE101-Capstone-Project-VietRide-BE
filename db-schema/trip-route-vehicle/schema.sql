@@ -90,7 +90,7 @@ CREATE TABLE stations (
     slug VARCHAR(100) NOT NULL,
     address_street VARCHAR(500) NULL,
     city VARCHAR(100) NOT NULL,
-    province VARCHAR(100) NOT NULL,
+    ward VARCHAR(100) NULL,
     location_id UUID NULL REFERENCES locations (id) ON DELETE SET NULL,
     latitude DECIMAL(10,7) NULL,
     longitude DECIMAL(10,7) NULL,
@@ -111,7 +111,7 @@ CREATE TABLE stations (
 );
 
 CREATE UNIQUE INDEX uq_stations_slug ON stations (slug) WHERE deleted_at IS NULL;
-CREATE INDEX idx_stations_city_province ON stations (city, province) WHERE is_active = TRUE;
+CREATE INDEX idx_stations_city_ward ON stations (city, ward) WHERE is_active = TRUE;
 CREATE INDEX idx_stations_location_id ON stations (location_id)
     WHERE location_id IS NOT NULL AND is_active = TRUE;
 CREATE INDEX idx_stations_supports_shuttle ON stations (supports_shuttle) WHERE is_active = TRUE;
@@ -122,6 +122,10 @@ CREATE INDEX idx_stations_name_trgm ON stations USING gin (name gin_trgm_ops)
 
 COMMENT ON TABLE stations IS
     'Canonical platform-level bến xe. KHÔNG có operatorId. OperatorStation maps which operators serve a Station.';
+COMMENT ON COLUMN stations.city IS
+    'Province or centrally governed municipality in the current two-tier address model.';
+COMMENT ON COLUMN stations.ward IS
+    'Commune, ward or special zone. Nullable only for legacy rows awaiting manual normalization.';
 COMMENT ON COLUMN stations.supports_shuttle IS
     'Per-Station flag toggled by Operator or SYSTEM_ADMIN. Only true Stations support shuttle service. Stops never have shuttle.';
 
@@ -419,6 +423,7 @@ CREATE TABLE driver_schedules (
     valid_from DATE NOT NULL,
     valid_until DATE NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    deleted_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_driver_schedules_valid_until_after_from

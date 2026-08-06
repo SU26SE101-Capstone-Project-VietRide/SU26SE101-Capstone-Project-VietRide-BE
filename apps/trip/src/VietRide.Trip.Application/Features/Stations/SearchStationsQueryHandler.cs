@@ -17,7 +17,7 @@ public sealed class SearchStationsQueryHandler : IRequestHandler<SearchStationsQ
         var stations = await stationRepository.SearchActiveByNameAsync(
             request.Q,
             request.City,
-            request.Province,
+            request.Ward,
             request.LocationId,
             cancellationToken);
 

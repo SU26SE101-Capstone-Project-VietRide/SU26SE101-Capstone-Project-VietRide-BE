@@ -317,7 +317,7 @@ public sealed class EditTripEndpointTests
             """;
 
         await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO vietride_trip.stations (id, name, slug, city, province)
+            INSERT INTO vietride_trip.stations (id, name, slug, city, ward)
             VALUES
                 ({originId}, 'Conflict Origin', {$"conflict-origin-{originId:N}"}, 'HCMC', 'HCMC'),
                 ({destinationId}, 'Conflict Destination', {$"conflict-destination-{destinationId:N}"}, 'Da Nang', 'Da Nang');

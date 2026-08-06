@@ -50,8 +50,8 @@ public sealed class UpdateAdminStationHandler : IRequestHandler<UpdateAdminStati
         var before = StationEventSnapshot.FromStation(station);
         var name = request.Name ?? station.Name;
         var city = request.City ?? station.City;
-        var province = request.Province ?? station.Province;
-        var baseSlug = Slugify($"{name} {city} {province}");
+        var ward = request.Ward ?? station.Ward;
+        var baseSlug = Slugify($"{name} {city} {ward}");
         if (baseSlug.Length == 0)
             baseSlug = $"station-{station.Id:N}";
 
@@ -68,7 +68,7 @@ public sealed class UpdateAdminStationHandler : IRequestHandler<UpdateAdminStati
             name,
             slug,
             city,
-            province,
+            ward,
             request.AddressStreet ?? station.AddressStreet,
             request.LocationId ?? station.LocationId,
             request.Latitude ?? station.Latitude,

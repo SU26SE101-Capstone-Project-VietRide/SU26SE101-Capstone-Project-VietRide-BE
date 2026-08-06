@@ -5,5 +5,5 @@ namespace VietRide.Trip.Application.Features.Stations;
 public sealed record SearchStationsQuery(
     string? Q,
     string? City,
-    string? Province,
+    string? Ward,
     Guid? LocationId) : IRequest<IReadOnlyList<StationSearchResult>>;

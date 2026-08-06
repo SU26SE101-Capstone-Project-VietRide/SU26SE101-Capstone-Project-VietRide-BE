@@ -47,7 +47,7 @@ public sealed class AdminStationMergeEndpointTests
                 {
                     name = "Primary Normalized",
                     city = "Primary City",
-                    province = "Primary Province",
+                    ward = "Primary Ward",
                     supportsShuttle = false,
                 }));
             using var patchResponse = await client.SendAsync(patchRequest);

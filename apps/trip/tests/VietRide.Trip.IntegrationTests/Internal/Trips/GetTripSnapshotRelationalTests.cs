@@ -90,7 +90,7 @@ public sealed class GetTripSnapshotRelationalTests
         var departure = pricingAt.AddDays(10);
 
         await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO vietride_trip.stations (id, name, slug, city, province)
+            INSERT INTO vietride_trip.stations (id, name, slug, city, ward)
             VALUES
                 ({originId}, 'Snapshot origin', {$"snapshot-origin-{originId:N}"}, 'Da Nang', 'Da Nang'),
                 ({destinationId}, 'Snapshot destination', {$"snapshot-destination-{destinationId:N}"}, 'Hue', 'Hue');

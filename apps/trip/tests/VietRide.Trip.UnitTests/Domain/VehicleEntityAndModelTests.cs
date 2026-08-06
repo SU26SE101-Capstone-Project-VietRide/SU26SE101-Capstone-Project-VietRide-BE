@@ -210,7 +210,9 @@ public sealed class VehicleEntityAndModelTests
         scheduleEntity.FindProperty(nameof(DriverSchedule.DayOfWeek))!.GetColumnType().Should().Be("jsonb");
         scheduleEntity.FindProperty(nameof(DriverSchedule.DepartureTime))!.GetColumnType().Should().Be("time without time zone");
         scheduleEntity.FindProperty(nameof(DriverSchedule.ValidFrom))!.GetColumnType().Should().Be("date");
-        scheduleEntity.FindProperty("DeletedAt").Should().BeNull();
+        scheduleEntity.FindProperty(nameof(DriverSchedule.DeletedAt))!.GetColumnName()
+            .Should().Be("deleted_at");
+        scheduleEntity.GetQueryFilter().Should().NotBeNull();
         scheduleEntity.GetIndexes().Select(index => index.GetDatabaseName()).Should().BeEquivalentTo(new[]
         {
             "idx_driver_schedules_operator_active",

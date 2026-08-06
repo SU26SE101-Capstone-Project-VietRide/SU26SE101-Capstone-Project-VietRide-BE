@@ -9,4 +9,5 @@ public sealed record OperatorTripListItemDto(
     OperatorTripCrewDto? Assistant,
     DateTimeOffset DepartureAt,
     DateTimeOffset ArrivalEstimate,
-    bool CanSubstituteVehicle);
+    bool CanSubstituteVehicle,
+    Guid? SourceScheduleId = null);

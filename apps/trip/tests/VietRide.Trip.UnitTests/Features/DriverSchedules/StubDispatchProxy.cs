@@ -42,6 +42,11 @@ internal class StubDispatchProxy<T> : DispatchProxy
             configuredResult = resultFactory(args);
         }
 
+        if (targetMethod.ReturnType == typeof(void))
+        {
+            return null;
+        }
+
         if (targetMethod.ReturnType == typeof(Task))
         {
             return Task.CompletedTask;

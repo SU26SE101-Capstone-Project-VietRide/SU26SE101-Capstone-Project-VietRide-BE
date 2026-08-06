@@ -33,7 +33,7 @@ public sealed class AdminStationsController(IMediator mediator) : ControllerBase
     public async Task<ActionResult<StationDto>> PatchAsync(Guid id, [FromBody] UpdateAdminStationRequest request,
         CancellationToken cancellationToken)
         => Ok(await mediator.Send(new UpdateAdminStationCommand(id, request.Name, request.AddressStreet,
-            request.LocationId, request.City, request.Province, request.Latitude, request.Longitude,
+            request.LocationId, request.City, request.Ward, request.Latitude, request.Longitude,
             request.ContactPhone, request.ContactEmail, request.OperatingHours?.GetRawText(),
             request.Facilities?.GetRawText(), request.SupportsShuttle, request.IsActive,
             CurrentUserClaims.GetUserId(User), HttpContext.Connection.RemoteIpAddress?.ToString(),

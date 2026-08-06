@@ -26,7 +26,7 @@ describe('route-change proposal notification mapper', () => {
       [RECIPIENT_ID, RECIPIENT_ID],
     );
 
-    expect(notifications).toHaveLength(1);
+    expect(notifications).toHaveLength(2);
     expect(notifications[0]).toMatchObject({
       userId: RECIPIENT_ID,
       type: NotificationType.ROUTE_CHANGE_PROPOSAL_CREATED,
@@ -39,6 +39,10 @@ describe('route-change proposal notification mapper', () => {
         resolutionCode: null,
         supersededByProposalId: null,
       },
+    });
+    expect(notifications[1]).toMatchObject({
+      userId: PROPOSER_ID,
+      title: 'Đã gửi đề xuất đổi lộ trình',
     });
   });
 
@@ -67,10 +71,15 @@ describe('route-change proposal notification mapper', () => {
       'EXPIRED',
       NotificationType.ROUTE_CHANGE_PROPOSAL_EXPIRED,
     ],
-  ] as const)('maps terminal %s directly to the proposer', (routingKey, schema, status, type) => {
+  ] as const)('maps terminal %s to resolved recipients and the proposer', (routingKey, schema, status, type) => {
     const event = schema.parse(eventPayload(status));
 
-    const [notification] = mapRouteChangeProposalToNotifications(routingKey, event, [RECIPIENT_ID]);
+    const notifications = mapRouteChangeProposalToNotifications(routingKey, event, [RECIPIENT_ID]);
+    expect(notifications.map((notification) => notification.userId)).toEqual([
+      RECIPIENT_ID,
+      PROPOSER_ID,
+    ]);
+    const notification = notifications.find((item) => item.userId === PROPOSER_ID);
 
     expect(notification).toMatchObject({
       userId: PROPOSER_ID,

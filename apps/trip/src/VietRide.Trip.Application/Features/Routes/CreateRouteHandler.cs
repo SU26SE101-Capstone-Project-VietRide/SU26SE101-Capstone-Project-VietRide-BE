@@ -15,6 +15,8 @@ public sealed class CreateRouteHandler : IRequestHandler<CreateRouteCommand, Rou
     private readonly IOperatorStationRepository operatorStationRepository;
     private readonly IRouteRepository routeRepository;
     private readonly IStationRepository stationRepository;
+    private readonly IRouteStopRepository? routeStopRepository;
+    private readonly IStopRepository? stopRepository;
     private readonly IUnitOfWork unitOfWork;
 
     public CreateRouteHandler(
@@ -22,13 +24,17 @@ public sealed class CreateRouteHandler : IRequestHandler<CreateRouteCommand, Rou
         IOperatorStationRepository operatorStationRepository,
         IRouteRepository routeRepository,
         IStationRepository stationRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IRouteStopRepository? routeStopRepository = null,
+        IStopRepository? stopRepository = null)
     {
         this.identityInternalClient = identityInternalClient;
         this.operatorStationRepository = operatorStationRepository;
         this.routeRepository = routeRepository;
         this.stationRepository = stationRepository;
         this.unitOfWork = unitOfWork;
+        this.routeStopRepository = routeStopRepository;
+        this.stopRepository = stopRepository;
     }
 
     public async Task<RouteDto> Handle(CreateRouteCommand request, CancellationToken cancellationToken)
@@ -48,6 +54,13 @@ public sealed class CreateRouteHandler : IRequestHandler<CreateRouteCommand, Rou
         ValidateOperatorStationLinks(request.OperatorId, request.OriginStationId, request.DestinationStationId);
         ValidateDifferentStations(request.OriginStationId, request.DestinationStationId);
         await ValidateReturnRouteAsync(request.OperatorId, request.ReturnRouteId, cancellationToken);
+        await EnsureNotDuplicatedAsync(
+            request.OperatorId,
+            request.Name!,
+            request.OriginStationId,
+            request.DestinationStationId,
+            null,
+            cancellationToken);
 
         var route = Route.Create(
             request.OperatorId,
@@ -86,7 +99,7 @@ public sealed class CreateRouteHandler : IRequestHandler<CreateRouteCommand, Rou
             throw;
         }
 
-        return RouteMapper.ToDto(route);
+        return RouteDetailsProjector.Project(route, stationRepository, routeStopRepository, stopRepository);
     }
 
     private async Task ValidateStationExistsAsync(Guid stationId, CancellationToken cancellationToken)
@@ -149,6 +162,25 @@ public sealed class CreateRouteHandler : IRequestHandler<CreateRouteCommand, Rou
         if (!await routeRepository.ExistsActiveOwnedByOperatorAsync(operatorId, returnRouteId.Value, cancellationToken))
         {
             throw new CodedNotFoundException("ROUTE_NOT_FOUND", "Return route was not found.");
+        }
+    }
+
+    private async Task EnsureNotDuplicatedAsync(
+        Guid operatorId,
+        string name,
+        Guid originStationId,
+        Guid destinationStationId,
+        Guid? excludedRouteId,
+        CancellationToken cancellationToken)
+    {
+        var duplicate = await routeRepository.FindDuplicateWithTransactionLockAsync(
+            operatorId, name, originStationId, destinationStationId, excludedRouteId, cancellationToken);
+        if (duplicate is not null)
+        {
+            throw new CodedConflictException(
+                "ROUTE_DUPLICATED",
+                "A Route with the same normalized name and station pair already exists.",
+                [new ValidationError("existingRouteId", duplicate.Id.ToString("D"))]);
         }
     }
 }

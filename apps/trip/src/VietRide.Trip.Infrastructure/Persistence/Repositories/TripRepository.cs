@@ -196,7 +196,8 @@ internal sealed class TripRepository : ITripRepository
                    t.driver_user_id,
                    t.assistant_user_id,
                    t.departure_date_time,
-                   t.estimated_arrival_time
+                   t.estimated_arrival_time,
+                   t.driver_schedule_id
             FROM vietride_trip.trips AS t
             INNER JOIN vietride_trip.routes AS r ON r.id = t.route_id
             INNER JOIN vietride_trip.vehicles AS v ON v.id = t.vehicle_id
@@ -234,7 +235,8 @@ internal sealed class TripRepository : ITripRepository
                 reader.GetGuid(9),
                 reader.IsDBNull(10) ? null : reader.GetGuid(10),
                 reader.GetFieldValue<DateTimeOffset>(11),
-                reader.GetFieldValue<DateTimeOffset>(12)));
+                reader.GetFieldValue<DateTimeOffset>(12),
+                reader.IsDBNull(13) ? null : reader.GetGuid(13)));
         }
 
         return PagedResult<OperatorTripListRow>.Create(items, page, pageSize, totalItems);

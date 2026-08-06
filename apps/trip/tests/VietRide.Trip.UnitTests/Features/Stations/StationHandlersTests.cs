@@ -38,7 +38,7 @@ public sealed class StationHandlersTests
         result[0].Name.Should().Be("Bến xe Miền Tây");
         repository.LastQuery.Should().Be("Mien Tay");
         repository.LastCity.Should().Be("Ho Chi Minh City");
-        repository.LastProvince.Should().Be("Ho Chi Minh");
+        repository.LastWard.Should().Be("Ho Chi Minh");
         repository.LastLocationId.Should().BeNull();
     }
 
@@ -73,7 +73,7 @@ public sealed class StationHandlersTests
         result.Name.Should().Be(station.Name);
         result.Slug.Should().Be(station.Slug);
         result.City.Should().Be(station.City);
-        result.Province.Should().Be(station.Province);
+        result.Ward.Should().Be(station.Ward);
         result.Latitude.Should().Be(station.Latitude);
         result.Longitude.Should().Be(station.Longitude);
     }
@@ -153,7 +153,7 @@ public sealed class StationHandlersTests
     }
 
     [Fact]
-    public async Task SearchStations_AllowsMissingQuery_WhenCityOrProvinceIsProvided()
+    public async Task SearchStations_AllowsMissingQuery_WhenCityOrWardIsProvided()
     {
         var behavior = new ValidationBehavior<SearchStationsQuery, IReadOnlyList<StationSearchResult>>(
             [new SearchStationsQueryValidator()]);
@@ -162,13 +162,13 @@ public sealed class StationHandlersTests
             new SearchStationsQuery(null, "Ho Chi Minh City", null, null),
             () => Task.FromResult<IReadOnlyList<StationSearchResult>>([]),
             CancellationToken.None);
-        var byProvince = await behavior.Handle(
+        var byWard = await behavior.Handle(
             new SearchStationsQuery(null, null, "Ho Chi Minh", null),
             () => Task.FromResult<IReadOnlyList<StationSearchResult>>([]),
             CancellationToken.None);
 
         byCity.Should().BeEmpty();
-        byProvince.Should().BeEmpty();
+        byWard.Should().BeEmpty();
     }
 
     [Fact]
@@ -281,13 +281,13 @@ public sealed class StationHandlersTests
     }
 
     [Fact]
-    public async Task CreateOrLinkOperatorStation_CreatesCollisionSafeSlugs_ForSameNameDifferentProvince()
+    public async Task CreateOrLinkOperatorStation_CreatesCollisionSafeSlugs_ForSameNameDifferentWard()
     {
         var first = Station.Create("Bến xe Trung Tâm", "ben-xe-trung-tam-da-nang-da-nang", "Da Nang", "Da Nang");
         var stationRepository = new FakeStationRepository([first]);
         var handler = CreateHandler(stationRepository, new FakeOperatorStationRepository([]));
 
-        await handler.Handle(CreateStationCommand(city: "Da Nang", province: "Da Nang"), CancellationToken.None);
+        await handler.Handle(CreateStationCommand(city: "Da Nang", ward: "Hai Chau"), CancellationToken.None);
 
         stationRepository.Entities.Select(station => station.Slug).Should().OnlyHaveUniqueItems();
         stationRepository.Entities.Should().HaveCount(2);
@@ -378,7 +378,7 @@ public sealed class StationHandlersTests
         exception.Which.Errors.Select(error => error.Field).Should().Contain([
             nameof(CreateOrLinkOperatorStationCommand.Name),
             nameof(CreateOrLinkOperatorStationCommand.City),
-            nameof(CreateOrLinkOperatorStationCommand.Province),
+            nameof(CreateOrLinkOperatorStationCommand.Ward),
             nameof(CreateOrLinkOperatorStationCommand.AddressStreet),
             nameof(CreateOrLinkOperatorStationCommand.StationContactPhone),
             nameof(CreateOrLinkOperatorStationCommand.ContactEmail),
@@ -448,12 +448,12 @@ public sealed class StationHandlersTests
         decimal? latitude = 16.0678m,
         decimal? longitude = 108.2208m,
         string city = "Da Nang",
-        string province = "Da Nang") => new(
+        string ward = "Hai Chau") => new(
             OperatorId,
             null,
             "Bến xe Trung Tâm",
             city,
-            province,
+            ward,
             latitude,
             longitude,
             "Đường Trung Tâm",
@@ -560,7 +560,7 @@ public sealed class StationHandlersTests
         public virtual Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
             string? q,
             string? city,
-            string? province,
+            string? ward,
             Guid? locationId,
             CancellationToken cancellationToken)
         {
@@ -580,10 +580,10 @@ public sealed class StationHandlersTests
                 stations = stations.Where(station => station.City == cityFilter);
             }
 
-            if (!string.IsNullOrWhiteSpace(province))
+            if (!string.IsNullOrWhiteSpace(ward))
             {
-                var provinceFilter = province.Trim();
-                stations = stations.Where(station => station.Province == provinceFilter);
+                var wardFilter = ward.Trim();
+                stations = stations.Where(station => station.Ward == wardFilter);
             }
 
             if (locationId.HasValue)
@@ -627,23 +627,23 @@ public sealed class StationHandlersTests
 
         public string? LastCity { get; private set; }
 
-        public string? LastProvince { get; private set; }
+        public string? LastWard { get; private set; }
 
         public Guid? LastLocationId { get; private set; }
 
         public override Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
             string? q,
             string? city,
-            string? province,
+            string? ward,
             Guid? locationId,
             CancellationToken cancellationToken)
         {
             LastQuery = q;
             LastCity = city;
-            LastProvince = province;
+            LastWard = ward;
             LastLocationId = locationId;
 
-            return base.SearchActiveByNameAsync(q, city, province, locationId, cancellationToken);
+            return base.SearchActiveByNameAsync(q, city, ward, locationId, cancellationToken);
         }
     }
 

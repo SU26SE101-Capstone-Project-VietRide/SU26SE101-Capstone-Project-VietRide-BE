@@ -92,6 +92,14 @@ public sealed class Route : BaseEntity<Guid>, ISoftDeletable, IActivatable
 
     public void SetPathGeometry(string? encodedPolyline) => PathPolyline = encodedPolyline;
 
+    public void SetMetrics(decimal? totalDistanceKm, int? estimatedDurationMinutes)
+    {
+        ValidateOptionalDistance(totalDistanceKm, nameof(totalDistanceKm));
+        ValidateOptionalDuration(estimatedDurationMinutes, nameof(estimatedDurationMinutes));
+        TotalDistanceKm = totalDistanceKm;
+        EstimatedDurationMinutes = estimatedDurationMinutes;
+    }
+
     public void Activate() => IsActive = true;
 
     public void Deactivate() => IsActive = false;

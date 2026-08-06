@@ -86,7 +86,8 @@ public sealed class ListOperatorTripsQueryHandler
                 : null,
             row.DepartureAt,
             row.ArrivalEstimate,
-            TripVehicleSubstitutionPolicy.CanSubstitute(row.Status));
+            TripVehicleSubstitutionPolicy.CanSubstitute(row.Status),
+            row.SourceScheduleId);
 
     private static OperatorTripCrewDto? ToCrew(
         Guid userId,

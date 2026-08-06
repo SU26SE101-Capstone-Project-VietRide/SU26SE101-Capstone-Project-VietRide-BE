@@ -67,11 +67,34 @@ public sealed class SetRouteGeometryHandler : IRequestHandler<SetRouteGeometryCo
                 stations
                     .Where(station => station.Latitude.HasValue && station.Longitude.HasValue)
                     .Select(station => (station.Id, new GeoPoint((double)station.Latitude!.Value, (double)station.Longitude!.Value))));
+            var metrics = RouteMetricsCalculator.Calculate(polyline);
+            route.SetMetrics(metrics.DistanceKm, metrics.DurationMinutes);
+            var trackedRouteStops = routeStopRepository.Query()
+                .Where(routeStop => routeStop.RouteId == route.Id)
+                .ToArray();
+            var stopCoordinates = stops.ToDictionary(stop => stop.Id);
+            foreach (var routeStop in trackedRouteStops.Where(routeStop => !routeStop.DistanceFromOriginKm.HasValue))
+            {
+                if (!stopCoordinates.TryGetValue(routeStop.StopId, out var stop))
+                    continue;
+                var projected = RouteMetricsCalculator.Project(
+                    new GeoPoint((double)stop.Latitude, (double)stop.Longitude),
+                    polyline);
+                routeStop.UpdateSequence(
+                    routeStop.OrderIndex,
+                    routeStop.EstimatedDurationFromOriginMinutes,
+                    projected.DistanceKm);
+                routeStopRepository.Update(routeStop);
+            }
+        }
+        else if (request.ManualDistanceKm.HasValue && request.ManualDurationMinutes.HasValue)
+        {
+            route.SetMetrics(request.ManualDistanceKm, request.ManualDurationMinutes);
         }
 
         route.SetPathGeometry(request.PathPolyline);
         routeRepository.Update(route);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return RouteMapper.ToDto(route);
+        return RouteDetailsProjector.Project(route, stationRepository, routeStopRepository, stopRepository);
     }
 }

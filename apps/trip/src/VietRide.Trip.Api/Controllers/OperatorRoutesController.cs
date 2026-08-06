@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Api.Controllers.Requests;
+using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.AlternativeRoutes;
 using VietRide.Trip.Application.Features.Routes;
 using VietRide.Trip.Application.Features.RouteStopFareTemplates;
@@ -52,6 +53,32 @@ public sealed class OperatorRoutesController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, response);
     }
 
+    [HttpPost("full")]
+    [RequireIdempotencyKey]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<RouteDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RouteDto>> PostFullAsync(
+        [FromBody] FullRouteRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await mediator.Send(ToFullCommand(GetRequiredOperatorId(), null, request), cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, response);
+    }
+
+    [HttpPut("{id:guid}/full")]
+    [RequireIdempotencyKey]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<RouteDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RouteDto>> PutFullAsync(
+        Guid id,
+        [FromBody] FullRouteRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await mediator.Send(ToFullCommand(GetRequiredOperatorId(), id, request), cancellationToken));
+
     [HttpGet]
     [Authorize(Roles = OperatorReadRoles)]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<RouteListItemDto>>), StatusCodes.Status200OK)]
@@ -77,6 +104,15 @@ public sealed class OperatorRoutesController : ControllerBase
     {
         return Ok(await mediator.Send(new GetRouteQuery(GetRequiredOperatorId(), id), cancellationToken));
     }
+
+    [HttpGet("{id:guid}/stop-metrics")]
+    [Authorize(Roles = OperatorReadRoles)]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<RouteStopMetricDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<RouteStopMetricDto>>> GetStopMetricsAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+        => Ok(await mediator.Send(new GetRouteStopMetricsQuery(GetRequiredOperatorId(), id), cancellationToken));
 
     [HttpPatch("{id:guid}")]
     [Authorize(Roles = OperatorWriteRoles)]
@@ -115,7 +151,12 @@ public sealed class OperatorRoutesController : ControllerBase
         CancellationToken cancellationToken)
     {
         return Ok(await mediator.Send(
-            new SetRouteGeometryCommand(GetRequiredOperatorId(), id, request.PathPolyline),
+            new SetRouteGeometryCommand(
+                GetRequiredOperatorId(),
+                id,
+                request.PathPolyline,
+                request.ManualMetrics?.TotalDistanceKm,
+                request.ManualMetrics?.EstimatedDurationMinutes),
             cancellationToken));
     }
 
@@ -250,6 +291,27 @@ public sealed class OperatorRoutesController : ControllerBase
             request.OrderIndex,
             request.EstimatedDurationFromOriginMinutes,
             request.DistanceFromOriginKm);
+
+    private static UpsertFullRouteCommand ToFullCommand(Guid operatorId, Guid? routeId, FullRouteRequest request)
+        => new(
+            operatorId,
+            routeId,
+            request.Name,
+            request.OriginStationId,
+            request.DestinationStationId,
+            request.ReturnRouteId,
+            request.BaseFare,
+            request.IsActive,
+            request.PathPolyline,
+            request.ManualMetrics?.TotalDistanceKm,
+            request.ManualMetrics?.EstimatedDurationMinutes,
+            (request.Stops ?? []).Select(stop => new FullRouteStopInput(
+                stop.StopId,
+                stop.OrderIndex,
+                stop.EstimatedDurationFromOriginMinutes,
+                stop.DistanceFromOriginKm,
+                stop.AllowPickup,
+                stop.AllowDropoff)).ToArray());
 
     private Guid GetRequiredOperatorId()
         => CurrentUserClaims.GetOperatorId(User)

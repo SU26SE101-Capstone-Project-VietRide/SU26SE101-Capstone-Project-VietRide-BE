@@ -78,6 +78,36 @@ internal sealed class RouteRepository : IRouteRepository
             && route.DeletedAt == null,
             cancellationToken);
 
+    public async Task<Route?> FindDuplicateWithTransactionLockAsync(
+        Guid operatorId,
+        string name,
+        Guid originStationId,
+        Guid destinationStationId,
+        Guid? excludedRouteId,
+        CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("A transaction is required for duplicate Route detection.");
+
+        var normalizedName = name.Trim().ToLowerInvariant();
+        var lockKey = $"{operatorId:D}|{originStationId:D}|{destinationStationId:D}|{normalizedName}";
+        await dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))",
+            cancellationToken);
+
+        return await dbContext.Routes
+            .AsNoTracking()
+            .Where(route => route.OperatorId == operatorId
+                && route.DeletedAt == null
+                && route.OriginStationId == originStationId
+                && route.DestinationStationId == destinationStationId
+                && (!excludedRouteId.HasValue || route.Id != excludedRouteId.Value)
+                && route.Name.Trim().ToLower() == normalizedName)
+            .OrderBy(route => route.CreatedAt)
+            .ThenBy(route => route.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public Task<bool> HasStationMergeConflictAsync(
         Guid duplicateStationId,
         Guid primaryStationId,

@@ -10,17 +10,20 @@ import { NotificationsService } from './notifications.service';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
 import { RouteChangeProposalEventsConsumer } from './route-change-proposal-events.consumer';
 import { ROUTE_CHANGE_PROPOSAL_QUEUE_BINDINGS } from './route-change-proposal-events.constants';
+import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const OPERATOR_ID = '22222222-2222-4222-8222-222222222222';
 const PROPOSER_ID = '33333333-3333-4333-8333-333333333333';
 const ADMIN_ID = '44444444-4444-4444-8444-444444444444';
+const DRIVER_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 describe('RouteChangeProposalEventsConsumer', () => {
   let rabbit: jest.Mocked<RabbitMqConsumer>;
   let idempotency: jest.Mocked<MessageIdempotencyService>;
   let notifications: jest.Mocked<NotificationsService>;
   let recipients: jest.Mocked<OperatorRecipientProvider>;
+  let tripRecipients: jest.Mocked<TripAnnouncementRecipientProvider>;
   let consumer: RouteChangeProposalEventsConsumer;
 
   beforeEach(() => {
@@ -34,13 +37,17 @@ describe('RouteChangeProposalEventsConsumer', () => {
       createNotification: jest.fn(async () => ({})),
     } as unknown as jest.Mocked<NotificationsService>;
     recipients = {
-      resolveOperatorRecipientUserIds: jest.fn(async (_operatorId: string) => []),
+      resolveOperatorRecipientUserIds: jest.fn(async () => []),
     } as unknown as jest.Mocked<OperatorRecipientProvider>;
+    tripRecipients = {
+      resolveTripCrewUserIds: jest.fn(async () => [DRIVER_ID]),
+    } as unknown as jest.Mocked<TripAnnouncementRecipientProvider>;
     consumer = new RouteChangeProposalEventsConsumer(
       rabbit,
       idempotency,
       notifications,
       recipients,
+      tripRecipients,
     );
   });
 
@@ -82,7 +89,7 @@ describe('RouteChangeProposalEventsConsumer', () => {
     );
     expect(recipients.resolveOperatorRecipientUserIds).toHaveBeenCalledTimes(1);
     expect(recipients.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(OPERATOR_ID);
-    expect(notifications.createNotification).toHaveBeenCalledTimes(1);
+    expect(notifications.createNotification).toHaveBeenCalledTimes(2);
     expect(notifications.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: ADMIN_ID,
@@ -96,7 +103,7 @@ describe('RouteChangeProposalEventsConsumer', () => {
     );
   });
 
-  it('notifies proposedByUserId directly for terminal events', async () => {
+  it('notifies current crew and proposedByUserId for terminal events', async () => {
     await consumer.handle(
       TRIP_ROUTE_CHANGE_PROPOSAL_APPROVED_ROUTING_KEY,
       eventPayload('APPROVED'),
@@ -104,6 +111,13 @@ describe('RouteChangeProposalEventsConsumer', () => {
     );
 
     expect(recipients.resolveOperatorRecipientUserIds).not.toHaveBeenCalled();
+    expect(tripRecipients.resolveTripCrewUserIds).toHaveBeenCalledWith(
+      '66666666-6666-4666-8666-666666666666',
+      OPERATOR_ID,
+    );
+    expect(notifications.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: DRIVER_ID }),
+    );
     expect(notifications.createNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: PROPOSER_ID,

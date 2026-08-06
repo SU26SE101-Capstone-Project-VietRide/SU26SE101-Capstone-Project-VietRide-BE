@@ -6155,7 +6155,7 @@ Auth: public.
 
 Purpose: passenger/FE station autocomplete. Mutation endpoints remain operator/admin-only.
 
-Query: `q`, `city?`, `province?`.
+Query: `q`, `city?`, `ward?`, `locationId?`.
 
 `q` is required. Blank or empty `q` is invalid and returns `422 VALIDATION_ERROR`.
 
@@ -6173,7 +6173,7 @@ Response `200`: `StationSearchResult[]` in the ADR 0004 success envelope.
   "id": "uuid",
   "name": "Bến xe Miền Tây",
   "city": "Ho Chi Minh City",
-  "province": "Ho Chi Minh",
+  "ward": "An Lac",
   "locationId": "uuid",
   "latitude": 10.7212345,
   "longitude": 106.6267890,
@@ -6207,7 +6207,7 @@ Create-Station branch request (field names derive from `stations` columns; JSON 
 {
   "name": "Bến xe Miền Tây",
   "city": "Ho Chi Minh City",
-  "province": "Ho Chi Minh",
+  "ward": "An Lac",
   "locationId": "uuid",
   "locationCode": "HCM",
   "latitude": 10.7212345,
@@ -6246,7 +6246,7 @@ Duplicate-nearby response `200`:
         "id": "uuid",
         "name": "Bến xe Miền Tây",
         "city": "Ho Chi Minh City",
-        "province": "Ho Chi Minh",
+        "ward": "An Lac",
         "latitude": 10.7212345,
         "longitude": 106.6267890,
         "addressStreet": "Kinh Dương Vương",
@@ -6404,8 +6404,8 @@ subset of:
   "name": "Ben xe Mien Dong Moi",
   "addressStreet": "501 Hoang Huu Nam",
   "locationId": "uuid",
-  "city": "Thu Duc",
-  "province": "Ho Chi Minh",
+  "city": "Ho Chi Minh City",
+  "ward": "Thu Duc",
   "latitude": 10.8796,
   "longitude": 106.8142,
   "contactPhone": "02812345678",
@@ -6418,7 +6418,7 @@ subset of:
 ```
 
 Coordinates must be supplied as a pair and fall in the normal latitude/longitude ranges. Slug is
-deterministically regenerated from `name + city + province`; collision uses a station-ID hash
+deterministically regenerated from `name + city + ward`; collision uses a station-ID hash
 suffix. A Station already merged into another Station cannot be normalized. Response `200` is the
 existing canonical Station DTO in an ADR 0004 envelope. The Station update and
 `trip.station.normalized` Outbox event commit atomically.
@@ -6434,7 +6434,7 @@ Request:
 ```
 
 Primary must be active, non-deleted and canonical. Duplicate must be non-deleted and canonical;
-the IDs must differ. Primary wins `name,slug,city,province`; `addressStreet`, `locationId`,
+the IDs must differ. Primary wins `name,slug,city,ward`; `addressStreet`, `locationId`,
 `contactPhone`, `contactEmail`, `operatingHours` and `facilities` are filled from duplicate only when
 the primary value is absent, coordinates are merged as one pair, and
 `supportsShuttle = primary OR duplicate`. Trip atomically relinks OperatorStation, Route origin and
@@ -6453,8 +6453,8 @@ Response `200`:
       "id": "uuid",
       "name": "Ben xe Mien Dong Moi",
       "slug": "ben-xe-mien-dong-moi",
-      "city": "Thu Duc",
-      "province": "Ho Chi Minh",
+      "city": "Ho Chi Minh City",
+      "ward": "Thu Duc",
       "supportsShuttle": true,
       "isActive": true
     },
@@ -6508,8 +6508,8 @@ Active canonical Station:
 {
   "id": "uuid",
   "name": "Ben xe Mien Dong Moi",
-  "city": "Thu Duc",
-  "province": "Ho Chi Minh",
+  "city": "Ho Chi Minh City",
+  "ward": "Thu Duc",
   "latitude": 10.8796,
   "longitude": 106.8142,
   "supportsShuttle": true,
@@ -8392,8 +8392,8 @@ Outbox row in the same transaction as Station merge. Consumer queues are durable
     "id": "uuid",
     "name": "Ben xe Mien Dong Moi",
     "slug": "ben-xe-mien-dong-moi",
-    "city": "Thu Duc",
-    "province": "Ho Chi Minh",
+    "city": "Ho Chi Minh City",
+    "ward": "Thu Duc",
     "latitude": 10.8796,
     "longitude": 106.8142,
     "supportsShuttle": true,
@@ -8403,8 +8403,8 @@ Outbox row in the same transaction as Station merge. Consumer queues are durable
     "id": "uuid",
     "name": "BX Mien Dong",
     "slug": "bx-mien-dong",
-    "city": "Thu Duc",
-    "province": "Ho Chi Minh",
+    "city": "Ho Chi Minh City",
+    "ward": "Thu Duc",
     "latitude": 10.8797,
     "longitude": 106.8141,
     "supportsShuttle": false,
@@ -8414,8 +8414,8 @@ Outbox row in the same transaction as Station merge. Consumer queues are durable
     "id": "uuid",
     "name": "Ben xe Mien Dong Moi",
     "slug": "ben-xe-mien-dong-moi",
-    "city": "Thu Duc",
-    "province": "Ho Chi Minh",
+    "city": "Ho Chi Minh City",
+    "ward": "Thu Duc",
     "latitude": 10.8796,
     "longitude": 106.8142,
     "supportsShuttle": true,
@@ -8454,8 +8454,8 @@ Producer: Trip. Consumer: Identity. Exchange: `vietride.events`. Payload:
     "id": "uuid",
     "name": "BX Mien Dong",
     "slug": "bx-mien-dong",
-    "city": "Thu Duc",
-    "province": "Ho Chi Minh",
+    "city": "Ho Chi Minh City",
+    "ward": "Thu Duc",
     "latitude": 10.8797,
     "longitude": 106.8141,
     "supportsShuttle": false,
@@ -8465,8 +8465,8 @@ Producer: Trip. Consumer: Identity. Exchange: `vietride.events`. Payload:
     "id": "uuid",
     "name": "Ben xe Mien Dong Moi",
     "slug": "ben-xe-mien-dong-moi",
-    "city": "Thu Duc",
-    "province": "Ho Chi Minh",
+    "city": "Ho Chi Minh City",
+    "ward": "Thu Duc",
     "latitude": 10.8796,
     "longitude": 106.8142,
     "supportsShuttle": true,
@@ -8887,3 +8887,62 @@ the exact array item shapes in the table and are sorted by ID/route name for det
 
 Internal 4xx is never retried. Timeout, transport, 5xx or malformed payload maps at the public
 facade to its documented `UPSTREAM_UNAVAILABLE` response. Caller cancellation propagates unchanged.
+
+## 2026-08-05 Route, Station address and Operations extension
+
+This section supersedes older field and endpoint descriptions where they conflict.
+
+### Station address
+
+- Public and internal Station DTOs use `city` plus nullable `ward`; `province` is removed.
+- `city` is the province or centrally governed municipality; `ward` is the commune, ward or
+  special zone. New Station create/update requests require both values, while migrated legacy
+  Stations may return `ward=null` until an administrator completes the address.
+- Search is `GET /v1/stations/search?q=&city=&ward=&locationId=`.
+
+### Route map and composite writes
+
+- `GET /v1/operator/routes` remains the lightweight `RouteListItemDto` projection and does not
+  add polyline or stops.
+- `GET /v1/operator/routes/{id}` and successful Route create, patch, geometry and composite
+  mutations return `RouteDto` with ordered `stops[]`. Each stop contains RouteStop fields plus
+  `stopId`, `name`, `address`, `latitude`, `longitude`, and `isActive`.
+- `POST /v1/operator/routes/full` and `PUT /v1/operator/routes/{id}/full` require a UUID-v4
+  `Idempotency-Key`. They atomically write the Route, optional geometry, and the complete ordered
+  RouteStop collection. Full update cannot change origin or destination.
+- When a precision-5 Google polyline is present, the server derives route distance and duration
+  (55 km/h, duration rounded up to a minute) and derives missing stop cumulative metrics by
+  projection onto the nearest polyline segment. Client-provided stop metrics take precedence.
+  Without a polyline, `manualMetrics` is required for create; clearing geometry without
+  `manualMetrics` preserves the current Route metrics.
+- `GET /v1/operator/routes/{routeId}/stop-metrics` returns the ordered effective stop metrics.
+- Duplicate normalized origin/destination/name combinations return `409 ROUTE_DUPLICATED` with
+  the oldest conflicting Route ID. Invalid duplicate stops and order return
+  `422 ROUTE_STOP_DUPLICATED` and `422 ROUTE_STOP_ORDER_INVALID`.
+
+### Operations and realtime
+
+- `GET /v1/tracking/operator/fleet-latest?status=` returns latest GPS items for the caller's
+  operator only: `{ tripId, latitude, longitude, speedKmh?, headingDeg?, recordedAt, status }`.
+  Trips without GPS are omitted.
+- ETA accepts an optional `stopId`. Its envelope always keeps `data.eta`; `stopName` is added. If
+  no stop is supplied, the next pending stop is inferred from latest GPS and Route progress. No
+  GPS or no remaining stop returns `{ eta: null }`; `stopName` is present only inside a non-null
+  ETA object.
+- Operator sockets support `joinOperatorFleet`; only an operator principal can join its own fleet
+  room. GPS produces `fleet:gps:update`; proposal events produce `routeProposal:created` and
+  `routeProposal:resolved` in that room.
+- DriverSchedule keeps the existing PATCH update with
+  `applyTo=FUTURE_ONLY|ALL_PENDING`. `PATCH .../{id}/deactivate` is behavior-idempotent and does
+  not mutate generated Trips. `DELETE .../{id}` requires UUID-v4 `Idempotency-Key`, soft-deletes
+  only a schedule with no generated Trips, returns `200 ApiResponse<{deleted:true}>`, and otherwise
+  returns `409 SCHEDULE_HAS_TRIPS` with `tripCount`.
+- Operator Trip list items include nullable `sourceScheduleId`; all six existing status filters
+  remain supported.
+
+### Route proposal delivery
+
+The five existing proposal integration events remain canonical. CREATED notifies operator admins
+and the proposer. APPROVED, REJECTED, SUPERSEDED and EXPIRED notify the current Driver, current
+Assistant and proposer after recipient-ID deduplication. Notification persistence precedes FCM
+enqueue, and crew lookup failure is retryable.

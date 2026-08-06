@@ -9,7 +9,7 @@ public sealed class SearchStationsQueryValidator : AbstractValidator<SearchStati
         RuleFor(query => query)
             .Must(HasSearchCriteria)
             .WithName("SearchCriteria")
-            .WithMessage("Provide q, city, province, or locationId.");
+            .WithMessage("Provide q, city, ward, or locationId.");
 
         RuleFor(query => query.LocationId)
             .NotEqual(Guid.Empty)
@@ -20,6 +20,6 @@ public sealed class SearchStationsQueryValidator : AbstractValidator<SearchStati
     private static bool HasSearchCriteria(SearchStationsQuery query)
         => !string.IsNullOrWhiteSpace(query.Q)
             || !string.IsNullOrWhiteSpace(query.City)
-            || !string.IsNullOrWhiteSpace(query.Province)
+            || !string.IsNullOrWhiteSpace(query.Ward)
             || query.LocationId.HasValue;
 }
