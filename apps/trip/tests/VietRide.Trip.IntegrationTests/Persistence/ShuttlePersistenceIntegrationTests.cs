@@ -267,7 +267,8 @@ public sealed class ShuttlePersistenceIntegrationTests
                     TripSource.MANUAL,
                     Money.FromRaw(100_000),
                     500m,
-                    5m,
+                    maxCargoVolumeM3: null,
+                    estimatedPassengerLuggageKg: 5m,
                     seatLayoutSnapshotJson: seed.MainSeatLayoutJson);
                 setup.Trips.Add(trip);
                 var bookingId = Guid.NewGuid();
@@ -659,7 +660,8 @@ public sealed class ShuttlePersistenceIntegrationTests
             TripSource.MANUAL,
             Money.FromRaw(100_000),
             500m,
-            5m,
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 5m,
             seatLayoutSnapshotJson: layout.RootElement);
 
         db.AddRange(origin, destination, route, vehicleType, mainVehicle, shuttleVehicle, mainTrip);
