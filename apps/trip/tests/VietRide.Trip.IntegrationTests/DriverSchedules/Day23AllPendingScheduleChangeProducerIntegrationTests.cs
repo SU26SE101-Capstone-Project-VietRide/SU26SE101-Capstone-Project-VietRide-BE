@@ -246,7 +246,9 @@ public sealed class Day23AllPendingScheduleChangeProducerIntegrationTests
             TripSource.AUTO_FROM_SCHEDULE,
             Money.FromRaw(100_000),
             maxCargoWeightKg: null,
-            estimatedPassengerLuggageKg: 0m);
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 0m,
+            seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
 
         db.AddRange(origin, destination, route, vehicleType, vehicle, schedule, trip);
         await db.SaveChangesAsync();

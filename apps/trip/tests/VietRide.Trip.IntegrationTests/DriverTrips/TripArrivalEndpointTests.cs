@@ -328,7 +328,9 @@ public sealed class TripArrivalEndpointTests
             TripSource.MANUAL,
             Money.FromRaw(100_000),
             500m,
-            5m);
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 5m,
+            seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
         trip.MarkBoarding(Now.AddHours(-2));
         trip.Start(Now.AddHours(-2));
 

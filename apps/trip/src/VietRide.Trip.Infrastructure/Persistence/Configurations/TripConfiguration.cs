@@ -34,7 +34,7 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
         builder.Property(trip => trip.SeatLayoutSnapshotJson)
             .HasColumnName("seat_layout_snapshot_json")
             .HasColumnType("jsonb")
-            .IsRequired(false);
+            .IsRequired();
         builder.Property(trip => trip.DriverUserId).HasColumnName("driver_user_id");
         builder.Property(trip => trip.AssistantUserId).HasColumnName("assistant_user_id");
         builder.Property(trip => trip.DriverScheduleId).HasColumnName("driver_schedule_id");

@@ -421,20 +421,23 @@ public sealed class Day32CargoTransferRepositoryTests
             route.Id,
             vehicles[0].Id,
             departure,
-            100m);
+            100m,
+            vehicles[0].SeatLayoutJson);
         var targetTrip = CreateTrip(
             targetUsesOtherOperator ? otherOperatorId : operatorId,
             route.Id,
             vehicles[1].Id,
             departure.AddMinutes(5),
             targetMaxCargoWeightKg,
+            vehicles[1].SeatLayoutJson,
             targetSource);
         var secondTargetTrip = CreateTrip(
             operatorId,
             route.Id,
             vehicles[2].Id,
             departure.AddMinutes(10),
-            targetMaxCargoWeightKg);
+            targetMaxCargoWeightKg,
+            vehicles[2].SeatLayoutJson);
         var parcelId = Guid.NewGuid();
         var sourceCargo = TripCargoParcel.Reserve(
             sourceTrip.Id,
@@ -495,6 +498,7 @@ public sealed class Day32CargoTransferRepositoryTests
         Guid vehicleId,
         DateTimeOffset departure,
         decimal maxCargoWeightKg,
+        JsonElement seatLayoutSnapshotJson,
         TripSource source = TripSource.MANUAL) =>
         VietRide.Trip.Domain.Entities.Trip.Create(
             operatorId,
@@ -509,7 +513,8 @@ public sealed class Day32CargoTransferRepositoryTests
             Money.FromRaw(100_000),
             maxCargoWeightKg,
             10m,
-            0m);
+            0m,
+            seatLayoutSnapshotJson: seatLayoutSnapshotJson);
 
     private sealed class FixedClock : IClock
     {

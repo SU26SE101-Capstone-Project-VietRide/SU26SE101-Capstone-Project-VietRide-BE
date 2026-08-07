@@ -408,7 +408,9 @@ public sealed class AdminStationMergeEndpointTests
             TripSource.MANUAL,
             Money.FromRaw(100_000),
             500m,
-            5m);
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 5m,
+            seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
         var shuttle = ShuttleTrip.Create(
             operatorOne,
             mainTrip.Id,

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -19,10 +20,15 @@ public sealed class TripPersistenceModelTests
             ?? throw new InvalidOperationException("Trip model missing.");
         var notes = tripEntity.FindProperty(nameof(VietRide.Trip.Domain.Entities.Trip.Notes))
             ?? throw new InvalidOperationException("Trip notes property missing.");
+        var seatLayoutSnapshot = tripEntity.FindProperty(
+                nameof(VietRide.Trip.Domain.Entities.Trip.SeatLayoutSnapshotJson))
+            ?? throw new InvalidOperationException("Trip seat-layout snapshot property missing.");
 
         notes.GetColumnName().Should().Be("notes");
         notes.GetMaxLength().Should().Be(2000);
         notes.IsNullable.Should().BeTrue();
+        seatLayoutSnapshot.GetColumnName().Should().Be("seat_layout_snapshot_json");
+        seatLayoutSnapshot.IsNullable.Should().BeFalse();
 
         var trip = CreateTrip("  Dispatch via Gate 3  ");
         trip.Notes.Should().Be("Dispatch via Gate 3");
@@ -157,7 +163,18 @@ public sealed class TripPersistenceModelTests
             null,
             0m,
             false,
-            notes);
+            notes,
+            JsonSerializer.SerializeToElement(new
+            {
+                version = 1,
+                vehicleTypeCode = "MODEL",
+                totalSeats = 0,
+                rows = 0,
+                cols = 0,
+                decks = 0,
+                aisles = Array.Empty<object>(),
+                seats = Array.Empty<object>(),
+            }));
     }
 
     private static string ResolveConnectionString(string databaseName)

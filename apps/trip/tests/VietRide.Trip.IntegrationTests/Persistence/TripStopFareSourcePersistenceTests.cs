@@ -116,10 +116,10 @@ public sealed class TripStopFareSourcePersistenceTests
             VALUES
                 ({vehicleId}, {operatorId}, {vehicleTypeId}, {$"FS{vehicleId:N}"[..20]}, jsonb_build_object(), 20);
             INSERT INTO vietride_trip.trips
-                (id, operator_id, route_id, vehicle_id, driver_user_id, departure_date_time,
+                (id, operator_id, route_id, vehicle_id, seat_layout_snapshot_json, driver_user_id, departure_date_time,
                  estimated_arrival_time, source, base_fare)
             VALUES
-                ({tripId}, {operatorId}, {routeId}, {vehicleId}, {driverId}, {departure},
+                ({tripId}, {operatorId}, {routeId}, {vehicleId}, jsonb_build_object(), {driverId}, {departure},
                  {departure.AddHours(3)}, 'MANUAL', 200000);
             """);
 

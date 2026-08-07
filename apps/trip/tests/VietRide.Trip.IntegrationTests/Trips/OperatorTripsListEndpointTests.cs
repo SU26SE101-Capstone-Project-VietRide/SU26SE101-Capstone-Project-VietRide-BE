@@ -241,13 +241,19 @@ public sealed class OperatorTripsListEndpointTests
         var boundaryVehicle = Vehicle.Create(operatorId, vehicleType.Id, "51B-999.99", layout, 1, null, null);
         var foreignVehicle = Vehicle.Create(foreignOperatorId, vehicleType.Id, "51B-123.46", layout, 1, null, null);
         var departure = DateTimeOffset.Parse("2026-07-29T01:00:00Z");
-        var expected = CreateInProgressTrip(operatorId, route.Id, vehicle.Id, departure);
+        var expected = CreateInProgressTrip(operatorId, route.Id, vehicle.Id, departure, layout);
         var exclusiveBoundary = CreateInProgressTrip(
             operatorId,
             route.Id,
             boundaryVehicle.Id,
-            DateTimeOffset.Parse("2026-07-30T17:00:00Z"));
-        var foreign = CreateInProgressTrip(foreignOperatorId, foreignRoute.Id, foreignVehicle.Id, departure);
+            DateTimeOffset.Parse("2026-07-30T17:00:00Z"),
+            layout);
+        var foreign = CreateInProgressTrip(
+            foreignOperatorId,
+            foreignRoute.Id,
+            foreignVehicle.Id,
+            departure,
+            layout);
 
         db.AddRange(
             origin,
@@ -276,7 +282,8 @@ public sealed class OperatorTripsListEndpointTests
         Guid operatorId,
         Guid routeId,
         Guid vehicleId,
-        DateTimeOffset departure)
+        DateTimeOffset departure,
+        JsonElement seatLayoutSnapshotJson)
     {
         var trip = DomainTrip.Create(
             operatorId,
@@ -290,7 +297,9 @@ public sealed class OperatorTripsListEndpointTests
             TripSource.MANUAL,
             Money.FromRaw(300_000),
             null,
-            0m);
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 0m,
+            seatLayoutSnapshotJson: seatLayoutSnapshotJson);
         trip.MarkBoarding(departure.AddMinutes(-30));
         trip.Start(departure);
         return trip;
