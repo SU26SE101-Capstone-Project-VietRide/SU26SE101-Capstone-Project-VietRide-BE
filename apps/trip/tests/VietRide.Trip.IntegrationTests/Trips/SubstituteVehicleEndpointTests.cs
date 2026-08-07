@@ -566,10 +566,13 @@ public sealed class SubstituteVehicleEndpointTests
         public async Task AddConflictAsync(bool vehicleConflict)
         {
             await using var db = OpenDb();
+            var conflictVehicleId = vehicleConflict ? ReplacementVehicleId : OldVehicleId;
+            var conflictVehicle = await db.Vehicles.AsNoTracking()
+                .SingleAsync(item => item.Id == conflictVehicleId);
             var conflict = VietRide.Trip.Domain.Entities.Trip.Create(
                 OperatorId,
                 (await db.Trips.AsNoTracking().SingleAsync(trip => trip.Id == OldTripId)).RouteId,
-                vehicleConflict ? ReplacementVehicleId : OldVehicleId,
+                conflictVehicleId,
                 vehicleConflict ? Guid.NewGuid() : DriverId,
                 null,
                 null,
@@ -577,8 +580,10 @@ public sealed class SubstituteVehicleEndpointTests
                 RecoveryDeparture.AddHours(2),
                 TripSource.MANUAL,
                 Money.FromRaw(100_000),
-                100m,
-                10m);
+                maxCargoWeightKg: 100m,
+                maxCargoVolumeM3: null,
+                estimatedPassengerLuggageKg: 10m,
+                seatLayoutSnapshotJson: conflictVehicle.SeatLayoutJson);
             db.Trips.Add(conflict);
             await db.SaveChangesAsync();
         }
@@ -654,7 +659,8 @@ public sealed class SubstituteVehicleEndpointTests
                 Money.FromRaw(100_000),
                 100m,
                 10m,
-                20m);
+                20m,
+                seatLayoutSnapshotJson: oldVehicle.SeatLayoutJson);
             if (inProgress)
             {
                 trip.MarkBoarding(departure);

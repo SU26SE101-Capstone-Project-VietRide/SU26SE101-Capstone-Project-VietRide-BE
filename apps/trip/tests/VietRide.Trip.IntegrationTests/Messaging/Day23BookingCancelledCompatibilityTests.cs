@@ -148,7 +148,8 @@ public sealed class Day23BookingCancelledCompatibilityTests
         var departure = DateTimeOffset.UtcNow.AddHours(4);
         var trip = VietRide.Trip.Domain.Entities.Trip.Create(
             operatorId, route.Id, vehicle.Id, Guid.NewGuid(), null, null, departure, departure.AddHours(3),
-            TripSource.MANUAL, Money.FromRaw(100_000), 500m, 5m);
+            TripSource.MANUAL, Money.FromRaw(100_000), 500m, null, 5m,
+            seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
 
         db.AddRange(origin, destination, route, vehicleType, vehicle, trip);
         await db.SaveChangesAsync();

@@ -42,7 +42,9 @@ public sealed class RouteStopFareTemplateWindowConstraintMigrationTests
         {
             var migrator = dbContext.GetService<IMigrator>();
             await migrator.MigrateAsync(PreviousMigration);
-            var (tripId, stopId) = await TripStopFareSourcePersistenceTests.SeedTripAndStopAsync(dbContext);
+            var (tripId, stopId) = await TripStopFareSourcePersistenceTests.SeedTripAndStopAsync(
+                dbContext,
+                includeSeatLayoutSnapshot: false);
             await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO vietride_trip.trip_stop_fares (trip_id, stop_id, fare_from_this_stop)
                 VALUES ({tripId}, {stopId}, 150000);

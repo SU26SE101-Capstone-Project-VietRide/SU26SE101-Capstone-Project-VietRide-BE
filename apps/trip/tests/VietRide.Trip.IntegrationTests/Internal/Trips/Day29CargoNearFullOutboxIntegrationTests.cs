@@ -157,7 +157,8 @@ public sealed class Day29CargoNearFullOutboxIntegrationTests
             Money.FromRaw(100_000),
             100m,
             10m,
-            0m);
+            0m,
+            seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
 
         db.AddRange(origin, destination, route, vehicleType, vehicle, trip);
         await db.SaveChangesAsync();

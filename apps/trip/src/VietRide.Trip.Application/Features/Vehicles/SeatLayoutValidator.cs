@@ -31,7 +31,7 @@ public static class SeatLayoutValidator
             }
 
             var hasDuplicateSeatNumber = seats
-                .GroupBy(seat => seat.SeatNumber, StringComparer.Ordinal)
+                .GroupBy(seat => seat.SeatNumber, StringComparer.OrdinalIgnoreCase)
                 .Any(group => group.Count() > 1);
 
             if (hasDuplicateSeatNumber)

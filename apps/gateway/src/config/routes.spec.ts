@@ -635,9 +635,10 @@ describe('buildRouteTable', () => {
     });
   });
 
-  it('routes Day 36 shuttle reads and dispatch mutations to Trip with distinct operator roles', () => {
+  it('routes shuttle history reads and creation mutations to Trip with distinct operator roles', () => {
     const requestsRoute = matchRoute(routes, '/v1/operator/shuttle-requests');
-    const dispatchRoute = matchRoute(routes, '/v1/operator/shuttle-trips');
+    const historyRoute = matchRoute(routes, '/v1/operator/shuttle-trips', 'GET');
+    const dispatchRoute = matchRoute(routes, '/v1/operator/shuttle-trips', 'POST');
 
     expect(requestsRoute).toMatchObject({
       prefix: '/v1/operator/shuttle-requests',
@@ -645,11 +646,41 @@ describe('buildRouteTable', () => {
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     });
+    expect(historyRoute).toMatchObject({
+      prefix: '/v1/operator/shuttle-trips',
+      method: 'GET',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    });
     expect(dispatchRoute).toMatchObject({
       prefix: '/v1/operator/shuttle-trips',
+      method: 'POST',
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN'],
+    });
+  });
+
+  it('matches only exact POST seat disable and enable paths as admin-only routes', () => {
+    const tripId = '11111111-1111-4111-8111-111111111111';
+    const paths = [
+      `/v1/operator/trips/${tripId}/seats/A1/disable`,
+      `/v1/operator/trips/${tripId}/seats/12/enable`,
+    ] as const;
+
+    paths.forEach((path) => {
+      expect(matchRoute(routes, path, 'POST')).toMatchObject({
+        target: env.TRIP_BASE_URL,
+        method: 'POST',
+        authRequired: 'user',
+        requiredRoles: ['OPERATOR_ADMIN'],
+      });
+      expect(matchRoute(routes, path, 'GET')?.requiredRoles).toEqual([
+        'OPERATOR_ADMIN',
+        'OPERATOR_STAFF',
+      ]);
+      expect(matchRoute(routes, `${path}/extra`, 'POST')?.prefix).toBe('/v1/operator/trips');
     });
   });
 
@@ -971,9 +1002,9 @@ describe('buildRouteTable', () => {
     });
   });
 
-  it('prefixes are unique', () => {
-    const prefixes = routes.map((r) => r.prefix);
-    const set = new Set(prefixes);
-    expect(set.size).toBe(prefixes.length);
+  it('route identities are unique while method-specific variants may share a prefix', () => {
+    const identities = routes.map((r) => `${r.method ?? 'ALL'}:${r.prefix}`);
+    const set = new Set(identities);
+    expect(set.size).toBe(identities.length);
   });
 });

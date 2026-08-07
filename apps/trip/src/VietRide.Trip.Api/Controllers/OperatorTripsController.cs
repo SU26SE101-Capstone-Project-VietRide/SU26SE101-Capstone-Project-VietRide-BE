@@ -9,8 +9,10 @@ using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
 using VietRide.Trip.Application.Features.Trips.EditTrip;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
+using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
 using VietRide.Trip.Application.Features.Trips.ListOperatorTrips;
 using VietRide.Trip.Application.Features.Trips.Operations;
+using VietRide.Trip.Application.Features.Trips.SeatOperations;
 
 namespace VietRide.Trip.Api.Controllers;
 
@@ -158,7 +160,62 @@ public sealed class OperatorTripsController : ControllerBase
             cancellationToken));
     }
 
+    [HttpPost("{tripId:guid}/seats/{seatNumber}/disable")]
+    [RequireIdempotency]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<TripSeatMapDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TripSeatMapDto>> DisableSeatAsync(
+        Guid tripId,
+        string seatNumber,
+        [FromBody] DisableTripSeatRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new DisableTripSeatCommand(
+                tripId,
+                GetRequiredOperatorId(),
+                CurrentUserClaims.GetUserId(User),
+                seatNumber,
+                request.Reason,
+                GetRequestId()),
+            cancellationToken));
+    }
+
+    [HttpPost("{tripId:guid}/seats/{seatNumber}/enable")]
+    [RequireIdempotency]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<TripSeatMapDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<TripSeatMapDto>> EnableSeatAsync(
+        Guid tripId,
+        string seatNumber,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new EnableTripSeatCommand(
+                tripId,
+                GetRequiredOperatorId(),
+                CurrentUserClaims.GetUserId(User),
+                seatNumber,
+                GetRequestId()),
+            cancellationToken));
+    }
+
     private Guid GetRequiredOperatorId()
         => CurrentUserClaims.GetOperatorId(User)
             ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage trips.");
+
+    private string GetRequestId()
+        => HttpContext.Items.TryGetValue(RequestLoggingMiddleware.RequestIdHeader, out var value)
+            && value is string requestId
+            && !string.IsNullOrWhiteSpace(requestId)
+                ? requestId
+                : HttpContext.TraceIdentifier;
 }

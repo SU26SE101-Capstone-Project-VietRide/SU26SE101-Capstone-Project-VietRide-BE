@@ -55,4 +55,25 @@ internal sealed class TripSeatRepository : ITripSeatRepository
 
         return seats;
     }
+
+    public Task<TripSeat?> AcquireForUpdateAsync(
+        Guid tripId,
+        string seatNumber,
+        CancellationToken cancellationToken)
+    {
+        if (_dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("A caller-owned transaction is required for trip-seat locking.");
+        }
+
+        return _dbContext.TripSeats
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_trip.trip_seats
+                WHERE trip_id = {tripId}
+                  AND upper(seat_number) = upper({seatNumber})
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
 }

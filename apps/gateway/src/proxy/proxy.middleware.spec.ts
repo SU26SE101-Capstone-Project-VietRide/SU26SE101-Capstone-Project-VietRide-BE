@@ -310,10 +310,16 @@ describe('createProxyHandler auth enforcement', () => {
       '/v1/operator/parcel-route-fares/11111111-1111-4111-8111-111111111111/batch',
       'OPERATOR_STAFF',
     ],
+    ['/v1/operator/shuttle-trips', 'OPERATOR_STAFF'],
+    [
+      '/v1/operator/trips/11111111-1111-4111-8111-111111111111/seats/A1/disable',
+      'OPERATOR_STAFF',
+    ],
   ])('rejects UI-gap route %s for role %s at Gateway', async (path, role) => {
     const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);
-    const req = makeRequest(path, { 'x-request-id': 'req-ui23-forbidden' }, 'GET');
+    const method = path.includes('shuttle-trips') || path.includes('/seats/') ? 'POST' : 'GET';
+    const req = makeRequest(path, { 'x-request-id': 'req-ui23-forbidden' }, method);
     (req as RequestWithUser).user = {
       sub: 'ui23-user-id',
       role,
@@ -351,6 +357,13 @@ describe('createProxyHandler auth enforcement', () => {
       ['GET', '/v1/admin/revenue/analytics', 'SYSTEM_ADMIN'],
       ['GET', '/v1/operator/revenue/analytics', 'OPERATOR_ADMIN'],
       ['GET', '/v1/operator/trips', 'OPERATOR_ADMIN'],
+      ['GET', '/v1/operator/shuttle-trips', 'OPERATOR_STAFF'],
+      ['POST', '/v1/operator/shuttle-trips', 'OPERATOR_ADMIN'],
+      [
+        'POST',
+        '/v1/operator/trips/11111111-1111-4111-8111-111111111111/seats/A1/enable',
+        'OPERATOR_ADMIN',
+      ],
       [
         'PUT',
         '/v1/operator/parcel-route-fares/11111111-1111-4111-8111-111111111111/batch',

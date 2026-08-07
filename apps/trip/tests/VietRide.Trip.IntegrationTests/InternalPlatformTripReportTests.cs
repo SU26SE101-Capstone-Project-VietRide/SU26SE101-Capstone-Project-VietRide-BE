@@ -384,13 +384,14 @@ public sealed class PlatformTripReportWebApplicationFactory : WebApplicationFact
             FROM report_trip_fixture;
 
             INSERT INTO vietride_trip.trips (
-                id, operator_id, route_id, vehicle_id, driver_user_id,
+                id, operator_id, route_id, vehicle_id, seat_layout_snapshot_json, driver_user_id,
                 departure_date_time, estimated_arrival_time, completed_at,
                 status, source, base_fare)
             SELECT gen_random_uuid(),
                    {operatorId},
                    {routeId},
                    vehicle_id,
+                   jsonb_build_object('rows', jsonb_build_array()),
                    driver_id,
                    '2026-01-01T00:00:00Z'::timestamptz + series * interval '1 second',
                    '2026-01-01T04:00:00Z'::timestamptz + series * interval '1 second',
@@ -511,7 +512,9 @@ public sealed class PlatformTripReportWebApplicationFactory : WebApplicationFact
             TripSource.MANUAL,
             Money.FromRaw(100_000),
             500m,
-            5m);
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 5m,
+            seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
         if (inProgress)
         {
             trip.MarkBoarding(now.AddMinutes(-10));

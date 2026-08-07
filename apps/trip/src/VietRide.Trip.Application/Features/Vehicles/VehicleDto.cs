@@ -7,6 +7,7 @@ public sealed record VehicleDto(
     string LicensePlate,
     SeatLayoutDto SeatLayoutJson,
     int TotalSeats,
+    int UsablePassengerCapacity,
     decimal? MaxCargoWeightKg,
     decimal? MaxCargoVolumeM3,
     IReadOnlyCollection<string>? ImageUrls,

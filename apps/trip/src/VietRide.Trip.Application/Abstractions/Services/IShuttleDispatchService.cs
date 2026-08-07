@@ -1,3 +1,6 @@
+using VietRide.Shared.Kernel.Primitives;
+using VietRide.Trip.Application.Features.Shuttle;
+
 namespace VietRide.Trip.Application.Abstractions.Services;
 
 public interface IShuttleDispatchService
@@ -6,6 +9,15 @@ public interface IShuttleDispatchService
         Guid operatorId,
         int page,
         int pageSize,
+        CancellationToken cancellationToken);
+
+    Task<PagedResult<OperatorShuttleTripListItemDto>> GetHistoryAsync(
+        Guid operatorId,
+        int page,
+        int pageSize,
+        DateOnly? from,
+        DateOnly? to,
+        IReadOnlyCollection<string>? statuses,
         CancellationToken cancellationToken);
 
     Task<CreateShuttleTripResult> CreateAsync(
@@ -116,7 +128,32 @@ public sealed record ShuttleBookingGroup(
     decimal PickupLng,
     int? DistanceToStationMeters,
     DateTimeOffset RequestedAt,
-    int? RoadDistanceMeters = null);
+    int? RoadDistanceMeters = null,
+    IReadOnlyList<ShuttlePassengerProfile> Passengers = null!);
+
+public sealed record ShuttlePassengerProfile(
+    Guid? PassengerUserId,
+    string? DisplayName,
+    string? Phone,
+    IReadOnlyList<Guid> TicketIds);
+
+public sealed record OperatorShuttleTripListItemDto(
+    Guid ShuttleTripId,
+    Guid MainTripId,
+    string Direction,
+    string Status,
+    DateTimeOffset ScheduledDepartureTime,
+    DateTimeOffset ScheduledEndTime,
+    DateTimeOffset? ActualDepartureTime,
+    DateTimeOffset? CompletedAt,
+    OperatorShuttleVehicleDto Vehicle,
+    OperatorShuttleDriverDto Driver,
+    int PassengerCount,
+    int StopCount);
+
+public sealed record OperatorShuttleVehicleDto(Guid Id, string LicensePlate);
+
+public sealed record OperatorShuttleDriverDto(Guid Id, string? DisplayName, string? Phone);
 
 public sealed record ShuttleTrackingContext(
     Guid ShuttleTripId,

@@ -90,6 +90,8 @@ public sealed class DriverScheduleAuditLogPersistenceTests
             dbContext.ChangeTracker.Clear();
 
             var departure = DateTimeOffset.UtcNow.AddDays(1);
+            const string seatLayout = "{\"rows\":[]}";
+            using var seatLayoutDocument = JsonDocument.Parse(seatLayout);
             var trip = VietRide.Trip.Domain.Entities.Trip.Create(
                 seed.OperatorId,
                 seed.RouteId,
@@ -105,10 +107,10 @@ public sealed class DriverScheduleAuditLogPersistenceTests
                 10m,
                 0m,
                 false,
-                "  Dispatch via Gate 3  ");
+                "  Dispatch via Gate 3  ",
+                seatLayoutDocument.RootElement);
             var vehicleTypeId = Guid.NewGuid();
             var vehicleId = trip.VehicleId;
-            const string seatLayout = "{\"rows\":[]}";
             await dbContext.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO vietride_trip.vehicle_types
                     (id, code, display_name, default_seat_count)
@@ -119,11 +121,11 @@ public sealed class DriverScheduleAuditLogPersistenceTests
                 VALUES
                     ({vehicleId}, {seed.OperatorId}, {vehicleTypeId}, {$"AUD-{vehicleId:N}"[..20]}, {seatLayout}::jsonb, 20, 'ACTIVE');
                 INSERT INTO vietride_trip.trips
-                    (id, operator_id, route_id, vehicle_id, driver_user_id, driver_schedule_id,
+                    (id, operator_id, route_id, vehicle_id, seat_layout_snapshot_json, driver_user_id, driver_schedule_id,
                      departure_date_time, estimated_arrival_time, status, source, base_fare,
                      estimated_passenger_luggage_kg, notes)
                 VALUES
-                    ({trip.Id}, {seed.OperatorId}, {seed.RouteId}, {vehicleId}, {seed.DriverUserId},
+                    ({trip.Id}, {seed.OperatorId}, {seed.RouteId}, {vehicleId}, {seatLayout}::jsonb, {seed.DriverUserId},
                      {seed.DriverScheduleId}, {departure}, {departure.AddHours(4)}, 'SCHEDULED', 'MANUAL',
                      100000, 0, {trip.Notes});
                 """);

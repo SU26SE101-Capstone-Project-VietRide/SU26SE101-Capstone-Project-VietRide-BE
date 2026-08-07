@@ -2091,12 +2091,34 @@ Response `200`:
     "tripId": "uuid",
     "vehicleType": "SLEEPER_BUS",
     "seats": [
-      { "seatNumber": "A01", "status": "AVAILABLE", "type": "SLEEPER_LOWER", "row": 1, "col": 1, "deck": 1 }
+      { "seatNumber": "A01", "status": "AVAILABLE", "type": "SLEEPER_LOWER", "row": 1, "col": 1, "deck": 1, "disabledReason": null }
     ]
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+Trip seat-map geometry is an immutable layout snapshot captured when the Trip is created.
+Changing the current Vehicle template does not change an existing Trip seat-map. The snapshot
+may change only through the documented vehicle substitution/swap flows.
+
+### POST `/v1/operator/trips/{tripId}/seats/{seatNumber}/disable`
+
+Auth: `OPERATOR_ADMIN`. `Idempotency-Key` is required. The Trip must belong to the operator in
+the JWT. Request body: `{ "reason": "Ghế hỏng nội thất" }`.
+
+The transition is `AVAILABLE -> UNAVAILABLE`; `HELD` and `BOOKED` seats return
+`409 TRIP_SEAT_IN_USE`. The response is `200 ApiResponse<TripSeatMapDto>` with the latest map,
+including nullable `disabledReason` on every seat. Audit is stored in the same local
+transaction; no RabbitMQ event is published.
+
+### POST `/v1/operator/trips/{tripId}/seats/{seatNumber}/enable`
+
+Auth: `OPERATOR_ADMIN`. `Idempotency-Key` is required. The transition is
+`UNAVAILABLE -> AVAILABLE` and clears `disabledReason`; enabling an `AVAILABLE` seat returns
+`409 TRIP_SEAT_STATE_CONFLICT`. Both endpoints mask a cross-tenant Trip as
+`404 TRIP_NOT_FOUND`; an absent passenger seat (including `DRIVER_AREA`) is
+`404 TRIP_SEAT_NOT_FOUND`. Missing/invalid disable reason is `422 VALIDATION_ERROR`.
 
 ### GET `/internal/v1/bookings/trips/{tripId}/stops/{stopId}/pending-passenger-count?operatorId={operatorId}`
 
@@ -5957,6 +5979,24 @@ Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant lấy từ JWT. Query phân tra
 
 Response trả `mainTripId`, Station theo direction, `direction`, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `roadDistanceMeters`, `requestedAt`) và `suggestedBookingOrder`. Thứ tự gợi ý dùng road-distance snapshot, xa nhất trước, hòa thì `requestedAt ASC`; không dùng Haversine để quyết định eligibility.
 
+Pending shuttle `BookingGroup` responses also include nested `passengers[]`. Each item contains
+`passengerUserId`, nullable `displayName` and `phone`, and aggregated `ticketIds[]`. The result
+keeps grouping by `mainTripId + direction`, cutoff/distance fields, and `suggestedBookingOrder`.
+Identity profile transport failure returns `503 UPSTREAM_UNAVAILABLE`; a missing profile returns
+null display fields.
+
+### GET `/v1/operator/shuttle-trips`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Query `page`, `pageSize`, `from`, `to`, and optional
+comma-separated `status=SCHEDULED,IN_PROGRESS,COMPLETED,CANCELLED`. `from/to` are ICT dates and
+`to` includes the whole day. Without a status filter all statuses, including `CANCELLED`, are
+returned. Default ordering is `scheduledDepartureTime DESC, shuttleTripId DESC`.
+
+Response `200`: `PagedResult<OperatorShuttleTripListItemDto>` with `vehicle { id, licensePlate }`,
+`driver { id, displayName, phone }`, `passengerCount`, and `stopCount`, plus scheduled/actual
+departure and completion timestamps. Invalid status returns `422 VALIDATION_ERROR`; Identity
+profile transport failure returns `503 UPSTREAM_UNAVAILABLE`.
+
 ### POST `/v1/operator/shuttle-trips`
 
 Request bắt buộc có thêm `direction`. Inbound dùng origin Station và `scheduledEndTime <= departureDateTime - 30 phút`; outbound dùng destination Station và `scheduledDepartureTime >= estimatedArrivalTime + 30 phút`.
@@ -7155,7 +7195,9 @@ Query: `page?`, `pageSize?`, `search?`, `searchIn?`, `sortBy?`, `sortDir?`.
 
 Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Search and sort follow BSOT §5.8; the allowed search field is `licensePlate`. Only non-soft-deleted Vehicles owned by the caller's operator are returned.
 
-Response `200`: `PagedResult<VehicleDto>` in the ADR 0004 success envelope.
+Response `200`: `PagedResult<VehicleDto>` in the ADR 0004 success envelope. `VehicleDto` keeps
+`totalSeats` for compatibility and also returns computed `usablePassengerCapacity`, which counts
+layout seats where `disabled=false` and `type != DRIVER_AREA`.
 
 ### GET `/v1/operator/vehicles/{id}`
 

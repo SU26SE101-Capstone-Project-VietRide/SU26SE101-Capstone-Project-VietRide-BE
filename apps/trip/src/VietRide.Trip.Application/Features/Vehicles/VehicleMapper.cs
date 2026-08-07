@@ -6,14 +6,18 @@ namespace VietRide.Trip.Application.Features.Vehicles;
 public static class VehicleMapper
 {
     public static VehicleDto ToDto(Vehicle vehicle)
-        => new(
+    {
+        var layout = vehicle.SeatLayoutJson.Deserialize<SeatLayoutDto>()
+            ?? throw new InvalidOperationException("Stored vehicle seat layout is invalid.");
+
+        return new VehicleDto(
             vehicle.Id,
             vehicle.OperatorId,
             vehicle.VehicleTypeId,
             vehicle.LicensePlate,
-            vehicle.SeatLayoutJson.Deserialize<SeatLayoutDto>()
-                ?? throw new InvalidOperationException("Stored vehicle seat layout is invalid."),
+            layout,
             vehicle.TotalSeats,
+            SeatLayoutMetrics.CountUsablePassengerSeats(layout),
             vehicle.MaxCargoWeightKg,
             vehicle.MaxCargoVolumeM3,
             vehicle.ImageUrls,
@@ -21,4 +25,5 @@ public static class VehicleMapper
             vehicle.IsActive,
             vehicle.CreatedAt,
             vehicle.UpdatedAt);
+    }
 }
