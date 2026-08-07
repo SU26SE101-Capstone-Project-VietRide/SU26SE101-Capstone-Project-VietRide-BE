@@ -22,6 +22,36 @@ public sealed class OperatorShuttleController : ControllerBase
         _sender = sender;
     }
 
+    [HttpGet("shuttle-trips")]
+    [Authorize(Roles = "OPERATOR_STAFF,OPERATOR_ADMIN")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<OperatorShuttleTripListItemDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<PagedResult<OperatorShuttleTripListItemDto>>> GetHistory(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] DateOnly? from = null,
+        [FromQuery] DateOnly? to = null,
+        [FromQuery] string? status = null,
+        CancellationToken cancellationToken = default)
+    {
+        var statuses = string.IsNullOrWhiteSpace(status)
+            ? null
+            : status.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(value => value.ToUpperInvariant())
+                .ToArray();
+        return Ok(await _sender.Send(
+            new GetOperatorShuttleTripsQuery(
+                GetOperatorId(),
+                Math.Max(1, page),
+                Math.Clamp(pageSize, 1, 100),
+                from,
+                to,
+                statuses),
+            cancellationToken));
+    }
+
     [HttpGet("shuttle-requests")]
     [Authorize(Roles = "OPERATOR_STAFF,OPERATOR_ADMIN")]
     [ProducesResponseType(typeof(ApiResponse<ShuttleRequestPage>), StatusCodes.Status200OK)]

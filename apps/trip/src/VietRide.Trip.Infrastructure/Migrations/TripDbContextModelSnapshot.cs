@@ -1812,6 +1812,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("route_id");
 
+                    b.Property<JsonElement>("SeatLayoutSnapshotJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("seat_layout_snapshot_json");
+
                     b.Property<TripSource>("Source")
                         .HasColumnType("vietride_trip.trip_source")
                         .HasColumnName("source")

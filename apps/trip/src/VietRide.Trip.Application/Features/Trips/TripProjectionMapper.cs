@@ -137,7 +137,8 @@ internal static class TripProjectionMapper
         VehicleType? vehicleType,
         IReadOnlyCollection<TripSeat> seats)
     {
-        var layout = vehicle.SeatLayoutJson.Deserialize<SeatLayoutDto>()
+        var layoutJson = trip.SeatLayoutSnapshotJson ?? vehicle.SeatLayoutJson;
+        var layout = layoutJson.Deserialize<SeatLayoutDto>()
             ?? throw new InvalidOperationException("Stored vehicle seat layout is invalid.");
         var layoutSeats = layout.Seats.ToDictionary(seat => seat.SeatNumber, StringComparer.OrdinalIgnoreCase);
         var seatDtos = seats
@@ -147,7 +148,9 @@ internal static class TripProjectionMapper
 
         return new TripSeatMapDto(
             trip.Id,
-            vehicleType?.Code ?? layout.VehicleTypeCode,
+            trip.SeatLayoutSnapshotJson.HasValue
+                ? layout.VehicleTypeCode
+                : vehicleType?.Code ?? layout.VehicleTypeCode,
             seatDtos);
     }
 
@@ -166,7 +169,8 @@ internal static class TripProjectionMapper
             layoutSeat.Type,
             layoutSeat.Row,
             layoutSeat.Col,
-            layoutSeat.Deck);
+            layoutSeat.Deck,
+            seat.DisabledReason);
     }
 
     private static int CountAvailableSeats(IEnumerable<TripSeat> seats) =>

@@ -27,16 +27,21 @@ public sealed class TripSeat : BaseEntity<Guid>
             throw new ArgumentException("Trip id cannot be empty.", nameof(tripId));
         }
 
-        if (string.IsNullOrWhiteSpace(seatNumber))
+        var normalizedSeatNumber = ValidateSeatNumber(seatNumber);
+        if (status == TripSeatStatus.UNAVAILABLE && string.IsNullOrWhiteSpace(disabledReason))
         {
-            throw new ArgumentException("Seat number is required.", nameof(seatNumber));
+            throw new ArgumentException("An unavailable seat requires a reason.", nameof(disabledReason));
+        }
+        if (status != TripSeatStatus.UNAVAILABLE && disabledReason is not null)
+        {
+            throw new ArgumentException("Only unavailable seats may have a disabled reason.", nameof(disabledReason));
         }
 
         return new TripSeat
         {
             Id = Guid.NewGuid(),
             TripId = tripId,
-            SeatNumber = seatNumber.Trim().ToUpperInvariant(),
+            SeatNumber = normalizedSeatNumber.ToUpperInvariant(),
             SeatType = seatType,
             Status = status,
             DisabledReason = disabledReason,
@@ -72,10 +77,18 @@ public sealed class TripSeat : BaseEntity<Guid>
         DisabledReason = null;
     }
 
-    public void MarkUnavailable(string reason)
+    public void Disable(string reason)
     {
+        EnsureStatus(TripSeatStatus.AVAILABLE, nameof(Disable));
         DisabledReason = ValidateRequired(reason, nameof(reason));
         Status = TripSeatStatus.UNAVAILABLE;
+    }
+
+    public void Enable()
+    {
+        EnsureStatus(TripSeatStatus.UNAVAILABLE, nameof(Enable));
+        Status = TripSeatStatus.AVAILABLE;
+        DisabledReason = null;
     }
 
     public bool ReconfigureAvailable(TripSeatType seatType)

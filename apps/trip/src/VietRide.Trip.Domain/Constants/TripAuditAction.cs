@@ -13,6 +13,8 @@ public static class TripAuditAction
     public const string RouteChangeProposalRejected = "ROUTE_CHANGE_PROPOSAL_REJECTED";
     public const string RouteChangeProposalSuperseded = "ROUTE_CHANGE_PROPOSAL_SUPERSEDED";
     public const string RouteChangeProposalExpired = "ROUTE_CHANGE_PROPOSAL_EXPIRED";
+    public const string TripSeatDisabled = "TRIP_SEAT_DISABLED";
+    public const string TripSeatEnabled = "TRIP_SEAT_ENABLED";
 
     public static bool IsApproved(string action) => action is
         TripCompletedManual
@@ -25,5 +27,7 @@ public static class TripAuditAction
         or RouteChangeProposalApproved
         or RouteChangeProposalRejected
         or RouteChangeProposalSuperseded
-        or RouteChangeProposalExpired;
+        or RouteChangeProposalExpired
+        or TripSeatDisabled
+        or TripSeatEnabled;
 }

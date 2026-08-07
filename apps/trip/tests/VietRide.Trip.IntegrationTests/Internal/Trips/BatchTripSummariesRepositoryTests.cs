@@ -145,7 +145,9 @@ public sealed class BatchTripSummariesRepositoryTests
             TripSource.MANUAL,
             Money.FromRaw(300_000),
             null,
-            0m);
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 0m,
+            seatLayoutSnapshotJson: firstVehicle.SeatLayoutJson);
         var secondTrip = TripEntity.Create(
             secondOperatorId,
             secondRoute.Id,
@@ -158,7 +160,9 @@ public sealed class BatchTripSummariesRepositoryTests
             TripSource.MANUAL,
             Money.FromRaw(310_000),
             null,
-            0m);
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 0m,
+            seatLayoutSnapshotJson: secondVehicle.SeatLayoutJson);
 
         db.AddRange(
             origin,

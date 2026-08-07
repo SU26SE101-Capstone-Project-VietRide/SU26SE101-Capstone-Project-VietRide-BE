@@ -63,6 +63,8 @@ public sealed class TripVehicleSwapService : ITripVehicleSwapService
             return false;
         }
 
+        trip.UpdateSeatLayoutSnapshot(newVehicle.SeatLayoutJson);
+
         var eventId = Guid.NewGuid();
         var integrationEvent = new TripVehicleSwappedIntegrationEvent(
             eventId,

@@ -224,10 +224,10 @@ public sealed class TripVehicleSwapServiceIntegrationTests
                 ({oldVehicleId}, {operatorId}, {vehicleTypeId}, {$"OLD-{oldVehicleId:N}"[..20]}, CAST({oldLayout} AS jsonb), 2),
                 ({newVehicleId}, {operatorId}, {vehicleTypeId}, {$"NEW-{newVehicleId:N}"[..20]}, CAST({newLayout} AS jsonb), 1);
             INSERT INTO vietride_trip.trips
-                (id, operator_id, route_id, vehicle_id, driver_user_id, departure_date_time,
+                (id, operator_id, route_id, vehicle_id, seat_layout_snapshot_json, driver_user_id, departure_date_time,
                  estimated_arrival_time, source, base_fare)
             VALUES
-                ({tripId}, {operatorId}, {routeId}, {oldVehicleId}, {driverUserId}, {departure},
+                ({tripId}, {operatorId}, {routeId}, {oldVehicleId}, CAST({oldLayout} AS jsonb), {driverUserId}, {departure},
                  {departure.AddHours(4)}, 'MANUAL', 100000);
             INSERT INTO vietride_trip.trip_seats (id, trip_id, seat_number, seat_type, status)
             VALUES

@@ -35,7 +35,25 @@ public sealed class ListDriverSchedulesHandler(
         var vehicles = vehicleRepository.QueryNoTracking().Where(x => x.OperatorId == request.OperatorId && vehicleIds.Contains(x.Id))
             .Select(x => new { x.Id, x.OperatorId, x.VehicleTypeId, x.LicensePlate, x.SeatLayoutJson, x.TotalSeats, x.MaxCargoWeightKg, x.MaxCargoVolumeM3, x.Status, x.IsActive, x.CreatedAt, x.UpdatedAt })
             .AsEnumerable()
-            .ToDictionary(x => x.Id, x => new VehicleDto(x.Id, x.OperatorId, x.VehicleTypeId, x.LicensePlate, x.SeatLayoutJson.Deserialize<SeatLayoutDto>()!, x.TotalSeats, x.MaxCargoWeightKg, x.MaxCargoVolumeM3, null, (VehicleStatusDto)x.Status, x.IsActive, x.CreatedAt, x.UpdatedAt));
+            .ToDictionary(x => x.Id, x =>
+            {
+                var layout = x.SeatLayoutJson.Deserialize<SeatLayoutDto>()!;
+                return new VehicleDto(
+                    x.Id,
+                    x.OperatorId,
+                    x.VehicleTypeId,
+                    x.LicensePlate,
+                    layout,
+                    x.TotalSeats,
+                    SeatLayoutMetrics.CountUsablePassengerSeats(layout),
+                    x.MaxCargoWeightKg,
+                    x.MaxCargoVolumeM3,
+                    null,
+                    (VehicleStatusDto)x.Status,
+                    x.IsActive,
+                    x.CreatedAt,
+                    x.UpdatedAt);
+            });
         var userIds = schedules.SelectMany(x => x.AssistantUserId.HasValue ? new[] { x.DriverUserId, x.AssistantUserId.Value } : new[] { x.DriverUserId }).Distinct().ToArray();
         var users = await identityClient.GetUsersAsync(userIds, cancellationToken);
         var items = schedules.Select(x => new DriverScheduleDetailDto(x.Id, x.OperatorId, x.RouteId, x.VehicleId, x.DriverUserId, x.AssistantUserId, DriverScheduleMapper.ToDto(x).DayOfWeek, x.DepartureTime, x.ValidFrom, x.ValidUntil, x.IsActive, x.CreatedAt, x.UpdatedAt, routeDtos.GetValueOrDefault(x.RouteId), x.VehicleId is { } vehicleId ? vehicles.GetValueOrDefault(vehicleId) : null, users.GetValueOrDefault(x.DriverUserId), x.AssistantUserId is { } assistantId ? users.GetValueOrDefault(assistantId) : null)).ToList();

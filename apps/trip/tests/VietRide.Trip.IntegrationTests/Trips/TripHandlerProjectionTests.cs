@@ -372,7 +372,9 @@ public sealed class TripHandlerProjectionTests
             TripSource.AUTO_FROM_SCHEDULE,
             Money.FromRaw(400000),
             null,
-            0m);
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 0m,
+            seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
         var handler = new GetTripSeatMapHandler(
             new InMemoryTripRepository([trip]),
             new InMemoryTripSeatRepository([TripSeat.Create(trip.Id, "A01")]),

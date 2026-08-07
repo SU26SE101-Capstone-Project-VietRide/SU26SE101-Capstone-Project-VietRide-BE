@@ -334,12 +334,12 @@ public sealed class EditTripEndpointTests
                 ({secondVehicleId}, {operatorId}, {vehicleTypeId}, {$"B-{secondVehicleId:N}"[..20]}, CAST({layout} AS jsonb), 1),
                 ({targetVehicleId}, {operatorId}, {vehicleTypeId}, {$"C-{targetVehicleId:N}"[..20]}, CAST({layout} AS jsonb), 1);
             INSERT INTO vietride_trip.trips
-                (id, operator_id, route_id, vehicle_id, driver_user_id, departure_date_time,
+                (id, operator_id, route_id, vehicle_id, seat_layout_snapshot_json, driver_user_id, departure_date_time,
                  estimated_arrival_time, source, base_fare)
             VALUES
-                ({firstTripId}, {operatorId}, {routeId}, {firstVehicleId}, {Guid.NewGuid()}, {departure},
+                ({firstTripId}, {operatorId}, {routeId}, {firstVehicleId}, CAST({layout} AS jsonb), {Guid.NewGuid()}, {departure},
                  {departure.AddHours(4)}, 'MANUAL', 100000),
-                ({secondTripId}, {operatorId}, {routeId}, {secondVehicleId}, {Guid.NewGuid()}, {departure},
+                ({secondTripId}, {operatorId}, {routeId}, {secondVehicleId}, CAST({layout} AS jsonb), {Guid.NewGuid()}, {departure},
                  {departure.AddHours(4)}, 'MANUAL', 100000);
             """);
 

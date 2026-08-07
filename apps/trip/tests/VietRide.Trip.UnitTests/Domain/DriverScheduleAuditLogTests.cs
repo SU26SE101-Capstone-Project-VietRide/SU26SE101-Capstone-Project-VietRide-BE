@@ -99,6 +99,8 @@ public sealed class DriverScheduleAuditLogTests
                 "TRIP_COMPLETED_MANUAL",
                 "TRIP_EDITED",
                 "TRIP_ROUTE_CHANGED",
+                "TRIP_SEAT_DISABLED",
+                "TRIP_SEAT_ENABLED",
                 "TRIP_VEHICLE_SWAPPED",
                 "VEHICLE_SUBSTITUTION_TRIGGERED",
             },

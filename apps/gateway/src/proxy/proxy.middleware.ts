@@ -232,7 +232,7 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
     const reqId = resolveRequestId(req);
     res.setHeader('X-Request-Id', reqId);
 
-    const route = matchRoute(routes, fullPath);
+    const route = matchRoute(routes, fullPath, req.method);
     if (!route) {
       res
         .status(404)

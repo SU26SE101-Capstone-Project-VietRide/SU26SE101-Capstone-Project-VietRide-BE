@@ -229,7 +229,9 @@ public sealed class OperatorAnalyticsRepositoryTests
             TripSource.MANUAL,
             Money.FromRaw(100_000),
             null,
-            0m);
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 0m,
+            seatLayoutSnapshotJson: CreateSeatLayout());
 
     private static JsonElement CreateSeatLayout()
         => JsonSerializer.SerializeToElement(new

@@ -183,7 +183,8 @@ public sealed class TripGenerationService
                     route.BaseFare,
                     vehicle.MaxCargoWeightKg,
                     vehicle.MaxCargoVolumeM3,
-                    0m);
+                    0m,
+                    seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
 
                 Guid? quotaAllocationId = null;
                 if (quotaClient is not null)
@@ -474,9 +475,7 @@ public sealed class TripGenerationService
                 "Vehicle seat layout is required for trip generation.",
                 [new ValidationError("seatLayoutJson", "Seat layout could not be parsed.")]);
 
-        foreach (var seat in layout.Seats.Where(seat =>
-                     !seat.Disabled
-                     && !string.Equals(seat.Type, nameof(TripSeatType.DRIVER_AREA), StringComparison.OrdinalIgnoreCase)))
+        foreach (var seat in layout.Seats.Where(SeatLayoutMetrics.IsUsablePassengerSeat))
         {
             await tripSeatRepository.AddAsync(
                 TripSeat.Create(tripId, seat.SeatNumber, MapSeatType(seat.Type)),

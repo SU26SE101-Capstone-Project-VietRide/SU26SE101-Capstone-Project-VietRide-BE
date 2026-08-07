@@ -359,7 +359,9 @@ public sealed class Day24DepartStopWarningIntegrationTests
             TripSource.AUTO_FROM_SCHEDULE,
             Money.FromRaw(100_000),
             null,
-            0);
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 0m,
+            seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
         trip.MarkBoarding(now.AddHours(-2));
         trip.Start(now.AddHours(-1));
         var stop = Stop.Create(operatorId, $"Day24 {Guid.NewGuid():N}", 10, 106);

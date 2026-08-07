@@ -267,7 +267,9 @@ public sealed class ShuttlePersistenceIntegrationTests
                     TripSource.MANUAL,
                     Money.FromRaw(100_000),
                     500m,
-                    5m);
+                    maxCargoVolumeM3: null,
+                    estimatedPassengerLuggageKg: 5m,
+                    seatLayoutSnapshotJson: seed.MainSeatLayoutJson);
                 setup.Trips.Add(trip);
                 var bookingId = Guid.NewGuid();
                 var passengerId = Guid.NewGuid();
@@ -627,12 +629,13 @@ public sealed class ShuttlePersistenceIntegrationTests
             300m,
             360);
         var vehicleType = VehicleType.Create("SHUTTLE_TEST", "Shuttle integration vehicle", 5, 20);
-        using var layout = JsonDocument.Parse("{\"rows\":[]}");
+        var mainLayout = CreateSeatLayout("MAIN", 20);
+        var shuttleLayout = CreateSeatLayout("SHUTTLE", 12);
         var mainVehicle = Vehicle.Create(
             operatorId,
             vehicleType.Id,
             $"MAIN-{Guid.NewGuid():N}"[..20],
-            layout.RootElement,
+            mainLayout,
             20,
             500m,
             10m);
@@ -640,7 +643,7 @@ public sealed class ShuttlePersistenceIntegrationTests
             operatorId,
             vehicleType.Id,
             $"SHUT-{Guid.NewGuid():N}"[..20],
-            layout.RootElement,
+            shuttleLayout,
             12,
             200m,
             5m);
@@ -658,7 +661,9 @@ public sealed class ShuttlePersistenceIntegrationTests
             TripSource.MANUAL,
             Money.FromRaw(100_000),
             500m,
-            5m);
+            maxCargoVolumeM3: null,
+            estimatedPassengerLuggageKg: 5m,
+            seatLayoutSnapshotJson: mainLayout);
 
         db.AddRange(origin, destination, route, vehicleType, mainVehicle, shuttleVehicle, mainTrip);
         await db.SaveChangesAsync();
@@ -669,8 +674,32 @@ public sealed class ShuttlePersistenceIntegrationTests
             mainDriverId,
             shuttleVehicle.Id,
             shuttleDriverId,
-            mainTrip.Id);
+            mainTrip.Id,
+            mainVehicle.SeatLayoutJson);
     }
+
+    private static JsonElement CreateSeatLayout(string vehicleTypeCode, int totalSeats)
+        => JsonSerializer.SerializeToElement(new
+        {
+            version = 1,
+            vehicleTypeCode,
+            totalSeats,
+            rows = totalSeats,
+            cols = 1,
+            decks = 1,
+            aisles = Array.Empty<object>(),
+            seats = Enumerable.Range(1, totalSeats).Select(index => new
+            {
+                seatNumber = $"A{index:00}",
+                row = index,
+                col = 1,
+                deck = 1,
+                type = "STANDARD",
+                isWindow = true,
+                isAisle = false,
+                disabled = false,
+            }),
+        });
 
     private static BookingShuttleConfirmedIntegrationEvent CreateConfirmedEvent(
         Guid tripId,
@@ -798,7 +827,8 @@ public sealed class ShuttlePersistenceIntegrationTests
         Guid MainDriverId,
         Guid ShuttleVehicleId,
         Guid ShuttleDriverId,
-        Guid MainTripId);
+        Guid MainTripId,
+        JsonElement MainSeatLayoutJson);
 
     private sealed class FrozenClock : IClock
     {

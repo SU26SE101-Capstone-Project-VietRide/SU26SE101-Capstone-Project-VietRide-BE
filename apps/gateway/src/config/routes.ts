@@ -17,6 +17,8 @@ export interface ProxyRoute {
   prefix: string;
   /** Optional exact family matcher for a route that shares a prefix with another service. */
   pathPattern?: RegExp;
+  /** Optional HTTP method matcher. Routes without a method match every HTTP method. */
+  method?: RouteMethod;
   /** Downstream service base URL. */
   target: string;
   /** Auth mode. 'mixed' = explicit publicSubpaths are anonymous, all other subpaths require user JWT. */
@@ -272,9 +274,17 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
     {
       prefix: '/v1/operator/shuttle-trips',
+      method: 'POST',
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/shuttle-trips',
+      method: 'GET',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
     {
       prefix: '/v1/operator/route-change-proposals',
@@ -294,6 +304,24 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       prefix: '/v1/operator/trips/{tripId}/substitute-vehicle',
       pathPattern:
         /^\/v1\/operator\/trips\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/substitute-vehicle$/,
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/trips/{tripId}/seats/{seatNumber}/disable',
+      pathPattern:
+        /^\/v1\/operator\/trips\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/seats\/[^/]+\/disable$/,
+      method: 'POST',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/trips/{tripId}/seats/{seatNumber}/enable',
+      pathPattern:
+        /^\/v1\/operator\/trips\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/seats\/[^/]+\/enable$/,
+      method: 'POST',
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN'],
@@ -674,14 +702,25 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
   ];
 }
 
-/** Find first prefix-matching route. */
-export function matchRoute(table: ProxyRoute[], path: string): ProxyRoute | undefined {
-  // Longest prefix wins so /v1/identity/health beats /v1/auth.
+/** Find the most-specific route matching both path and HTTP method. */
+export function matchRoute(
+  table: ProxyRoute[],
+  path: string,
+  method?: string,
+): ProxyRoute | undefined {
+  const normalizedMethod = method?.toUpperCase();
+
+  // Longest prefix wins so /v1/identity/health beats /v1/auth. Routes without a method
+  // remain catch-alls for backwards-compatible route families.
   return table
     .filter((r) =>
-      r.pathPattern
+      (normalizedMethod === undefined ||
+        r.method === undefined ||
+        r.method === 'ALL' ||
+        r.method === normalizedMethod) &&
+      (r.pathPattern
         ? r.pathPattern.test(path)
-        : path === r.prefix || path.startsWith(r.prefix + '/'),
+        : path === r.prefix || path.startsWith(r.prefix + '/')),
     )
     .sort((a, b) => b.prefix.length - a.prefix.length)[0];
 }
