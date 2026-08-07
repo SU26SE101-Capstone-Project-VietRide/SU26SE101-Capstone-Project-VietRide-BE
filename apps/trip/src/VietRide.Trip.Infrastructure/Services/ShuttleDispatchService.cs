@@ -18,6 +18,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
 {
     private const int ArrivalBufferMinutes = 30;
     private const int DefaultShuttleMaxDistanceKm = 5;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly TripDbContext _db;
     private readonly IIdentityInternalClient _identity;
     private readonly IIntegrationEventOutbox _outbox;
@@ -352,7 +353,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 "The shuttle dispatch cutoff has passed.");
         }
 
-        var vehicleLayout = vehicle.SeatLayoutJson.Deserialize<SeatLayoutDto>()
+        var vehicleLayout = vehicle.SeatLayoutJson.Deserialize<SeatLayoutDto>(JsonOptions)
             ?? throw new CodedValidationException("VALIDATION_ERROR", "Vehicle seat layout is invalid.");
         var usablePassengerCapacity = SeatLayoutMetrics.CountUsablePassengerSeats(vehicleLayout);
         if (manifests.Length > usablePassengerCapacity)
