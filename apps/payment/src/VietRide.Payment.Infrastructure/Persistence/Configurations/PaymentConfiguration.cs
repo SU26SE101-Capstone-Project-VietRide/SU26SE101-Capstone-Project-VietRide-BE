@@ -139,5 +139,9 @@ internal sealed class PaymentConfiguration : IEntityTypeConfiguration<PaymentEnt
         builder.HasIndex(x => new { x.ContextReconciliationRequired, x.Status })
             .HasDatabaseName("idx_payments_context_reconciliation")
             .HasFilter("context_reconciliation_required = TRUE");
+
+        builder.HasIndex(x => x.SucceededAt)
+            .HasDatabaseName("idx_payments_subscription_succeeded_at")
+            .HasFilter("reference_type = 'SUBSCRIPTION' AND status = 'SUCCEEDED'");
     }
 }

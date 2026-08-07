@@ -56,7 +56,7 @@ public sealed class Day38PersistenceModelTests
     }
 
     [Fact]
-    public void LedgerFactory_EnforcesSignedDirectionAndAuditOnlyZero()
+    public void OperatorLedgerFactory_EnforcesSignedDirectionAndAuditOnlyZero()
     {
         var operatorId = Guid.NewGuid();
         var tripId = Guid.NewGuid();
@@ -91,6 +91,92 @@ public sealed class Day38PersistenceModelTests
             referenceId,
             eventId);
         invalidAudit.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void OperatorLedgerFactory_EnforcesTypedAdjustmentSemantics()
+    {
+        var operatorId = Guid.NewGuid();
+        var tripId = Guid.NewGuid();
+        var referenceId = Guid.NewGuid();
+        var eventId = Guid.NewGuid();
+
+        var reversal = OperatorLedgerEntry.Create(
+            operatorId,
+            tripId,
+            OperatorLedgerEntryType.ADJUSTMENT,
+            -10_001,
+            OperatorLedgerReferenceType.BOOKING,
+            referenceId,
+            eventId,
+            adjustmentReason: OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL);
+        reversal.AdjustmentReason.Should().Be(
+            OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL);
+
+        Action missingReason = () => OperatorLedgerEntry.Create(
+            operatorId,
+            tripId,
+            OperatorLedgerEntryType.ADJUSTMENT,
+            -1,
+            OperatorLedgerReferenceType.BOOKING,
+            referenceId,
+            eventId);
+        missingReason.Should().Throw<ArgumentException>();
+
+        Action reasonOnRevenue = () => OperatorLedgerEntry.Create(
+            operatorId,
+            tripId,
+            OperatorLedgerEntryType.BOOKING_REVENUE,
+            1,
+            OperatorLedgerReferenceType.BOOKING,
+            referenceId,
+            eventId,
+            adjustmentReason: OperatorLedgerAdjustmentReason.MANUAL_WALLET_ADJUSTMENT);
+        reasonOnRevenue.Should().Throw<ArgumentException>();
+
+        Action invalidReversal = () => OperatorLedgerEntry.Create(
+            operatorId,
+            tripId,
+            OperatorLedgerEntryType.ADJUSTMENT,
+            1,
+            OperatorLedgerReferenceType.BOOKING,
+            referenceId,
+            eventId,
+            adjustmentReason: OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL);
+        invalidReversal.Should().Throw<ArgumentException>();
+
+        Action invalidGeneric = () => OperatorLedgerEntry.Create(
+            operatorId,
+            tripId,
+            OperatorLedgerEntryType.ADJUSTMENT,
+            -1,
+            OperatorLedgerReferenceType.BOOKING,
+            referenceId,
+            eventId,
+            adjustmentReason: OperatorLedgerAdjustmentReason.GENERIC_BOOKING_REFUND_ENTITLEMENT);
+        invalidGeneric.Should().Throw<ArgumentException>();
+
+        Action invalidManual = () => OperatorLedgerEntry.Create(
+            operatorId,
+            null,
+            OperatorLedgerEntryType.ADJUSTMENT,
+            1,
+            OperatorLedgerReferenceType.BOOKING,
+            referenceId,
+            eventId,
+            adjustmentReason: OperatorLedgerAdjustmentReason.MANUAL_WALLET_ADJUSTMENT);
+        invalidManual.Should().Throw<ArgumentException>();
+
+        Action legacy = () => OperatorLedgerEntry.Create(
+            operatorId,
+            null,
+            OperatorLedgerEntryType.ADJUSTMENT,
+            1,
+            OperatorLedgerReferenceType.MANUAL,
+            referenceId,
+            eventId,
+            adjustmentReason: OperatorLedgerAdjustmentReason.LEGACY_UNCLASSIFIED);
+        legacy.Should().Throw<ArgumentException>();
     }
 
     [Fact]

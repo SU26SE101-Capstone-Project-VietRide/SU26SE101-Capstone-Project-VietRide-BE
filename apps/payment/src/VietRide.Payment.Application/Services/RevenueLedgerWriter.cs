@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Models;
@@ -120,9 +122,11 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                 cancellationToken);
         }
 
-        if (allocation.ReferenceType == "BOOKING"
-            && allocation.VoucherVietRideFundedAmount > 0)
+        if (allocation.VoucherVietRideFundedAmount > 0)
         {
+            var adjustmentSourceEventId = allocation.ReferenceType == "PARCEL"
+                ? CreateParcelVoucherAdjustmentSourceId(sourceEventId, allocation.ReferenceId)
+                : sourceEventId;
             await _ledger.AddAsync(
                 OperatorLedgerEntry.Create(
                     allocation.OperatorId,
@@ -131,8 +135,9 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                     -allocation.VoucherVietRideFundedAmount,
                     referenceType,
                     allocation.ReferenceId,
-                    sourceEventId,
-                    "reverse-vietride-funded-voucher"),
+                    adjustmentSourceEventId,
+                    "reverse-vietride-funded-voucher",
+                    adjustmentReason: OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL),
                 cancellationToken);
         }
     }
@@ -172,7 +177,8 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                 OperatorLedgerReferenceType.BOOKING,
                 allocation.ReferenceId,
                 sourceEventId,
-                "generic-booking-refund-entitlement"),
+                "generic-booking-refund-entitlement",
+                adjustmentReason: OperatorLedgerAdjustmentReason.GENERIC_BOOKING_REFUND_ENTITLEMENT),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -223,8 +229,22 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                     OperatorLedgerReferenceType.BOOKING,
                     allocation.ReferenceId,
                     voucherAdjustmentSourceEventId,
-                    "reverse-vietride-funded-voucher"),
+                    "reverse-vietride-funded-voucher",
+                    adjustmentReason: OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL),
                 cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    public static Guid CreateParcelVoucherAdjustmentSourceId(
+        Guid originalParcelRefundSourceEventId,
+        Guid parcelId)
+    {
+        var source = string.Concat(
+            "parcel-refund-voucher-adjustment:",
+            originalParcelRefundSourceEventId,
+            ":allocation:",
+            parcelId);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(source));
+        return new Guid(hash.AsSpan(0, 16));
     }
 }

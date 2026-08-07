@@ -584,7 +584,8 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             var signedAmount = type == OperatorWalletTransactionType.CREDIT ? request.Amount : -request.Amount;
             await _db.OperatorLedgerEntries.AddAsync(OperatorLedgerEntry.Create(operatorId, null,
                 OperatorLedgerEntryType.ADJUSTMENT, signedAmount, OperatorLedgerReferenceType.MANUAL,
-                movement.Id, movement.Id, request.Note, actor), ct);
+                movement.Id, movement.Id, request.Note, actor,
+                OperatorLedgerAdjustmentReason.MANUAL_WALLET_ADJUSTMENT), ct);
             await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             _logger.LogInformation("Operator wallet {OperatorId} adjusted by admin {ActorUserId}; type {Type}, amount {Amount}.", operatorId, actorUserId, type, request.Amount);

@@ -11,6 +11,7 @@ public sealed class OperatorLedgerEntry : BaseEntity<Guid>
     public Guid OperatorId { get; private set; }
     public Guid? TripId { get; private set; }
     public OperatorLedgerEntryType EntryType { get; private set; }
+    public OperatorLedgerAdjustmentReason? AdjustmentReason { get; private set; }
     public long Amount { get; private set; }
     public OperatorLedgerReferenceType ReferenceType { get; private set; }
     public Guid ReferenceId { get; private set; }
@@ -32,12 +33,15 @@ public sealed class OperatorLedgerEntry : BaseEntity<Guid>
         Guid referenceId,
         Guid sourceEventId,
         string? note = null,
-        FinancialActorSnapshot? actor = null)
+        FinancialActorSnapshot? actor = null,
+        OperatorLedgerAdjustmentReason? adjustmentReason = null)
     {
         if (operatorId == Guid.Empty || referenceId == Guid.Empty || sourceEventId == Guid.Empty)
             throw new ArgumentException("Ledger identity fields are required.");
         if (tripId == Guid.Empty)
             throw new ArgumentException("Trip id cannot be empty.", nameof(tripId));
+
+        ValidateAdjustment(entryType, amount, referenceType, adjustmentReason);
 
         var isRefund = entryType is OperatorLedgerEntryType.BOOKING_REFUND or
             OperatorLedgerEntryType.PARCEL_REFUND;
@@ -55,6 +59,7 @@ public sealed class OperatorLedgerEntry : BaseEntity<Guid>
             OperatorId = operatorId,
             TripId = tripId,
             EntryType = entryType,
+            AdjustmentReason = adjustmentReason,
             Amount = amount,
             ReferenceType = referenceType,
             ReferenceId = referenceId,
@@ -66,6 +71,38 @@ public sealed class OperatorLedgerEntry : BaseEntity<Guid>
             ActorEmail = actor?.Email,
             ActorRole = actor?.Role,
         };
+    }
+
+    private static void ValidateAdjustment(
+        OperatorLedgerEntryType entryType,
+        long amount,
+        OperatorLedgerReferenceType referenceType,
+        OperatorLedgerAdjustmentReason? adjustmentReason)
+    {
+        if (entryType != OperatorLedgerEntryType.ADJUSTMENT)
+        {
+            if (adjustmentReason.HasValue)
+                throw new ArgumentException("Only adjustment entries can have an adjustment reason.", nameof(adjustmentReason));
+            return;
+        }
+
+        if (!adjustmentReason.HasValue)
+            throw new ArgumentException("Adjustment entries require an adjustment reason.", nameof(adjustmentReason));
+
+        var valid = adjustmentReason.Value switch
+        {
+            OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL =>
+                amount < 0 && referenceType is OperatorLedgerReferenceType.BOOKING or OperatorLedgerReferenceType.PARCEL,
+            OperatorLedgerAdjustmentReason.GENERIC_BOOKING_REFUND_ENTITLEMENT =>
+                amount == 0 && referenceType == OperatorLedgerReferenceType.BOOKING,
+            OperatorLedgerAdjustmentReason.MANUAL_WALLET_ADJUSTMENT =>
+                amount != 0 && referenceType == OperatorLedgerReferenceType.MANUAL,
+            OperatorLedgerAdjustmentReason.LEGACY_UNCLASSIFIED => false,
+            _ => false,
+        };
+
+        if (!valid)
+            throw new ArgumentException("Adjustment amount, reference, and reason are inconsistent.", nameof(adjustmentReason));
     }
 
     public void BackfillUserActor(FinancialActorSnapshot actor)

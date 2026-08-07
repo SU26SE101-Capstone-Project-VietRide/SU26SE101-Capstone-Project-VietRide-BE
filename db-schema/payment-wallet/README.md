@@ -33,7 +33,7 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
 | `OperatorWallet` | **Ví nội bộ operator** (1-1 với Operator). Replaces former `operator_balances`. | `operator_id` PK, `balance` non-negative, `row_version` |
 | `OperatorWalletTransaction` | Ledger immutable của OperatorWallet. | `type` CREDIT/DEBIT, `referenceType` TRIP_SETTLEMENT/ADJUSTMENT/SUBSCRIPTION_PAYMENT, balance snapshot |
 | `OperatorTripSettlement` | Per-Trip settlement marker và settlement cùng một row. | UNIQUE `(operator_id, trip_id)`, `status` enum 4-state, `eligibleAt`, failure metadata, `row_version` |
-| `OperatorLedgerEntry` | **Audit log** per booking/parcel revenue/refund. | `trip_id` nullable, `entryType` enum, `amount` signed. **KHÔNG có balance_before/after** (drop từ v1 wallet model). |
+| `OperatorLedgerEntry` | **Audit log** per booking/parcel revenue/refund. | `trip_id` nullable, `entryType` enum, `amount` signed, `adjustmentReason` có kiểu rõ ràng cho mọi `ADJUSTMENT`. **KHÔNG có balance_before/after** (drop từ v1 wallet model). |
 | `RefundFailureLog` | Retry tracking khi refund event consume fail. | `retryCount` ≤ 5 → admin manual |
 | `OutboxEvent` | Outbox pattern. | |
 | `OutboxDlq` | Terminal Outbox failures for admin review. | unique `eventId`, payload, retry metadata, `terminalAt` |
@@ -126,6 +126,12 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
 - PDF bundle Noto Sans Regular/Bold + OFL-1.1 và custom resolver để render tiếng Việt ổn định trong Linux container.
 
 ### OperatorLedgerEntry — audit log thuần
+
+- `ADJUSTMENT` bắt buộc có `adjustment_reason`; entry type khác bắt buộc để null. `note` chỉ phục vụ hiển thị/audit và không được dùng làm điều kiện tính tiền.
+- `VIETRIDE_FUNDED_VOUCHER_REVERSAL`: số âm, reference `BOOKING` hoặc `PARCEL`; đây là adjustment duy nhất được tính vào doanh thu.
+- `GENERIC_BOOKING_REFUND_ENTITLEMENT`: số 0, reference `BOOKING`; marker kỹ thuật, không phải doanh thu.
+- `MANUAL_WALLET_ADJUSTMENT`: số khác 0, reference `MANUAL`; không phải doanh thu.
+- `LEGACY_UNCLASSIFIED`: chỉ dành cho dữ liệu cũ chưa phân loại; application không được tạo mới và mọi truy vấn doanh thu phải loại bỏ.
 
 - **Drop `balance_before` / `balance_after`** từ v1 wallet model: ledger không còn track running balance (concept "VietRide nợ operator" thay bằng "wallet balance"). Ledger chỉ là audit per-event.
 - **Add `trip_id` nullable** — cần để aggregate per trip cho TripSettlement.netAmount computation. NULL cho ADJUSTMENT/MANUAL entries không gắn trip.

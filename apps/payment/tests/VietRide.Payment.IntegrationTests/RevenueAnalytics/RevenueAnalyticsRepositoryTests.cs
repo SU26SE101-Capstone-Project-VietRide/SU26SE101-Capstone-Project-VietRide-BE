@@ -269,7 +269,31 @@ public sealed class RevenueAnalyticsRepositoryTests
         OperatorLedgerReferenceType referenceType,
         Guid referenceId,
         string? note = null)
-        => OperatorLedgerEntry.Create(
+    {
+        if (entryType == OperatorLedgerEntryType.ADJUSTMENT
+            && referenceType != OperatorLedgerReferenceType.MANUAL
+            && note != "reverse-vietride-funded-voucher")
+        {
+            var legacy = OperatorLedgerEntry.Create(
+                operatorId,
+                null,
+                entryType,
+                amount,
+                OperatorLedgerReferenceType.MANUAL,
+                referenceId,
+                Guid.NewGuid(),
+                note,
+                adjustmentReason: OperatorLedgerAdjustmentReason.MANUAL_WALLET_ADJUSTMENT);
+            typeof(OperatorLedgerEntry).GetProperty(nameof(OperatorLedgerEntry.TripId))!
+                .SetValue(legacy, tripId);
+            typeof(OperatorLedgerEntry).GetProperty(nameof(OperatorLedgerEntry.ReferenceType))!
+                .SetValue(legacy, referenceType);
+            typeof(OperatorLedgerEntry).GetProperty(nameof(OperatorLedgerEntry.AdjustmentReason))!
+                .SetValue(legacy, OperatorLedgerAdjustmentReason.LEGACY_UNCLASSIFIED);
+            return legacy;
+        }
+
+        return OperatorLedgerEntry.Create(
             operatorId,
             tripId,
             entryType,
@@ -277,7 +301,13 @@ public sealed class RevenueAnalyticsRepositoryTests
             referenceType,
             referenceId,
             Guid.NewGuid(),
-            note);
+            note,
+            adjustmentReason: entryType == OperatorLedgerEntryType.ADJUSTMENT
+                ? referenceType == OperatorLedgerReferenceType.MANUAL
+                    ? OperatorLedgerAdjustmentReason.MANUAL_WALLET_ADJUSTMENT
+                    : OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL
+                : null);
+    }
 
     private sealed class CountingCommandInterceptor : DbCommandInterceptor
     {
