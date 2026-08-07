@@ -15,6 +15,7 @@ public sealed class GetAdminDashboardSummaryQueryHandlerTests
     private static readonly Guid UnapprovedOperator = Guid.Parse("33333333-3333-4333-8333-333333333333");
     private readonly IBookingStatsRepository _stats = Substitute.For<IBookingStatsRepository>();
     private readonly IIdentityDashboardMetricsClient _identity = Substitute.For<IIdentityDashboardMetricsClient>();
+    private readonly IPaymentRevenueSummaryClient _payment = Substitute.For<IPaymentRevenueSummaryClient>();
 
     [Fact]
     public async Task Handle_ComparesEqualPeriodsAndUsesCurrentApprovedOperatorsForBothPeriods()
@@ -53,7 +54,11 @@ public sealed class GetAdminDashboardSummaryQueryHandlerTests
                 [ApprovedOperatorA, UnapprovedOperator],
                 [],
                 []));
-        var handler = new GetAdminDashboardSummaryQueryHandler(_stats, _identity);
+        _payment.GetAsync(currentFrom, currentTo, Arg.Any<CancellationToken>())
+            .Returns(Revenue(1_500, 1_200, 1_000, 200, 300));
+        _payment.GetAsync(previousFrom, previousTo, Arg.Any<CancellationToken>())
+            .Returns(Revenue(1_000, 800, 700, 100, 200));
+        var handler = new GetAdminDashboardSummaryQueryHandler(_stats, _identity, _payment);
 
         var result = await handler.Handle(
             new GetAdminDashboardSummaryQuery(currentFrom, currentTo),
@@ -63,7 +68,11 @@ public sealed class GetAdminDashboardSummaryQueryHandlerTests
             currentFrom,
             currentTo,
             "Asia/Ho_Chi_Minh"));
-        result.TotalRevenue.Should().Be(new AdminDashboardComparisonResponse(1_500, 1_000, 50m, "UP"));
+        result.TotalProjectRevenueVnd.Should().Be(new AdminDashboardComparisonResponse(1_500, 1_000, 50m, "UP"));
+        result.NetTransportRevenueVnd.Should().Be(new AdminDashboardComparisonResponse(1_200, 800, 50m, "UP"));
+        result.NetTicketRevenueVnd.Should().Be(new AdminDashboardComparisonResponse(1_000, 700, 42.86m, "UP"));
+        result.NetParcelRevenueVnd.Should().Be(new AdminDashboardComparisonResponse(200, 100, 100m, "UP"));
+        result.SubscriptionRevenueVnd.Should().Be(new AdminDashboardComparisonResponse(300, 200, 50m, "UP"));
         result.Bookings.Should().Be(new AdminDashboardComparisonResponse(10, 7, 42.86m, "UP"));
         result.ActiveUsers.Should().Be(new AdminDashboardComparisonResponse(20, 10, 100m, "UP"));
         result.ActiveOperators.Should().Be(new AdminDashboardComparisonResponse(1, 1, 0m, "FLAT"));
@@ -89,16 +98,20 @@ public sealed class GetAdminDashboardSummaryQueryHandlerTests
             .Returns(new IdentityDashboardMetricsDto(1, [ApprovedOperatorA], [], []));
         _identity.GetAsync(previous, previous, Arg.Any<CancellationToken>())
             .Returns(new IdentityDashboardMetricsDto(0, [], [], []));
-        var handler = new GetAdminDashboardSummaryQueryHandler(_stats, _identity);
+        _payment.GetAsync(from, to, Arg.Any<CancellationToken>())
+            .Returns(Revenue(100, 100, 100, 0, 0));
+        _payment.GetAsync(previous, previous, Arg.Any<CancellationToken>())
+            .Returns(Revenue(0, 0, 0, 0, 0));
+        var handler = new GetAdminDashboardSummaryQueryHandler(_stats, _identity, _payment);
 
         var result = await handler.Handle(
             new GetAdminDashboardSummaryQuery(from, to),
             CancellationToken.None);
 
-        result.TotalRevenue.Should().Be(new AdminDashboardComparisonResponse(100, 0, 0m, "UP"));
-        result.Bookings.Should().Be(new AdminDashboardComparisonResponse(1, 0, 0m, "UP"));
-        result.ActiveUsers.Should().Be(new AdminDashboardComparisonResponse(1, 0, 0m, "UP"));
-        result.ActiveOperators.Should().Be(new AdminDashboardComparisonResponse(1, 0, 0m, "UP"));
+        result.TotalProjectRevenueVnd.Should().Be(new AdminDashboardComparisonResponse(100, 0, null, "UP"));
+        result.Bookings.Should().Be(new AdminDashboardComparisonResponse(1, 0, null, "UP"));
+        result.ActiveUsers.Should().Be(new AdminDashboardComparisonResponse(1, 0, null, "UP"));
+        result.ActiveOperators.Should().Be(new AdminDashboardComparisonResponse(1, 0, null, "UP"));
     }
 
     [Theory]
@@ -108,7 +121,7 @@ public sealed class GetAdminDashboardSummaryQueryHandlerTests
     [InlineData("2025-01-01", "2026-01-02")]
     public async Task Handle_RejectsInvalidRangeBeforeDependencies(string? fromValue, string? toValue)
     {
-        var handler = new GetAdminDashboardSummaryQueryHandler(_stats, _identity);
+        var handler = new GetAdminDashboardSummaryQueryHandler(_stats, _identity, _payment);
         DateOnly? from = fromValue is null ? null : DateOnly.Parse(fromValue);
         DateOnly? to = toValue is null ? null : DateOnly.Parse(toValue);
 
@@ -121,6 +134,7 @@ public sealed class GetAdminDashboardSummaryQueryHandlerTests
         await _stats.DidNotReceiveWithAnyArgs()
             .GetAdminAggregateStatsAsync(default, default, default!, default);
         await _identity.DidNotReceiveWithAnyArgs().GetAsync(default, default, default);
+        await _payment.DidNotReceiveWithAnyArgs().GetAsync(default, default, default);
     }
 
     private static AdminBookingStatsAggregateReadModel Stats(Guid operatorId, int bookings, long revenue)
@@ -133,4 +147,12 @@ public sealed class GetAdminDashboardSummaryQueryHandlerTests
             TotalCancellations: 0,
             TotalNoShows: 0,
             TotalCompleted: 0);
+
+    private static PaymentRevenueSummaryDto Revenue(
+        long totalProject,
+        long netTransport,
+        long netTicket,
+        long netParcel,
+        long subscription)
+        => new(totalProject, netTransport, netTicket, netParcel, subscription);
 }

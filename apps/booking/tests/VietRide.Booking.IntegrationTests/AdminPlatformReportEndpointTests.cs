@@ -43,7 +43,9 @@ public sealed class AdminPlatformReportEndpointTests
         document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         document.RootElement.GetProperty("statusCode").GetInt32().Should().Be(200);
         var data = document.RootElement.GetProperty("data");
-        data.GetProperty("totals").GetProperty("netRevenueVnd").GetInt64()
+        data.GetProperty("period").GetProperty("timezone").GetString()
+            .Should().Be("Asia/Ho_Chi_Minh");
+        data.GetProperty("totals").GetProperty("netTransportRevenueVnd").GetInt64()
             .Should().Be(150_000);
         var item = data.GetProperty("byOperator").EnumerateArray().Single();
         item.GetProperty("operatorId").GetGuid().Should().Be(OperatorId);
@@ -53,15 +55,15 @@ public sealed class AdminPlatformReportEndpointTests
     }
 
     [Fact]
-    public async Task GetReport_WhenRequiredSourceFails_ReturnsCanonical503WithoutPartialData()
+    public async Task GetReport_WhenPaymentFails_ReturnsCanonical503WithoutPartialData()
     {
         _factory.ConfigureReconciledSources(OperatorId);
-        _factory.TripClient.GetAsync(
+        _factory.LedgerClient.GetAsync(
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
-            .Returns(Task.FromException<IReadOnlyList<TripPlatformReportItem>>(
-                new HttpRequestException("trip unavailable")));
+            .Returns(Task.FromException<IReadOnlyList<PlatformLedgerReportItem>>(
+                new HttpRequestException("payment unavailable")));
         using var client = _factory.CreateAuthenticatedClient("SYSTEM_ADMIN");
 
         var response = await client.GetAsync(AdminPlatformReportWebApplicationFactory.ReportPath);
@@ -89,15 +91,16 @@ public sealed class AdminPlatformReportEndpointTests
         var data = document.RootElement.GetProperty("data");
         var totals = data.GetProperty("totals");
         totals.GetProperty("completedBookingCount").GetInt64().Should().Be(0);
-        totals.GetProperty("bookingRevenueVnd").GetInt64().Should().Be(450_000);
-        totals.GetProperty("netRevenueVnd").GetInt64().Should().Be(450_000);
+        totals.GetProperty("netTicketRevenueVnd").GetInt64().Should().Be(450_000);
+        totals.GetProperty("netTransportRevenueVnd").GetInt64().Should().Be(450_000);
+        totals.TryGetProperty("bookingRevenueVnd", out _).Should().BeFalse();
         var item = data.GetProperty("byOperator").EnumerateArray().Single();
         item.GetProperty("completedBookingCount").GetInt64().Should().Be(0);
-        item.GetProperty("bookingRevenueVnd").GetInt64().Should().Be(450_000);
+        item.GetProperty("netTicketRevenueVnd").GetInt64().Should().Be(450_000);
         await _factory.Cache.Received(1).SetAsync(
-            Arg.Is<string>(key => key.StartsWith("platform-report:v2:", StringComparison.Ordinal)),
+            Arg.Is<string>(key => key.StartsWith("platform-report:v3:", StringComparison.Ordinal)),
             Arg.Any<PlatformReportResult>(),
-            TimeSpan.FromMinutes(5),
+            TimeSpan.FromSeconds(60),
             Arg.Any<CancellationToken>());
     }
 
@@ -120,15 +123,8 @@ public sealed class AdminPlatformReportEndpointTests
 public sealed class AdminPlatformReportWebApplicationFactory : WebApplicationFactory<Program>
 {
     private const string TestSecret = "test-secret-at-least-32-chars-long-xxxxx";
-    private static readonly DateTimeOffset From =
-        new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
-    private static readonly DateTimeOffset To =
-        new(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
-
-    public static string ReportPath =>
-        "/v1/admin/reports/platform" +
-        $"?from={Uri.EscapeDataString(From.UtcDateTime.ToString("O"))}" +
-        $"&to={Uri.EscapeDataString(To.UtcDateTime.ToString("O"))}";
+    public const string ReportPath =
+        "/v1/admin/reports/platform?from=2026-07-01&to=2026-07-31";
 
     public IBookingRepository BookingRepository { get; } = Substitute.For<IBookingRepository>();
     public ITripPlatformReportClient TripClient { get; } = Substitute.For<ITripPlatformReportClient>();
@@ -188,7 +184,7 @@ public sealed class AdminPlatformReportWebApplicationFactory : WebApplicationFac
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
-            .Returns([new ParcelPlatformReportItem(operatorId, 3, 50_000)]);
+            .Returns([new ParcelPlatformReportItem(operatorId, 3)]);
         LedgerClient.GetAsync(
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<DateTimeOffset>(),

@@ -65,7 +65,7 @@ public sealed class BookingStatsEndpointIntegrationTests
             .GetProperty("items")[0];
 
         item.GetProperty("operatorId").GetGuid().Should().Be(OperatorId);
-        item.GetProperty("totalRevenue").GetInt64().Should().Be(900_000);
+        item.TryGetProperty("totalRevenue", out _).Should().BeFalse();
         item.GetProperty("totalPartialNoShows").GetInt32().Should().Be(0);
         await _factory.BookingStatsRepository.Received(1).GetOperatorStatsAsync(
             OperatorId,
@@ -112,7 +112,8 @@ public sealed class BookingStatsEndpointIntegrationTests
         data.GetProperty("items")[0].GetProperty("totalCompleted").GetInt32().Should().Be(0);
         data.GetProperty("items")[0].GetProperty("totalBookings").GetInt32().Should().Be(0);
         data.GetProperty("totalBookings").GetInt32().Should().Be(5);
-        data.GetProperty("totalRevenue").GetInt64().Should().Be(900_000);
+        data.TryGetProperty("totalRevenue", out _).Should().BeFalse();
+        data.GetProperty("items")[1].TryGetProperty("totalRevenue", out _).Should().BeFalse();
     }
 
     [Fact]
@@ -152,7 +153,8 @@ public sealed class BookingStatsEndpointIntegrationTests
         data.GetProperty("items")[0].TryGetProperty("totalPartialNoShows", out _).Should().BeFalse();
         data.GetProperty("items")[0].TryGetProperty("totalCompleted", out _).Should().BeFalse();
         data.GetProperty("totalBookings").GetInt32().Should().Be(7);
-        data.GetProperty("totalRevenue").GetInt64().Should().Be(1_250_000);
+        data.TryGetProperty("totalRevenue", out _).Should().BeFalse();
+        data.GetProperty("items")[1].TryGetProperty("totalRevenue", out _).Should().BeFalse();
     }
 
     [Fact]
@@ -214,6 +216,8 @@ public sealed class BookingStatsWebApplicationFactory : WebApplicationFactory<Pr
     public IIdentityUserServiceClient IdentityUsers { get; } = Substitute.For<IIdentityUserServiceClient>();
     public IIdentityDashboardMetricsClient IdentityDashboard { get; } =
         Substitute.For<IIdentityDashboardMetricsClient>();
+    public IPaymentRevenueSummaryClient PaymentRevenue { get; } =
+        Substitute.For<IPaymentRevenueSummaryClient>();
     public IUnitOfWork UnitOfWork { get; } = Substitute.For<IUnitOfWork>();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -231,6 +235,7 @@ public sealed class BookingStatsWebApplicationFactory : WebApplicationFactory<Pr
             services.AddSingleton(BookingRepository);
             services.AddSingleton(IdentityUsers);
             services.AddSingleton(IdentityDashboard);
+            services.AddSingleton(PaymentRevenue);
 
             var mockUow = UnitOfWork;
             mockUow.ExecuteInTransactionAsync(
