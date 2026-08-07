@@ -19,6 +19,14 @@ import type { DeviceTokenSnapshot } from './fcm-push.types';
 export interface PagedNotificationsRow {
   items: Notification[];
   totalItems: number;
+  hasMore?: boolean;
+}
+
+export interface NotificationCursorBoundary {
+  snapshotCutoff: Date;
+  lastCreatedAt?: Date;
+  lastId?: string;
+  skip?: number;
 }
 
 export interface CreateEmailDeliveryRow {
@@ -72,27 +80,47 @@ export class NotificationsRepository {
   async listForUser(
     userId: string,
     query: ListNotificationsQueryDto,
+    boundary: NotificationCursorBoundary,
   ): Promise<PagedNotificationsRow> {
     const where: Prisma.NotificationWhereInput = {
       userId,
       ...(query.unreadOnly ? { readAt: null } : {}),
+      createdAt: { lte: boundary.snapshotCutoff },
+      ...(boundary.lastCreatedAt && boundary.lastId
+        ? {
+            OR: [
+              { createdAt: { lt: boundary.lastCreatedAt } },
+              { createdAt: boundary.lastCreatedAt, id: { lt: boundary.lastId } },
+            ],
+          }
+        : {}),
     };
-    const orderBy: Prisma.NotificationOrderByWithRelationInput = {
-      [query.sortBy]: query.sortDir,
-    };
-    const skip = (query.page - 1) * query.pageSize;
+    const orderBy: Prisma.NotificationOrderByWithRelationInput[] = [
+      { createdAt: 'desc' },
+      { id: 'desc' },
+    ];
 
     const [items, totalItems] = await Promise.all([
       this.prisma.notification.findMany({
         where,
         orderBy,
-        skip,
-        take: query.pageSize,
+        ...(boundary.skip ? { skip: boundary.skip } : {}),
+        take: query.pageSize + 1,
       }),
-      this.prisma.notification.count({ where }),
+      this.prisma.notification.count({
+        where: {
+          userId,
+          ...(query.unreadOnly ? { readAt: null } : {}),
+          createdAt: { lte: boundary.snapshotCutoff },
+        },
+      }),
     ]);
 
-    return { items, totalItems };
+    return {
+      items: items.slice(0, query.pageSize),
+      totalItems,
+      hasMore: items.length > query.pageSize,
+    };
   }
 
   async findOwnedById(notificationId: string, userId: string): Promise<Notification | null> {
@@ -112,6 +140,18 @@ export class NotificationsRepository {
       where: { id: notificationId },
       data: { readAt: new Date() },
     });
+  }
+
+  async markAllRead(userId: string, cutoff: Date): Promise<number> {
+    const result = await this.prisma.notification.updateMany({
+      where: {
+        userId,
+        readAt: null,
+        createdAt: { lte: cutoff },
+      },
+      data: { readAt: cutoff },
+    });
+    return result.count;
   }
 
   async deleteNotificationsCreatedBefore(cutoff: Date): Promise<number> {

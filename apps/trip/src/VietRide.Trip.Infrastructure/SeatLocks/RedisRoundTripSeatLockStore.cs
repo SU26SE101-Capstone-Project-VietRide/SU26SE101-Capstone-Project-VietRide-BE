@@ -62,7 +62,10 @@ internal sealed class RedisRoundTripSeatLockStore : IRoundTripSeatLockStore
         var payload = BuildReplayPayload(request, expiresAt);
         var payloadJson = JsonSerializer.Serialize(payload, JsonOptions);
         var seatOwners = BuildSeatOwners(request);
-        var seatLabels = request.Outbound.SeatNumbers.Concat(request.Return.SeatNumbers).ToArray();
+        var seatLabels = request.Outbound.SeatNumbers
+            .Select(seat => $"outbound.seatNumbers|{seat}")
+            .Concat(request.Return.SeatNumbers.Select(seat => $"return.seatNumbers|{seat}"))
+            .ToArray();
 
         var keys = new List<RedisKey> { IdempotencyKey(request.IdempotencyKey) };
         keys.AddRange(request.Outbound.SeatNumbers.Select(seat => SeatKey(request.Outbound.TripId, seat)));
@@ -96,7 +99,9 @@ internal sealed class RedisRoundTripSeatLockStore : IRoundTripSeatLockStore
             "CONFLICT" => new RoundTripSeatLockStoreResult(
                 false,
                 false,
-                value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(ParseConflict)
+                    .ToArray(),
                 null),
             _ => throw new InvalidOperationException("Redis round-trip lock script returned an unknown status."),
         };
@@ -185,6 +190,17 @@ internal sealed class RedisRoundTripSeatLockStore : IRoundTripSeatLockStore
 
     private static RedisKey SeatKey(Guid tripId, string seatNumber)
         => $"{SeatLockPrefix}:{tripId:D}:{seatNumber}";
+
+    private static RoundTripSeatConflict ParseConflict(string value)
+    {
+        var separator = value.IndexOf('|', StringComparison.Ordinal);
+        if (separator <= 0 || separator == value.Length - 1)
+        {
+            throw new InvalidOperationException("Redis round-trip lock conflict payload is invalid.");
+        }
+
+        return new RoundTripSeatConflict(value[..separator], value[(separator + 1)..]);
+    }
 
     private sealed record RedisRoundTripSeatLockPayload(
         string RequestHash,

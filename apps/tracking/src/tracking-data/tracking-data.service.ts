@@ -4,6 +4,8 @@ import type { EtaResponseDto } from './dto/eta-response.dto';
 import { TrackingDataRepository } from './tracking-data.repository';
 import { TRIP_DATA_PROVIDER } from '../eta/eta.constants';
 import type { TripDataProvider } from '../eta/trip-data.provider';
+import { ROUTE_GEOMETRY_PROVIDER } from '../off-route/off-route.constants';
+import type { DetailedRouteGeometryProvider } from '../off-route/route-geometry.provider';
 
 export interface LatestTrackingResponseDto {
   latest: Awaited<ReturnType<TrackingDataRepository['findLatest']>>;
@@ -28,6 +30,8 @@ export class TrackingDataService {
   constructor(
     private readonly repository: TrackingDataRepository,
     @Optional() @Inject(TRIP_DATA_PROVIDER) private readonly tripData?: TripDataProvider,
+    @Optional() @Inject(ROUTE_GEOMETRY_PROVIDER)
+    private readonly routeGeometry?: DetailedRouteGeometryProvider,
   ) {}
 
   async getLatest(tripId: string): Promise<LatestTrackingResponseDto> {
@@ -56,8 +60,19 @@ export class TrackingDataService {
     query: EtaQueryDto,
   ): Promise<EtaTrackingResponseDto> {
     const routeStops = this.tripData ? await this.tripData.getRouteStops(tripId) : [];
+    if (query.targetKind === 'STATION' && query.stationId) {
+      const route = this.routeGeometry
+        ? await this.routeGeometry.getDetailedRouteGeometry(tripId)
+        : null;
+      if (!route || route.kind !== 'ok' || route.snapshot.destinationStation?.stationId !== query.stationId) {
+        return { eta: null };
+      }
+      const eta = await this.repository.findEta(tripId, query.stationId, 'STATION');
+      return { eta: eta ? { ...eta, stopName: route.snapshot.destinationStation.name } : null };
+    }
+
     if (query.stopId) {
-      const eta = await this.repository.findEta(tripId, query.stopId);
+      const eta = await this.repository.findEta(tripId, query.stopId, 'STOP');
       const stopName = routeStops.find((stop) => stop.stopId === query.stopId)?.stopName ?? null;
       return { eta: eta ? { ...eta, stopName } : null };
     }
@@ -66,7 +81,7 @@ export class TrackingDataService {
     const completed = new Set(['COMPLETED', 'ARRIVED', 'SKIPPED', 'PICKED_UP', 'DROPPED_OFF', 'CANCELLED']);
     for (const stop of [...routeStops].sort((left, right) => left.sequence - right.sequence)) {
       if (stop.status && completed.has(stop.status)) continue;
-      const eta = await this.repository.findEta(tripId, stop.stopId);
+      const eta = await this.repository.findEta(tripId, stop.stopId, 'STOP');
       if (eta) return { eta: { ...eta, stopName: stop.stopName ?? null } };
     }
     return { eta: null };

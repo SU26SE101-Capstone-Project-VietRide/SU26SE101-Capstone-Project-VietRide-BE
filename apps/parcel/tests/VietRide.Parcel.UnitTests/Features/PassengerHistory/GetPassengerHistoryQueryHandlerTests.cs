@@ -29,6 +29,7 @@ public sealed class GetPassengerHistoryQueryHandlerTests
         var bookingClient = Substitute.For<IBookingServiceClient>();
         var parcelRepository = Substitute.For<IParcelRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
+        var dropoffStopId = Guid.NewGuid();
         var booking = new BookingHistoryItemDto(
             Guid.NewGuid(),
             "VR-20260701-ABCDEFGH",
@@ -43,7 +44,8 @@ public sealed class GetPassengerHistoryQueryHandlerTests
             null,
             "Route",
             [new BookingHistoryTicketDto(Guid.NewGuid(), "VT-20260701-ABCDEFGH", "A01", "ISSUED", 350_000)],
-            "https://sandbox.vnpayment.vn/ticket");
+            "https://sandbox.vnpayment.vn/ticket",
+            DropoffStopId: dropoffStopId);
         bookingClient.GetPassengerHistoryAsync(
                 userId,
                 "CONFIRMED",
@@ -69,6 +71,12 @@ public sealed class GetPassengerHistoryQueryHandlerTests
         result.Items[0].Parcel.Should().BeNull();
         result.Items[0].Ticket!.Tickets.Should().ContainSingle();
         result.Items[0].PaymentRedirectUrl.Should().Be("https://sandbox.vnpayment.vn/ticket");
+        result.Items[0].TrackingTarget.Should().BeEquivalentTo(new
+        {
+            Kind = "STOP",
+            StopId = (Guid?)dropoffStopId,
+            StationId = (Guid?)null,
+        });
         await paymentLookup.DidNotReceiveWithAnyArgs().LookupAsync(default, default!, default);
         await parcelRepository.DidNotReceive().ListSentByUserIdAsync(
             Arg.Any<Guid>(),
@@ -88,6 +96,7 @@ public sealed class GetPassengerHistoryQueryHandlerTests
         var bookingClient = Substitute.For<IBookingServiceClient>();
         var parcelRepository = Substitute.For<IParcelRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
+        var destinationStationId = Guid.NewGuid();
         var parcel = ParcelEntity.CreatePendingPayment(
             "VR-PCL-HISTORY",
             userId,
@@ -115,7 +124,23 @@ public sealed class GetPassengerHistoryQueryHandlerTests
                 Arg.Any<CancellationToken>())
             .Returns(PagedResult<ParcelEntity>.Create([parcel], 1, 20, 1));
         tripClient.GetTripParcelSnapshotAsync(parcel.TripId, Arg.Any<CancellationToken>())
-            .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.TransportError, null, "unavailable"));
+            .Returns(new TripSnapshotOutcome(
+                TripSnapshotOutcomeKind.Success,
+                new TripParcelSnapshot(
+                    parcel.TripId,
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    "SCHEDULED",
+                    Now.AddDays(1),
+                    Now.AddDays(1).AddHours(4),
+                    50_000,
+                    new TripStationDto(Guid.NewGuid(), "Origin"),
+                    new TripStationDto(destinationStationId, "Destination"),
+                    [],
+                    new TripSeatSummaryDto(40, 40),
+                    null),
+                null));
         var paymentLookup = Substitute.For<IPaymentRedirectLookupClient>();
         var handler = CreateHandler(bookingClient, parcelRepository, tripClient, paymentLookup);
 
@@ -127,6 +152,12 @@ public sealed class GetPassengerHistoryQueryHandlerTests
         result.Items[0].Parcel.Should().NotBeNull();
         result.Items[0].Parcel!.PhotoUrl.Should().Be(photoUrl);
         result.Items[0].PaymentRedirectUrl.Should().BeNull();
+        result.Items[0].TrackingTarget.Should().BeEquivalentTo(new
+        {
+            Kind = "STATION",
+            StopId = (Guid?)null,
+            StationId = (Guid?)destinationStationId,
+        });
         await bookingClient.DidNotReceive().GetPassengerHistoryAsync(
             Arg.Any<Guid>(),
             Arg.Any<string?>(),

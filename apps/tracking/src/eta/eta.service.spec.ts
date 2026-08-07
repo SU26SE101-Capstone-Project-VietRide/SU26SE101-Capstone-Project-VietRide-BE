@@ -20,6 +20,7 @@ import type { TripDataProvider, TripStopSnapshot } from './trip-data.provider';
 
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const TEST_STOP_ID = '22222222-2222-4222-8222-222222222222';
+const TEST_DESTINATION_STATION_ID = '33333333-3333-4333-8333-333333333333';
 
 interface RedisMultiMock {
   set: jest.Mock;
@@ -143,6 +144,67 @@ describe('EtaService', () => {
       ETA_STATE_TTL_SECONDS,
     );
     expect(redisEval).toHaveBeenCalledTimes(1);
+  });
+
+  it('also caches ETA for the effective destination station without changing the next-stop event', async () => {
+    routePeek.mockReturnValue({
+      tripId: TEST_TRIP_ID,
+      effectiveRouteId: '44444444-4444-4444-8444-444444444444',
+      points: [
+        { latitude: 10.7, longitude: 106.66 },
+        { latitude: 11.9, longitude: 108.44 },
+      ],
+      destinationStation: {
+        stationId: TEST_DESTINATION_STATION_ID,
+        name: 'Da Lat',
+        latitude: 11.9,
+        longitude: 108.44,
+      },
+    });
+
+    const result = await service.handleGpsUpdate(createGps());
+
+    expect(result).toEqual(expect.objectContaining({ stopId: TEST_STOP_ID }));
+    const destinationPayload = store.get(
+      trackingEtaKey(TEST_TRIP_ID, TEST_DESTINATION_STATION_ID),
+    );
+    if (!destinationPayload) throw new Error('Expected destination ETA to be cached');
+    const destinationEta = JSON.parse(destinationPayload) as Record<string, unknown>;
+    expect(destinationEta).toMatchObject({
+      tripId: TEST_TRIP_ID,
+      targetKind: 'STATION',
+      stationId: TEST_DESTINATION_STATION_ID,
+      etaMinutes: 12,
+      distanceMeters: 7_500,
+    });
+    expect(localProvider.calculate).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Object),
+      expect.objectContaining({ stopId: TEST_DESTINATION_STATION_ID, stopName: 'Da Lat' }),
+    );
+  });
+
+  it('still returns the next-stop event when destination ETA calculation fails', async () => {
+    routePeek.mockReturnValue({
+      tripId: TEST_TRIP_ID,
+      points: [
+        { latitude: 10.7, longitude: 106.66 },
+        { latitude: 11.9, longitude: 108.44 },
+      ],
+      destinationStation: {
+        stationId: TEST_DESTINATION_STATION_ID,
+        name: 'Da Lat',
+        latitude: 11.9,
+        longitude: 108.44,
+      },
+    });
+    localProvider.calculate
+      .mockResolvedValueOnce({ distanceMeters: 7_500, etaMinutes: 12 })
+      .mockRejectedValueOnce(new Error('destination provider unavailable'));
+
+    await expect(service.handleGpsUpdate(createGps())).resolves.toEqual(
+      expect.objectContaining({ stopId: TEST_STOP_ID, etaMinutes: 12 }),
+    );
   });
 
   it('recalculates after the minimum interval when cached ETA is below 15 minutes', async () => {

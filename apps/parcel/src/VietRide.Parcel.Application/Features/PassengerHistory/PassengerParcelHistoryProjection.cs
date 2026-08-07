@@ -11,4 +11,6 @@ internal sealed record PassengerParcelHistoryProjection(
     long DepositRemainingAmount,
     long BalanceRemainingAmount,
     DateTimeOffset? LatestCheckInAt,
-    DateTimeOffset? FinalPaymentDeadline);
+    DateTimeOffset? FinalPaymentDeadline,
+    Guid? DropoffStopId = null,
+    Guid? DestinationStationId = null);

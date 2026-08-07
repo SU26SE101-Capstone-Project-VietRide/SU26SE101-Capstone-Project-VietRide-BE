@@ -198,7 +198,13 @@ public sealed class LockRoundTripSeatsHandlerTests
         public Task<RoundTripSeatLockStoreResult> TryLockAsync(RoundTripSeatLockStoreRequest request, CancellationToken cancellationToken)
             => Task.FromResult(replay is not null
                 ? new RoundTripSeatLockStoreResult(true, true, [], replay)
-                : new RoundTripSeatLockStoreResult(false, unavailableSeats.Count == 0, unavailableSeats, null));
+                : new RoundTripSeatLockStoreResult(
+                    false,
+                    unavailableSeats.Count == 0,
+                    unavailableSeats
+                        .Select(seatNumber => new RoundTripSeatConflict("outbound.seatNumbers", seatNumber))
+                        .ToArray(),
+                    null));
 
         public Task ReleaseAsync(IReadOnlyList<RoundTripSeatLockKey> keys, string idempotencyKey, CancellationToken cancellationToken)
         {

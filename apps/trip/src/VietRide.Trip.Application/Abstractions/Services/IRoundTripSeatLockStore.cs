@@ -27,8 +27,10 @@ public sealed record RoundTripSeatLockLeg(
 public sealed record RoundTripSeatLockStoreResult(
     bool IsReplay,
     bool Succeeded,
-    IReadOnlyList<string> UnavailableSeats,
+    IReadOnlyList<RoundTripSeatConflict> UnavailableSeats,
     RoundTripSeatLockReplay? Replay);
+
+public sealed record RoundTripSeatConflict(string Field, string SeatNumber);
 
 public sealed record RoundTripSeatLockReplay(
     RoundTripSeatLockReplayLeg Outbound,

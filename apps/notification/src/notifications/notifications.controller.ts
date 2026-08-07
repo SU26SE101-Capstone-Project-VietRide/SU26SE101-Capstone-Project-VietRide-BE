@@ -52,6 +52,7 @@ export class NotificationsController {
   @ApiQuery({ name: 'pageSize', type: Number, required: false, description: 'Maximum 100' })
   @ApiQuery({ name: 'sortBy', enum: ['createdAt', 'readAt', 'type'], required: false })
   @ApiQuery({ name: 'sortDir', enum: ['asc', 'desc'], required: false })
+  @ApiQuery({ name: 'cursor', type: String, required: false, description: 'Opaque continuation cursor' })
   @ApiResponse({
     status: 200,
     description:
@@ -123,6 +124,30 @@ export class NotificationsController {
   ): Promise<void> {
     requireUuidV4IdempotencyKey(idempotencyKey);
     await this.notificationsService.markRead(params.notificationId, this.readUserId(request));
+  }
+
+  @Post('read-all')
+  @ApiIdempotencyRequired()
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Atomically mark all current notifications as read' })
+  @ApiResponse({
+    status: 200,
+    description: 'Unread notifications up to the server cutoff were marked as read.',
+    schema: successEnvelopeSchema(200, {
+      type: 'object',
+      required: ['markedCount', 'readAt'],
+      properties: {
+        markedCount: { type: 'integer', minimum: 0, example: 4 },
+        readAt: { type: 'string', format: 'date-time' },
+      },
+    }),
+  })
+  async markAllRead(
+    @Req() request: RequestWithNotificationUser,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ): Promise<{ markedCount: number; readAt: string }> {
+    const normalizedKey = requireUuidV4IdempotencyKey(idempotencyKey);
+    return this.notificationsService.markAllRead(this.readUserId(request), normalizedKey);
   }
 
   private readUserId(request: RequestWithNotificationUser): string {

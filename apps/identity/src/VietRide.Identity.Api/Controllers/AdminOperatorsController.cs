@@ -6,6 +6,7 @@ using VietRide.Identity.Application.Features.Admin.ApproveOperator;
 using VietRide.Identity.Application.Features.Admin.CreateOperator;
 using VietRide.Identity.Application.Features.Admin.GetOperatorDetail;
 using VietRide.Identity.Application.Features.Admin.ListOperators;
+using VietRide.Identity.Application.Features.Admin.ReactivateOperator;
 using VietRide.Identity.Application.Features.Admin.RejectOperator;
 using VietRide.Identity.Application.Features.Admin.SuspendOperator;
 using VietRide.Shared.Kernel.Primitives;
@@ -156,6 +157,27 @@ public sealed class AdminOperatorsController : ControllerBase
     {
         var response = await _sender.Send(
             new SuspendOperatorCommand(CurrentUserClaims.GetRole(User), CurrentUserClaims.GetUserId(User), operatorId, request.Reason),
+            cancellationToken);
+
+        return Ok(response);
+    }
+
+    /// <summary>Reactivates a suspended operator without changing its subscription.</summary>
+    [HttpPost("{operatorId:guid}/reactivate")]
+    [ProducesResponseType(typeof(ApiResponse<ReactivateOperatorResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ReactivateOperatorResponseDto>> Reactivate(
+        Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        var response = await _sender.Send(
+            new ReactivateOperatorCommand(
+                CurrentUserClaims.GetRole(User),
+                CurrentUserClaims.GetUserId(User),
+                operatorId),
             cancellationToken);
 
         return Ok(response);

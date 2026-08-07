@@ -89,8 +89,12 @@ export class TrackingDataRepository {
     };
   }
 
-  async findEta(tripId: string, stopId: string): Promise<EtaResponseDto | null> {
-    const payload = await this.redis.getClient().get(trackingEtaKey(tripId, stopId));
+  async findEta(
+    tripId: string,
+    targetId: string,
+    targetKind: 'STOP' | 'STATION' = 'STOP',
+  ): Promise<EtaResponseDto | null> {
+    const payload = await this.redis.getClient().get(trackingEtaKey(tripId, targetId));
     if (!payload) return null;
 
     let parsedJson: unknown;
@@ -101,17 +105,30 @@ export class TrackingDataRepository {
     }
 
     const parsed = EtaBaseResponseSchema.safeParse(parsedJson);
-    if (!parsed.success || parsed.data.tripId !== tripId || parsed.data.stopId !== stopId) return null;
+    if (!parsed.success || parsed.data.tripId !== tripId || parsed.data.targetKind !== targetKind) return null;
+    if (targetKind === 'STOP' && parsed.data.stopId !== targetId) return null;
+    if (targetKind === 'STATION' && parsed.data.stationId !== targetId) return null;
     const baseEta: Omit<EtaResponseDto, 'delayed' | 'delayStatus' | 'delayMinutes'> = parsed.data;
+
+    if (targetKind === 'STATION') {
+      return {
+        ...baseEta,
+        delayed: null,
+        delayStatus: 'UNKNOWN',
+        delayMinutes: null,
+      };
+    }
 
     type DelayState = {
       stopId: string;
       delayStatus: 'DELAYED' | 'ON_TIME';
       delayMinutes: number;
     };
+    const stopId = baseEta.stopId;
+    if (!stopId) return null;
     let state: DelayState | null = null;
     const stateKeys = [
-      trackingTripDelayStateKey(tripId, baseEta.stopId),
+      trackingTripDelayStateKey(tripId, stopId),
       trackingTripDelayStateKey(tripId),
     ];
     for (const stateKey of stateKeys) {
@@ -122,7 +139,8 @@ export class TrackingDataRepository {
         const candidate = JSON.parse(statePayload) as Partial<DelayState> & { tripId?: unknown };
         if (
           candidate.tripId === tripId &&
-          candidate.stopId === baseEta.stopId &&
+          typeof candidate.stopId === 'string' &&
+          candidate.stopId === stopId &&
           (candidate.delayStatus === 'DELAYED' || candidate.delayStatus === 'ON_TIME') &&
           typeof candidate.delayMinutes === 'number' &&
           Number.isFinite(candidate.delayMinutes) &&
@@ -140,7 +158,7 @@ export class TrackingDataRepository {
       }
     }
 
-    const stateForEta = state !== null && state.stopId === baseEta.stopId ? state : null;
+    const stateForEta = state !== null && state.stopId === stopId ? state : null;
 
     return {
       ...baseEta,

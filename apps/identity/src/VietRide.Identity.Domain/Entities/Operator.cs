@@ -151,6 +151,17 @@ public sealed class Operator : BaseEntity<Guid>, ISoftDeletable, IActivatable
         IsActive = false;
     }
 
+    public void Reactivate()
+    {
+        if (RegistrationStatus != OperatorRegistrationStatus.SUSPENDED)
+        {
+            throw new InvalidOperationException("Only suspended operators can be reactivated.");
+        }
+
+        RegistrationStatus = OperatorRegistrationStatus.APPROVED;
+        IsActive = true;
+    }
+
     public void UpdateProfile(
         string name,
         string contactEmail,

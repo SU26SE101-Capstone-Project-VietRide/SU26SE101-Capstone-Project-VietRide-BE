@@ -102,7 +102,7 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         var routeIds = routes.Keys.ToHashSet();
         var candidates = tripRepository.QueryNoTracking()
             .Where(trip => routeIds.Contains(trip.RouteId)
-                && (trip.Status == TripStatus.SCHEDULED || trip.Status == TripStatus.BOARDING)
+                && trip.Status == TripStatus.SCHEDULED
                 && trip.DepartureDateTime >= start
                 && trip.DepartureDateTime < end)
             .OrderBy(trip => trip.DepartureDateTime)

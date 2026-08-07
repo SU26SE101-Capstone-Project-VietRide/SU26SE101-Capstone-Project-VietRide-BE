@@ -344,6 +344,7 @@ describe('buildRouteTable', () => {
     const cases = [
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],
       ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],
+      ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/reactivate', env.IDENTITY_BASE_URL],
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
       ['/v1/admin/activity-logs', env.IDENTITY_BASE_URL],

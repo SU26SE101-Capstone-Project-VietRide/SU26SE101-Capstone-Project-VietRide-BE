@@ -73,7 +73,9 @@ public sealed class SentParcelHistoryReader
             RemainingAmount(parcel.DepositRequiredVnd.Amount, parcel.DepositPaidVnd.Amount),
             RemainingAmount(parcel.BalanceRequiredVnd.Amount, parcel.BalancePaidVnd.Amount),
             parcel.LatestCheckInAt,
-            parcel.FinalPaymentDeadline))
+            parcel.FinalPaymentDeadline,
+            parcel.DropoffStopId,
+            context.TripSnapshots.GetValueOrDefault(parcel.TripId)?.DestinationStation.Id))
             .ToList();
 
         return PagedResult<PassengerParcelHistoryProjection>.Create(

@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.56.0
+> **Phiên bản:** 1.58.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-05
+> **Cập nhật lần cuối:** 2026-08-07
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1265,7 +1265,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
 endpoint có behavior-idempotent hay không, trừ đúng 17 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `188 mutation surfaces / 171 required / 17 exempt`;
+bảng sau. Inventory executable phải giữ tổng `190 mutation surfaces / 173 required / 17 exempt`;
 thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
 
 **Canonical 17 exemptions (không yêu cầu `Idempotency-Key`):**
@@ -1904,7 +1904,7 @@ role=OPERATOR_*:       socket.join(`operator:${operatorId}`)
 
 **Day-6 Operator status guard (Identity):** OPERATOR_ADMIN/OPERATOR_STAFF login is rejected with HTTP 403 `FORBIDDEN` when the caller's `Operator.registrationStatus != APPROVED`. Because access tokens can outlive a later suspend/reject, Identity application handlers MUST also re-check current Operator status for operator write/action endpoints. In Day 6 this applies to `POST /v1/operator/users`, `POST /v1/operator/users/{userId}/resend-initial-password`, and `PATCH /v1/operator/profile`: require current `Operator.registrationStatus=APPROVED`, otherwise return 403 `FORBIDDEN` with no side effects. `GET /v1/operator/profile` remains readable for OPERATOR_ADMIN/OPERATOR_STAFF even when non-APPROVED so the UI can display current status/policies. No Gateway -> Identity synchronous status hop is added.
 
-**Day-6 ActivityLog actor convention (Identity):** for operator onboarding/lifecycle actions, `activity_logs.user_id` stores the actor user id. Authenticated actions use the caller's user id; public operator self-registration uses the newly created OPERATOR_ADMIN user id as the self actor. Metadata is JSONB built via serializer (not string interpolation) and includes `operatorId`, `actorUserId`, `targetUserId` when different from actor, and `source` (for example `SELF_REGISTER`, `SYSTEM_ADMIN_CREATE_OPERATOR`, `OPERATOR_USER_CREATE`). Suspend writes no ActivityLog in Day 6 because `activity_log_action` has no `SUSPEND_OPERATOR` value.
+**Operator lifecycle ActivityLog actor convention (Identity):** for operator onboarding/lifecycle actions, `activity_logs.user_id` stores the actor user id. Authenticated actions use the caller's user id; public operator self-registration uses the newly created OPERATOR_ADMIN user id as the self actor. Metadata is JSONB built via serializer (not string interpolation) and includes `operatorId`, `actorUserId`, `targetUserId` when different from actor, and `source` (for example `SELF_REGISTER`, `SYSTEM_ADMIN_CREATE_OPERATOR`, `OPERATOR_USER_CREATE`). System Admin suspend and reactivate actions use `SUSPEND_OPERATOR` and `REACTIVATE_OPERATOR` respectively and record actor, operator ID and source.
 
 **Day-6 reject subscription rule (Identity):** when System Admin rejects a PENDING operator, Identity sets `Operator.registrationStatus=REJECTED` and sets the matching PENDING_APPROVAL `OperatorSubscription.status=CANCELLED`. `operator_subscriptions` has no `deleted_at` column and is not soft-deletable, so implementations MUST NOT set a subscription `deletedAt` value for reject.
 
@@ -3857,6 +3857,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.58.0** | 2026-08-07 | Codex | **MINOR** — Freeze Mobile gap contracts: passenger Trip search exposes only `SCHEDULED`; round-trip route identity and leg-scoped seat conflicts; effective-route geometry/ETag; STOP/STATION ETA and passenger-history tracking targets; atomic notification read-all plus snapshot cursor pagination; System Admin `SUSPENDED -> APPROVED` operator reactivation with ActivityLog and unchanged subscription; RAG 429 documents `RAG_RATE_LIMIT_EXCEEDED`. Adds two UUID-v4-required mutations, raising the executable inventory to 190/173/17. No new dependency or integration event. |
 | **1.57.0** | 2026-08-05 | Codex | **MINOR** — Hoàn thiện Tracking Phase 12: giữ fallback `STOPS_ONLY` cho Route thiếu polyline, làm rõ Google/Local ETA fallback và UNKNOWN, khóa quy tắc chọn stop/recalculate, bổ sung delay state 24h, Outbox `dedupeKey` unique, transition `DELAYED`/`DELAY_CLEARED` và contract ETA additive tương thích ngược. |
 | **1.56.0** | 2026-08-05 | Codex | **MINOR** — Bổ sung event `booking.booking.created` cho Tracking/Notification, payload crew-facing strict và phát Outbox nguyên tử cùng chuyển Booking sang CONFIRMED; giữ nguyên event `booking.booking.confirmed` tương thích ngược. |
 | **1.55.0** | 2026-08-04 | Codex | **MINOR** — Hoàn thiện Shuttle hai chiều inbound/outbound, snapshot road distance Google Routes tối đa 5 km, internal distance contract, manifest/lifecycle event registry, operator subscription guard và fail-safe migration rollback. |

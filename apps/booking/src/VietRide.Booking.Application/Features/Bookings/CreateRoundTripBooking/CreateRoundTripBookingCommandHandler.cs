@@ -134,6 +134,14 @@ public sealed class CreateRoundTripBookingCommandHandler
                 "Outbound route is not configured with a return route.");
         }
 
+        if (returnTrip.RouteId != outboundTrip.ReturnRouteId.Value)
+        {
+            throw new CodedValidationException(
+                "BOOKING_ROUND_TRIP_INVALID",
+                "Return trip does not use the outbound route's configured return route.",
+                [new ValidationError("return.tripId", "Return trip does not use the configured return route.")]);
+        }
+
         if (returnTrip.DepartureDateTime <= outboundTrip.EstimatedArrivalTime)
         {
             throw new CodedValidationException(
@@ -167,7 +175,10 @@ public sealed class CreateRoundTripBookingCommandHandler
                 success.Return.ExpiresAt),
             LockRoundTripSeatsOutcome.SeatUnavailable unavailable => throw new ConflictException(
                 "BOOKING_SEAT_UNAVAILABLE",
-                $"One or more seats are unavailable: {string.Join(", ", unavailable.UnavailableSeats)}."),
+                "One or more requested seats are unavailable.",
+                unavailable.Conflicts
+                    .Select(conflict => new ValidationError(conflict.Field, conflict.SeatNumber))
+                    .ToArray()),
             LockRoundTripSeatsOutcome.TripNotBookable notBookable => throw new ConflictException(
                 "BOOKING_TRIP_NOT_BOOKABLE",
                 notBookable.Message),

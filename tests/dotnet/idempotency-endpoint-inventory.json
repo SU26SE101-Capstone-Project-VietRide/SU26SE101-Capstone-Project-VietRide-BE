@@ -2,8 +2,8 @@
   "version": 3,
   "policy": "system-wide-idempotency-contract",
   "expectedSummary": {
-    "mutationSurfaces": 187,
-    "required": 170,
+    "mutationSurfaces": 189,
+    "required": 172,
     "exemptions": 17
   },
   "services": {
@@ -11,7 +11,7 @@
       "stack": "dotnet",
       "servicePrefix": "identity",
       "requireAllMutations": true,
-      "expectedMutationCount": 35,
+      "expectedMutationCount": 36,
       "endpoints": [
         {
           "method": "POST",
@@ -31,6 +31,11 @@
         {
           "method": "POST",
           "path": "/v1/admin/operators/{operatorId:guid}/suspend",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/operators/{operatorId:guid}/reactivate",
           "policy": "required"
         },
         {
@@ -913,8 +918,8 @@
       "sourceDirectory": "apps/notification/src",
       "requiredDecorator": "ApiIdempotencyRequired",
       "decoratorFile": "apps/notification/src/swagger/idempotency.swagger.ts",
-      "expectedMutationCount": 3,
-      "expectedRequiredCount": 3,
+      "expectedMutationCount": 4,
+      "expectedRequiredCount": 4,
       "endpoints": [
         {
           "method": "POST",
@@ -924,6 +929,11 @@
         {
           "method": "POST",
           "path": "/v1/notifications/:notificationId/read",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/notifications/read-all",
           "policy": "required"
         },
         {

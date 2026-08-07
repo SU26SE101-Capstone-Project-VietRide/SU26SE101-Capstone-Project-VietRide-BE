@@ -42,7 +42,8 @@ public sealed class TripHandlerProjectionTests
             new InMemoryRouteRepository([route]),
             new InMemoryTripStopRepository([tripStop]),
             new InMemoryStopRepository([waypoint]),
-            new InMemoryStationRepository([origin, destination]));
+            new InMemoryStationRepository([origin, destination]),
+            new InMemoryAlternativeRouteRepository([], []));
 
         var result = await handler.Handle(new GetTripRouteGeometryTrackingQuery(trip.Id), CancellationToken.None);
 
@@ -65,6 +66,70 @@ public sealed class TripHandlerProjectionTests
         });
         result.DestinationStation.Should().NotBeNull();
         result.DestinationStation!.StationId.Should().Be(destination.Id);
+        result.EffectiveRouteId.Should().Be(route.Id);
+    }
+
+    [Fact]
+    public async Task TrackingRouteGeometry_AssignedAlternativeUsesItsPolylineStopsAndDestination()
+    {
+        var operatorId = Guid.NewGuid();
+        var origin = Station.Create("Main origin", "main-origin", "HCM", "HCM", latitude: 10.7m, longitude: 106.6m);
+        var mainDestination = Station.Create("Main destination", "main-destination", "Can Tho", "Can Tho", latitude: 10.0m, longitude: 105.7m);
+        var alternativeDestination = Station.Create("Alternative destination", "alternative-destination", "Da Lat", "Da Lat", latitude: 11.9m, longitude: 108.4m);
+        var route = Route.Create(operatorId, "Main route", origin.Id, mainDestination.Id, Money.FromRaw(100_000), 100m, 120);
+        route.SetPathGeometry("_p~iF~ps|U_ulLnnqC_mqNvxq`@");
+        var alternative = AlternativeRoute.Create(route.Id, "Incident bypass", alternativeDestination.Id, 90m, 110);
+        alternative.SetPathGeometry("_ulLnnqC_mqNvxq`@");
+        var alternativeStop = Stop.Create(operatorId, "Alternative stop", 11.2m, 107.2m);
+        var alternativeRouteStop = AlternativeRouteStop.Create(alternative.Id, alternativeStop.Id, 1, 45, null);
+        var trip = CreateTrip(operatorId, route.Id, DateTimeOffset.UtcNow.AddDays(1));
+        trip.ChangeAlternativeRoute(alternative.Id);
+        var staleMainStop = Stop.Create(operatorId, "Stale main stop", 10.5m, 106.2m);
+        var tripStop = TripStop.Create(trip.Id, staleMainStop.Id, 1, trip.DepartureDateTime.AddMinutes(30), true, true, 50m);
+        var handler = new GetTripRouteGeometryTrackingHandler(
+            new InMemoryTripRepository([trip]),
+            new InMemoryRouteRepository([route]),
+            new InMemoryTripStopRepository([tripStop]),
+            new InMemoryStopRepository([alternativeStop, staleMainStop]),
+            new InMemoryStationRepository([origin, mainDestination, alternativeDestination]),
+            new InMemoryAlternativeRouteRepository([alternative], [alternativeRouteStop]));
+
+        var result = await handler.Handle(new GetTripRouteGeometryTrackingQuery(trip.Id), CancellationToken.None);
+
+        result.EffectiveRouteId.Should().Be(alternative.Id);
+        result.GeometrySource.Should().Be("ROUTE_POLYLINE");
+        result.IntermediateStops.Should().ContainSingle().Which.StopId.Should().Be(alternativeStop.Id);
+        result.IntermediateStops.Should().NotContain(stop => stop.StopId == staleMainStop.Id);
+        result.DestinationStation!.StationId.Should().Be(alternativeDestination.Id);
+    }
+
+    [Fact]
+    public async Task TrackingRouteGeometry_AlternativeWithoutPolylineDoesNotReuseMainRoutePolyline()
+    {
+        var operatorId = Guid.NewGuid();
+        var origin = Station.Create("Main origin", "main-origin", "HCM", "HCM", latitude: 10.7m, longitude: 106.6m);
+        var mainDestination = Station.Create("Main destination", "main-destination", "Can Tho", "Can Tho", latitude: 10.0m, longitude: 105.7m);
+        var alternativeDestination = Station.Create("Alternative destination", "alternative-destination", "Da Lat", "Da Lat", latitude: 11.9m, longitude: 108.4m);
+        var route = Route.Create(operatorId, "Main route", origin.Id, mainDestination.Id, Money.FromRaw(100_000), 100m, 120);
+        route.SetPathGeometry("_p~iF~ps|U_ulLnnqC_mqNvxq`@");
+        var alternative = AlternativeRoute.Create(route.Id, "Incident bypass", alternativeDestination.Id, 90m, 110);
+        var alternativeStop = Stop.Create(operatorId, "Alternative stop", 11.2m, 107.2m);
+        var alternativeRouteStop = AlternativeRouteStop.Create(alternative.Id, alternativeStop.Id, 1, 45, null);
+        var trip = CreateTrip(operatorId, route.Id, DateTimeOffset.UtcNow.AddDays(1));
+        trip.ChangeAlternativeRoute(alternative.Id);
+        var handler = new GetTripRouteGeometryTrackingHandler(
+            new InMemoryTripRepository([trip]),
+            new InMemoryRouteRepository([route]),
+            new InMemoryTripStopRepository([]),
+            new InMemoryStopRepository([alternativeStop]),
+            new InMemoryStationRepository([origin, mainDestination, alternativeDestination]),
+            new InMemoryAlternativeRouteRepository([alternative], [alternativeRouteStop]));
+
+        var result = await handler.Handle(new GetTripRouteGeometryTrackingQuery(trip.Id), CancellationToken.None);
+
+        result.GeometrySource.Should().Be("STOPS_ONLY");
+        result.Points.Should().Equal(new RouteGeometryPointDto(11.2, 107.2));
+        result.DestinationStation!.StationId.Should().Be(alternativeDestination.Id);
     }
 
     [Theory]
@@ -85,7 +150,8 @@ public sealed class TripHandlerProjectionTests
             new InMemoryRouteRepository([route]),
             new InMemoryTripStopRepository([tripStop]),
             new InMemoryStopRepository([waypoint]),
-            new InMemoryStationRepository([origin, destination]));
+            new InMemoryStationRepository([origin, destination]),
+            new InMemoryAlternativeRouteRepository([], []));
 
         var result = await handler.Handle(new GetTripRouteGeometryTrackingQuery(trip.Id), CancellationToken.None);
 
@@ -180,7 +246,7 @@ public sealed class TripHandlerProjectionTests
     }
 
     [Fact]
-    public async Task Search_IncludesScheduledAndBoardingTrips()
+    public async Task Search_IncludesScheduledAndExcludesBoardingTrips()
     {
         var fixture = SearchFixture.Create();
         var scheduled = CreateTrip(fixture.OperatorId, fixture.Route.Id, DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"));
@@ -193,7 +259,7 @@ public sealed class TripHandlerProjectionTests
 
         var result = await fixture.Handler.Handle(fixture.Query, CancellationToken.None);
 
-        result.Items.Select(item => item.TripId).Should().Equal(scheduled.Id, boarding.Id);
+        result.Items.Select(item => item.TripId).Should().Equal(scheduled.Id);
     }
 
     [Fact]
@@ -738,6 +804,42 @@ public sealed class TripHandlerProjectionTests
 
         public Task<bool> ExistsActiveOwnedByOperatorAsync(Guid operatorId, Guid routeId, CancellationToken cancellationToken) =>
             Task.FromResult(Query().Any(route => route.OperatorId == operatorId && route.Id == routeId && route.IsActive));
+    }
+
+    private sealed class InMemoryAlternativeRouteRepository(
+        List<AlternativeRoute> routes,
+        List<AlternativeRouteStop> stops)
+        : InMemoryRepository<AlternativeRoute, Guid>(routes, route => route.Id), IAlternativeRouteRepository
+    {
+        public Task<AlternativeRoute?> GetOwnedByIdAsync(
+            Guid operatorId,
+            Guid alternativeRouteId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(Query().FirstOrDefault(route => route.Id == alternativeRouteId));
+
+        public Task<bool> ExistsStopAsync(Guid alternativeRouteId, Guid stopId, CancellationToken cancellationToken) =>
+            Task.FromResult(stops.Any(stop => stop.AlternativeRouteId == alternativeRouteId && stop.StopId == stopId));
+
+        public Task<bool> ExistsStopOrderIndexAsync(Guid alternativeRouteId, int orderIndex, CancellationToken cancellationToken) =>
+            Task.FromResult(stops.Any(stop => stop.AlternativeRouteId == alternativeRouteId && stop.OrderIndex == orderIndex));
+
+        public Task<IReadOnlyList<AlternativeRouteStop>> ListStopsAsync(
+            Guid alternativeRouteId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<AlternativeRouteStop>>(stops
+                .Where(stop => stop.AlternativeRouteId == alternativeRouteId)
+                .OrderBy(stop => stop.OrderIndex)
+                .ToArray());
+
+        public Task ReplaceStopsAsync(
+            Guid alternativeRouteId,
+            IReadOnlyCollection<AlternativeRouteStop> replacementStops,
+            CancellationToken cancellationToken)
+        {
+            stops.RemoveAll(stop => stop.AlternativeRouteId == alternativeRouteId);
+            stops.AddRange(replacementStops);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class InMemoryLocationRepository : InMemoryRepository<Location, Guid>, ILocationRepository
