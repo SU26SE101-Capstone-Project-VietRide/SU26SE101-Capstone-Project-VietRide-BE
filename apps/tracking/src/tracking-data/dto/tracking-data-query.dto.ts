@@ -31,7 +31,25 @@ export const TrailQuerySchema = z
 export type TrailQueryDto = z.infer<typeof TrailQuerySchema>;
 
 export const EtaQuerySchema = z.object({
+  targetKind: z.enum(['STOP', 'STATION']).optional(),
   stopId: z.string().uuid().optional(),
+  stationId: z.string().uuid().optional(),
+}).superRefine((query, context) => {
+  const validLegacy = query.targetKind === undefined
+    && query.stationId === undefined;
+  const validStop = query.targetKind === 'STOP'
+    && query.stopId !== undefined
+    && query.stationId === undefined;
+  const validStation = query.targetKind === 'STATION'
+    && query.stationId !== undefined
+    && query.stopId === undefined;
+  if (!validLegacy && !validStop && !validStation) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['targetKind'],
+      message: 'targetKind must be paired with exactly one matching stopId or stationId',
+    });
+  }
 });
 
 export type EtaQueryDto = z.infer<typeof EtaQuerySchema>;

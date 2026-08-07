@@ -395,12 +395,13 @@ public sealed class StationMergeSerializationTests
                     false)));
         var operatorId = Guid.NewGuid();
         var destinationStationId = Guid.NewGuid();
+        var returnRouteId = Guid.NewGuid();
         var trip = CreateTripSnapshot(
             tripId,
             operatorId,
             duplicateStationId,
             destinationStationId,
-            returnRouteId: Guid.NewGuid());
+            returnRouteId: returnRouteId);
         tripClient.GetTripSnapshotAsync(tripId, Arg.Any<CancellationToken>()).Returns(trip);
         tripClient.GetTripSnapshotAsync(
                 tripId,
@@ -457,7 +458,8 @@ public sealed class StationMergeSerializationTests
                         operatorId,
                         duplicateStationId,
                         Guid.NewGuid(),
-                        departureOffsetHours: 10);
+                        departureOffsetHours: 10,
+                        routeId: returnRouteId);
                     tripClient.GetTripSnapshotAsync(returnTripId, Arg.Any<CancellationToken>()).Returns(returnTrip);
                     tripClient.GetTripSnapshotAsync(
                             returnTripId,
@@ -574,11 +576,12 @@ public sealed class StationMergeSerializationTests
         Guid originStationId,
         Guid destinationStationId,
         int departureOffsetHours = 6,
-        Guid? returnRouteId = null)
+        Guid? returnRouteId = null,
+        Guid? routeId = null)
         => new(
             tripId,
             operatorId,
-            Guid.NewGuid(),
+            routeId ?? Guid.NewGuid(),
             Guid.NewGuid(),
             "SCHEDULED",
             Now.AddHours(departureOffsetHours),

@@ -4,6 +4,7 @@ using NSubstitute;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Events;
 using VietRide.Identity.Application.Features.Admin.ApproveOperator;
+using VietRide.Identity.Application.Features.Admin.ReactivateOperator;
 using VietRide.Identity.Application.Features.Admin.RejectOperator;
 using VietRide.Identity.Application.Features.Admin.SuspendOperator;
 using VietRide.Identity.Domain.Entities;
@@ -128,7 +129,7 @@ public sealed class LifecycleOperatorCommandHandlerTests
     }
 
     [Fact]
-    public async Task Suspend_HappyPath_SuspendsApprovedOperatorWithoutActivityLog()
+    public async Task Suspend_HappyPath_SuspendsApprovedOperatorAndWritesActivityLog()
     {
         var fixture = new Fixture();
         var operatorEntity = PendingOperator();
@@ -146,7 +147,10 @@ public sealed class LifecycleOperatorCommandHandlerTests
         response.RegistrationStatus.Should().Be(OperatorRegistrationStatus.SUSPENDED.ToString());
         operatorEntity.SuspendedAt.Should().Be(FixedNow);
         operatorEntity.SuspendReason.Should().Be("Policy violation");
-        await fixture.ActivityLogs.DidNotReceive().AddAsync(Arg.Any<ActivityLog>(), Arg.Any<CancellationToken>());
+        await fixture.ActivityLogs.Received(1).AddAsync(
+            Arg.Is<ActivityLog>(x => x.Action == ActivityLogAction.SUSPEND_OPERATOR
+                && HasLifecycleMetadata(x.Metadata, operatorEntity.Id, "SYSTEM_ADMIN_SUSPEND_OPERATOR")),
+            Arg.Any<CancellationToken>());
         await fixture.Outbox.Received(1).EnqueueAsync(
             "identity.operator.suspended",
             Arg.Is<string>(p => HasOperatorTimestampPayload(p, "operatorId", operatorEntity.Id, "suspendedAt", FixedNow)),
@@ -174,6 +178,52 @@ public sealed class LifecycleOperatorCommandHandlerTests
         operatorEntity.RegistrationStatus.Should().Be(OperatorRegistrationStatus.PENDING);
         await fixture.ActivityLogs.DidNotReceive().AddAsync(Arg.Any<ActivityLog>(), Arg.Any<CancellationToken>());
         await fixture.Outbox.DidNotReceive().EnqueueAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Reactivate_HappyPath_PreservesApprovalAndSuspensionMetadataAndWritesActivityLog()
+    {
+        var fixture = new Fixture();
+        var operatorEntity = PendingOperator();
+        var approvedAt = FixedNow.AddDays(-10);
+        operatorEntity.Approve(CallerUserId, approvedAt);
+        operatorEntity.Suspend("Policy violation", FixedNow.AddDays(-1));
+        fixture.Operators.GetByIdAsync(operatorEntity.Id, Arg.Any<CancellationToken>()).Returns(operatorEntity);
+
+        var response = await fixture.ReactivateHandler.Handle(
+            new ReactivateOperatorCommand(UserRole.SYSTEM_ADMIN.ToString(), CallerUserId, operatorEntity.Id),
+            CancellationToken.None);
+
+        response.RegistrationStatus.Should().Be(OperatorRegistrationStatus.APPROVED.ToString());
+        response.IsActive.Should().BeTrue();
+        operatorEntity.ApprovedAt.Should().Be(approvedAt);
+        operatorEntity.SuspendedAt.Should().Be(FixedNow.AddDays(-1));
+        operatorEntity.SuspendReason.Should().Be("Policy violation");
+        await fixture.ActivityLogs.Received(1).AddAsync(
+            Arg.Is<ActivityLog>(x => x.Action == ActivityLogAction.REACTIVATE_OPERATOR
+                && HasLifecycleMetadata(x.Metadata, operatorEntity.Id, "SYSTEM_ADMIN_REACTIVATE_OPERATOR")),
+            Arg.Any<CancellationToken>());
+        await fixture.Outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Reactivate_InvalidState_ThrowsValidationExceptionWithoutActivityLog()
+    {
+        var fixture = new Fixture();
+        var operatorEntity = PendingOperator();
+        fixture.Operators.GetByIdAsync(operatorEntity.Id, Arg.Any<CancellationToken>()).Returns(operatorEntity);
+
+        var act = () => fixture.ReactivateHandler.Handle(
+            new ReactivateOperatorCommand(UserRole.SYSTEM_ADMIN.ToString(), CallerUserId, operatorEntity.Id),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<ValidationException>();
+        await fixture.ActivityLogs.DidNotReceive().AddAsync(
+            Arg.Any<ActivityLog>(),
+            Arg.Any<CancellationToken>());
     }
 
     private static Operator PendingOperator()
@@ -239,7 +289,8 @@ public sealed class LifecycleOperatorCommandHandlerTests
                 Outbox,
                 WalletBackfillMarkers);
             RejectHandler = new RejectOperatorCommandHandler(Operators, OperatorSubscriptions, ActivityLogs, Clock);
-            SuspendHandler = new SuspendOperatorCommandHandler(Operators, Users, Clock, Outbox);
+            SuspendHandler = new SuspendOperatorCommandHandler(Operators, Users, Clock, Outbox, ActivityLogs);
+            ReactivateHandler = new ReactivateOperatorCommandHandler(Operators, ActivityLogs);
         }
 
         public IOperatorRepository Operators { get; } = Substitute.For<IOperatorRepository>();
@@ -252,5 +303,6 @@ public sealed class LifecycleOperatorCommandHandlerTests
         public ApproveOperatorCommandHandler ApproveHandler { get; }
         public RejectOperatorCommandHandler RejectHandler { get; }
         public SuspendOperatorCommandHandler SuspendHandler { get; }
+        public ReactivateOperatorCommandHandler ReactivateHandler { get; }
     }
 }

@@ -144,7 +144,17 @@ public abstract record LockRoundTripSeatsOutcome
         RoundTripSeatLockResult Return) : LockRoundTripSeatsOutcome;
 
     /// <summary>409 BOOKING_SEAT_UNAVAILABLE — no seats were retained.</summary>
-    public sealed record SeatUnavailable(IReadOnlyList<string> UnavailableSeats) : LockRoundTripSeatsOutcome;
+    public sealed record SeatUnavailable(IReadOnlyList<RoundTripSeatConflict> Conflicts) : LockRoundTripSeatsOutcome
+    {
+        public SeatUnavailable(IReadOnlyList<string> unavailableSeats)
+            : this(unavailableSeats
+                .Select(seatNumber => new RoundTripSeatConflict("outbound.seatNumbers", seatNumber))
+                .ToArray())
+        {
+        }
+
+        public IReadOnlyList<string> UnavailableSeats => Conflicts.Select(conflict => conflict.SeatNumber).ToArray();
+    }
 
     /// <summary>409 BOOKING_TRIP_NOT_BOOKABLE — at least one trip status ≠ SCHEDULED.</summary>
     public sealed record TripNotBookable(string Message) : LockRoundTripSeatsOutcome;
@@ -155,6 +165,8 @@ public abstract record LockRoundTripSeatsOutcome
     /// <summary>Unexpected HTTP / transport error.</summary>
     public sealed record TransportError(string Message) : LockRoundTripSeatsOutcome;
 }
+
+public sealed record RoundTripSeatConflict(string Field, string SeatNumber);
 
 // ---------------------------------------------------------------------------
 // ITripServiceClient

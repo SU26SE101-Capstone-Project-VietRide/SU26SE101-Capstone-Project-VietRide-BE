@@ -37,6 +37,7 @@ const routeGeometryIntermediateStopSchema = z.object({
 
 const routeGeometryDataSchema = z.object({
   tripId: z.string().uuid(),
+  effectiveRouteId: z.string().uuid().optional(),
   points: z.array(routeGeometryPointSchema),
   alertRecipientUserIds: z.array(z.string()).nullish(),
   geometrySource: z.enum(['ROUTE_POLYLINE', 'STOPS_ONLY']).optional(),
@@ -81,13 +82,16 @@ export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider 
     return this.toLegacySnapshot(result);
   }
 
-  async getDetailedRouteGeometry(tripId: string): Promise<RouteGeometryFetchResult> {
-    const cached = this.cache.get(tripId);
+  async getDetailedRouteGeometry(
+    tripId: string,
+    options?: { bypassCache?: boolean },
+  ): Promise<RouteGeometryFetchResult> {
+    const cached = options?.bypassCache ? undefined : this.cache.get(tripId);
     if (cached && Date.now() < cached.expiresAt) {
       return cached.result;
     }
 
-    const existing = this.inFlight.get(tripId);
+    const existing = options?.bypassCache ? undefined : this.inFlight.get(tripId);
     if (existing) return existing;
 
     const request = this.fetchRouteGeometry(tripId);
@@ -150,6 +154,9 @@ export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider 
 
       const result: RouteGeometrySnapshot = {
         tripId: parsed.data.tripId,
+        ...(parsed.data.effectiveRouteId
+          ? { effectiveRouteId: parsed.data.effectiveRouteId }
+          : {}),
         points,
         ...(parsed.data.geometrySource ? { geometrySource: parsed.data.geometrySource } : {}),
         ...(parsed.data.originStation !== undefined

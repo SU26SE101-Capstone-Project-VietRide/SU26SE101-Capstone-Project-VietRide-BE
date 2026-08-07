@@ -63,7 +63,7 @@ public class CreateRoundTripBookingIntegrationTests
         var returnTrip = new TripSnapshot(
             returnTripId,
             Guid.NewGuid(),
-            Guid.NewGuid(),
+            returnRouteId,
             Guid.NewGuid(),
             "SCHEDULED",
             DateTimeOffset.UtcNow.AddHours(6),

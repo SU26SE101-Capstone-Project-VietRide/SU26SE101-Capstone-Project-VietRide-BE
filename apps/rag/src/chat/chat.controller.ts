@@ -56,7 +56,7 @@ export class ChatController {
   @ApiResponse({ status: 401, description: 'Missing or invalid access token', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token') })
   @ApiResponse({ status: 403, description: 'Caller is not allowed to query RAG or the module is disabled', schema: ragChatForbiddenSchema })
   @ApiResponse({ status: 404, description: 'Conversation not found', schema: errorEnvelopeSchema(404, 'RAG_CONVERSATION_NOT_FOUND', 'Conversation not found') })
-  @ApiResponse({ status: 429, description: 'Rate limit exceeded', schema: errorEnvelopeSchema(429, 'RATE_LIMIT_EXCEEDED', 'Rate limit exceeded') })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded', schema: errorEnvelopeSchema(429, 'RAG_RATE_LIMIT_EXCEEDED', 'Rate limit exceeded') })
   @ApiResponse({ status: 503, description: 'RAG provider or Identity subscription lookup is unavailable', schema: ragChatUnavailableSchema })
   async create(
     @Body(new ZodValidationPipe(CreateChatSchema)) dto: CreateChatDto,

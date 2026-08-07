@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-05 (Route/operations API and two-level Station address extension)
+> **Cập nhật:** 2026-08-07 (Mobile contract gaps and operator reactivation)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -605,7 +605,7 @@ Cùng codebase NextJS với Operator Web, phân biệt qua role SYSTEM_ADMIN. Na
 
   **ActivityLog — entity requirements (thuộc Identity & User Service):**
   - Link tới userId
-  - `action` enum: LOGIN | LOGOUT | BOOK_TICKET | CANCEL_TICKET | UPDATE_PROFILE | CHANGE_PASSWORD | CREATE_OPERATOR | APPROVE_OPERATOR | LOCK_USER | UNLOCK_USER | STATION_MERGED | STATION_NORMALIZED (mở rộng khi cần)
+  - `action` enum: LOGIN | LOGOUT | BOOK_TICKET | CANCEL_TICKET | UPDATE_PROFILE | CHANGE_PASSWORD | CREATE_OPERATOR | APPROVE_OPERATOR | SUSPEND_OPERATOR | REACTIVATE_OPERATOR | LOCK_USER | UNLOCK_USER | STATION_MERGED | STATION_NORMALIZED (mở rộng khi cần)
   - `metadata` JSONB nullable — context tùy action (bookingId, userAgent, etc.)
   - `ipAddress` string, `createdAt` datetime
   - Query pattern phổ biến: theo userId order by createdAt DESC → cần index phù hợp
@@ -5211,6 +5211,20 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **Parcel delivery tại Stop dọc tuyến** — `Parcel.dropoffStopId` nullable. Sender chọn Stop trong RouteStop của trip; UNLOADED trigger check stop của parcel.
 - **`RouteStop` là single source of truth cho pickup/dropoff control** — bỏ hoàn toàn `Trip.allowAlongRoutePickup`/`Dropoff` và `Route.defaultAllowAlongRoute*`. Operator kiểm soát qua việc thêm/bỏ RouteStop entries.
 - **`RouteStop.allowPickup` + `RouteStop.allowDropoff`** — phân loại stop pickup-only / dropoff-only / both, phản ánh thực tế operator gom khách đầu tuyến và trả khách dần cuối tuyến. Snapshot vào TripStop.
+
+## Điều chỉnh Mobile contract và phục hồi nhà xe — 2026-08-07
+
+- Passenger chỉ tìm thấy Trip `SCHEDULED`; Booking vẫn kiểm tra lại lifecycle khi ghi.
+- Round-trip bắt buộc Route của Trip về bằng `returnRouteId` của Route chiều đi trước khi lock ghế.
+  Conflict ghế phải giữ attribution theo outbound/return leg.
+- Tracking dùng Route hiệu lực: Route chính khi chưa gán AlternativeRoute, ngược lại dùng geometry,
+  ordered stops và destination station của AlternativeRoute. ETA phân biệt `STOP` và `STATION`;
+  history trả cùng tracking-target union, không suy ID từ tên.
+- Notification read-all dùng cutoff phía server, idempotency theo user/key trong Redis 24 giờ và
+  update nguyên tử. Danh sách dùng snapshot cursor ổn định với thứ tự `createdAt DESC, id DESC`.
+- System Admin được phục hồi Operator chỉ từ `SUSPENDED` về `APPROVED`. Phục hồi bật lại
+  `isActive`, giữ nguyên subscription, `approvedAt`, thời hạn gói và metadata suspend; refresh token
+  đã revoke không được khôi phục. Suspend/reactivate đều ghi ActivityLog; không phát event mới.
 
 ## Điều chỉnh Route/Operations và địa chỉ Station — 2026-08-05
 

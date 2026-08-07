@@ -126,10 +126,13 @@ describe('NotificationsController (e2e)', () => {
     expect(response.body.success).toBe(true);
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { userId: OWNER_USER_ID, readAt: null },
-        orderBy: { createdAt: 'desc' },
-        skip: 0,
-        take: 20,
+        where: expect.objectContaining({
+          userId: OWNER_USER_ID,
+          readAt: null,
+          createdAt: { lte: expect.any(Date) },
+        }),
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 21,
       }),
     );
     expect(response.body.data?.items[0]).toEqual(

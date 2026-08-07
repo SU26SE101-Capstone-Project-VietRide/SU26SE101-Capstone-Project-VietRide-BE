@@ -69,7 +69,9 @@ public sealed class GetBookingHistoryQueryHandler
                     ticket.Status.ToString(),
                     ticket.PaidAmount.Amount))
                 .ToList(),
-            paymentRedirectUrls.GetValueOrDefault(booking.Id)))
+            paymentRedirectUrls.GetValueOrDefault(booking.Id),
+            booking.DropoffStationId,
+            booking.DropoffStopId))
             .ToList();
 
         return PagedResult<BookingHistoryItemDto>.Create(

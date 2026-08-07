@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { RedisService } from '@vietride/nest-redis';
+import { z } from 'zod';
 import { EmailDeliveryStatus, type Notification } from '../generated/notification-prisma-client';
 import {
   CreateNotificationSchema,
@@ -31,7 +33,24 @@ export interface PagedNotificationsDto {
   totalPages: number;
   hasNextPage: boolean;
   hasPreviousPage: boolean;
+  nextCursor: string | null;
 }
+
+export interface MarkAllReadDto {
+  markedCount: number;
+  readAt: string;
+}
+
+const NotificationCursorSchema = z.object({
+  version: z.literal(1),
+  userId: z.string().uuid(),
+  snapshotCutoff: z.string().datetime(),
+  lastCreatedAt: z.string().datetime(),
+  lastId: z.string().uuid(),
+  unreadOnly: z.boolean(),
+  pageSize: z.number().int().min(1).max(100),
+  pageIndex: z.number().int().min(2),
+});
 
 export interface EmailDeliveryDto {
   id: string;
@@ -48,6 +67,7 @@ export class NotificationsService {
     private readonly fcmPushQueue: FcmPushQueue,
     private readonly emailSendQueue: EmailSendQueue,
     private readonly emailTemplateRenderer: EmailTemplateRenderer,
+    @Optional() private readonly redis?: RedisService,
   ) {}
 
   async createNotification(dto: CreateNotificationDto): Promise<NotificationItemDto> {
@@ -65,18 +85,59 @@ export class NotificationsService {
     userId: string,
     query: ListNotificationsQueryDto,
   ): Promise<PagedNotificationsDto> {
-    const result = await this.notificationsRepository.listForUser(userId, query);
-    const totalPages = Math.ceil(result.totalItems / query.pageSize);
+    const cursor = query.cursor ? this.decodeCursor(query.cursor, userId) : null;
+    const effectiveQuery = cursor
+      ? { ...query, unreadOnly: cursor.unreadOnly, pageSize: cursor.pageSize, page: cursor.pageIndex }
+      : query;
+    const snapshotCutoff = cursor ? new Date(cursor.snapshotCutoff) : new Date();
+    const result = await this.notificationsRepository.listForUser(userId, effectiveQuery, {
+      snapshotCutoff,
+      ...(cursor
+        ? { lastCreatedAt: new Date(cursor.lastCreatedAt), lastId: cursor.lastId }
+        : effectiveQuery.page > 1
+          ? { skip: (effectiveQuery.page - 1) * effectiveQuery.pageSize }
+          : {}),
+    });
+    const totalPages = Math.ceil(result.totalItems / effectiveQuery.pageSize);
+    const last = result.items.at(-1);
+    const hasMore = result.hasMore ?? effectiveQuery.page < totalPages;
+    const nextCursor = hasMore && last
+      ? this.encodeCursor({
+          version: 1,
+          userId,
+          snapshotCutoff: snapshotCutoff.toISOString(),
+          lastCreatedAt: last.createdAt.toISOString(),
+          lastId: last.id,
+          unreadOnly: effectiveQuery.unreadOnly,
+          pageSize: effectiveQuery.pageSize,
+          pageIndex: effectiveQuery.page + 1,
+        })
+      : null;
 
     return {
       items: result.items.map((notification) => this.toDto(notification)),
-      page: query.page,
-      pageSize: query.pageSize,
+      page: effectiveQuery.page,
+      pageSize: effectiveQuery.pageSize,
       totalItems: result.totalItems,
       totalPages,
-      hasNextPage: query.page < totalPages,
-      hasPreviousPage: query.page > 1,
+      hasNextPage: hasMore,
+      hasPreviousPage: effectiveQuery.page > 1,
+      nextCursor,
     };
+  }
+
+  async markAllRead(userId: string, idempotencyKey: string): Promise<MarkAllReadDto> {
+    if (!this.redis) throw new Error('Redis is required for notification read-all idempotency.');
+    const key = `notification:read-all:${userId}:${idempotencyKey}`;
+    const proposedCutoff = new Date().toISOString();
+    const inserted = await this.redis.getClient().set(key, proposedCutoff, 'EX', 86_400, 'NX');
+    const cutoffValue = inserted === 'OK' ? proposedCutoff : await this.redis.get(key);
+    if (!cutoffValue) throw new Error('Notification read-all cutoff could not be persisted.');
+    const cutoff = new Date(cutoffValue);
+    if (Number.isNaN(cutoff.getTime())) throw new Error('Notification read-all cutoff is invalid.');
+
+    const markedCount = await this.notificationsRepository.markAllRead(userId, cutoff);
+    return { markedCount, readAt: cutoff.toISOString() };
   }
 
   async markRead(notificationId: string, userId: string): Promise<void> {
@@ -143,5 +204,25 @@ export class NotificationsService {
       readAt: notification.readAt ? notification.readAt.toISOString() : null,
       createdAt: notification.createdAt.toISOString(),
     };
+  }
+
+  private encodeCursor(cursor: z.infer<typeof NotificationCursorSchema>): string {
+    return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+  }
+
+  private decodeCursor(value: string, userId: string): z.infer<typeof NotificationCursorSchema> {
+    try {
+      const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as unknown;
+      const cursor = NotificationCursorSchema.parse(decoded);
+      if (cursor.userId !== userId || new Date(cursor.snapshotCutoff).getTime() > Date.now()) {
+        throw new Error('Cursor scope is invalid.');
+      }
+      return cursor;
+    } catch {
+      throw new BadRequestException({
+        errorCode: 'VALIDATION_FAILED',
+        detail: 'Notification cursor is invalid',
+      });
+    }
   }
 }

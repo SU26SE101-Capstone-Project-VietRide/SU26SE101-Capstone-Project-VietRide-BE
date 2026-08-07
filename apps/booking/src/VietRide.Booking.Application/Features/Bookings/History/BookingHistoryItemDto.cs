@@ -17,4 +17,6 @@ public sealed record BookingHistoryItemDto(
     string? RouteName,
     IReadOnlyList<BookingHistoryTicketDto> Tickets,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    string? PaymentRedirectUrl = null);
+    string? PaymentRedirectUrl = null,
+    Guid? DropoffStationId = null,
+    Guid? DropoffStopId = null);

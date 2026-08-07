@@ -7,4 +7,5 @@ public sealed record TripRouteGeometryTrackingResponse(
     string GeometrySource = TripRouteGeometrySources.StopsOnly,
     TripRouteStationTrackingDto? OriginStation = null,
     IReadOnlyList<TripRouteIntermediateStopTrackingDto>? IntermediateStops = null,
-    TripRouteStationTrackingDto? DestinationStation = null);
+    TripRouteStationTrackingDto? DestinationStation = null,
+    Guid? EffectiveRouteId = null);

@@ -10,6 +10,7 @@ public sealed class GetTripRouteGeometryTrackingHandler
     : IRequestHandler<GetTripRouteGeometryTrackingQuery, TripRouteGeometryTrackingResponse>
 {
     private readonly IRouteRepository routeRepository;
+    private readonly IAlternativeRouteRepository alternativeRouteRepository;
     private readonly IStationRepository stationRepository;
     private readonly IStopRepository stopRepository;
     private readonly ITripRepository tripRepository;
@@ -20,10 +21,12 @@ public sealed class GetTripRouteGeometryTrackingHandler
         IRouteRepository routeRepository,
         ITripStopRepository tripStopRepository,
         IStopRepository stopRepository,
-        IStationRepository stationRepository)
+        IStationRepository stationRepository,
+        IAlternativeRouteRepository alternativeRouteRepository)
     {
         this.tripRepository = tripRepository;
         this.routeRepository = routeRepository;
+        this.alternativeRouteRepository = alternativeRouteRepository;
         this.tripStopRepository = tripStopRepository;
         this.stopRepository = stopRepository;
         this.stationRepository = stationRepository;
@@ -39,16 +42,31 @@ public sealed class GetTripRouteGeometryTrackingHandler
         var route = await routeRepository.QueryNoTracking()
             .FirstOrDefaultAsync(route => route.Id == trip.RouteId, cancellationToken)
             ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip route was not found.");
-
-        var tripStops = await tripStopRepository.QueryNoTracking()
-            .Where(stop => stop.TripId == request.TripId)
-            .OrderBy(stop => stop.OrderIndex)
-            .ToArrayAsync(cancellationToken);
-        var stopIds = tripStops.Select(stop => stop.StopId).ToArray();
+        var alternativeRoute = trip.AlternativeRouteId.HasValue
+            ? await alternativeRouteRepository.QueryNoTracking()
+                .FirstOrDefaultAsync(
+                    item => item.Id == trip.AlternativeRouteId.Value && item.RouteId == route.Id,
+                    cancellationToken)
+                ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip alternative route was not found.")
+            : null;
+        IReadOnlyList<Domain.Entities.AlternativeRouteStop> alternativeStops = alternativeRoute is null
+            ? []
+            : await alternativeRouteRepository.ListStopsAsync(alternativeRoute.Id, cancellationToken);
+        IReadOnlyList<Domain.Entities.TripStop> tripStops = alternativeRoute is null
+            ? await tripStopRepository.QueryNoTracking()
+                .Where(stop => stop.TripId == request.TripId)
+                .OrderBy(stop => stop.OrderIndex)
+                .ToArrayAsync(cancellationToken)
+            : [];
+        var stopIds = alternativeRoute is null
+            ? tripStops.Select(stop => stop.StopId).ToArray()
+            : alternativeStops.Select(stop => stop.StopId).ToArray();
         var stopsById = await stopRepository.QueryNoTracking()
             .Where(stop => stopIds.Contains(stop.Id))
             .ToDictionaryAsync(stop => stop.Id, cancellationToken);
-        var intermediateStops = tripStops.Select(stop =>
+        var intermediateStops = (alternativeRoute is null
+            ? tripStops.Select(stop => (stop.StopId, stop.OrderIndex))
+            : alternativeStops.Select(stop => (stop.StopId, stop.OrderIndex))).Select(stop =>
         {
             if (!stopsById.TryGetValue(stop.StopId, out var routeStop))
             {
@@ -67,11 +85,12 @@ public sealed class GetTripRouteGeometryTrackingHandler
         IReadOnlyList<RouteGeometryPointDto> points = intermediateStops
             .Select(stop => new RouteGeometryPointDto(stop.Latitude, stop.Longitude))
             .ToArray();
-        if (!string.IsNullOrWhiteSpace(route.PathPolyline))
+        var pathPolyline = alternativeRoute is null ? route.PathPolyline : alternativeRoute.PathPolyline;
+        if (!string.IsNullOrWhiteSpace(pathPolyline))
         {
             try
             {
-                var decoded = PolylineCodec.Decode(route.PathPolyline)
+                var decoded = PolylineCodec.Decode(pathPolyline)
                     .Select(point => new RouteGeometryPointDto(point.Latitude, point.Longitude))
                     .ToArray();
                 if (decoded.Length >= 2)
@@ -86,7 +105,8 @@ public sealed class GetTripRouteGeometryTrackingHandler
             }
         }
 
-        var stationIds = new[] { route.OriginStationId, route.DestinationStationId };
+        var destinationStationId = alternativeRoute?.DestinationStationId ?? route.DestinationStationId;
+        var stationIds = new[] { route.OriginStationId, destinationStationId };
         var stationsById = await stationRepository.QueryNoTracking()
             .Where(station => stationIds.Contains(station.Id))
             .ToDictionaryAsync(station => station.Id, cancellationToken);
@@ -98,7 +118,8 @@ public sealed class GetTripRouteGeometryTrackingHandler
             geometrySource,
             MapStation(stationsById.GetValueOrDefault(route.OriginStationId)),
             intermediateStops,
-            MapStation(stationsById.GetValueOrDefault(route.DestinationStationId)));
+            MapStation(stationsById.GetValueOrDefault(destinationStationId)),
+            alternativeRoute?.Id ?? route.Id);
     }
 
     private static TripRouteStationTrackingDto? MapStation(Domain.Entities.Station? station)

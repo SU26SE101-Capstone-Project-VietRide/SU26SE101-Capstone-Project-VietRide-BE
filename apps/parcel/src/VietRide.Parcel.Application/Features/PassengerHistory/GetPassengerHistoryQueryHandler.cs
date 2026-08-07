@@ -66,7 +66,8 @@ public sealed class GetPassengerHistoryQueryHandler
                 parcel.History.SizeCategory,
                 parcel.History.PhotoUrl,
                 parcel.History.DeliveryMethod),
-            paymentRedirectUrls.GetValueOrDefault(parcel.History.ParcelId)))
+            paymentRedirectUrls.GetValueOrDefault(parcel.History.ParcelId),
+            CreateTrackingTarget(parcel.DropoffStopId, parcel.DestinationStationId)))
             .ToList();
 
         return PagedResult<PassengerHistoryItemDto>.Create(
@@ -117,7 +118,8 @@ public sealed class GetPassengerHistoryQueryHandler
                     ticket.Status,
                     ticket.PaidAmount)).ToList()),
             null,
-            booking.PaymentRedirectUrl))
+            booking.PaymentRedirectUrl,
+            CreateTrackingTarget(booking.DropoffStopId, booking.DropoffStationId)))
             .ToList();
 
         return PagedResult<PassengerHistoryItemDto>.Create(
@@ -218,6 +220,15 @@ public sealed class GetPassengerHistoryQueryHandler
 
         return null;
     }
+
+    private static PassengerTrackingTargetDto? CreateTrackingTarget(
+        Guid? stopId,
+        Guid? stationId)
+        => stopId.HasValue
+            ? new PassengerTrackingTargetDto("STOP", StopId: stopId)
+            : stationId.HasValue
+                ? new PassengerTrackingTargetDto("STATION", StationId: stationId)
+                : null;
 
     private sealed record RedirectCandidate(
         Guid ParcelId,

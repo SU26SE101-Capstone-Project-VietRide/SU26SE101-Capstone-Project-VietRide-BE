@@ -211,7 +211,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
     }
 
     [Fact]
-    public async Task Suspend_ApprovedOperator_Returns200PersistsSuspendedWithoutActivityLogAndWithOutboxEvent()
+    public async Task Suspend_ApprovedOperator_Returns200PersistsSuspendedActivityLogAndOutboxEvent()
     {
         await _factory.ResetAsync();
         await _factory.SeedSystemAdminAsync(SystemAdminId);
@@ -233,7 +233,9 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         operatorEntity.RegistrationStatus.Should().Be(OperatorRegistrationStatus.SUSPENDED);
         operatorEntity.SuspendedAt.Should().NotBeNull();
         operatorEntity.SuspendReason.Should().Be("Policy violation");
-        (await db.ActivityLogs.CountAsync()).Should().Be(0);
+        var activityLog = await db.ActivityLogs.SingleAsync(x =>
+            x.UserId == SystemAdminId && x.Action == ActivityLogAction.SUSPEND_OPERATOR);
+        AssertActivityMetadata(activityLog.Metadata, operatorId, "SYSTEM_ADMIN_SUSPEND_OPERATOR");
 
         // Task 10.2 — transactional outbox emits identity.operator.suspended (BSOT §7.3).
         var outboxEvent = await db.Set<OutboxEvent>().SingleAsync();
@@ -265,6 +267,74 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         (await _factory.CountActivityLogsAsync()).Should().Be(0);
     }
 
+    [Fact]
+    public async Task Reactivate_SuspendedOperator_Returns200PreservesSubscriptionAndSuspensionMetadata()
+    {
+        await _factory.ResetAsync();
+        await _factory.SeedSystemAdminAsync(SystemAdminId);
+        var operatorId = await _factory.SeedApprovedOperatorAsync(SystemAdminId);
+        using var client = _factory.CreateIdempotentClient();
+        using var suspendRequest = AuthorizedPost(
+            $"/v1/admin/operators/{operatorId}/suspend",
+            new SuspendOperatorRequest("Policy violation"));
+        (await client.SendAsync(suspendRequest)).EnsureSuccessStatusCode();
+
+        DateTimeOffset approvedAt;
+        DateTimeOffset suspendedAt;
+        Guid subscriptionId;
+        DateTimeOffset subscriptionStartedAt;
+        DateTimeOffset subscriptionExpiresAt;
+        await using (var beforeScope = _factory.Services.CreateAsyncScope())
+        {
+            var beforeDb = beforeScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var beforeOperator = await beforeDb.Operators.SingleAsync(x => x.Id == operatorId);
+            var beforeSubscription = await beforeDb.OperatorSubscriptions.SingleAsync(x => x.OperatorId == operatorId);
+            approvedAt = beforeOperator.ApprovedAt!.Value;
+            suspendedAt = beforeOperator.SuspendedAt!.Value;
+            subscriptionId = beforeSubscription.Id;
+            subscriptionStartedAt = beforeSubscription.StartedAt!.Value;
+            subscriptionExpiresAt = beforeSubscription.ExpiresAt!.Value;
+        }
+
+        using var reactivateRequest = AuthorizedBodylessPost($"/v1/admin/operators/{operatorId}/reactivate");
+        var response = await client.SendAsync(reactivateRequest);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(document, 200);
+        document.RootElement.GetProperty("data").GetProperty("registrationStatus").GetString()
+            .Should().Be(OperatorRegistrationStatus.APPROVED.ToString());
+        document.RootElement.GetProperty("data").GetProperty("isActive").GetBoolean().Should().BeTrue();
+
+        await using var scope = _factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var operatorEntity = await db.Operators.SingleAsync(x => x.Id == operatorId);
+        operatorEntity.ApprovedAt.Should().Be(approvedAt);
+        operatorEntity.SuspendedAt.Should().Be(suspendedAt);
+        operatorEntity.SuspendReason.Should().Be("Policy violation");
+        var subscription = await db.OperatorSubscriptions.SingleAsync(x => x.OperatorId == operatorId);
+        subscription.Id.Should().Be(subscriptionId);
+        subscription.StartedAt.Should().Be(subscriptionStartedAt);
+        subscription.ExpiresAt.Should().Be(subscriptionExpiresAt);
+        var activityLog = await db.ActivityLogs.SingleAsync(x =>
+            x.UserId == SystemAdminId && x.Action == ActivityLogAction.REACTIVATE_OPERATOR);
+        AssertActivityMetadata(activityLog.Metadata, operatorId, "SYSTEM_ADMIN_REACTIVATE_OPERATOR");
+        (await db.Set<OutboxEvent>().CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Reactivate_NonSystemAdmin_Returns403()
+    {
+        using var client = _factory.CreateIdempotentClient();
+        using var request = AuthorizedBodylessPost(
+            $"/v1/admin/operators/{Guid.NewGuid()}/reactivate",
+            UserRole.OPERATOR_ADMIN.ToString());
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
     private static HttpRequestMessage AuthorizedPost<T>(string url, T payload)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, url)
@@ -279,6 +349,15 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
     {
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.TryAddWithoutValidation("X-Internal-Auth", $"Bearer {CreateInternalJwt(SystemAdminId, role)}");
+        return request;
+    }
+
+    private static HttpRequestMessage AuthorizedBodylessPost(string url, string role = "SYSTEM_ADMIN")
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, url);
+        request.Headers.TryAddWithoutValidation(
+            "X-Internal-Auth",
+            $"Bearer {CreateInternalJwt(SystemAdminId, role)}");
         return request;
     }
 
