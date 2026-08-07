@@ -1,3 +1,3 @@
 namespace VietRide.Payment.Application.Features.RevenueAnalytics.Core;
 
-public sealed record TopOperatorPayoutReadModel(Guid OperatorId, long RevenueVnd);
+public sealed record TopOperatorRevenueReadModel(Guid OperatorId, long RevenueVnd);

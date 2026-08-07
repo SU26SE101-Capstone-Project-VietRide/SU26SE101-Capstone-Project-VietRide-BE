@@ -1,12 +1,14 @@
 namespace VietRide.Payment.Application.Features.RevenueAnalytics.Core;
 
 public sealed record OperatorRevenuePeriod(
-    string Month,
+    bool IsYearMode,
+    string? Month,
+    int? Year,
     DateOnly From,
     DateOnly To,
     DateTimeOffset CurrentFromUtc,
     DateTimeOffset CurrentToUtc,
     DateTimeOffset PreviousFromUtc,
     DateTimeOffset PreviousToUtc,
-    DateTimeOffset TwelveMonthFromUtc,
+    DateTimeOffset QueryFromUtc,
     IReadOnlyList<string> Months);

@@ -42,7 +42,50 @@ public static class RevenueAnalyticsPeriodRules
     }
 
     public static OperatorRevenuePeriod OperatorMonth(string? month)
+        => OperatorPeriod(month, null, null);
+
+    public static OperatorRevenuePeriod OperatorPeriod(string? month, int? year, string? groupBy)
     {
+        var hasMonth = !string.IsNullOrWhiteSpace(month);
+        var hasYear = year.HasValue;
+        if (hasMonth == hasYear)
+        {
+            throw Validation("month", "Exactly one of month or year is required.");
+        }
+
+        if (hasYear)
+        {
+            if (!string.Equals(groupBy, "month", StringComparison.Ordinal)
+                || year is < 2 or > 9998)
+            {
+                throw Validation("year", "year must use YYYY and groupBy must be month.");
+            }
+
+            var yearFirstDay = new DateOnly(year!.Value, 1, 1);
+            var currentTo = yearFirstDay.AddYears(1);
+            var previousFrom = yearFirstDay.AddYears(-1);
+            var months = Enumerable.Range(0, 12)
+                .Select(offset => yearFirstDay.AddMonths(offset).ToString("yyyy-MM", CultureInfo.InvariantCulture))
+                .ToArray();
+            return new OperatorRevenuePeriod(
+                true,
+                null,
+                year,
+                yearFirstDay,
+                currentTo.AddDays(-1),
+                ToUtc(yearFirstDay),
+                ToUtc(currentTo),
+                ToUtc(previousFrom),
+                ToUtc(yearFirstDay),
+                ToUtc(previousFrom),
+                months);
+        }
+
+        if (groupBy is not null)
+        {
+            throw Validation("groupBy", "groupBy is only valid with year mode.");
+        }
+
         if (month?.Length != 7
             || !DateOnly.TryParseExact(
                 $"{month}-01",
@@ -63,7 +106,9 @@ public static class RevenueAnalyticsPeriodRules
                 .Select(offset => twelveMonthFrom.AddMonths(offset).ToString("yyyy-MM", CultureInfo.InvariantCulture))
                 .ToArray();
             return new OperatorRevenuePeriod(
+                false,
                 month,
+                null,
                 firstDay,
                 currentTo.AddDays(-1),
                 ToUtc(firstDay),

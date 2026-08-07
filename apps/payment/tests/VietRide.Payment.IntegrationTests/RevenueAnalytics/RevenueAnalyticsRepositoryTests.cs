@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
 using Npgsql.NameTranslation;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Features.Admin.PlatformReports;
+using VietRide.Payment.Application.Features.OperatorReports;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Core;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
@@ -41,15 +43,15 @@ public sealed class RevenueAnalyticsRepositoryTests
             var monthly = await repository.GetAdminMonthlyRevenueAsync(fromUtc, toUtc);
 
             monthly.Should().ContainSingle().Which.Should().Be(
-                new AdminRevenueMonthReadModel(new DateOnly(2026, 7, 1), 700, 400));
+                new AdminRevenueMonthReadModel(new DateOnly(2026, 7, 1), 10_084, 43, 700, 400));
             interceptor.ReaderCount.Should().Be(1);
 
             interceptor.Reset();
-            var top = await repository.GetTopOperatorPayoutsAsync(fromUtc, toUtc, 20);
+            var top = await repository.GetTopOperatorRevenueAsync(fromUtc, toUtc, 20);
 
             top.Should().Equal(
-                new TopOperatorPayoutReadModel(seed.OperatorId, 300),
-                new TopOperatorPayoutReadModel(seed.SecondOperatorId, 100));
+                new TopOperatorRevenueReadModel(seed.SecondOperatorId, 9_999),
+                new TopOperatorRevenueReadModel(seed.OperatorId, 128));
             interceptor.ReaderCount.Should().Be(1);
 
             interceptor.Reset();
@@ -67,6 +69,35 @@ public sealed class RevenueAnalyticsRepositoryTests
                     1,
                     1));
             interceptor.ReaderCount.Should().Be(1);
+
+            var operatorSummary = await repository.GetOperatorRevenueSummaryAsync(
+                seed.OperatorId,
+                fromUtc,
+                toUtc);
+            operatorSummary.Should().Be(new OperatorRevenueSummaryReadModel(85, 43, 55, -12));
+
+            var operatorLedgerRepository = CreateOperatorLedgerRepository(queryDb);
+            var platformRows = await operatorLedgerRepository.GetPlatformLedgerMetricsAsync(fromUtc, toUtc);
+            platformRows.Should().BeEquivalentTo(new[]
+            {
+                new PlatformLedgerReportItem(seed.OperatorId, 85, 43),
+                new PlatformLedgerReportItem(seed.SecondOperatorId, 9_999, 0)
+            });
+            var revenueExportRows = await CollectAsync(operatorLedgerRepository.StreamOperatorReportRowsAsync(
+                seed.OperatorId,
+                fromUtc,
+                toUtc,
+                false));
+            revenueExportRows.Should().HaveCount(8);
+            revenueExportRows.Should().ContainSingle(row => row.Note == "display-only-note");
+            revenueExportRows.Should().NotContain(row =>
+                row.Note == "other-adjustment" || row.Note == "manual");
+            var refundExportRows = await CollectAsync(operatorLedgerRepository.StreamOperatorReportRowsAsync(
+                seed.OperatorId,
+                fromUtc,
+                toUtc,
+                true));
+            refundExportRows.Should().HaveCount(2).And.OnlyContain(row => row.AmountVnd < 0);
 
             var overflowOperatorId = Guid.NewGuid();
             var overflowTripId = Guid.NewGuid();
@@ -105,6 +136,23 @@ public sealed class RevenueAnalyticsRepositoryTests
             "VietRide.Payment.Infrastructure.Persistence.Repositories.RevenueAnalyticsRepository",
             throwOnError: true)!;
         return (IRevenueAnalyticsRepository)Activator.CreateInstance(type, dbContext)!;
+    }
+
+    private static IOperatorLedgerEntryRepository CreateOperatorLedgerRepository(PaymentDbContext dbContext)
+    {
+        var type = typeof(PaymentDbContext).Assembly.GetType(
+            "VietRide.Payment.Infrastructure.Persistence.Repositories.OperatorLedgerEntryRepository",
+            throwOnError: true)!;
+        return (IOperatorLedgerEntryRepository)Activator.CreateInstance(type, dbContext)!;
+    }
+
+    private static async Task<IReadOnlyList<OperatorLedgerReportRow>> CollectAsync(
+        IAsyncEnumerable<OperatorLedgerReportRow> rows)
+    {
+        var result = new List<OperatorLedgerReportRow>();
+        await foreach (var row in rows)
+            result.Add(row);
+        return result;
     }
 
     private static PaymentDbContext CreateDbContext(
@@ -214,7 +262,7 @@ public sealed class RevenueAnalyticsRepositoryTests
             Ledger(operatorId, tripId, OperatorLedgerEntryType.BOOKING_REVENUE, 100, OperatorLedgerReferenceType.BOOKING, bookingReference),
             Ledger(operatorId, tripId, OperatorLedgerEntryType.BOOKING_REFUND, -20, OperatorLedgerReferenceType.BOOKING, bookingReference),
             Ledger(operatorId, tripId, OperatorLedgerEntryType.VOUCHER_VIETRIDE_FUNDED_CREDIT, 10, OperatorLedgerReferenceType.BOOKING, bookingReference),
-            Ledger(operatorId, tripId, OperatorLedgerEntryType.ADJUSTMENT, -5, OperatorLedgerReferenceType.BOOKING, bookingReference, "reverse-vietride-funded-voucher"),
+            Ledger(operatorId, tripId, OperatorLedgerEntryType.ADJUSTMENT, -5, OperatorLedgerReferenceType.BOOKING, bookingReference, "display-only-note"),
             Ledger(operatorId, tripId, OperatorLedgerEntryType.PARCEL_REVENUE, 50, OperatorLedgerReferenceType.PARCEL, parcelReference),
             Ledger(operatorId, tripId, OperatorLedgerEntryType.PARCEL_REFUND, -10, OperatorLedgerReferenceType.PARCEL, parcelReference),
             Ledger(operatorId, tripId, OperatorLedgerEntryType.VOUCHER_VIETRIDE_FUNDED_CREDIT, 5, OperatorLedgerReferenceType.PARCEL, parcelReference),
@@ -272,7 +320,7 @@ public sealed class RevenueAnalyticsRepositoryTests
     {
         if (entryType == OperatorLedgerEntryType.ADJUSTMENT
             && referenceType != OperatorLedgerReferenceType.MANUAL
-            && note != "reverse-vietride-funded-voucher")
+            && amount >= 0)
         {
             var legacy = OperatorLedgerEntry.Create(
                 operatorId,

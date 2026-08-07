@@ -20,6 +20,7 @@ using VietRide.Payment.Application.Features.Settlements.HandleTripTerminal;
 using VietRide.Payment.Application.Features.Settlements.SettleTrip;
 using VietRide.Payment.Application.Features.Wallets.BootstrapWallet;
 using VietRide.Payment.Application.Services;
+using VietRide.Payment.Infrastructure.Caching;
 using VietRide.Payment.Infrastructure.Http;
 using VietRide.Payment.Infrastructure.Invoices;
 using VietRide.Payment.Infrastructure.Jobs;
@@ -112,6 +113,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IParcelVoucherReversalBackfillService, ParcelVoucherReversalBackfillService>();
         services.AddScoped<IOperatorTripSettlementRepository, OperatorTripSettlementRepository>();
         services.AddScoped<IRevenueAnalyticsRepository, RevenueAnalyticsRepository>();
+        services.AddScoped<IRevenueCacheStore, RedisRevenueCacheStore>();
+        services.AddScoped<IRevenueReportCache, RedisRevenueReportCache>();
         services.AddScoped<IFinancialActorPrivacyStore, FinancialActorPrivacyStore>();
         services.AddScoped<IProcessedIntegrationEventRepository, ProcessedIntegrationEventRepository>();
         services.AddScoped<IIntegrationEventInbox, PaymentIntegrationEventInbox>();

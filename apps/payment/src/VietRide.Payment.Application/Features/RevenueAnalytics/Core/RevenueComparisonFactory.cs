@@ -11,7 +11,7 @@ public static class RevenueComparisonFactory
                 : "FLAT";
         if (previous == 0)
         {
-            return new RevenueComparison(current, previous, 0m, trend);
+            return new RevenueComparison(current, previous, current == 0 ? 0m : null, trend);
         }
 
         var percent = decimal.Round(

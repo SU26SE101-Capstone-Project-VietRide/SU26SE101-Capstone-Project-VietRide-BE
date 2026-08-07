@@ -33,19 +33,18 @@ internal sealed class OperatorLedgerEntryRepository : IOperatorLedgerEntryReposi
 
         await using var command = connection.CreateCommand();
         command.CommandText =
-            """
+            $"""
             SELECT operator_id,
                    COALESCE(SUM(amount) FILTER (
-                       WHERE reference_type = 'BOOKING'::vietride_payment.operator_ledger_reference_type
-                         AND entry_type <> 'VOUCHER_OPERATOR_FUNDED_AUDIT'::vietride_payment.operator_ledger_entry_type
+                       WHERE {CanonicalRevenueSql.BookingPredicate}
                    ), 0)::numeric AS booking_revenue_vnd,
                    COALESCE(SUM(amount) FILTER (
-                       WHERE reference_type = 'PARCEL'::vietride_payment.operator_ledger_reference_type
-                         AND entry_type <> 'VOUCHER_OPERATOR_FUNDED_AUDIT'::vietride_payment.operator_ledger_entry_type
+                       WHERE {CanonicalRevenueSql.ParcelPredicate}
                    ), 0)::numeric AS parcel_revenue_vnd
             FROM vietride_payment.operator_ledger_entries
             WHERE created_at >= @from_utc
               AND created_at < @to_utc
+              AND {CanonicalRevenueSql.RecognizedPredicate}
             GROUP BY operator_id
             ORDER BY operator_id;
             """;
@@ -80,35 +79,47 @@ internal sealed class OperatorLedgerEntryRepository : IOperatorLedgerEntryReposi
         bool refundOnly,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var query = _db.OperatorLedgerEntries
-            .AsNoTracking()
-            .Where(entry => entry.OperatorId == operatorId
-                && entry.CreatedAt >= fromUtc
-                && entry.CreatedAt < toUtc);
+        var connection = _db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync(ct).ConfigureAwait(false);
 
-        query = refundOnly
-            ? query.Where(entry => entry.EntryType == OperatorLedgerEntryType.BOOKING_REFUND
-                || entry.EntryType == OperatorLedgerEntryType.PARCEL_REFUND)
-            : query.Where(entry => entry.EntryType == OperatorLedgerEntryType.BOOKING_REVENUE
-                || entry.EntryType == OperatorLedgerEntryType.PARCEL_REVENUE
-                || entry.EntryType == OperatorLedgerEntryType.ADJUSTMENT);
+        await using var command = connection.CreateCommand();
+        var predicate = refundOnly
+            ? CanonicalRevenueSql.RefundPredicate
+            : CanonicalRevenueSql.RecognizedPredicate;
+        command.CommandText = $"""
+            SELECT id,
+                   entry_type::text,
+                   reference_type::text,
+                   reference_id,
+                   trip_id,
+                   amount,
+                   created_at,
+                   note
+            FROM vietride_payment.operator_ledger_entries
+            WHERE operator_id = @operator_id
+              AND created_at >= @from_utc
+              AND created_at < @to_utc
+              AND {predicate}
+            ORDER BY created_at, id;
+            """;
+        command.Transaction = _db.Database.CurrentTransaction?.GetDbTransaction();
+        AddParameter(command, "operator_id", operatorId);
+        AddParameter(command, "from_utc", fromUtc.ToUniversalTime());
+        AddParameter(command, "to_utc", toUtc.ToUniversalTime());
 
-        var rows = query
-            .OrderBy(entry => entry.CreatedAt)
-            .ThenBy(entry => entry.Id)
-            .Select(entry => new OperatorLedgerReportRow(
-                entry.Id,
-                entry.EntryType.ToString(),
-                entry.ReferenceType.ToString(),
-                entry.ReferenceId,
-                entry.TripId,
-                entry.Amount,
-                entry.CreatedAt,
-                entry.Note));
-
-        await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            yield return row;
+            yield return new OperatorLedgerReportRow(
+                reader.GetGuid(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetGuid(3),
+                reader.IsDBNull(4) ? null : reader.GetGuid(4),
+                reader.GetInt64(5),
+                reader.GetFieldValue<DateTimeOffset>(6),
+                reader.IsDBNull(7) ? null : reader.GetString(7));
         }
     }
     public Task<long> SumTripNetAmountAsync(Guid operatorId, Guid tripId, CancellationToken cancellationToken)

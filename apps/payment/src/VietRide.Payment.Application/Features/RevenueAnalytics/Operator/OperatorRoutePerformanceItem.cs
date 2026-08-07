@@ -9,5 +9,5 @@ public sealed record OperatorRoutePerformanceItem(
     int CompletedTripCount,
     int BookingCount,
     int ParcelCount,
-    long RevenueVnd,
+    long NetRevenueVnd,
     decimal CompletionRatePercent);

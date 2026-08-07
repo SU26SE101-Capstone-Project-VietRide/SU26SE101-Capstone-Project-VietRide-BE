@@ -2,9 +2,11 @@ using System.Globalization;
 using MediatR;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Core;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Payment.Application.Features.RevenueAnalytics.Operator;
 
@@ -13,13 +15,19 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandler
 {
     private readonly IRevenueAnalyticsRepository repository;
     private readonly ITripRevenueAnalyticsClient trip;
+    private readonly IClock clock;
+    private readonly IRevenueReportCache cache;
 
     public GetOperatorRevenueAnalyticsQueryHandler(
         IRevenueAnalyticsRepository repository,
-        ITripRevenueAnalyticsClient trip)
+        ITripRevenueAnalyticsClient trip,
+        IClock clock,
+        IRevenueReportCache cache)
     {
         this.repository = repository;
         this.trip = trip;
+        this.clock = clock;
+        this.cache = cache;
     }
 
     public async Task<OperatorRevenueAnalyticsResponse> Handle(
@@ -31,43 +39,47 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandler
             throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
         }
 
-        var period = RevenueAnalyticsPeriodRules.OperatorMonth(request.Month);
-        var ledgerTask = repository.GetOperatorRevenueLedgerAsync(
+        var period = RevenueAnalyticsPeriodRules.OperatorPeriod(request.Month, request.Year, request.GroupBy);
+        var cacheKey = RevenueReportCacheKeys.OperatorAnalytics(request.OperatorId, period);
+        var cached = await cache.GetAsync<OperatorRevenueAnalyticsResponse>(cacheKey, cancellationToken);
+        if (cached is not null)
+            return cached;
+        var rows = await repository.GetOperatorRevenueLedgerAsync(
             request.OperatorId,
-            period.TwelveMonthFromUtc,
+            period.QueryFromUtc,
             period.CurrentToUtc,
             cancellationToken);
-        var routesTask = trip.GetRoutePerformanceAsync(
-            request.OperatorId,
-            period.Month,
-            cancellationToken);
-        await Task.WhenAll(ledgerTask, routesTask);
-        var rows = await ledgerTask;
-        var routes = await routesTask;
-        ValidateRoutes(routes);
-
-        var currentMonth = new DateOnly(period.From.Year, period.From.Month, 1);
-        var previousDate = period.From.AddMonths(-1);
-        var previousMonth = new DateOnly(previousDate.Year, previousDate.Month, 1);
-        var currentRows = rows.Where(row => row.Month == currentMonth).ToArray();
-        var previousRows = rows.Where(row => row.Month == previousMonth).ToArray();
+        var currentRows = rows.Where(row =>
+            row.Month >= new DateOnly(period.From.Year, period.From.Month, 1)
+            && row.Month <= new DateOnly(period.To.Year, period.To.Month, 1)).ToArray();
+        var previousFrom = period.IsYearMode
+            ? new DateOnly(period.From.Year - 1, 1, 1)
+            : new DateOnly(period.From.AddMonths(-1).Year, period.From.AddMonths(-1).Month, 1);
+        var previousTo = period.IsYearMode
+            ? new DateOnly(period.From.Year - 1, 12, 1)
+            : previousFrom;
+        var previousRows = rows.Where(row => row.Month >= previousFrom && row.Month <= previousTo).ToArray();
         var tripIds = currentRows
             .Where(row => row.TripId.HasValue)
             .Select(row => row.TripId!.Value)
             .Distinct()
             .Order()
             .ToArray();
-        var summaries = tripIds.Length == 0
+        var summaries = period.IsYearMode || tripIds.Length == 0
             ? Array.Empty<TripRevenueSummaryItem>()
             : await trip.GetTripSummariesAsync(tripIds, cancellationToken);
-        var summaryByTrip = ValidateAndIndexSummaries(tripIds, summaries);
+        var summaryByTrip = period.IsYearMode
+            ? new Dictionary<Guid, TripRevenueSummaryItem>()
+            : ValidateAndIndexSummaries(tripIds, summaries);
 
         var current = Sum(currentRows);
         var previous = Sum(previousRows);
 
-        return new OperatorRevenueAnalyticsResponse(
+        var result = new OperatorRevenueAnalyticsResponse(
             new OperatorRevenueAnalyticsPeriod(
                 period.Month,
+                period.Year,
+                "month",
                 period.From,
                 period.To,
                 RevenueAnalyticsPeriodRules.Timezone),
@@ -79,7 +91,29 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandler
                     Average(current.Total, current.TripCount),
                     Average(previous.Total, previous.TripCount))),
             BuildMonthly(period.Months, rows),
-            BuildRoutePerformance(routes, currentRows, summaryByTrip));
+            period.IsYearMode
+                ? null
+                : await BuildRoutePerformanceAsync(
+                    request.OperatorId,
+                    period.Month!,
+                    currentRows,
+                    summaryByTrip,
+                    cancellationToken),
+            clock.UtcNow.UtcDateTime);
+        await cache.SetAsync(cacheKey, result, RevenueReportCacheKeys.Expiration, cancellationToken);
+        return result;
+    }
+
+    private async Task<IReadOnlyList<OperatorRoutePerformanceItem>> BuildRoutePerformanceAsync(
+        Guid operatorId,
+        string month,
+        IReadOnlyList<OperatorRevenueLedgerReadModel> currentRows,
+        IReadOnlyDictionary<Guid, TripRevenueSummaryItem> summaryByTrip,
+        CancellationToken cancellationToken)
+    {
+        var routes = await trip.GetRoutePerformanceAsync(operatorId, month, cancellationToken);
+        ValidateRoutes(routes);
+        return BuildRoutePerformance(routes, currentRows, summaryByTrip);
     }
 
     private static IReadOnlyList<OperatorRevenueMonthItem> BuildMonthly(
@@ -207,8 +241,8 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandler
         long parcel = 0;
         foreach (var row in rows)
         {
-            ticket = checked(ticket + row.TicketRevenueVnd);
-            parcel = checked(parcel + row.ParcelRevenueVnd);
+            ticket = checked(ticket + row.NetTicketRevenueVnd);
+            parcel = checked(parcel + row.NetParcelRevenueVnd);
         }
 
         return (
