@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
 
@@ -7,9 +8,11 @@ namespace VietRide.Parcel.Application.Features.Parcels.Reports;
 
 internal static class ParcelReportQuerySupport
 {
+    private static readonly TimeZoneInfo IctTimeZone = ResolveIctTimeZone();
+
     public static (DateOnly From, DateOnly To) NormalizeRange(DateOnly? from, DateOnly? to, IClock clock)
     {
-        var today = DateOnly.FromDateTime(clock.UtcNow.UtcDateTime);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(clock.UtcNow, IctTimeZone).DateTime);
         var normalizedTo = to ?? today;
         var normalizedFrom = from ?? normalizedTo.AddDays(-30);
 
@@ -24,6 +27,7 @@ internal static class ParcelReportQuerySupport
     public static async Task<ParcelReportSummaryResponse> BuildSummaryAsync(
         IParcelStatsRepository statsRepository,
         IParcelRepository parcelRepository,
+        IPaymentOperatorRevenueSummaryClient paymentRevenue,
         Guid operatorId,
         DateOnly from,
         DateOnly to,
@@ -33,48 +37,83 @@ internal static class ParcelReportQuerySupport
             .Where(stat => stat.OperatorId == operatorId && stat.StatDate >= from && stat.StatDate <= to)
             .ToListAsync(cancellationToken);
 
+        int totalParcels;
+        int totalLoaded;
+        int totalDelivered;
+        int totalRejected;
+        int totalReturned;
+        string source;
+
         if (stats.Count > 0)
         {
-            return new ParcelReportSummaryResponse(
-                operatorId,
-                from,
-                to,
-                stats.Sum(stat => stat.TotalParcels),
-                stats.Sum(stat => stat.TotalLoaded),
-                stats.Sum(stat => stat.TotalDelivered),
-                stats.Sum(stat => stat.TotalRejected),
-                stats.Sum(stat => stat.TotalReturned),
-                stats.Sum(stat => stat.TotalRevenue),
-                stats.Sum(stat => stat.TotalRefunded),
-                "ParcelStats");
+            totalParcels = stats.Sum(stat => stat.TotalParcels);
+            totalLoaded = stats.Sum(stat => stat.TotalLoaded);
+            totalDelivered = stats.Sum(stat => stat.TotalDelivered);
+            totalRejected = stats.Sum(stat => stat.TotalRejected);
+            totalReturned = stats.Sum(stat => stat.TotalReturned);
+            source = "ParcelStats";
         }
 
-        var fromDateTime = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
-        var toDateTime = new DateTimeOffset(to.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
-        var parcels = await parcelRepository.QueryNoTracking()
-            .Where(parcel => parcel.OperatorId == operatorId
-                && parcel.CreatedAt >= fromDateTime
-                && parcel.CreatedAt < toDateTime)
-            .Select(parcel => new
-            {
-                parcel.Status,
-                DepositAmount = parcel.DepositAmount.Amount,
-                AdditionalAmount = parcel.AdditionalAmount.Amount,
-            })
-            .ToListAsync(cancellationToken);
+        else
+        {
+            var fromDateTime = ToUtc(from);
+            var toDateTime = ToUtc(to.AddDays(1));
+            var parcels = await parcelRepository.QueryNoTracking()
+                .Where(parcel => parcel.OperatorId == operatorId
+                    && parcel.CreatedAt >= fromDateTime
+                    && parcel.CreatedAt < toDateTime)
+                .Select(parcel => parcel.Status)
+                .ToListAsync(cancellationToken);
+
+            totalParcels = parcels.Count;
+            totalLoaded = parcels.Count(status => status is ParcelStatus.LOADED or ParcelStatus.IN_TRANSIT
+                or ParcelStatus.DELIVERED_PENDING_CONFIRM or ParcelStatus.DELIVERY_CONFIRMED);
+            totalDelivered = parcels.Count(status => status == ParcelStatus.DELIVERY_CONFIRMED);
+            totalRejected = parcels.Count(status => status == ParcelStatus.DELIVERY_REJECTED);
+            totalReturned = parcels.Count(status => status == ParcelStatus.RETURNED);
+            source = "ParcelsFallback";
+        }
+
+        var money = await paymentRevenue.GetAsync(operatorId, from, to, cancellationToken);
 
         return new ParcelReportSummaryResponse(
             operatorId,
             from,
             to,
-            parcels.Count,
-            parcels.Count(parcel => parcel.Status is ParcelStatus.LOADED or ParcelStatus.IN_TRANSIT
-                or ParcelStatus.DELIVERED_PENDING_CONFIRM or ParcelStatus.DELIVERY_CONFIRMED),
-            parcels.Count(parcel => parcel.Status == ParcelStatus.DELIVERY_CONFIRMED),
-            parcels.Count(parcel => parcel.Status == ParcelStatus.DELIVERY_REJECTED),
-            parcels.Count(parcel => parcel.Status == ParcelStatus.RETURNED),
-            parcels.Sum(parcel => parcel.DepositAmount + parcel.AdditionalAmount),
-            0,
-            "ParcelsFallback");
+            totalParcels,
+            totalLoaded,
+            totalDelivered,
+            totalRejected,
+            totalReturned,
+            money.GrossParcelRevenueVnd,
+            money.ParcelRefundsVnd,
+            money.NetParcelRevenueVnd,
+            source);
+    }
+
+    private static DateTimeOffset ToUtc(DateOnly date)
+    {
+        var local = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, IctTimeZone), TimeSpan.Zero);
+    }
+
+    private static TimeZoneInfo ResolveIctTimeZone()
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                return TimeZoneInfo.CreateCustomTimeZone(
+                    "Asia/Ho_Chi_Minh", TimeSpan.FromHours(7), "ICT", "ICT");
+            }
+        }
     }
 }

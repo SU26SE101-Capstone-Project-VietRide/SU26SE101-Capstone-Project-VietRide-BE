@@ -76,6 +76,7 @@ public sealed class OperatorParcelsController : ControllerBase
     [HttpGet("reports/summary")]
     [ProducesResponseType(typeof(ApiResponse<ParcelReportSummaryResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<ParcelReportSummaryResponse>> GetReportSummaryAsync(
         [FromQuery] DateOnly? from,
         [FromQuery] DateOnly? to,
@@ -94,6 +95,7 @@ public sealed class OperatorParcelsController : ControllerBase
     [HttpGet("reports/export")]
     [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK, "text/csv")]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> ExportReportAsync(
         [FromQuery] DateOnly? from,
         [FromQuery] DateOnly? to,

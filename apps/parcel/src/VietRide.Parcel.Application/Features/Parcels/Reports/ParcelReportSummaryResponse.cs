@@ -9,6 +9,7 @@ public sealed record ParcelReportSummaryResponse(
     int TotalDelivered,
     int TotalRejected,
     int TotalReturned,
-    long TotalRevenue,
-    long TotalRefunded,
+    long GrossParcelRevenueVnd,
+    long ParcelRefundsVnd,
+    long NetParcelRevenueVnd,
     string Source);
