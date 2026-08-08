@@ -245,10 +245,21 @@ ingest-time whitespace word count, exactly `content.trim().split(/\s+/u).length`
 `documentTitle`, `documentType`, and `operatorId` equal the parent values; `sectionHeader=null`.
 The attested `embedding` is the document's exact 2,048-value vector stored as `halfvec(2048)`.
 
+Retrieval is fail-closed by role and tenant. PASSENGER can query only PUBLIC knowledge. DRIVER,
+ASSISTANT, OPERATOR_STAFF, and OPERATOR_ADMIN can query PUBLIC knowledge according to role, but
+can query an OPERATOR document only when `document.operatorId == caller.operatorId`; null/global
+OPERATOR documents never bypass this tenant predicate for ordinary operator roles. Therefore the
+Operator A policy is visible to those roles only in Operator A. SYSTEM_ADMIN alone bypasses the
+tenant filter and can query and view PUBLIC, OPERATOR, and ADMIN knowledge globally, including the
+Operator A policy. This System Admin read/query visibility does not change document ownership or
+relax tenant scoping for ordinary operator roles. PASSENGER remains denied OPERATOR and ADMIN
+knowledge; ordinary operator roles remain denied ADMIN knowledge and every OPERATOR document not
+owned by their tenant.
+
 | Key | Title/storage path | Exact `fileName` | Access/category/type | Operator | Audience roles |
 |---|---|---|---|---|---|
 | `rag:document:public-passenger-guide` | Day44 Public Passenger Guide / `day44-v1/rag/public-passenger-guide.txt` | `vietride-public-demo-knowledge-base.txt` | PUBLIC/CUSTOMER_SUPPORT/GUIDE | null | PASSENGER, DRIVER, ASSISTANT, OPERATOR_STAFF, OPERATOR_ADMIN, SYSTEM_ADMIN |
-| `rag:document:operator-a-policy` | Day44 Operator A Policy / `day44-v1/rag/operator-a-policy.txt` | `vietride-operator-demo-knowledge-base.txt` | OPERATOR/OPERATOR_POLICY/POLICY | A | DRIVER, ASSISTANT, OPERATOR_STAFF, OPERATOR_ADMIN |
+| `rag:document:operator-a-policy` | Day44 Operator A Policy / `day44-v1/rag/operator-a-policy.txt` | `vietride-operator-demo-knowledge-base.txt` | OPERATOR/OPERATOR_POLICY/POLICY | A | DRIVER, ASSISTANT, OPERATOR_STAFF, OPERATOR_ADMIN (Operator A only), SYSTEM_ADMIN |
 | `rag:document:system-admin-runbook` | Day44 System Admin Runbook / `day44-v1/rag/system-admin-runbook.txt` | `vietride-admin-demo-knowledge-base.txt` | ADMIN/PLATFORM_ADMIN/SOP | null | SYSTEM_ADMIN |
 
 ## Fixed UUID registry

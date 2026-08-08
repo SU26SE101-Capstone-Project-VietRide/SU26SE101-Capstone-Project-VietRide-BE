@@ -117,7 +117,8 @@ them.
   `APPROVED`, `COMPLETED`, `chunkCount>=1`, have approved-by/approved-at/ingested-at values, and
   use recorded precomputed `halfvec(2048)` embeddings from
   `nvidia/llama-nemotron-embed-vl-1b-v2:free`. PUBLIC is global/all roles; OPERATOR is scoped to
-  Operator A and DRIVER/ASSISTANT/OPERATOR_STAFF/OPERATOR_ADMIN; ADMIN is global/SYSTEM_ADMIN.
+  Operator A for DRIVER/ASSISTANT/OPERATOR_STAFF/OPERATOR_ADMIN, while SYSTEM_ADMIN may query it
+  globally; ADMIN is global/SYSTEM_ADMIN.
   PUBLIC explicitly lists PASSENGER/DRIVER/ASSISTANT/OPERATOR_STAFF/OPERATOR_ADMIN/SYSTEM_ADMIN.
   Default seed never calls Cloudinary or OpenRouter. The committed fixture contains exactly one
   vector per canonical document and is generated only by the explicit Task 44.6 command using a
@@ -276,8 +277,9 @@ only demo seed/test assets, isolated Compose config, `seed:demo`/`e2e:day44` scr
 | verification tier | `FOCUSED` |
 | verification commands | `node --test --require ts-node/register/transpile-only --test-name-pattern="Day 44 offline RAG seed planner" scripts/day44/seed-rag.test.ts` (at least 1 test must execute and pass)<br>`npx tsc --noEmit --target ES2022 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck --resolveJsonModule --ignoreDeprecations 6.0 scripts/day44/seed-rag.ts scripts/day44/seed-rag.test.ts`<br>`npx eslint scripts/day44/seed-rag.ts scripts/day44/seed-rag.test.ts`<br>`npx prettier --check scripts/day44/seed-rag.ts scripts/day44/seed-rag.test.ts`<br>`node --require ts-node/register/transpile-only scripts/day44/generate-rag-fixture.ts --verify --fixture=scripts/day44/fixtures/rag-embeddings.json --provenance=scripts/day44/fixtures/rag-embeddings.provenance.json --documents=docs/rag/vietride-public-demo-knowledge-base.txt,docs/rag/vietride-operator-demo-knowledge-base.txt,docs/rag/vietride-admin-demo-knowledge-base.txt` (must emit `RAG_FIXTURE_PROVENANCE=PASS` without `OPENROUTER_API_KEY`)<br>`git diff --check -- scripts/day44/seed-rag.ts scripts/day44/seed-rag.test.ts` |
 | full regression owner | `audit-day` |
-| invariant flags | LF `.ts`; committed attested fixture is read-only; exact model/2048 check before DB writes; no provider/network branch or usable key; PUBLIC/OPERATOR/ADMIN access never widens; no banned/new dependency/cross-DB FK. |
-| acceptance | Focused tests prove the module first performs the same offline provenance/hash/model/dimension checks, then plans exactly three APPROVED/COMPLETED documents and exactly three chunks, one per document, with approval/ingest timestamps and `chunkCount=1`. Each chunk is non-empty, uniquely indexed, searchable, and uses its attested 2,048-value vector. Tests prove PUBLIC all six roles, OPERATOR exact Operator A/operator roles, ADMIN global/SYSTEM_ADMIN only, and deny cross-tenant/role combinations. The module has no provider/network code path and fails before DB writes on any fixture/provenance drift. Real pgvector assertions and `RAG_READY=PASS` belong to Task 44.8. |
+| human-approved command corrections | The focused mocked-test and offline provenance commands run with temporary `TS_NODE_COMPILER_OPTIONS={"module":"commonjs","moduleResolution":"node10","target":"ES2022","ignoreDeprecations":"6.0"}` and restore prior compiler/key state afterward; offline verification removes any process `OPENROUTER_API_KEY`. The final whitespace check uses `git diff --no-index --check` from a temporary empty file against both untracked owned paths and removes the temporary file. Approved on 2026-08-08; root config remains untouched. |
+| invariant flags | LF `.ts`; committed attested fixture is read-only; exact model/2048 check before DB writes; no provider/network branch or usable key; access matches canonical SYSTEM_ADMIN global bypass while ordinary OPERATOR access remains exact-tenant; no banned/new dependency/cross-DB FK. |
+| acceptance | Focused tests prove the module first performs the same offline provenance/hash/model/dimension checks, then plans exactly three APPROVED/COMPLETED documents and exactly three chunks, one per document, with approval/ingest timestamps and `chunkCount=1`. Each chunk is non-empty, uniquely indexed, searchable, and uses its attested 2,048-value vector. Tests prove PUBLIC all six roles, OPERATOR exact Operator A access for ordinary operator roles plus global SYSTEM_ADMIN access, ADMIN global/SYSTEM_ADMIN only, and deny passenger/admin/cross-tenant combinations for non-admin callers. The module has no provider/network code path and fails before DB writes on any fixture/provenance drift. Real pgvector assertions and `RAG_READY=PASS` belong to Task 44.8. |
 | source citations | Frozen manifest; Task 44.6 provenance contract; reconciled `SU26SE101_VIETRIDE_technical_context_v7.md` §6.8; reconciled `BACKEND_SOURCE_OF_TRUTH.md` §4.2/RAG access; `db-schema/rag-ai/schema.sql` document/chunk enums/tables and HNSW `halfvec(2048)`; `apps/rag/prisma/schema.prisma`. |
 
 ### Task 44.8 — Orchestrate and prove the isolated real-store seed
@@ -341,7 +343,7 @@ parallel-safe.
 
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 44.1 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 patch round; later human-approved E.164 corrective patch re-reviewed. |
+| 44.1 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 patch round; later E.164 and canonical SYSTEM_ADMIN RAG-access corrections re-reviewed. |
 | 44.2 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 patch round; human-approved README/schema header scope expansion. |
 | 44.3 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 patch round; human-approved focused-test command correction. |
 | 44.4 | ✅ done | APPROVE | 2026-08-08 | Approved after 2 review patch rounds; human-approved focused-test command correction. |
