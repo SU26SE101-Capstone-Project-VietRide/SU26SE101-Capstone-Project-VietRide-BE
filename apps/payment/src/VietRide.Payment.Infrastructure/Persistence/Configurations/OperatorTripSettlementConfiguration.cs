@@ -53,6 +53,7 @@ internal sealed class OperatorTripSettlementConfiguration : IEntityTypeConfigura
         builder.HasIndex(x => x.WalletTransactionId).HasDatabaseName("idx_operator_trip_settlements_wallet_transaction_id").HasFilter("wallet_transaction_id IS NOT NULL");
         builder.HasIndex(x => x.SettledByUserId).HasDatabaseName("idx_operator_trip_settlements_settled_by_user_id").HasFilter("settled_by_user_id IS NOT NULL");
         builder.HasIndex(x => new { x.Status, x.ActiveFailureCode, x.LastSettlementFailureAt }).HasDatabaseName("idx_operator_trip_settlements_stuck").HasFilter("status = 'ELIGIBLE' AND active_failure_code IS NOT NULL");
+        builder.HasIndex(x => x.SettledAt).HasDatabaseName("idx_operator_trip_settlements_settled_at").HasFilter("status = 'SETTLED'");
         builder.HasOne<OperatorWalletTransaction>()
             .WithMany()
             .HasForeignKey(x => x.WalletTransactionId)

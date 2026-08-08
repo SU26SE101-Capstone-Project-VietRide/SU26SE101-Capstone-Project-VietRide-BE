@@ -2,9 +2,11 @@ using System.Globalization;
 using MediatR;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Core;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Payment.Application.Features.RevenueAnalytics.Admin;
 
@@ -14,15 +16,21 @@ public sealed class GetAdminRevenueAnalyticsQueryHandler
     private readonly IRevenueAnalyticsRepository repository;
     private readonly IIdentityOperatorSummaryClient identity;
     private readonly ITripRevenueAnalyticsClient trip;
+    private readonly IClock clock;
+    private readonly IRevenueReportCache cache;
 
     public GetAdminRevenueAnalyticsQueryHandler(
         IRevenueAnalyticsRepository repository,
         IIdentityOperatorSummaryClient identity,
-        ITripRevenueAnalyticsClient trip)
+        ITripRevenueAnalyticsClient trip,
+        IClock clock,
+        IRevenueReportCache cache)
     {
         this.repository = repository;
         this.identity = identity;
         this.trip = trip;
+        this.clock = clock;
+        this.cache = cache;
     }
 
     public async Task<AdminRevenueAnalyticsResponse> Handle(
@@ -38,6 +46,10 @@ public sealed class GetAdminRevenueAnalyticsQueryHandler
             ParseDate(request.From, "from"),
             ParseDate(request.To, "to"));
         var top = RevenueAnalyticsPeriodRules.ClampTop(request.Top);
+        var cacheKey = RevenueReportCacheKeys.AdminAnalytics(range, top);
+        var cached = await cache.GetAsync<AdminRevenueAnalyticsResponse>(cacheKey, cancellationToken);
+        if (cached is not null)
+            return cached;
         var currentRows = await repository.GetAdminMonthlyRevenueAsync(
             range.FromUtc,
             range.ToUtc,
@@ -46,7 +58,7 @@ public sealed class GetAdminRevenueAnalyticsQueryHandler
             range.PreviousFromUtc,
             range.PreviousToUtc,
             cancellationToken);
-        var topRows = await repository.GetTopOperatorPayoutsAsync(
+        var topRows = await repository.GetTopOperatorRevenueAsync(
             range.FromUtc,
             range.ToUtc,
             top,
@@ -57,18 +69,26 @@ public sealed class GetAdminRevenueAnalyticsQueryHandler
         var monthly = BuildMonthly(range.From, range.To, currentRows);
         var topOperators = await EnrichTopOperatorsAsync(topRows, cancellationToken);
 
-        return new AdminRevenueAnalyticsResponse(
+        var result = new AdminRevenueAnalyticsResponse(
             new AdminRevenuePeriod(range.From, range.To, RevenueAnalyticsPeriodRules.Timezone),
             new AdminRevenueSummary(
-                RevenueComparisonFactory.Create(current.Gross, previous.Gross),
-                RevenueComparisonFactory.Create(current.Platform, previous.Platform),
-                RevenueComparisonFactory.Create(current.Paid, previous.Paid)),
+                new AdminRevenueComparisons(
+                    RevenueComparisonFactory.Create(current.TotalProject, previous.TotalProject),
+                    RevenueComparisonFactory.Create(current.NetTransport, previous.NetTransport),
+                    RevenueComparisonFactory.Create(current.NetTicket, previous.NetTicket),
+                    RevenueComparisonFactory.Create(current.NetParcel, previous.NetParcel),
+                    RevenueComparisonFactory.Create(current.Subscription, previous.Subscription)),
+                new AdminSettlementComparisons(
+                    RevenueComparisonFactory.Create(current.Paid, previous.Paid))),
             monthly,
-            topOperators);
+            topOperators,
+            clock.UtcNow.UtcDateTime);
+        await cache.SetAsync(cacheKey, result, RevenueReportCacheKeys.Expiration, cancellationToken);
+        return result;
     }
 
     private async Task<IReadOnlyList<AdminTopOperatorItem>> EnrichTopOperatorsAsync(
-        IReadOnlyList<TopOperatorPayoutReadModel> rows,
+        IReadOnlyList<TopOperatorRevenueReadModel> rows,
         CancellationToken cancellationToken)
     {
         var orderedRows = rows
@@ -124,13 +144,20 @@ public sealed class GetAdminRevenueAnalyticsQueryHandler
         while (true)
         {
             byMonth.TryGetValue(current, out var row);
-            var platform = row?.PlatformRevenueVnd ?? 0;
+            var ticket = row?.NetTicketRevenueVnd ?? 0;
+            var parcel = row?.NetParcelRevenueVnd ?? 0;
+            var subscription = row?.SubscriptionRevenueVnd ?? 0;
             var paid = row?.PaidToOperatorsVnd ?? 0;
+            var transport = checked(ticket + parcel);
             result.Add(new AdminRevenueMonthItem(
                 current.ToString("yyyy-MM", CultureInfo.InvariantCulture),
-                checked(platform + paid),
-                paid,
-                platform));
+                new AdminRevenueMonthValues(
+                    checked(transport + subscription),
+                    transport,
+                    ticket,
+                    parcel,
+                    subscription),
+                new AdminSettlementMonthValues(paid)));
             if (current == last)
             {
                 break;
@@ -142,18 +169,23 @@ public sealed class GetAdminRevenueAnalyticsQueryHandler
         return result;
     }
 
-    private static (long Platform, long Paid, long Gross) Sum(
+    private static (long NetTicket, long NetParcel, long NetTransport, long Subscription, long TotalProject, long Paid) Sum(
         IReadOnlyList<AdminRevenueMonthReadModel> rows)
     {
-        long platform = 0;
+        long ticket = 0;
+        long parcel = 0;
+        long subscription = 0;
         long paid = 0;
         foreach (var row in rows)
         {
-            platform = checked(platform + row.PlatformRevenueVnd);
+            ticket = checked(ticket + row.NetTicketRevenueVnd);
+            parcel = checked(parcel + row.NetParcelRevenueVnd);
+            subscription = checked(subscription + row.SubscriptionRevenueVnd);
             paid = checked(paid + row.PaidToOperatorsVnd);
         }
 
-        return (platform, paid, checked(platform + paid));
+        var transport = checked(ticket + parcel);
+        return (ticket, parcel, transport, subscription, checked(transport + subscription), paid);
     }
 
     private static DateOnly? ParseDate(string? value, string field)

@@ -3,6 +3,7 @@ using Hangfire.PostgreSql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Polly;
 using StackExchange.Redis;
 using VietRide.Parcel.Application.Abstractions.Caching;
 using VietRide.Parcel.Application.Abstractions.Repositories;
@@ -183,6 +184,7 @@ public static class InfrastructureServiceCollectionExtensions
         {
             services.AddScoped<IPaymentServiceClient, DevPaymentServiceClient>();
             services.AddScoped<IPaymentRedirectLookupClient, DevPaymentRedirectLookupClient>();
+            services.AddScoped<IPaymentOperatorRevenueSummaryClient, UnavailablePaymentOperatorRevenueSummaryClient>();
         }
         else
         {
@@ -211,8 +213,30 @@ public static class InfrastructureServiceCollectionExtensions
                 })
                 .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
                 .AddHttpMessageHandler<InternalJwtDelegatingHandler>();
+            services
+                .AddHttpClient<IPaymentOperatorRevenueSummaryClient, PaymentOperatorRevenueSummaryClient>(client =>
+                {
+                    client.BaseAddress = new Uri(baseUrl);
+                    client.Timeout = TimeSpan.FromSeconds(5);
+                    client.DefaultRequestHeaders.Accept.Clear();
+                    client.DefaultRequestHeaders.Accept.Add(
+                        new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                })
+                .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+                .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+                .AddPolicyHandler(CreatePaymentReportingCircuitBreakerPolicy())
+                .AddPolicyHandler(CreatePaymentReportingRetryPolicy());
         }
     }
+
+    public static IAsyncPolicy<HttpResponseMessage> CreatePaymentReportingRetryPolicy()
+        => HttpResiliencePolicies.GetRetryPolicy(retryCount: 1);
+
+    public static IAsyncPolicy<HttpResponseMessage> CreatePaymentReportingCircuitBreakerPolicy(
+        TimeSpan? breakDuration = null)
+        => HttpResiliencePolicies.GetCircuitBreakerPolicy(
+            failuresBeforeBreak: 5,
+            breakDuration: breakDuration ?? TimeSpan.FromSeconds(30));
 
     private static void RegisterBookingClient(IServiceCollection services, IConfiguration configuration, IHostEnvironment hostEnvironment)
     {

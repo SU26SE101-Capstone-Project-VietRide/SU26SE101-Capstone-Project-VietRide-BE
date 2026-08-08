@@ -91,7 +91,8 @@ public sealed class FinancialProjectionSnapshotTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             "Manual correction",
-            actor);
+            actor,
+            OperatorLedgerAdjustmentReason.MANUAL_WALLET_ADJUSTMENT);
 
         entry.ActorType.Should().Be(FinancialActorType.USER);
         entry.ActorUserId.Should().Be(actor.UserId);

@@ -86,10 +86,79 @@ public sealed class RevenueLedgerWriterTests
         repository.Entries.Should().ContainSingle(entry =>
             entry.EntryType == OperatorLedgerEntryType.ADJUSTMENT
             && entry.Amount == -30_000
+            && entry.AdjustmentReason == OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL
             && entry.Note == "reverse-vietride-funded-voucher");
         repository.Entries.Should().OnlyContain(entry =>
             entry.SourceEventId == sourceEventId
             && entry.ReferenceId == bookingId);
+    }
+
+    [Fact]
+    public async Task RecordRefundAsync_ParcelRefund_UsesTypedDeterministicVoucherReversal()
+    {
+        var sourceEventId = Guid.NewGuid();
+        var parcelId = Guid.NewGuid();
+        var repository = new FakeLedgerRepository();
+        var writer = new RevenueLedgerWriter(repository);
+        var context = new PaymentContextV1(1,
+        [
+            new PaymentAllocationV1(
+                parcelId,
+                "PARCEL",
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                200_000,
+                30_000,
+                0),
+        ]);
+
+        await writer.RecordRefundAsync(
+            sourceEventId,
+            context,
+            parcelId,
+            75_000,
+            CancellationToken.None);
+
+        repository.Entries.Should().ContainSingle(entry =>
+            entry.EntryType == OperatorLedgerEntryType.PARCEL_REFUND
+            && entry.Amount == -75_000
+            && entry.SourceEventId == sourceEventId);
+        var adjustment = repository.Entries.Should().ContainSingle(entry =>
+            entry.EntryType == OperatorLedgerEntryType.ADJUSTMENT).Which;
+        adjustment.Amount.Should().Be(-30_000);
+        adjustment.AdjustmentReason.Should().Be(
+            OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL);
+        adjustment.SourceEventId.Should().Be(
+            RevenueLedgerWriter.CreateParcelVoucherAdjustmentSourceId(sourceEventId, parcelId));
+        adjustment.SourceEventId.Should().NotBe(sourceEventId);
+    }
+
+    [Fact]
+    public async Task RecordGenericBookingRefundEntitlementAsync_UsesTypedZeroMarker()
+    {
+        var bookingId = Guid.NewGuid();
+        var repository = new FakeLedgerRepository();
+        var writer = new RevenueLedgerWriter(repository);
+        var context = new PaymentContextV1(1,
+        [
+            new PaymentAllocationV1(
+                bookingId,
+                "BOOKING",
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                200_000,
+                0,
+                0),
+        ]);
+
+        await writer.RecordGenericBookingRefundEntitlementAsync(
+            Guid.NewGuid(),
+            context,
+            bookingId,
+            CancellationToken.None);
+
+        repository.Entries.Should().ContainSingle().Which.AdjustmentReason.Should().Be(
+            OperatorLedgerAdjustmentReason.GENERIC_BOOKING_REFUND_ENTITLEMENT);
     }
 
     [Fact]

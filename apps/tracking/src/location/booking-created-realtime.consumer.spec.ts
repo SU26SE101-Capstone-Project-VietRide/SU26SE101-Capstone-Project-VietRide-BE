@@ -154,6 +154,8 @@ function createPayload() {
     tripId: '44444444-4444-4444-8444-444444444444',
     status: 'CONFIRMED',
     ticketCodes: ['VT-20260805-ABCDEFGH'],
+    seatNumbers: ['A01'],
+    departureDateTime: '2026-08-05T03:00:00.000Z',
     passengerCount: 1,
     pickup: { stationId: '66666666-6666-4666-8666-666666666666', stopId: null, address: null },
     dropoff: { stationId: null, stopId: '77777777-7777-4777-8777-777777777777', address: null },

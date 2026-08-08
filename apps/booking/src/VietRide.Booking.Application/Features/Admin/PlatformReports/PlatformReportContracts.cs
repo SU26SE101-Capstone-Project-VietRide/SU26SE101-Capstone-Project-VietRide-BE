@@ -1,14 +1,14 @@
 namespace VietRide.Booking.Application.Features.Admin.PlatformReports;
 
-public sealed record PlatformReportPeriod(DateTime From, DateTime To, string Timezone);
+public sealed record PlatformReportPeriod(DateOnly From, DateOnly To, string Timezone);
 
 public sealed record PlatformReportTotals(
     long CompletedBookingCount,
     long CompletedTripCount,
     long DeliveredParcelCount,
-    long BookingRevenueVnd,
-    long ParcelRevenueVnd,
-    long NetRevenueVnd);
+    long NetTicketRevenueVnd,
+    long NetParcelRevenueVnd,
+    long NetTransportRevenueVnd);
 
 public sealed record PlatformReportOperatorItem(
     Guid OperatorId,
@@ -16,9 +16,9 @@ public sealed record PlatformReportOperatorItem(
     long CompletedBookingCount,
     long CompletedTripCount,
     long DeliveredParcelCount,
-    long BookingRevenueVnd,
-    long ParcelRevenueVnd,
-    long NetRevenueVnd);
+    long NetTicketRevenueVnd,
+    long NetParcelRevenueVnd,
+    long NetTransportRevenueVnd);
 
 public sealed record PlatformReportResult(
     PlatformReportPeriod Period,

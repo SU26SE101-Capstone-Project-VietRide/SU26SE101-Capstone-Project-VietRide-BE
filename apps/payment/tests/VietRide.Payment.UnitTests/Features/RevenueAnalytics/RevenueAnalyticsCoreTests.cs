@@ -44,7 +44,7 @@ public sealed class RevenueAnalyticsCoreTests
         period.CurrentToUtc.Should().Be(DateTimeOffset.Parse("2026-07-31T17:00:00Z"));
         period.PreviousFromUtc.Should().Be(DateTimeOffset.Parse("2026-05-31T17:00:00Z"));
         period.PreviousToUtc.Should().Be(DateTimeOffset.Parse("2026-06-30T17:00:00Z"));
-        period.TwelveMonthFromUtc.Should().Be(DateTimeOffset.Parse("2025-07-31T17:00:00Z"));
+        period.QueryFromUtc.Should().Be(DateTimeOffset.Parse("2025-07-31T17:00:00Z"));
     }
 
     [Fact]
@@ -71,22 +71,56 @@ public sealed class RevenueAnalyticsCoreTests
         => RevenueAnalyticsPeriodRules.ClampTop(top).Should().Be(expected);
 
     [Theory]
-    [InlineData(100, 0, 0, "UP")]
-    [InlineData(0, 0, 0, "FLAT")]
-    [InlineData(-10, 0, 0, "DOWN")]
-    [InlineData(113, 100, 13, "UP")]
-    [InlineData(100, 113, -11.5, "DOWN")]
-    [InlineData(20201, 20000, 1.01, "UP")]
-    [InlineData(19799, 20000, -1.01, "DOWN")]
+    [InlineData(100, 0, null, "UP")]
+    [InlineData(0, 0, "0", "FLAT")]
+    [InlineData(-10, 0, null, "DOWN")]
+    [InlineData(113, 100, "13", "UP")]
+    [InlineData(100, 113, "-11.5", "DOWN")]
+    [InlineData(20201, 20000, "1.01", "UP")]
+    [InlineData(19799, 20000, "-1.01", "DOWN")]
     public void Comparison_HandlesZeroDenominatorTrendAndAwayFromZeroRounding(
         long current,
         long previous,
-        decimal expectedPercent,
+        string? expectedPercent,
         string expectedTrend)
     {
         var result = RevenueComparisonFactory.Create(current, previous);
 
-        result.ChangePercent.Should().Be(expectedPercent);
+        result.ChangePercent.Should().Be(expectedPercent is null
+            ? null
+            : decimal.Parse(expectedPercent, System.Globalization.CultureInfo.InvariantCulture));
         result.Trend.Should().Be(expectedTrend);
+    }
+
+    [Fact]
+    public void OperatorYear_ReturnsCalendarMonthsAndPreviousYearRange()
+    {
+        var period = RevenueAnalyticsPeriodRules.OperatorPeriod(null, 2026, "month");
+
+        period.IsYearMode.Should().BeTrue();
+        period.Months.Should().Equal(
+            "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
+            "2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12");
+        period.CurrentFromUtc.Should().Be(DateTimeOffset.Parse("2025-12-31T17:00:00Z"));
+        period.CurrentToUtc.Should().Be(DateTimeOffset.Parse("2026-12-31T17:00:00Z"));
+        period.PreviousFromUtc.Should().Be(DateTimeOffset.Parse("2024-12-31T17:00:00Z"));
+        period.PreviousToUtc.Should().Be(DateTimeOffset.Parse("2025-12-31T17:00:00Z"));
+        period.QueryFromUtc.Should().Be(period.PreviousFromUtc);
+    }
+
+    [Theory]
+    [InlineData(null, null, null)]
+    [InlineData("2026-07", 2026, "month")]
+    [InlineData("2026-07", null, "month")]
+    [InlineData(null, 2026, null)]
+    [InlineData(null, 2026, "day")]
+    public void OperatorPeriod_RejectsAnythingExceptMonthOrYearContract(
+        string? month,
+        int? year,
+        string? groupBy)
+    {
+        var act = () => RevenueAnalyticsPeriodRules.OperatorPeriod(month, year, groupBy);
+
+        act.Should().Throw<CodedValidationException>();
     }
 }

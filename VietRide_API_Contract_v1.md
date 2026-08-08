@@ -1722,13 +1722,13 @@ Response `200`:
         "operatorId": "uuid",
         "date": "2026-05-18",
         "totalBookings": 120,
-        "totalRevenue": 42000000,
         "totalCancellations": 4,
         "totalNoShows": 2,
         "totalPartialNoShows": 1,
         "totalCompleted": 113
       }
-    ]
+    ],
+    "totalBookings": 120
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
@@ -1751,13 +1751,13 @@ Response `200`:
         "operatorId": "uuid",
         "operatorName": "VietRide Express",
         "totalBookings": 120,
-        "totalRevenue": 42000000,
         "totalCancellations": 4,
         "totalNoShows": 2,
         "totalPartialNoShows": 1,
         "totalCompleted": 113
       }
-    ]
+    ],
+    "totalBookings": 120
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
@@ -4486,9 +4486,9 @@ Server broadcasts to room `trip:{tripId}`:
 - `trip:statusChanged`
 
 Driver và Assistant được Tracking tự động tham gia thêm room nội bộ
-`tracking:trip:{tripId}:crew`. Khi Booking chuyển sang `CONFIRMED`, Booking phát fact
-`booking.booking.created`; Tracking validate fact này và chỉ broadcast `booking:created` vào
-crew room. Passenger room không nhận sự kiện này.
+`trip:crew:{tripId}`. Khi manifest thay đổi, Tracking chỉ broadcast các event booking vào crew
+room; Passenger room không nhận. `booking:created` được giữ tương thích, còn client mới dùng
+`booking:updated` với `reason=BOOKING_CREATED|BOOKING_CANCELLED|PASSENGER_BOARDED|BOOKING_TRANSFERRED`.
 
 ```json
 {
@@ -4499,6 +4499,8 @@ crew room. Passenger room không nhận sự kiện này.
   "tripId": "uuid",
   "status": "CONFIRMED",
   "ticketCodes": ["VT-20260805-ABCDEFGH"],
+  "seatNumbers": ["A01"],
+  "departureDateTime": "2026-08-05T12:00:00.000Z",
   "passengerCount": 1,
   "pickup": { "stationId": "uuid", "stopId": null, "address": null },
   "dropoff": { "stationId": null, "stopId": "uuid", "address": null },
@@ -4508,8 +4510,30 @@ crew room. Passenger room không nhận sự kiện này.
 ```
 
 `eventId` là identity bền vững cho Outbox, RabbitMQ, Notification và Tracking dedupe.
-Notification lưu type `BOOKING_CREATED` cho từng crew recipient hiện có với dedupe riêng theo
-`eventId + recipientUserId`. Các field và event mới đều additive; client cũ có thể bỏ qua.
+Notification lưu type `BOOKING_CREATED` hoặc crew-facing `BOOKING_CANCELLED` cho từng crew
+recipient hiện có với dedupe riêng theo `eventId + recipientUserId`. FCM gửi cả `data.type` và
+`data.notificationType` bằng đúng type; array trong FCM data được JSON stringify.
+
+`booking:updated` là signal invalidate/refetch, không thay thế manifest/seat-map REST:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-08-05T10:00:01.000Z",
+  "tripId": "uuid",
+  "bookingId": "uuid",
+  "reason": "PASSENGER_BOARDED",
+  "bookingCode": "VR-20260805-ABCDEFGH",
+  "seatNumbers": ["A01"],
+  "passengerRecordId": "uuid",
+  "ticketCode": "VT-20260805-ABCDEFGH",
+  "boardedAt": "2026-08-05T10:00:01.000Z"
+}
+```
+
+Cancellation chỉ fan-out crew khi `previousStatus=CONFIRMED`, và bỏ qua cancellation phát sinh do
+toàn Trip đã terminal. Transfer phát cùng event vào cả crew room Trip cũ và mới, dedupe room nếu
+hai Trip id trùng nhau.
 
 Tracking Phase 10 invariants (legacy fields remain compatible; delay fields below are additive):
 
@@ -5254,8 +5278,12 @@ Xác thực: `SYSTEM_ADMIN`. Booking sở hữu facade và orchestration; Gatewa
 nào đọc database của service khác. Booking lấy các chỉ số vận hành từ Booking/Trip/Parcel, lấy doanh
 thu cuối cùng từ Payment ledger, rồi gọi các endpoint raw và Identity bên dưới bằng Internal JWT.
 
-`from` and `to` are both required RFC 3339 timestamps with UTC offset `Z`; `from < to`; maximum
-range is 366 days. Metrics use half-open UTC interval `[from,to)`.
+`from` và `to` là hai ngày ICT bắt buộc theo `YYYY-MM-DD`, inclusive, `from <= to`, tối đa 366 ngày.
+Booking diễn giải input theo lịch ICT rồi chuẩn hóa ngay thành hai timestamp UTC
+`[fromUtc, toUtcExclusive)` để query DB/gọi nguồn nội bộ. Công thức là
+`fromUtc = UTC(from 00:00 Asia/Ho_Chi_Minh)` và
+`toUtcExclusive = UTC((to + 1 ngày) 00:00 Asia/Ho_Chi_Minh)`; ví dụ
+`2026-07-01..2026-07-31` thành `[2026-06-30T17:00:00Z, 2026-07-31T17:00:00Z)`.
 
 Response `200`:
 
@@ -5265,17 +5293,17 @@ Response `200`:
   "statusCode": 200,
   "data": {
     "period": {
-      "from": "2026-07-01T00:00:00Z",
-      "to": "2026-08-01T00:00:00Z",
-      "timezone": "UTC"
+      "from": "2026-07-01",
+      "to": "2026-07-31",
+      "timezone": "Asia/Ho_Chi_Minh"
     },
     "totals": {
       "completedBookingCount": 120,
       "completedTripCount": 36,
       "deliveredParcelCount": 18,
-      "bookingRevenueVnd": 48000000,
-      "parcelRevenueVnd": 3200000,
-      "netRevenueVnd": 51200000
+      "netTicketRevenueVnd": 48000000,
+      "netParcelRevenueVnd": 3200000,
+      "netTransportRevenueVnd": 51200000
     },
     "byOperator": [{
       "operatorId": "uuid",
@@ -5283,9 +5311,9 @@ Response `200`:
       "completedBookingCount": 120,
       "completedTripCount": 36,
       "deliveredParcelCount": 18,
-      "bookingRevenueVnd": 48000000,
-      "parcelRevenueVnd": 3200000,
-      "netRevenueVnd": 51200000
+      "netTicketRevenueVnd": 48000000,
+      "netParcelRevenueVnd": 3200000,
+      "netTransportRevenueVnd": 51200000
     }],
     "generatedAt": "2026-08-01T00:00:01Z"
   },
@@ -5294,16 +5322,17 @@ Response `200`:
 ```
 
 `byOperator` là hợp của operator ID từ Booking/Trip/Parcel và Payment ledger, sort theo
-`netRevenueVnd DESC` rồi operator ID. Counts vận hành do Booking/Trip/Parcel sở hữu; Payment ledger
-sở hữu `bookingRevenueVnd` và `parcelRevenueVnd` cuối cùng. Một booking đã thanh toán ở trạng thái
-`NO_SHOW` vẫn có thể cộng doanh thu ledger nhưng không cộng `completedBookingCount`. DTO public không
-đổi shape. Summary Identity bị thiếu vẫn giữ `operatorName=null`; totals phải bằng checked sum của
-mọi breakdown row. Parcel và net revenue là signed và có thể âm.
+`netTransportRevenueVnd DESC` rồi operator ID. Counts vận hành do Booking/Trip/Parcel sở hữu;
+Payment ledger sở hữu `netTicketRevenueVnd` và `netParcelRevenueVnd` cuối cùng. Một booking đã thanh
+toán ở trạng thái `NO_SHOW` vẫn có thể cộng doanh thu ledger nhưng không cộng
+`completedBookingCount`. Summary Identity bị thiếu vẫn giữ `operatorName=null`; totals phải bằng
+checked sum của mọi breakdown row. Ticket, Parcel và transport revenue là signed và có thể âm.
 
 Lỗi: `403 FORBIDDEN`, `422 VALIDATION_ERROR`, `500 REPORT_VALUE_OVERFLOW`, `503
 UPSTREAM_UNAVAILABLE`. Overflow upstream được propagate cùng HTTP 500; timeout, source unavailable,
 payload không dùng được, ledger malformed/duplicate và source-local live/projection mismatch đều trả
-503. Ledger-only revenue không phải là mismatch. Không trả partial hoặc stale response.
+503. Ledger-only revenue không phải là mismatch. Không trả partial hoặc stale response. Cache
+`platform-report:v3` có TTL tối đa 60 giây; lỗi nguồn không được dùng cache quá hạn.
 
 ### GET `/internal/v1/reports/platform/bookings?from={from}&to={to}`
 
@@ -8506,7 +8535,9 @@ Success is a raw file response with media type
 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `Content-Disposition:
 attachment`, and a deterministic filename ending in `.xlsx`. Errors use the ADR 0004 envelope.
 Empty ranges still produce a valid workbook. No report contains passenger, sender or recipient
-PII. The existing `GET /v1/operator/parcels/reports/export?format=csv` route remains unchanged.
+PII. Legacy CSV `GET /v1/operator/parcels/reports/export?format=csv` vẫn giữ filename/MIME/counts,
+nhưng breaking đổi ba cột tiền thành `grossParcelRevenueVnd`, signed `parcelRefundsVnd` và
+`netParcelRevenueVnd`; cả ba lấy từ Payment cho cùng khoảng ngày ICT.
 
 Workbook columns are stable and typed as follows:
 
@@ -8528,16 +8559,18 @@ Revenue and refund rows come from immutable Payment `OperatorLedgerEntry`. `BOOK
 allocations are read from the existing Payment context and are not duplicated in a new attribution
 table. The shared writer uses ClosedXML `0.105.0`, a delete-on-close seekable temp stream and
 async row enumeration; it must not materialize a full output byte array or a duplicate full row
-list.
+list. Revenue XLSX áp dụng đúng canonical signed predicate của Payment; Refund XLSX chỉ là subset
+`BOOKING_REFUND|PARCEL_REFUND`, không tự suy ra refund từ note hoặc wallet transaction.
 
 ### Platform report stabilization
 
-`GET /v1/admin/reports/platform?from=&to=` vẫn là public route với anchor UTC `[from,to)`. Từ Day
-42, Booking sở hữu facade và chỉ gọi internal raw source; mỗi source đọc database của chính mình.
+`GET /v1/admin/reports/platform?from=&to=` vẫn là public route nhận ngày ICT inclusive. Booking
+chuẩn hóa thành UTC half-open `[fromUtc,toUtcExclusive)` trước mọi query/internal call. Từ Day 42,
+Booking sở hữu facade và chỉ gọi internal raw source; mỗi source đọc database của chính mình.
 Booking/Trip/Parcel sở hữu các count vận hành. Payment ledger là nguồn authoritative cho
-`bookingRevenueVnd` và `parcelRevenueVnd` cuối cùng; paid `NO_SHOW` có thể tạo revenue mà không tạo
+`netTicketRevenueVnd` và `netParcelRevenueVnd` cuối cùng; paid `NO_SHOW` có thể tạo revenue mà không tạo
 completed booking count. Redis read-through cache dùng key
-`platform-report:v2:{fromUtc}:{toUtc}`, TTL 5 phút và boundary UTC chính xác.
+`platform-report:v3:{fromUtc}:{toUtc}`, TTL 60 giây và boundary UTC chính xác.
 
 Facade chỉ reconciliation dữ liệu live/projection trong từng source vận hành trước khi promote
 Stats/cache. Source-local mismatch, downstream timeout, source unavailable, payload malformed,
@@ -8553,8 +8586,9 @@ live operational aggregates của chính source đó cho từng operator trong e
 source-local count hoặc field vận hành mismatch trả `503 UPSTREAM_UNAVAILABLE`; projected timestamp
 mới không được dùng để bypass reconciliation.
 
-`GET /internal/v1/reports/platform/ledger?from=&to=` chỉ dành cho Internal JWT và trả raw payload do
-Payment sở hữu `{ "items": [{ "operatorId", "bookingRevenueVnd", "parcelRevenueVnd" }] }`.
+`GET /internal/v1/reports/platform/ledger?from=&to=` chỉ dành cho Internal JWT và trả raw payload
+legacy do Payment sở hữu `{ "items": [{ "operatorId", "bookingRevenueVnd", "parcelRevenueVnd" }] }`;
+Booking map hai field nội bộ này sang tên public `netTicketRevenueVnd`/`netParcelRevenueVnd`.
 Payment đọc immutable `OperatorLedgerEntry` trong UTC `[from,to)`, checked BIGINT aggregation và
 không gọi service khác. Ledger malformed/duplicate hoặc unavailable là `503`; Booking không so
 revenue ledger với operational amount để bác bỏ ledger-only revenue trước khi publish/cache report.
@@ -8614,7 +8648,9 @@ Auth: `OPERATOR_ADMIN` only. The operator is read from the JWT; `operatorId` is 
 Query: `search?`, `status?`, `from?`, `to?`, `page=1`, `pageSize=20` (1..100),
 `sortBy=departureAt`, `sortDir=asc|desc`. `from`/`to` are ICT dates and `from <= to`.
 `search` matches route name case-insensitively and vehicle plate after removing separators.
-The date range is inclusive and is converted to UTC `[from@00:00 ICT, to+1day@00:00 ICT)`.
+The date range is inclusive theo lịch ICT nhưng mọi filter persistence dùng timestamp UTC
+`[fromUtc, toUtcExclusive)`, với hai mốc được chuẩn hóa từ local midnight; không query DB bằng
+timestamp mang offset ICT.
 
 Each paged item is:
 
@@ -8785,9 +8821,10 @@ for Operator Trip search; the maximum requested range is 366 inclusive days.
 tenant-scoped and uses stable route snapshots so inactive routes retain historical names.
 Its `from/to` range uses the same inclusive ICT rule.
 
-BookingStats month items remain `{ date, totalBookings, totalRevenue, totalCancellations }`; the
-operator variant also retains `totalCompleted`. `date` is the first ICT date of the month. Parcel
-status items are `{ key, count }` where `key` is a current ParcelStatus; route items are
+BookingStats không trả bất kỳ field tiền nào. Month items là
+`{ date, totalBookings, totalCancellations }`; operator variant thêm `totalCompleted` và các count
+no-show hiện có. `date` là ngày ICT đầu tiên của tháng. Parcel status items là `{ key, count }`
+where `key` is a current ParcelStatus; route items are
 `{ routeId, routeName, parcelCount }`. Both Parcel shapes return `totalParcels`.
 
 `GET /v1/admin/dashboard/summary?from=&to=` is a Booking-owned `SYSTEM_ADMIN` facade. It combines
@@ -8803,12 +8840,17 @@ The range is 1..366 inclusive ICT days; missing, reversed or oversized ranges re
 Identity timeout, 5xx or malformed metrics fail the whole Dashboard with
 `503 UPSTREAM_UNAVAILABLE`; no partial summary/distribution is returned.
 
-The response data shape is:
+Booking lấy toàn bộ năm comparison doanh thu từ Payment internal admin summary; BookingStats chỉ
+cung cấp count. The response data shape is:
 
 ```json
 {
   "period": { "from": "2026-01-01", "to": "2026-12-31", "timezone": "Asia/Ho_Chi_Minh" },
-  "totalRevenue": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
+  "totalProjectRevenueVnd": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
+  "netTransportRevenueVnd": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
+  "netTicketRevenueVnd": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
+  "netParcelRevenueVnd": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
+  "subscriptionRevenueVnd": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
   "activeOperators": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
   "activeUsers": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
   "bookings": { "currentValue": 0, "previousValue": 0, "changePercent": 0, "trend": "FLAT" },
@@ -8819,46 +8861,123 @@ The response data shape is:
 
 ### Revenue analytics — Payment owner
 
+> **Cảnh báo ngữ nghĩa:** các field revenue dưới đây là KPI quản trị, không phải báo cáo kế toán
+> pháp lý hay số tiền mặt hành khách đã trả. `VOUCHER_VIETRIDE_FUNDED_CREDIT` là quyền lợi doanh thu
+> VietRide cấp cho nhà xe và được cộng vào revenue dù không phải passenger cash. Không dùng các số
+> này để suy ra số dư ví hoặc tiền đã settlement.
+
+Payment là financial source of truth. Canonical whitelist duy nhất:
+
+- `BOOKING_REVENUE`, `BOOKING_REFUND`, `VOUCHER_VIETRIDE_FUNDED_CREDIT` có
+  `referenceType=BOOKING`;
+- `PARCEL_REVENUE`, `PARCEL_REFUND`, `VOUCHER_VIETRIDE_FUNDED_CREDIT` có
+  `referenceType=PARCEL`;
+- `ADJUSTMENT` chỉ khi
+  `adjustmentReason=VIETRIDE_FUNDED_VOUCHER_REVERSAL` và reference là `BOOKING|PARCEL`.
+
+`note` chỉ phục vụ audit, tuyệt đối không phải predicate tài chính. Loại khỏi revenue:
+`VOUCHER_OPERATOR_FUNDED_AUDIT`, `MANUAL_WALLET_ADJUSTMENT`,
+`GENERIC_BOOKING_REFUND_ENTITLEMENT`, `LEGACY_UNCLASSIFIED` và mọi type/reference khác.
+
+Taxonomy bắt buộc cho `ADJUSTMENT`:
+
+| `adjustmentReason` | Ràng buộc | Ý nghĩa revenue |
+|---|---|---|
+| `VIETRIDE_FUNDED_VOUCHER_REVERSAL` | `amount < 0`, reference `BOOKING|PARCEL` | được nhận diện trong category tương ứng |
+| `GENERIC_BOOKING_REFUND_ENTITLEMENT` | `amount = 0`, reference `BOOKING` | marker quyền được hoàn chung, không phải dòng tiền/revenue |
+| `MANUAL_WALLET_ADJUSTMENT` | `amount != 0`, reference `MANUAL` | điều chỉnh ví thủ công, không phải recognized revenue |
+| `LEGACY_UNCLASSIFIED` | chỉ dành cho dữ liệu lịch sử chưa phân loại | không được application tạo mới và không tính revenue |
+
+Mọi `ADJUSTMENT` phải có reason; mọi entry type khác phải để reason null. DB CHECK enforce presence
+và amount/reference semantics này.
+
+```text
+netTicketRevenueVnd      = canonical BOOKING entries
+netParcelRevenueVnd      = canonical PARCEL entries
+netTransportRevenueVnd   = netTicketRevenueVnd + netParcelRevenueVnd
+subscriptionRevenueVnd   = SUBSCRIPTION payment SUCCEEDED, anchor succeededAt
+totalProjectRevenueVnd   = netTransportRevenueVnd + subscriptionRevenueVnd
+```
+
+`paidToOperatorsVnd` là settlement cash-flow độc lập (`SETTLED`, anchor `settledAt`), nằm dưới
+object `settlement` và không thuộc bất kỳ công thức revenue nào. Subscription v1 không có
+refund/proration; nếu nghiệp vụ này thay đổi phải mở contract mới trước khi sửa công thức.
+
 `GET /v1/admin/revenue/analytics?from=&to=&groupBy=month&top=5` is `SYSTEM_ADMIN`-only; `top` is
 clamped 1..20. The range is 1..366 inclusive ICT days and `groupBy` is exactly `month`.
-`platformRevenueVnd` is completed subscription payments,
-`paidToOperatorsVnd` is settled payouts, and `grossRevenueVnd` is their sum. Monthly buckets are
-zero-filled and reconcile with summary. Top operators are batch-enriched with Identity display
-data and Trip vehicle counts.
+Monthly buckets are zero-filled and reconcile with summary. Response data contains:
 
-Subscription rows require `Payment.status=SUCCEEDED` and are bucketed by `succeededAt`. Payout rows
-require settlement `status=SETTLED` and are bucketed by `settledAt`; top operators rank by these
-same settled payouts in the requested period.
+- `summary.revenue`: comparisons cho `totalProjectRevenueVnd`, `netTransportRevenueVnd`,
+  `netTicketRevenueVnd`, `netParcelRevenueVnd`, `subscriptionRevenueVnd`;
+- `summary.settlement.paidToOperatorsVnd`: comparison độc lập;
+- `monthly[]`: `{ month, revenue: { totalProjectRevenueVnd, netTransportRevenueVnd,
+  netTicketRevenueVnd, netParcelRevenueVnd, subscriptionRevenueVnd }, settlement: {
+  paidToOperatorsVnd } }`;
+- `topOperators[]`: `{ rank, operatorId, operatorName, logoUrl, revenueVnd, vehicleCount }`, xếp
+  hạng bằng canonical net transport revenue, không phải payout;
+- `generatedAt`: UTC.
 
-Admin response data contains `period`, `summary.grossRevenueVnd`,
-`summary.platformRevenueVnd`, `summary.paidToOperatorsVnd` (each comparison object), `monthly`
-items `{ month, grossRevenueVnd, paidToOperatorsVnd, platformRevenueVnd }`, and `topOperators`
-items `{ rank, operatorId, operatorName, logoUrl, revenueVnd, vehicleCount }`.
+`GET /v1/operator/revenue/analytics` is `OPERATOR_ADMIN`-only and gets the tenant from JWT. Exactly
+one mode is required:
 
-`GET /v1/operator/revenue/analytics?month=YYYY-MM` is `OPERATOR_ADMIN`-only and gets the tenant from
-JWT. It returns current/previous summary, exactly 12 zero-filled months ending at the selected
-month, and route performance. Ticket revenue is signed `BOOKING_REVENUE/BOOKING_REFUND` plus
-VietRide-funded voucher credit whose reference is `BOOKING`; Parcel uses the equivalent `PARCEL`
-entries. The exact negative voucher reversal entry `entryType=ADJUSTMENT`,
-`referenceType=BOOKING|PARCEL`, `note=reverse-vietride-funded-voucher` is included in its matching
-category. `VOUCHER_OPERATOR_FUNDED_AUDIT` and every adjustment with `referenceType=MANUAL` are
-excluded, so `totalRevenueVnd = ticketRevenueVnd + parcelRevenueVnd`. Ledger entries are bucketed by
-`createdAt`. Route booking/parcel counts use distinct ledger references grouped by `tripId`; Trip
-supplies route/trip completion metadata. The comparison previous period is the immediately prior
-ICT calendar month. `averageRevenuePerTripVnd = totalRevenueVnd / tripCount`, rounded to the nearest
-đồng away from zero; tripCount zero returns 0. `completionRatePercent = completedTripCount /
-tripCount * 100`; tripCount zero returns 0.
+- month: `?month=YYYY-MM`; trả rolling 12 tháng kết thúc ở tháng chọn, comparison với tháng liền
+  trước và có `routePerformance`;
+- year: `?year=YYYY&groupBy=month`; trả Jan–Dec, comparison với calendar year trước và omit
+  `routePerformance`. Năm trước không có dữ liệu vẫn trả đủ comparison zero, không omit field.
 
-Operator response data contains `period`, comparison objects for `totalRevenueVnd`,
-`ticketRevenueVnd`, `parcelRevenueVnd`, `averageRevenuePerTripVnd`, exactly 12 `monthly` items
-`{ month, revenueVnd, ticketRevenueVnd, parcelRevenueVnd, tripCount }`, and `routePerformance`
-items `{ routeId, routeName, originName, destinationName, tripCount, completedTripCount,
-bookingCount, parcelCount, revenueVnd, completionRatePercent }`.
+Summary fields là `netRevenueVnd`, `netTicketRevenueVnd`, `netParcelRevenueVnd`,
+`averageNetRevenuePerTripVnd`. Monthly items là
+`{ month, netRevenueVnd, netTicketRevenueVnd, netParcelRevenueVnd, tripCount }`.
+Route items dùng field `netRevenueVnd`. Refund được bucket theo `createdAt` của kỳ phát sinh, vì vậy
+một tháng không có sale mới vẫn có thể âm do refund lịch sử; UI không được clamp về 0.
 
-For every comparison metric, previous zero and current positive means `trend=UP`; both zero means
-`trend=FLAT`; `changePercent=0` in both zero-denominator cases. Required upstream failure or
-malformed data fails the whole facade with `503 UPSTREAM_UNAVAILABLE`; no partial analytics are
-returned.
+Với mọi comparison: previous=0/current=0 trả `changePercent=0, trend=FLAT`;
+previous=0/current>0 trả `changePercent=null, trend=UP`; previous=0/current<0 trả
+`changePercent=null, trend=DOWN`; previous khác 0 dùng công thức phần trăm hiện hành. Mọi response
+financial có thể trễ tối đa 60 giây do cache Payment. Query lỗi không dùng stale cache.
+
+### Internal revenue summaries — không qua Gateway
+
+Hai endpoint dưới đây yêu cầu Internal JWT, dùng ICT inclusive range, trả raw DTO thành công và
+không được đăng ký Gateway:
+
+- `GET /internal/v1/revenue/admin-summary?from=YYYY-MM-DD&to=YYYY-MM-DD` trả
+  `totalProjectRevenueVnd`, `netTransportRevenueVnd`, `netTicketRevenueVnd`,
+  `netParcelRevenueVnd`, `subscriptionRevenueVnd`, `paidToOperatorsVnd`, `period`, `generatedAt`;
+- `GET /internal/v1/revenue/operators/{operatorId}/summary?from=YYYY-MM-DD&to=YYYY-MM-DD` trả
+  `netRevenueVnd`, `netTicketRevenueVnd`, `netParcelRevenueVnd`, `grossParcelRevenueVnd`, signed
+  `parcelRefundsVnd`, `period`, `operatorId`, `generatedAt`.
+
+Booking Dashboard/Platform Report và Parcel report gọi các endpoint này với timeout tổng 5 giây,
+tối đa một retry GET transient, circuit mở sau 5 operation lỗi trong 30 giây, sau đó half-open một
+probe. Unavailable, timeout, malformed hoặc circuit-open trả `503 UPSTREAM_UNAVAILABLE`; không
+fallback sang BookingStats/ParcelStats money.
+
+### Operator Parcel report summary và legacy CSV
+
+`GET /v1/operator/parcels/reports/summary?from=&to=` giữ counts từ Parcel nhưng money từ Payment.
+Response data là `{ operatorId, from, to, totalParcels, totalLoaded, totalDelivered, totalRejected,
+totalReturned, grossParcelRevenueVnd, parcelRefundsVnd, netParcelRevenueVnd, source }`.
+`parcelRefundsVnd` signed, thường âm; `netParcelRevenueVnd = grossParcelRevenueVnd +
+parcelRefundsVnd`. `source` chỉ mô tả nguồn counts (`ParcelStats|ParcelsFallback`), không mô tả nguồn
+money; money luôn từ Payment. Hai field cũ `totalRevenue`/`totalRefunded` không còn alias.
+
+`GET /v1/operator/parcels/reports/export?format=csv` dùng đúng cùng summary và header:
+`operatorId,from,to,totalParcels,totalLoaded,totalDelivered,totalRejected,totalReturned,
+grossParcelRevenueVnd,parcelRefundsVnd,netParcelRevenueVnd,source`. Parcel không cache full response;
+độ trễ tài chính tối đa chỉ do Payment cache 60 giây. `GET /v1/operator/parcel-stats` giữ nguyên
+count/status/route và không phải financial endpoint.
+
+### Breaking field mapping cho FE/BI
+
+| Surface | Field cũ | Field mới / hành vi |
+|---|---|---|
+| Admin Dashboard | `totalRevenue` | năm comparison: `totalProjectRevenueVnd`, `netTransportRevenueVnd`, `netTicketRevenueVnd`, `netParcelRevenueVnd`, `subscriptionRevenueVnd` |
+| BookingStats Admin/Operator | `totalRevenue` trong item/totals | bỏ hoàn toàn; không có alias |
+| Platform Report | `bookingRevenueVnd`, `parcelRevenueVnd`, `netRevenueVnd` | `netTicketRevenueVnd`, `netParcelRevenueVnd`, `netTransportRevenueVnd` |
+| Admin Revenue Analytics | `grossRevenueVnd`, `platformRevenueVnd`, top-level `paidToOperatorsVnd` | nested `summary.revenue.*`, `summary.settlement.paidToOperatorsVnd` |
+| Operator Revenue Analytics | `totalRevenueVnd`, `ticketRevenueVnd`, `parcelRevenueVnd`, `averageRevenuePerTripVnd` | `netRevenueVnd`, `netTicketRevenueVnd`, `netParcelRevenueVnd`, `averageNetRevenuePerTripVnd` |
+| Parcel summary/CSV | `totalRevenue`, `totalRefunded` | `grossParcelRevenueVnd`, signed `parcelRefundsVnd`, `netParcelRevenueVnd` |
 
 ### Internal UI-gap projections
 
@@ -8873,6 +8992,9 @@ Gateway:
 | `POST /internal/v1/trips/summaries/batch` | Trip | Body `{ tripIds }`, 1..100 distinct IDs; raw trip/route/station/vehicle/crew/timing summaries, missing IDs omitted |
 | `POST /internal/v1/operators/vehicle-counts/batch` | Trip | Body `{ operatorIds }`, 1..100 distinct IDs; raw `{ operatorId, vehicleCount }[]` |
 | `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Trip | Raw ICT-month `{ routeId, routeName, originName, destinationName, tripCount, completedTripCount }[]` |
+| `GET /internal/v1/revenue/admin-summary?from=&to=` | Payment | Raw canonical project revenue + independent payout summary; ICT inclusive |
+| `GET /internal/v1/revenue/operators/{operatorId}/summary?from=&to=` | Payment | Raw canonical operator ticket/parcel summary, gồm gross Parcel và signed refund; ICT inclusive |
+| `POST /internal/v1/revenue/backfills/parcel-voucher-reversals?dryRun=true|false` | Payment | Internal maintenance; mặc định dry-run, raw `{ scannedRefundCount, candidateCount, skippedExistingCount, legacyUnclassifiedCount, totalAdjustmentVnd, appliedCount }` |
 
 User batch items are `{ id, displayName, phone, email, avatarUrl, role, operatorId, status,
 deleted }`; deleted rows keep only `id`, `role`, `operatorId`, `status`, `deleted=true` and the

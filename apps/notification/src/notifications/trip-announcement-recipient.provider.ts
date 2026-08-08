@@ -13,11 +13,13 @@ const tripSnapshotSchema = z.object({
   operatorId: z.string().uuid(),
   driverUserId: z.string().uuid().nullable(),
   assistantUserId: z.string().uuid().nullable(),
+  departureDateTime: z.string().datetime({ offset: true }).optional(),
 });
 
 export interface TripRecipientSnapshot {
   operatorId: string;
   crewUserIds: string[];
+  departureDateTime?: string;
 }
 
 @Injectable()
@@ -64,6 +66,7 @@ export class TripAnnouncementRecipientProvider {
       crewUserIds: [snapshot.driverUserId, snapshot.assistantUserId].filter(
         (value): value is string => Boolean(value),
       ),
+      ...(snapshot.departureDateTime ? { departureDateTime: snapshot.departureDateTime } : {}),
     };
   }
 

@@ -978,6 +978,8 @@ public sealed class CreateRoundTripBookingCommandHandler
             booking.BookingCode.Value,
             booking.TripId,
             booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
+            booking.Passengers.Select(passenger => passenger.SeatNumber).OfType<string>().ToArray(),
+            trip.DepartureDateTime,
             new BookingLocationSnapshot(booking.PickupStationId, booking.PickupStopId, null),
             new BookingLocationSnapshot(booking.DropoffStationId, booking.DropoffStopId, null),
             trip.DriverUserId,

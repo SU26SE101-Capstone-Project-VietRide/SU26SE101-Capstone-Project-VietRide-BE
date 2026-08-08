@@ -251,14 +251,18 @@ public class CreateRoundTripBookingCommandHandlerTests
             Arg.Is<string>(json =>
                 json.Contains(result.Outbound.BookingId.ToString(), StringComparison.OrdinalIgnoreCase)
                 && json.Contains(OutboundTripId.ToString(), StringComparison.OrdinalIgnoreCase)
-                && json.Contains(OutboundDriverUserId.ToString(), StringComparison.OrdinalIgnoreCase)),
+                && json.Contains(OutboundDriverUserId.ToString(), StringComparison.OrdinalIgnoreCase)
+                && json.Contains("\"seatNumbers\"", StringComparison.Ordinal)
+                && json.Contains("\"departureDateTime\"", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
         await _outbox.Received(1).EnqueueAsync(
             Arg.Is("booking.booking.created"),
             Arg.Is<string>(json =>
                 json.Contains(result.Return.BookingId.ToString(), StringComparison.OrdinalIgnoreCase)
                 && json.Contains(ReturnTripId.ToString(), StringComparison.OrdinalIgnoreCase)
-                && json.Contains(ReturnDriverUserId.ToString(), StringComparison.OrdinalIgnoreCase)),
+                && json.Contains(ReturnDriverUserId.ToString(), StringComparison.OrdinalIgnoreCase)
+                && json.Contains("\"seatNumbers\"", StringComparison.Ordinal)
+                && json.Contains("\"departureDateTime\"", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
 
         await _statusHistory.Received(4).AddAsync(

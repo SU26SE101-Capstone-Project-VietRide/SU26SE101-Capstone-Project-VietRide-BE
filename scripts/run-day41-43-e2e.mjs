@@ -63,6 +63,8 @@ const compose = [
   'infra/docker/docker-compose.day41-43-e2e.yml',
 ];
 const serviceNames = ['identity', 'trip', 'booking', 'payment', 'parcel', 'tracking', 'gateway'];
+const revenueServiceNames = ['identity', 'trip', 'booking', 'payment', 'parcel', 'gateway'];
+const activeServiceNames = scope === 'revenue' ? revenueServiceNames : serviceNames;
 const operatorA = '41430000-0000-4000-8000-000000000001';
 const operatorB = '41430000-0000-4000-8000-000000000002';
 const systemAdmin = '41430000-0000-4000-8000-000000000010';
@@ -357,18 +359,53 @@ async function api(method, pathname, { token, body, key, signal } = {}) {
   return { response, buffer, text, json };
 }
 
-async function directApi(service, pathname, { token, body } = {}) {
+async function directApi(service, pathname, { token, body, key, method = 'GET' } = {}) {
   const response = await fetch(`${urls[service]}${pathname}`, {
+    method,
     headers: {
       ...(token ? { 'X-Internal-Auth': `Bearer ${token}` } : {}),
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(key ? { 'Idempotency-Key': key } : {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
   let json;
   try { json = JSON.parse(text); } catch { json = null; }
   return { response, text, json };
+}
+
+function responseData(result) {
+  return result.json?.data ?? result.json;
+}
+
+function ictDate(value = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(value);
+}
+
+function assertIctPeriod(period, from, to, label) {
+  assert(period?.from === from, `${label} period.from mismatch: ${period?.from}`);
+  assert(period?.to === to, `${label} period.to mismatch: ${period?.to}`);
+  assert(period?.timezone === 'Asia/Ho_Chi_Minh', `${label} timezone mismatch: ${period?.timezone}`);
+}
+
+function findMoneyFields(value, prefix = '') {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => findMoneyFields(item, `${prefix}[${index}]`));
+  }
+  if (!value || typeof value !== 'object') return [];
+  return Object.entries(value).flatMap(([key, child]) => {
+    const pathName = prefix ? `${prefix}.${key}` : key;
+    const current = /(revenue|amount|fare|refund|settlement|wallet|ledger|payout|paid)/i.test(key)
+      ? [pathName]
+      : [];
+    return current.concat(findMoneyFields(child, pathName));
+  });
 }
 
 function errorCode(result) {
@@ -489,10 +526,10 @@ function seed() {
   `);
 
   tripSql(`
-    INSERT INTO stations (id,name,slug,address_street,city,province,latitude,longitude,supports_shuttle,is_active,deleted_at)
+    INSERT INTO stations (id,name,slug,address_street,city,ward,latitude,longitude,supports_shuttle,is_active,deleted_at)
     VALUES
-      ('${stationOrigin}','Day 41-43 Origin','day4143-origin','Origin address','HCM','HCM',10.7700,106.7000,true,true,NULL),
-      ('${stationDestination}','Day 41-43 Destination','day4143-destination','Destination address','HCM','HCM',10.7800,106.7100,false,true,NULL)
+      ('${stationOrigin}','Day 41-43 Origin','day4143-origin','Origin address','HCM','Ward 1',10.7700,106.7000,true,true,NULL),
+      ('${stationDestination}','Day 41-43 Destination','day4143-destination','Destination address','HCM','Ward 2',10.7800,106.7100,false,true,NULL)
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO routes (id,operator_id,name,origin_station_id,destination_station_id,base_fare,is_active)
     VALUES
@@ -504,17 +541,17 @@ function seed() {
     ON CONFLICT (id) DO NOTHING;
     INSERT INTO vehicles (id,operator_id,vehicle_type_id,license_plate,seat_layout_json,total_seats,status,is_active)
     VALUES
-      ('${vehicleId}','${operatorA}','${vehicleTypeId}','51B-4143','{}',2,'ACTIVE',true),
-      ('${vehicleB}','${operatorB}','${vehicleTypeId}','51B-4143B','{}',2,'ACTIVE',true)
+      ('${vehicleId}','${operatorA}','${vehicleTypeId}','51B-4143','{"rows":[]}',2,'ACTIVE',true),
+      ('${vehicleB}','${operatorB}','${vehicleTypeId}','51B-4143B','{"rows":[]}',2,'ACTIVE',true)
     ON CONFLICT (id) DO NOTHING;
-    INSERT INTO trips (id,operator_id,route_id,vehicle_id,driver_user_id,departure_date_time,estimated_arrival_time,completed_at,status,source,base_fare)
+    INSERT INTO trips (id,operator_id,route_id,vehicle_id,seat_layout_snapshot_json,driver_user_id,departure_date_time,estimated_arrival_time,completed_at,status,source,base_fare)
     VALUES
-      ('${baseTrip}','${operatorA}','${routeId}','${vehicleId}','${driverA}',now()-interval '4 hours',now()-interval '3 hours',now()-interval '3 hours','COMPLETED','MANUAL',100000),
-      ('${tripB}','${operatorB}','${routeB}','${vehicleB}','${driverTenantB}',now()-interval '2 hours',now()-interval '1 hour',now()-interval '1 hour','COMPLETED','MANUAL',100000)
+      ('${baseTrip}','${operatorA}','${routeId}','${vehicleId}','{"rows":[]}','${driverA}',now()-interval '4 hours',now()-interval '3 hours',now()-interval '3 hours','COMPLETED','MANUAL',100000),
+      ('${tripB}','${operatorB}','${routeB}','${vehicleB}','{"rows":[]}','${driverTenantB}',now()-interval '2 hours',now()-interval '1 hour',now()-interval '1 hour','COMPLETED','MANUAL',100000)
     ON CONFLICT (id) DO NOTHING;
-    INSERT INTO trips (id,operator_id,route_id,vehicle_id,driver_user_id,departure_date_time,estimated_arrival_time,completed_at,status,source,base_fare)
+    INSERT INTO trips (id,operator_id,route_id,vehicle_id,seat_layout_snapshot_json,driver_user_id,departure_date_time,estimated_arrival_time,completed_at,status,source,base_fare)
     SELECT ('41430000-0000-4000-8001-' || lpad(g::text,12,'0'))::uuid,
-           '${operatorA}','${routeId}','${vehicleId}','${driverB}',
+           '${operatorA}','${routeId}','${vehicleId}','{"rows":[]}'::jsonb,'${driverB}',
            now() - interval '1 hour' - make_interval(secs => g),
            now() - interval '30 minutes' - make_interval(secs => g),
            now() - interval '30 minutes' - make_interval(secs => g),
@@ -660,7 +697,9 @@ function seed() {
     const eventId = `41430000-0000-4000-8010-${String(index + 1).padStart(12, '0')}`;
     write(`INSERT INTO outbox_dlq (event_id,event_type,payload,retry_count,last_error,created_at,terminal_at) VALUES ('${eventId}','${service}.day4143.failed','{"service":"${service}"}',6,'day4143 deterministic terminal failure','2026-07-18T09:59:00Z','2026-07-18T10:00:00Z') ON CONFLICT (event_id) DO NOTHING;`);
   }
-  trackingSql(`INSERT INTO outbox_dlq (event_id,event_type,payload,retry_count,last_error,created_at,terminal_at) VALUES ('41430000-0000-4000-8010-000000000006','tracking.day4143.failed','{"service":"tracking"}',6,'day4143 deterministic terminal failure','2026-07-18T09:59:00Z','2026-07-18T10:00:00Z') ON CONFLICT (event_id) DO NOTHING;`);
+  if (scope !== 'revenue') {
+    trackingSql(`INSERT INTO outbox_dlq (event_id,event_type,payload,retry_count,last_error,created_at,terminal_at) VALUES ('41430000-0000-4000-8010-000000000006','tracking.day4143.failed','{"service":"tracking"}',6,'day4143 deterministic terminal failure','2026-07-18T09:59:00Z','2026-07-18T10:00:00Z') ON CONFLICT (event_id) DO NOTHING;`);
+  }
 }
 
 async function runExcelScenario() {
@@ -722,6 +761,309 @@ async function runExcelScenario() {
   console.log('gateway REST PASS');
   console.log('six XLSX + 10k + tenant isolation PASS');
   summary.add('six XLSX + 10k + tenant isolation PASS');
+}
+
+async function runRevenueScenario() {
+  const checkedRequests = [];
+  const to = ictDate();
+  const year = Number(to.slice(0, 4));
+  const month = to.slice(0, 7);
+  const from = `${month}-01`;
+  const exportFrom = ictDate(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000));
+  const rangeQuery = `from=${from}&to=${to}`;
+  const internal = await internalJwt();
+
+  clearPlatformReportCache();
+  const revenueCacheKeys = redis('--scan', '--pattern', 'revenue:v2:*').split(/\r?\n/).filter(Boolean);
+  if (revenueCacheKeys.length > 0) redis('DEL', ...revenueCacheKeys);
+
+  const internalAdminResult = await directApi(
+    'payment',
+    `/internal/v1/revenue/admin-summary?${rangeQuery}`,
+    { token: internal },
+  );
+  assert(internalAdminResult.response.status === 200, `Internal admin revenue failed: ${internalAdminResult.text}`);
+  const internalAdmin = responseData(internalAdminResult);
+  assertIctPeriod(internalAdmin.period, from, to, 'Internal admin revenue');
+  assert(
+    internalAdmin.netTransportRevenueVnd
+      === internalAdmin.netTicketRevenueVnd + internalAdmin.netParcelRevenueVnd,
+    `Internal admin transport revenue did not reconcile: ${internalAdminResult.text}`,
+  );
+  assert(
+    internalAdmin.totalProjectRevenueVnd
+      === internalAdmin.netTransportRevenueVnd + internalAdmin.subscriptionRevenueVnd,
+    `Internal admin project revenue did not reconcile: ${internalAdminResult.text}`,
+  );
+  checkedRequests.push('GET Payment internal admin summary');
+
+  const internalOperatorResult = await directApi(
+    'payment',
+    `/internal/v1/revenue/operators/${operatorA}/summary?${rangeQuery}`,
+    { token: internal },
+  );
+  assert(internalOperatorResult.response.status === 200, `Internal operator revenue failed: ${internalOperatorResult.text}`);
+  const internalOperator = responseData(internalOperatorResult);
+  assertIctPeriod(internalOperator.period, from, to, 'Internal operator revenue');
+  assert(internalOperator.operatorId === operatorA, `Internal operator tenant drifted: ${internalOperatorResult.text}`);
+  assert(
+    internalOperator.netRevenueVnd
+      === internalOperator.netTicketRevenueVnd + internalOperator.netParcelRevenueVnd,
+    `Internal operator revenue did not reconcile: ${internalOperatorResult.text}`,
+  );
+  assert(
+    internalOperator.netParcelRevenueVnd
+      === internalOperator.grossParcelRevenueVnd + internalOperator.parcelRefundsVnd,
+    `Internal operator Parcel revenue did not reconcile: ${internalOperatorResult.text}`,
+  );
+  checkedRequests.push('GET Payment internal operator summary');
+
+  const ledgerCountBeforeDryRun = count(paymentSql('SELECT count(*) FROM operator_ledger_entries;'));
+  const dryRun = await directApi(
+    'payment',
+    '/internal/v1/revenue/backfills/parcel-voucher-reversals?dryRun=true',
+    { token: internal, key: randomUUID(), method: 'POST' },
+  );
+  assert(dryRun.response.status === 200, `Parcel voucher reversal dry-run failed: ${dryRun.text}`);
+  const dryRunData = responseData(dryRun);
+  for (const field of [
+    'scannedRefundCount',
+    'candidateCount',
+    'skippedExistingCount',
+    'legacyUnclassifiedCount',
+    'totalAdjustmentVnd',
+    'appliedCount',
+  ]) {
+    assert(Number.isInteger(dryRunData?.[field]), `Backfill dry-run field ${field} drifted: ${dryRun.text}`);
+  }
+  assert(dryRunData.appliedCount === 0, `Backfill dry-run applied rows: ${dryRun.text}`);
+  assert(
+    count(paymentSql('SELECT count(*) FROM operator_ledger_entries;')) === ledgerCountBeforeDryRun,
+    'Backfill dry-run mutated operator ledger rows',
+  );
+  checkedRequests.push('POST Payment voucher reversal backfill dry-run');
+
+  const adminAnalyticsResult = await api(
+    'GET',
+    `/v1/admin/revenue/analytics?${rangeQuery}&groupBy=month&top=5`,
+    { token: tokens.systemAdmin },
+  );
+  assert(adminAnalyticsResult.response.status === 200, `Admin revenue analytics failed: ${adminAnalyticsResult.text}`);
+  const adminAnalytics = responseData(adminAnalyticsResult);
+  assertIctPeriod(adminAnalytics.period, from, to, 'Admin revenue analytics');
+  const adminRevenue = adminAnalytics.summary.revenue;
+  const adminSettlement = adminAnalytics.summary.settlement;
+  assert(adminRevenue.totalProjectRevenueVnd.currentValue === internalAdmin.totalProjectRevenueVnd, 'Admin total project revenue drifted from Payment summary');
+  assert(adminRevenue.netTransportRevenueVnd.currentValue === internalAdmin.netTransportRevenueVnd, 'Admin transport revenue drifted from Payment summary');
+  assert(adminRevenue.netTicketRevenueVnd.currentValue === internalAdmin.netTicketRevenueVnd, 'Admin ticket revenue drifted from Payment summary');
+  assert(adminRevenue.netParcelRevenueVnd.currentValue === internalAdmin.netParcelRevenueVnd, 'Admin Parcel revenue drifted from Payment summary');
+  assert(adminRevenue.subscriptionRevenueVnd.currentValue === internalAdmin.subscriptionRevenueVnd, 'Admin subscription revenue drifted from Payment summary');
+  assert(adminSettlement.paidToOperatorsVnd.currentValue === internalAdmin.paidToOperatorsVnd, 'Admin payout drifted from Payment summary');
+  assert(
+    adminRevenue.totalProjectRevenueVnd.currentValue
+      === adminRevenue.netTransportRevenueVnd.currentValue + adminRevenue.subscriptionRevenueVnd.currentValue,
+    'Admin analytics incorrectly mixed payout into project revenue',
+  );
+  if (adminRevenue.totalProjectRevenueVnd.previousValue === 0
+      && adminRevenue.totalProjectRevenueVnd.currentValue > 0) {
+    assert(adminRevenue.totalProjectRevenueVnd.changePercent === null, 'Admin zero-baseline growth must be null');
+  }
+  checkedRequests.push('GET Gateway admin revenue analytics');
+
+  const operatorMonthResult = await api(
+    'GET',
+    `/v1/operator/revenue/analytics?month=${month}`,
+    { token: tokens.operatorA },
+  );
+  assert(operatorMonthResult.response.status === 200, `Operator month revenue failed: ${operatorMonthResult.text}`);
+  const operatorMonth = responseData(operatorMonthResult);
+  assert(operatorMonth.period.month === month, `Operator month period drifted: ${operatorMonthResult.text}`);
+  assert(operatorMonth.period.timezone === 'Asia/Ho_Chi_Minh', `Operator month timezone drifted: ${operatorMonthResult.text}`);
+  assert(operatorMonth.summary.netRevenueVnd.currentValue === internalOperator.netRevenueVnd, 'Operator month total drifted from internal summary');
+  assert(operatorMonth.summary.netTicketRevenueVnd.currentValue === internalOperator.netTicketRevenueVnd, 'Operator month ticket revenue drifted');
+  assert(operatorMonth.summary.netParcelRevenueVnd.currentValue === internalOperator.netParcelRevenueVnd, 'Operator month Parcel revenue drifted');
+  checkedRequests.push('GET Gateway operator revenue month analytics');
+
+  const operatorYearResult = await api(
+    'GET',
+    `/v1/operator/revenue/analytics?year=${year}&groupBy=month`,
+    { token: tokens.operatorA },
+  );
+  assert(operatorYearResult.response.status === 200, `Operator year revenue failed: ${operatorYearResult.text}`);
+  const operatorYear = responseData(operatorYearResult);
+  assert(operatorYear.period.year === year && operatorYear.period.groupBy === 'month', `Operator year period drifted: ${operatorYearResult.text}`);
+  assert(operatorYear.period.timezone === 'Asia/Ho_Chi_Minh', `Operator year timezone drifted: ${operatorYearResult.text}`);
+  assert(operatorYear.monthly.length === 12, `Operator year must return 12 month buckets: ${operatorYearResult.text}`);
+  assert(operatorYear.summary.netRevenueVnd.previousValue === 0, `Operator previous-year zero baseline drifted: ${operatorYearResult.text}`);
+  assert(operatorYear.summary.netRevenueVnd.changePercent === null, `Operator zero-baseline growth must be null: ${operatorYearResult.text}`);
+  checkedRequests.push('GET Gateway operator revenue year analytics');
+
+  const dashboardResult = await api(
+    'GET',
+    `/v1/admin/dashboard/summary?${rangeQuery}`,
+    { token: tokens.systemAdmin },
+  );
+  assert(dashboardResult.response.status === 200, `Admin dashboard failed: ${dashboardResult.text}`);
+  const dashboard = responseData(dashboardResult);
+  assertIctPeriod(dashboard.period, from, to, 'Admin dashboard');
+  assert(dashboard.totalProjectRevenueVnd.currentValue === internalAdmin.totalProjectRevenueVnd, 'Dashboard total project revenue drifted');
+  assert(dashboard.netTransportRevenueVnd.currentValue === internalAdmin.netTransportRevenueVnd, 'Dashboard transport revenue drifted');
+  assert(dashboard.netTicketRevenueVnd.currentValue === internalAdmin.netTicketRevenueVnd, 'Dashboard ticket revenue drifted');
+  assert(dashboard.netParcelRevenueVnd.currentValue === internalAdmin.netParcelRevenueVnd, 'Dashboard Parcel revenue drifted');
+  assert(dashboard.subscriptionRevenueVnd.currentValue === internalAdmin.subscriptionRevenueVnd, 'Dashboard subscription revenue drifted');
+  if (dashboard.totalProjectRevenueVnd.previousValue === 0
+      && dashboard.totalProjectRevenueVnd.currentValue > 0) {
+    assert(dashboard.totalProjectRevenueVnd.changePercent === null, 'Dashboard zero-baseline growth must be null');
+  }
+  checkedRequests.push('GET Gateway admin dashboard summary');
+
+  const adminBookingStats = await api(
+    'GET',
+    `/v1/admin/booking-stats/aggregate?${rangeQuery}&groupBy=operator`,
+    { token: tokens.systemAdmin },
+  );
+  assert(adminBookingStats.response.status === 200, `Admin booking stats failed: ${adminBookingStats.text}`);
+  assert(findMoneyFields(responseData(adminBookingStats)).length === 0, `Admin booking stats leaked money fields: ${findMoneyFields(responseData(adminBookingStats)).join(', ')}`);
+  checkedRequests.push('GET Gateway admin booking stats without money');
+
+  const operatorBookingStats = await api(
+    'GET',
+    `/v1/operator/booking-stats?${rangeQuery}&groupBy=date`,
+    { token: tokens.operatorA },
+  );
+  assert(operatorBookingStats.response.status === 200, `Operator booking stats failed: ${operatorBookingStats.text}`);
+  assert(findMoneyFields(responseData(operatorBookingStats)).length === 0, `Operator booking stats leaked money fields: ${findMoneyFields(responseData(operatorBookingStats)).join(', ')}`);
+  checkedRequests.push('GET Gateway operator booking stats without money');
+
+  const platformResult = await api(
+    'GET',
+    `/v1/admin/reports/platform?${rangeQuery}`,
+    { token: tokens.systemAdmin },
+  );
+  assert(platformResult.response.status === 200, `Platform report failed: ${platformResult.text}`);
+  const platform = responseData(platformResult);
+  assertIctPeriod(platform.period, from, to, 'Platform report');
+  assert(platform.totals.netTransportRevenueVnd === platform.totals.netTicketRevenueVnd + platform.totals.netParcelRevenueVnd, 'Platform transport revenue did not reconcile');
+  assert(platform.totals.netTicketRevenueVnd === internalAdmin.netTicketRevenueVnd, 'Platform ticket revenue drifted from Payment');
+  assert(platform.totals.netParcelRevenueVnd === internalAdmin.netParcelRevenueVnd, 'Platform Parcel revenue drifted from Payment');
+  checkedRequests.push('GET Gateway admin platform report');
+
+  const cacheKeys = redis('--scan', '--pattern', 'platform-report:v3:*').split(/\r?\n/).filter(Boolean);
+  assert(cacheKeys.length > 0, 'Platform v3 cache key missing');
+  assert(cacheKeys.every((key) => {
+    const ttl = Number(redis('TTL', key));
+    return ttl > 0 && ttl <= 60;
+  }), 'Platform v3 cache TTL must be at most 60 seconds');
+
+  const parcelSummaryResult = await api(
+    'GET',
+    `/v1/operator/parcels/reports/summary?${rangeQuery}`,
+    { token: tokens.operatorA },
+  );
+  assert(parcelSummaryResult.response.status === 200, `Parcel report summary failed: ${parcelSummaryResult.text}`);
+  const parcelSummary = responseData(parcelSummaryResult);
+  assert(parcelSummary.grossParcelRevenueVnd === internalOperator.grossParcelRevenueVnd, 'Parcel gross revenue drifted from Payment');
+  assert(parcelSummary.parcelRefundsVnd === internalOperator.parcelRefundsVnd, 'Parcel refunds drifted from Payment');
+  assert(parcelSummary.netParcelRevenueVnd === internalOperator.netParcelRevenueVnd, 'Parcel net revenue drifted from Payment');
+  checkedRequests.push('GET Gateway operator Parcel report summary');
+
+  const parcelCsvResult = await api(
+    'GET',
+    `/v1/operator/parcels/reports/export?${rangeQuery}&format=csv`,
+    { token: tokens.operatorA },
+  );
+  assert(parcelCsvResult.response.status === 200, `Parcel CSV export failed: ${parcelCsvResult.text}`);
+  assert(parcelCsvResult.response.headers.get('content-type')?.includes('text/csv'), 'Parcel CSV content type drifted');
+  const csvLines = parcelCsvResult.text.replace(/^\uFEFF/, '').trim().split(/\r?\n/);
+  assert(csvLines.length === 2, `Parcel CSV row count drifted: ${parcelCsvResult.text}`);
+  const csvHeaders = csvLines[0].split(',');
+  const csvValues = csvLines[1].split(',');
+  const csv = Object.fromEntries(csvHeaders.map((header, index) => [header, csvValues[index]]));
+  assert(Number(csv.grossParcelRevenueVnd) === parcelSummary.grossParcelRevenueVnd, 'Parcel CSV gross revenue drifted from summary');
+  assert(Number(csv.parcelRefundsVnd) === parcelSummary.parcelRefundsVnd, 'Parcel CSV refunds drifted from summary');
+  assert(Number(csv.netParcelRevenueVnd) === parcelSummary.netParcelRevenueVnd, 'Parcel CSV net revenue drifted from summary');
+  checkedRequests.push('GET Gateway operator Parcel report CSV');
+
+  const exportRange = { from: exportFrom, to };
+  const revenueExport = await api('GET', reportPath('revenue', exportRange), { token: tokens.operatorA });
+  assert(revenueExport.response.status === 200, `Payment revenue XLSX failed: ${revenueExport.text}`);
+  inspectWorkbook(revenueExport.buffer, 'Revenue', ['entry_id', 'entry_type', 'reference_type', 'amount_vnd'], 1);
+  checkedRequests.push('GET Gateway Payment revenue XLSX');
+
+  const refundExport = await api('GET', reportPath('refunds', exportRange), { token: tokens.operatorA });
+  assert(refundExport.response.status === 200, `Payment refund XLSX failed: ${refundExport.text}`);
+  inspectWorkbook(refundExport.buffer, 'Refunds', ['entry_id', 'entry_type', 'reference_type', 'amount_vnd'], 1);
+  checkedRequests.push('GET Gateway Payment refund XLSX');
+
+  let paymentStopped = false;
+  try {
+    clearPlatformReportCache();
+    const cachedRevenueKeys = redis('--scan', '--pattern', 'revenue:v2:*').split(/\r?\n/).filter(Boolean);
+    if (cachedRevenueKeys.length > 0) redis('DEL', ...cachedRevenueKeys);
+    composeRun(['--profile', 'app', 'stop', 'payment']);
+    paymentStopped = true;
+
+    const unavailableAnalytics = await api(
+      'GET',
+      `/v1/admin/revenue/analytics?${rangeQuery}&groupBy=month&top=5`,
+      { token: tokens.systemAdmin },
+    );
+    assert([502, 503].includes(unavailableAnalytics.response.status), `Payment analytics did not fail closed: ${unavailableAnalytics.text}`);
+    checkedRequests.push('GET Gateway admin revenue while Payment down');
+
+    const unavailableDashboard = await api(
+      'GET',
+      `/v1/admin/dashboard/summary?${rangeQuery}`,
+      { token: tokens.systemAdmin },
+    );
+    expectError(unavailableDashboard, [503], 'UPSTREAM_UNAVAILABLE');
+    checkedRequests.push('GET Gateway dashboard fail-closed while Payment down');
+
+    const unavailablePlatform = await api(
+      'GET',
+      `/v1/admin/reports/platform?${rangeQuery}`,
+      { token: tokens.systemAdmin },
+    );
+    expectError(unavailablePlatform, [503], 'UPSTREAM_UNAVAILABLE');
+    checkedRequests.push('GET Gateway platform report fail-closed while Payment down');
+
+    const unavailableParcel = await api(
+      'GET',
+      `/v1/operator/parcels/reports/summary?${rangeQuery}`,
+      { token: tokens.operatorA },
+    );
+    expectError(unavailableParcel, [503], 'UPSTREAM_UNAVAILABLE');
+    checkedRequests.push('GET Gateway Parcel report fail-closed while Payment down');
+
+    const statsWithoutPayment = await api(
+      'GET',
+      `/v1/operator/booking-stats?${rangeQuery}&groupBy=date`,
+      { token: tokens.operatorA },
+    );
+    assert(statsWithoutPayment.response.status === 200, `Booking stats incorrectly depended on Payment: ${statsWithoutPayment.text}`);
+    assert(findMoneyFields(responseData(statsWithoutPayment)).length === 0, 'Booking stats leaked money while Payment was down');
+    checkedRequests.push('GET Gateway booking stats remains non-financial while Payment down');
+  } finally {
+    if (paymentStopped) {
+      composeRun(['--profile', 'app', 'up', '-d', '--no-deps', 'payment']);
+      await waitFor(`${urls.payment}/ready`);
+    }
+  }
+
+  const recovered = await poll(async () => {
+    const result = await directApi(
+      'payment',
+      `/internal/v1/revenue/admin-summary?${rangeQuery}`,
+      { token: await internalJwt() },
+    );
+    return result.response.status === 200 ? result : false;
+  }, 'Payment revenue API did not recover after restart', 90_000);
+  assert(responseData(recovered).totalProjectRevenueVnd === internalAdmin.totalProjectRevenueVnd, 'Recovered Payment total drifted');
+  checkedRequests.push('GET Payment internal admin summary after restart');
+
+  for (const name of checkedRequests) console.log(`live API PASS: ${name}`);
+  console.log(`${checkedRequests.length} real HTTP revenue checks PASS`);
+  summary.add(`${checkedRequests.length} real HTTP revenue checks PASS`);
 }
 
 async function runPlatformScenario() {
@@ -1195,10 +1537,10 @@ async function runAcceptance() {
   if (!useDev) {
     composeRun(['--profile', 'infra', '--profile', 'app', 'down', '-v', '--remove-orphans']);
     composeRun(['--profile', 'infra', 'up', '-d', '--wait', 'postgres', 'redis', 'rabbitmq']);
-    composeRun(['--profile', 'app', 'up', '-d', '--build', '--no-deps', ...serviceNames]);
+    composeRun(['--profile', 'app', 'up', '-d', '--build', '--no-deps', ...activeServiceNames]);
     stackStarted = true;
   }
-  await Promise.all(serviceNames.map((service) => waitFor(`${urls[service]}/${service === 'gateway' ? 'health' : 'ready'}`)));
+  await Promise.all(activeServiceNames.map((service) => waitFor(`${urls[service]}/${service === 'gateway' ? 'health' : 'ready'}`)));
   seed();
   tokens.systemAdmin = await userJwt(systemAdmin, 'SYSTEM_ADMIN');
   tokens.operatorA = await userJwt(operatorAdminA, 'OPERATOR_ADMIN', operatorA);
@@ -1213,6 +1555,7 @@ async function runAcceptance() {
   }
 
   if (scope === 'all' || scope === '41' || scope === 'day41') await scenario('gateway REST PASS', runExcelScenario);
+  if (scope === 'revenue') await scenario('real-stack revenue API', runRevenueScenario);
   if (!useDev && scope === 'all') {
     await recycleIsolatedApps(serviceNames.filter((service) => service !== 'tracking'), 'Day 42');
   }
@@ -1229,7 +1572,9 @@ async function runAcceptance() {
       ? ['seed', 'platform aggregate + Redis cache PASS']
       : scope === '43' || scope === 'day43'
         ? ['seed', 'idempotency inventory PASS', 'DLQ + idempotency + Hangfire job health PASS', 'migration up/down/reapply PASS']
-        : ['seed', 'idempotency inventory PASS', 'gateway REST PASS', 'platform aggregate + Redis cache PASS', 'DLQ + idempotency + Hangfire job health PASS', 'migration up/down/reapply PASS'];
+        : scope === 'revenue'
+          ? ['seed', 'real-stack revenue API', '20 real HTTP revenue checks PASS']
+          : ['seed', 'idempotency inventory PASS', 'gateway REST PASS', 'platform aggregate + Redis cache PASS', 'DLQ + idempotency + Hangfire job health PASS', 'migration up/down/reapply PASS'];
   const missing = required.filter((item) => !summary.has(item));
   assert(missing.length === 0, `Summary gates missing: ${missing.join(', ')}`);
   console.log(`${scope} acceptance PASS`);
@@ -1249,7 +1594,7 @@ try {
           'inspect',
           '--format',
           '{{.Name}} status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}',
-          ...serviceNames.map(containerName),
+          ...activeServiceNames.map(containerName),
         ]);
         console.error(`[failure diagnostics: container states]\n${states}`);
       } catch (diagnosticError) {

@@ -106,7 +106,9 @@ public sealed class PaymentEventHandlersTests
                     && json.Contains(DriverUserId.ToString(), StringComparison.OrdinalIgnoreCase)
                     && json.Contains(PickupStationId.ToString(), StringComparison.OrdinalIgnoreCase)
                     && json.Contains(DropoffStopId.ToString(), StringComparison.OrdinalIgnoreCase)
-                    && json.Contains("\"status\":\"CONFIRMED\"", StringComparison.Ordinal)),
+                    && json.Contains("\"status\":\"CONFIRMED\"", StringComparison.Ordinal)
+                    && json.Contains("\"seatNumbers\"", StringComparison.Ordinal)
+                    && json.Contains("\"departureDateTime\"", StringComparison.Ordinal)),
                 Arg.Any<CancellationToken>());
     }
 

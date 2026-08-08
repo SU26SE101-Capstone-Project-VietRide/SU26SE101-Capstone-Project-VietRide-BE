@@ -29,10 +29,12 @@ public sealed class OperatorRevenueAnalyticsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<OperatorRevenueAnalyticsResponse>> GetAsync(
         [FromQuery] string? month,
+        [FromQuery] int? year,
+        [FromQuery] string? groupBy,
         CancellationToken cancellationToken)
     {
         var result = await sender.Send(
-            new GetOperatorRevenueAnalyticsQuery(GetOperatorId(), month),
+            new GetOperatorRevenueAnalyticsQuery(GetOperatorId(), month, year, groupBy),
             cancellationToken);
         return Ok(result);
     }

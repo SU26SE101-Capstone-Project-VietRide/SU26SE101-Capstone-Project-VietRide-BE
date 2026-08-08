@@ -15,7 +15,7 @@ public sealed class GetPlatformReportQueryHandler
 {
     private const int IdentityChunkSize = 500;
     private static readonly ConcurrentDictionary<string, InFlightGate> InFlight = new(StringComparer.Ordinal);
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
 
     private readonly IBookingRepository _bookings;
     private readonly ITripPlatformReportClient _trips;
@@ -48,8 +48,8 @@ public sealed class GetPlatformReportQueryHandler
 
     public async Task<PlatformReportResult> Handle(GetPlatformReportQuery request, CancellationToken ct)
     {
-        var range = PlatformReportUtcRange.Parse(request.From, request.To);
-        var key = BuildCacheKey(range.From, range.To);
+        var range = PlatformReportIctRange.Parse(request.From, request.To);
+        var key = BuildCacheKey(range.FromUtc, range.ToUtc);
         var cached = await TryGetCacheAsync(key, ct).ConfigureAwait(false);
         if (TryValidateResult(cached, range))
         {
@@ -110,7 +110,7 @@ public sealed class GetPlatformReportQueryHandler
     }
 
     private async Task<PlatformReportResult> BuildReportAsync(
-        PlatformReportUtcRange range,
+        PlatformReportIctRange range,
         CancellationToken ct)
     {
         Task<IReadOnlyList<PlatformBookingReportItem>> bookingTask;
@@ -119,10 +119,10 @@ public sealed class GetPlatformReportQueryHandler
         Task<IReadOnlyList<PlatformLedgerReportItem>> ledgerTask;
         try
         {
-            bookingTask = _bookings.GetPlatformBookingMetricsAsync(range.From, range.To, ct);
-            tripTask = _trips.GetAsync(range.From, range.To, ct);
-            parcelTask = _parcels.GetAsync(range.From, range.To, ct);
-            ledgerTask = _ledger.GetAsync(range.From, range.To, ct);
+            bookingTask = _bookings.GetPlatformBookingMetricsAsync(range.FromUtc, range.ToUtc, ct);
+            tripTask = _trips.GetAsync(range.FromUtc, range.ToUtc, ct);
+            parcelTask = _parcels.GetAsync(range.FromUtc, range.ToUtc, ct);
+            ledgerTask = _ledger.GetAsync(range.FromUtc, range.ToUtc, ct);
             await Task.WhenAll(bookingTask, tripTask, parcelTask, ledgerTask).ConfigureAwait(false);
         }
         catch (PlatformReportValueOverflowException)
@@ -154,14 +154,14 @@ public sealed class GetPlatformReportQueryHandler
                     var ledger = ledgerByOperator.GetValueOrDefault(item.OperatorId);
                     return item.ToResult(
                         names.GetValueOrDefault(item.OperatorId),
-                        ledger?.BookingRevenueVnd ?? 0,
-                        ledger?.ParcelRevenueVnd ?? 0);
+                        ledger?.NetTicketRevenueVnd ?? 0,
+                        ledger?.NetParcelRevenueVnd ?? 0);
                 })
-                .OrderByDescending(item => item.NetRevenueVnd)
+                .OrderByDescending(item => item.NetTransportRevenueVnd)
                 .ThenBy(item => item.OperatorId)
                 .ToArray();
             var result = new PlatformReportResult(
-                new PlatformReportPeriod(range.From.UtcDateTime, range.To.UtcDateTime, "UTC"),
+                new PlatformReportPeriod(range.From, range.To, "Asia/Ho_Chi_Minh"),
                 SumTotals(byOperator),
                 byOperator,
                 _clock.UtcNow.UtcDateTime);
@@ -209,7 +209,7 @@ public sealed class GetPlatformReportQueryHandler
 
     private bool TryValidateResult(
         PlatformReportResult? result,
-        PlatformReportUtcRange range)
+        PlatformReportIctRange range)
     {
         if (result is null)
         {
@@ -230,17 +230,15 @@ public sealed class GetPlatformReportQueryHandler
 
     private void ValidateResult(
         PlatformReportResult result,
-        PlatformReportUtcRange range)
+        PlatformReportIctRange range)
     {
         var nowUtc = _clock.UtcNow.UtcDateTime;
         if (result.ByOperator is null
             || result.Totals is null
             || result.Period is null
-            || result.Period.From != range.From.UtcDateTime
-            || result.Period.To != range.To.UtcDateTime
-            || result.Period.From.Kind != DateTimeKind.Utc
-            || result.Period.To.Kind != DateTimeKind.Utc
-            || !string.Equals(result.Period.Timezone, "UTC", StringComparison.Ordinal)
+            || result.Period.From != range.From
+            || result.Period.To != range.To
+            || !string.Equals(result.Period.Timezone, "Asia/Ho_Chi_Minh", StringComparison.Ordinal)
             || result.GeneratedAt.Kind != DateTimeKind.Utc
             || result.GeneratedAt < nowUtc.Subtract(CacheTtl)
             || result.GeneratedAt > nowUtc.AddMinutes(1))
@@ -255,7 +253,7 @@ public sealed class GetPlatformReportQueryHandler
                 || row.CompletedBookingCount < 0
                 || row.CompletedTripCount < 0
                 || row.DeliveredParcelCount < 0
-                || row.NetRevenueVnd != checked(row.BookingRevenueVnd + row.ParcelRevenueVnd)
+                || row.NetTransportRevenueVnd != checked(row.NetTicketRevenueVnd + row.NetParcelRevenueVnd)
                 || !seen.Add(row.OperatorId))
             {
                 throw new PlatformReportUnavailableException();
@@ -269,7 +267,7 @@ public sealed class GetPlatformReportQueryHandler
     }
 
     private static string BuildCacheKey(DateTimeOffset fromUtc, DateTimeOffset toUtc)
-        => $"platform-report:v2:{fromUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)}:{toUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)}";
+        => $"platform-report:v3:{fromUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)}:{toUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)}";
 
     private async Task<IReadOnlyDictionary<Guid, string>> LoadOperatorNamesAsync(
         IEnumerable<Guid> operatorIds,
@@ -369,7 +367,7 @@ public sealed class GetPlatformReportQueryHandler
 
         foreach (var ledger in ledgerByOperator.Values)
         {
-            if (ledger.BookingRevenueVnd == 0 && ledger.ParcelRevenueVnd == 0)
+            if (ledger.NetTicketRevenueVnd == 0 && ledger.NetParcelRevenueVnd == 0)
             {
                 continue;
             }
@@ -406,9 +404,9 @@ public sealed class GetPlatformReportQueryHandler
             completedBookings = checked(completedBookings + item.CompletedBookingCount);
             completedTrips = checked(completedTrips + item.CompletedTripCount);
             deliveredParcels = checked(deliveredParcels + item.DeliveredParcelCount);
-            bookingRevenue = checked(bookingRevenue + item.BookingRevenueVnd);
-            parcelRevenue = checked(parcelRevenue + item.ParcelRevenueVnd);
-            netRevenue = checked(netRevenue + item.NetRevenueVnd);
+            bookingRevenue = checked(bookingRevenue + item.NetTicketRevenueVnd);
+            parcelRevenue = checked(parcelRevenue + item.NetParcelRevenueVnd);
+            netRevenue = checked(netRevenue + item.NetTransportRevenueVnd);
         }
 
         return new PlatformReportTotals(

@@ -41,14 +41,13 @@ internal sealed class ParcelPlatformReportClient : IParcelPlatformReportClient
         {
             if (!PlatformReportHttpClientSupport.TryGuid(item, "operatorId", out var operatorId)
                 || !PlatformReportHttpClientSupport.TryInt64(item, "deliveredParcelCount", out var count)
-                || !PlatformReportHttpClientSupport.TryInt64(item, "parcelRevenueVnd", out var revenue)
                 || count < 0
                 || !seen.Add(operatorId))
             {
                 throw new PlatformReportUnavailableException();
             }
 
-            result.Add(new ParcelPlatformReportItem(operatorId, count, revenue));
+            result.Add(new ParcelPlatformReportItem(operatorId, count));
         }
 
         return result;

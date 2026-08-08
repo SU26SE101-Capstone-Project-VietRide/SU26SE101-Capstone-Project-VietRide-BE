@@ -12,6 +12,7 @@ import { JoseNotificationUserJwtVerifier } from '../auth/user-jwt.verifier';
 import { UserJwtAuthGuard } from '../auth/user-jwt-auth.guard';
 import { CoreEventsConsumer } from './core-events.consumer';
 import { BookingCreatedEventsConsumer } from './booking-created-events.consumer';
+import { BookingCancelledCrewEventsConsumer } from './booking-cancelled-crew-events.consumer';
 import { EmailSendQueue } from './email-send.queue';
 import { EmailSendWorker } from './email-send.worker';
 import { EmailDeliveryRecoveryService } from './email-delivery-recovery.service';
@@ -67,6 +68,7 @@ import { RouteChangeProposalEventsConsumer } from './route-change-proposal-event
     MessageIdempotencyService,
     CoreEventsConsumer,
     BookingCreatedEventsConsumer,
+    BookingCancelledCrewEventsConsumer,
     BookingTripChangeEventsConsumer,
     Day24StopDisabledAutoFallbackEventsConsumer,
     Day24NoShowEventsConsumer,

@@ -13,7 +13,12 @@ import { ApproachingAlertService } from '../approaching-alert/approaching-alert.
 import type { TrackingUser } from '../auth/tracking-user.types';
 import type { UserJwtVerifier } from '../auth/user-jwt.verifier';
 import type { TrackingAuthorizationAdapter } from '../authorization/tracking-authorization.adapter';
-import type { OperationalBookingCreatedEvent } from '@vietride/contracts';
+import type {
+  BookingTransferredEvent,
+  OperationalBookingCancelledEvent,
+  OperationalBookingCreatedEvent,
+  PassengerBoardedEvent,
+} from '@vietride/contracts';
 import { EtaService } from '../eta/eta.service';
 import { OffRouteService } from '../off-route/off-route.service';
 import { TripDelayService, type TripDelayEtaUpdate } from '../trip-delay/trip-delay.service';
@@ -203,6 +208,58 @@ export class LocationGateway implements OnGatewayInit {
 
   emitBookingCreated(event: OperationalBookingCreatedEvent): void {
     this.server.to(trackingTripCrewRoom(event.tripId)).emit('booking:created', event);
+    this.server.to(trackingTripCrewRoom(event.tripId)).emit('booking:updated', {
+      eventId: event.eventId,
+      occurredAt: event.occurredAt,
+      tripId: event.tripId,
+      bookingId: event.bookingId,
+      bookingCode: event.bookingCode,
+      seatNumbers: event.seatNumbers,
+      reason: 'BOOKING_CREATED',
+    });
+  }
+
+  emitBookingCancelled(event: OperationalBookingCancelledEvent): void {
+    this.server.to(trackingTripCrewRoom(event.tripId)).emit('booking:updated', {
+      eventId: event.eventId,
+      occurredAt: event.occurredAt,
+      tripId: event.tripId,
+      bookingId: event.bookingId,
+      bookingCode: event.bookingCode,
+      seatNumbers: event.seatNumbers,
+      reason: 'BOOKING_CANCELLED',
+      cancellationReason: event.cancellationReason,
+    });
+  }
+
+  emitPassengerBoarded(event: PassengerBoardedEvent): void {
+    this.server.to(trackingTripCrewRoom(event.tripId)).emit('booking:updated', {
+      eventId: event.eventId,
+      occurredAt: event.occurredAt,
+      tripId: event.tripId,
+      bookingId: event.bookingId,
+      bookingCode: event.bookingCode,
+      seatNumbers: [event.seatNumber],
+      reason: 'PASSENGER_BOARDED',
+      passengerRecordId: event.passengerRecordId,
+      ticketCode: event.ticketCode,
+      boardedAt: event.boardedAt,
+    });
+  }
+
+  emitBookingTransferred(event: BookingTransferredEvent): void {
+    for (const tripId of new Set([event.oldTripId, event.newTripId])) {
+      this.server.to(trackingTripCrewRoom(tripId)).emit('booking:updated', {
+        eventId: event.eventId,
+        occurredAt: event.occurredAt,
+        tripId,
+        bookingId: event.bookingId,
+        reason: 'BOOKING_TRANSFERRED',
+        oldTripId: event.oldTripId,
+        newTripId: event.newTripId,
+        transfers: event.transfers,
+      });
+    }
   }
 
   emitRouteProposal(event: RouteChangeProposalEvent): void {

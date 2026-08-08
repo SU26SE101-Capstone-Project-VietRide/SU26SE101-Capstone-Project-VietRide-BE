@@ -3,7 +3,7 @@ namespace VietRide.Payment.Application.Features.RevenueAnalytics.Core;
 public sealed record OperatorRevenueLedgerReadModel(
     DateOnly Month,
     Guid? TripId,
-    long TicketRevenueVnd,
-    long ParcelRevenueVnd,
+    long NetTicketRevenueVnd,
+    long NetParcelRevenueVnd,
     int BookingCount,
     int ParcelCount);

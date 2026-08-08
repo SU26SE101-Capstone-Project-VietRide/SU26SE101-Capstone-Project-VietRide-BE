@@ -1,7 +1,11 @@
+using System.Text.Json.Serialization;
+
 namespace VietRide.Payment.Application.Features.RevenueAnalytics.Operator;
 
 public sealed record OperatorRevenueAnalyticsResponse(
     OperatorRevenueAnalyticsPeriod Period,
     OperatorRevenueSummary Summary,
     IReadOnlyList<OperatorRevenueMonthItem> Monthly,
-    IReadOnlyList<OperatorRoutePerformanceItem> RoutePerformance);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<OperatorRoutePerformanceItem>? RoutePerformance,
+    DateTime GeneratedAt);

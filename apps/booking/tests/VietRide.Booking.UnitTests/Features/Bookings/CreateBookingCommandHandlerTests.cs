@@ -181,7 +181,9 @@ public class CreateBookingCommandHandlerTests
                     && json.Contains(TripId.ToString(), StringComparison.OrdinalIgnoreCase)
                     && json.Contains(DriverUserId.ToString(), StringComparison.OrdinalIgnoreCase)
                     && json.Contains(AssistantUserId.ToString(), StringComparison.OrdinalIgnoreCase)
-                    && json.Contains("\"status\":\"CONFIRMED\"", StringComparison.Ordinal)),
+                    && json.Contains("\"status\":\"CONFIRMED\"", StringComparison.Ordinal)
+                    && json.Contains("\"seatNumbers\"", StringComparison.Ordinal)
+                    && json.Contains("\"departureDateTime\"", StringComparison.Ordinal)),
                 Arg.Any<CancellationToken>());
 
         // Confirm BookSeats was called (seats booked after payment)

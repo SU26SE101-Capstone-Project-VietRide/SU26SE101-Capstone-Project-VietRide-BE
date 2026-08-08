@@ -12,7 +12,7 @@ public sealed class GetBookingStatsQueryHandlerTests
     private static readonly Guid OperatorId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
 
     [Fact]
-    public async Task OperatorStats_MapsRevenueAndHardCodesPartialNoShows()
+    public async Task OperatorStats_MapsOperationalCountsWithoutRevenue()
     {
         var stats = new FakeBookingStatsRepository();
         stats.OperatorRows =
@@ -35,7 +35,6 @@ public sealed class GetBookingStatsQueryHandlerTests
         result.Items.Should().ContainSingle();
         var item = result.Items.Single();
         item.OperatorId.Should().Be(OperatorId);
-        item.TotalRevenue.Should().Be(450_000);
         item.TotalNoShows.Should().Be(2);
         item.TotalPartialNoShows.Should().Be(0);
         stats.LastOperatorId.Should().Be(OperatorId);
@@ -74,15 +73,14 @@ public sealed class GetBookingStatsQueryHandlerTests
             new DateOnly(2026, 2, 1),
             new DateOnly(2026, 3, 1));
         result.Items[0].TotalBookings.Should().Be(0);
-        result.Items[1].TotalRevenue.Should().Be(450_000);
+        result.Items[1].TotalBookings.Should().Be(3);
         result.Items[2].TotalCompleted.Should().Be(0);
         result.TotalBookings.Should().Be(result.Items.Sum(item => item.TotalBookings));
-        result.TotalRevenue.Should().Be(result.Items.Sum(item => item.TotalRevenue));
         stats.LastOperatorGroupBy.Should().Be("month");
     }
 
     [Fact]
-    public async Task AdminStats_MapsSnapshotOperatorNameAndHardCodesPartialNoShows()
+    public async Task AdminStats_MapsOperationalCountsWithoutRevenue()
     {
         var stats = new FakeBookingStatsRepository();
         stats.AdminRows =
@@ -106,7 +104,6 @@ public sealed class GetBookingStatsQueryHandlerTests
         result.Items.Should().ContainSingle();
         var item = result.Items.Single();
         item.OperatorName.Should().Be("VietRide Express");
-        item.TotalRevenue.Should().Be(1_250_000);
         item.TotalPartialNoShows.Should().Be(0);
         stats.LastAdminGroupBy.Should().Be("operator");
     }
@@ -144,7 +141,6 @@ public sealed class GetBookingStatsQueryHandlerTests
             new DateOnly(2026, 3, 1));
         result.Items.Should().OnlyContain(item => item.OperatorId == null && item.OperatorName == null);
         result.TotalBookings.Should().Be(7);
-        result.TotalRevenue.Should().Be(1_250_000);
         stats.LastAdminGroupBy.Should().Be("month");
     }
 

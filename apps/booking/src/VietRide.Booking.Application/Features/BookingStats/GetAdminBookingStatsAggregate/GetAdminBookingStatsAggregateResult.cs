@@ -2,5 +2,4 @@ namespace VietRide.Booking.Application.Features.BookingStats.GetAdminBookingStat
 
 public sealed record GetAdminBookingStatsAggregateResult(
     IReadOnlyList<GetAdminBookingStatsAggregateItemResult> Items,
-    int TotalBookings,
-    long TotalRevenue);
+    int TotalBookings);

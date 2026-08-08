@@ -225,6 +225,7 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private toGenericFcmType(type: Notification['type']): string {
+    if (type === 'BOOKING_CREATED' || type === 'BOOKING_CANCELLED') return type;
     if (type === 'TRIP_ASSIGNED') return 'TRIP_ASSIGNED';
     if (
       type.startsWith('TRIP_') ||

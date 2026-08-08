@@ -20,6 +20,16 @@ internal sealed class OperatorLedgerEntryConfiguration : IEntityTypeConfiguratio
                 "chk_operator_ledger_entries_trip_required",
                 "entry_type = 'ADJUSTMENT' OR trip_id IS NOT NULL");
             table.HasCheckConstraint(
+                "chk_operator_ledger_entries_adjustment_reason_presence",
+                "(entry_type = 'ADJUSTMENT' AND adjustment_reason IS NOT NULL) OR " +
+                "(entry_type <> 'ADJUSTMENT' AND adjustment_reason IS NULL)");
+            table.HasCheckConstraint(
+                "chk_operator_ledger_entries_adjustment_reason_semantics",
+                "(adjustment_reason = 'VIETRIDE_FUNDED_VOUCHER_REVERSAL' AND amount < 0 AND reference_type IN ('BOOKING','PARCEL')) OR " +
+                "(adjustment_reason = 'GENERIC_BOOKING_REFUND_ENTITLEMENT' AND amount = 0 AND reference_type = 'BOOKING') OR " +
+                "(adjustment_reason = 'MANUAL_WALLET_ADJUSTMENT' AND amount <> 0 AND reference_type = 'MANUAL') OR " +
+                "(adjustment_reason = 'LEGACY_UNCLASSIFIED') OR adjustment_reason IS NULL");
+            table.HasCheckConstraint(
                 "chk_operator_ledger_entries_actor_type",
                 "actor_type IN ('USER','SYSTEM')");
         });
@@ -28,6 +38,7 @@ internal sealed class OperatorLedgerEntryConfiguration : IEntityTypeConfiguratio
         builder.Property(x => x.OperatorId).HasColumnName("operator_id").HasColumnType("uuid").IsRequired();
         builder.Property(x => x.TripId).HasColumnName("trip_id").HasColumnType("uuid");
         builder.Property(x => x.EntryType).HasColumnName("entry_type").HasColumnType($"{PaymentDbContext.SchemaName}.operator_ledger_entry_type").IsRequired();
+        builder.Property(x => x.AdjustmentReason).HasColumnName("adjustment_reason").HasColumnType($"{PaymentDbContext.SchemaName}.operator_ledger_adjustment_reason");
         builder.Property(x => x.Amount).HasColumnName("amount").HasColumnType("bigint").IsRequired();
         builder.Property(x => x.ReferenceType).HasColumnName("reference_type").HasColumnType($"{PaymentDbContext.SchemaName}.operator_ledger_reference_type").IsRequired();
         builder.Property(x => x.ReferenceId).HasColumnName("reference_id").HasColumnType("uuid").IsRequired();
@@ -48,5 +59,10 @@ internal sealed class OperatorLedgerEntryConfiguration : IEntityTypeConfiguratio
         builder.HasIndex(x => new { x.OperatorId, x.EntryType }).HasDatabaseName("idx_operator_ledger_entries_entry_type");
         builder.HasIndex(x => new { x.SourceEventId, x.EntryType, x.ReferenceId }).HasDatabaseName("uq_operator_ledger_entries_source").IsUnique();
         builder.HasIndex(x => x.ActorUserId).HasDatabaseName("idx_operator_ledger_entries_actor_user_id").HasFilter("actor_user_id IS NOT NULL");
+        builder.HasIndex(x => new { x.CreatedAt, x.OperatorId, x.ReferenceType })
+            .HasDatabaseName("idx_operator_ledger_entries_canonical_revenue")
+            .HasFilter(
+                "entry_type IN ('BOOKING_REVENUE','BOOKING_REFUND','PARCEL_REVENUE','PARCEL_REFUND','VOUCHER_VIETRIDE_FUNDED_CREDIT') " +
+                "OR (entry_type = 'ADJUSTMENT' AND adjustment_reason = 'VIETRIDE_FUNDED_VOUCHER_REVERSAL')");
     }
 }

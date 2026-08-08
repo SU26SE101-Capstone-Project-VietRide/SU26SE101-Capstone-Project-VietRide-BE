@@ -65,6 +65,13 @@ CREATE TYPE operator_ledger_reference_type AS ENUM (
     'BOOKING', 'PARCEL', 'VOUCHER_USAGE', 'MANUAL'
 );
 
+CREATE TYPE operator_ledger_adjustment_reason AS ENUM (
+    'VIETRIDE_FUNDED_VOUCHER_REVERSAL',
+    'GENERIC_BOOKING_REFUND_ENTITLEMENT',
+    'MANUAL_WALLET_ADJUSTMENT',
+    'LEGACY_UNCLASSIFIED'
+);
+
 -- Operator wallet (internal v1 wallet) — transaction log enums
 CREATE TYPE operator_wallet_transaction_type AS ENUM ('CREDIT', 'DEBIT');
 
@@ -137,6 +144,8 @@ CREATE INDEX idx_payments_context_reconciliation ON payments (context_reconcilia
     WHERE context_reconciliation_required = TRUE;
 CREATE INDEX idx_payments_subscription_due_at ON payments (due_at)
     WHERE reference_type = 'SUBSCRIPTION' AND due_at IS NOT NULL;
+CREATE INDEX idx_payments_subscription_succeeded_at ON payments (succeeded_at)
+    WHERE reference_type = 'SUBSCRIPTION' AND status = 'SUCCEEDED';
 
 COMMENT ON COLUMN payments.vnpay_txn_ref IS
     'VNPay vnp_TxnRef — unique per VNPay transaction. NULL for WALLET method.';
@@ -408,6 +417,7 @@ CREATE TABLE operator_ledger_entries (
     operator_id UUID NOT NULL,                -- logical FK
     trip_id UUID NULL,                         -- logical FK trip.trips — NULL only for ADJUSTMENT/MANUAL
     entry_type operator_ledger_entry_type NOT NULL,
+    adjustment_reason operator_ledger_adjustment_reason NULL,
     amount BIGINT NOT NULL,                    -- signed: positive=credit, negative=debit, 0=audit-only
     reference_type operator_ledger_reference_type NOT NULL,
     reference_id UUID NOT NULL,
@@ -427,6 +437,20 @@ CREATE TABLE operator_ledger_entries (
         OR (entry_type NOT IN ('BOOKING_REFUND', 'PARCEL_REFUND', 'VOUCHER_OPERATOR_FUNDED_AUDIT', 'ADJUSTMENT') AND amount > 0)
     ),
     CONSTRAINT chk_operator_ledger_entries_trip_required CHECK (entry_type = 'ADJUSTMENT' OR trip_id IS NOT NULL),
+    CONSTRAINT chk_operator_ledger_entries_adjustment_reason_presence CHECK (
+        (entry_type = 'ADJUSTMENT' AND adjustment_reason IS NOT NULL)
+        OR (entry_type <> 'ADJUSTMENT' AND adjustment_reason IS NULL)
+    ),
+    CONSTRAINT chk_operator_ledger_entries_adjustment_reason_semantics CHECK (
+        (adjustment_reason = 'VIETRIDE_FUNDED_VOUCHER_REVERSAL'
+            AND amount < 0 AND reference_type IN ('BOOKING', 'PARCEL'))
+        OR (adjustment_reason = 'GENERIC_BOOKING_REFUND_ENTITLEMENT'
+            AND amount = 0 AND reference_type = 'BOOKING')
+        OR (adjustment_reason = 'MANUAL_WALLET_ADJUSTMENT'
+            AND amount <> 0 AND reference_type = 'MANUAL')
+        OR adjustment_reason = 'LEGACY_UNCLASSIFIED'
+        OR adjustment_reason IS NULL
+    ),
     CONSTRAINT chk_operator_ledger_entries_actor_type CHECK (actor_type IN ('USER', 'SYSTEM'))
 );
 
@@ -443,6 +467,13 @@ CREATE UNIQUE INDEX uq_operator_ledger_entries_source
     ON operator_ledger_entries (source_event_id, entry_type, reference_id);
 CREATE INDEX idx_operator_ledger_entries_actor_user_id
     ON operator_ledger_entries (actor_user_id) WHERE actor_user_id IS NOT NULL;
+CREATE INDEX idx_operator_ledger_entries_canonical_revenue
+    ON operator_ledger_entries (created_at, operator_id, reference_type)
+    WHERE entry_type IN (
+        'BOOKING_REVENUE', 'BOOKING_REFUND', 'PARCEL_REVENUE', 'PARCEL_REFUND',
+        'VOUCHER_VIETRIDE_FUNDED_CREDIT'
+    ) OR (entry_type = 'ADJUSTMENT'
+        AND adjustment_reason = 'VIETRIDE_FUNDED_VOUCHER_REVERSAL');
 
 COMMENT ON TABLE operator_ledger_entries IS
     'Audit-only log per-booking/per-parcel event. NOT the wallet balance source — see operator_wallets + operator_trip_settlements.';
@@ -516,6 +547,8 @@ CREATE INDEX idx_operator_trip_settlements_settled_by_user_id
 CREATE INDEX idx_operator_trip_settlements_stuck
     ON operator_trip_settlements (status, active_failure_code, last_settlement_failure_at)
     WHERE status = 'ELIGIBLE' AND active_failure_code IS NOT NULL;
+CREATE INDEX idx_operator_trip_settlements_settled_at
+    ON operator_trip_settlements (settled_at) WHERE status = 'SETTLED';
 
 COMMENT ON TABLE operator_trip_settlements IS
     'Per-Trip settlement marker. 1 record per Trip per Operator. Drives 7-day hold + Monday auto-settle + admin manual.';

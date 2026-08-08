@@ -122,6 +122,10 @@ public sealed class CancelBookingCommandHandlerTests
         root.GetProperty("refundAmount").GetInt64().Should().Be(180_000);
         root.GetProperty("refundOverride").GetBoolean().Should().BeFalse();
         root.GetProperty("cancellationReason").GetString().Should().Be("USER_INITIATED");
+        root.GetProperty("tripId").GetGuid().Should().Be(TripId);
+        root.GetProperty("previousStatus").GetString().Should().Be("CONFIRMED");
+        root.GetProperty("seatNumbers").EnumerateArray().Select(value => value.GetString())
+            .Should().Equal("A01");
     }
 
     [Fact]
