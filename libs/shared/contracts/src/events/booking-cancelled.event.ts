@@ -28,11 +28,11 @@ export const OperationalBookingCancelledEventSchema = z
     occurredAt: z.string().datetime({ offset: true }),
     ...bookingCancelledFields,
     bookingCode: z.string().trim().min(1),
-    ticketCodes: z.array(z.string().trim().min(1)).min(1),
-    ticketCount: z.number().int().positive(),
+    ticketCodes: z.array(z.string().trim().min(1)),
+    ticketCount: z.number().int().nonnegative(),
     tripId: z.string().uuid(),
     previousStatus: z.enum(['PENDING_PAYMENT', 'CONFIRMED']),
-    seatNumbers: z.array(z.string().trim().min(1)).min(1),
+    seatNumbers: z.array(z.string().trim().min(1)),
   })
   .strict()
   .refine((event) => event.ticketCount === event.ticketCodes.length, {

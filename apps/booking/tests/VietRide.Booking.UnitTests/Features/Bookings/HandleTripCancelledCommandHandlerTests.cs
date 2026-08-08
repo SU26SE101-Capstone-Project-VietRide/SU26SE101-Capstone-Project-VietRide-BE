@@ -42,7 +42,7 @@ public sealed class HandleTripCancelledCommandHandlerTests
         pending.CancellationReason.Should().Be(BookingCancellationReason.OPERATOR_CANCELLED_TRIP);
         confirmed.CancelledAt.Should().Be(OccurredAt);
         payloads.Select(ReadRefund).Should().BeEquivalentTo([0L, 125_001L]);
-        payloads.Should().OnlyContain(payload => PayloadIsCanonicalCancellation(payload));
+        payloads.Should().OnlyContain(payload => PayloadIsOperationalCancellation(payload));
         await fixture.History.Received(2).AddAsync(
             Arg.Is<BookingStatusHistory>(history =>
                 history.Status == BookingStatus.CANCELLED
@@ -107,14 +107,16 @@ public sealed class HandleTripCancelledCommandHandlerTests
         return document.RootElement.GetProperty("refundAmount").GetInt64();
     }
 
-    private static bool PayloadIsCanonicalCancellation(string payload)
+    private static bool PayloadIsOperationalCancellation(string payload)
     {
         using var document = JsonDocument.Parse(payload);
         var root = document.RootElement;
         return root.EnumerateObject().Select(property => property.Name).ToHashSet(StringComparer.Ordinal).SetEquals(
-                ["eventId", "occurredAt", "bookingId", "bookingCode", "userId", "refundAmount", "refundOverride", "cancellationReason", "ticketCodes", "ticketCount"])
+                ["eventId", "occurredAt", "bookingId", "bookingCode", "userId", "refundAmount", "refundOverride", "cancellationReason", "ticketCodes", "ticketCount", "tripId", "previousStatus", "seatNumbers"])
             && root.GetProperty("eventId").GetGuid() != Guid.Empty
             && root.GetProperty("occurredAt").GetDateTimeOffset() == OccurredAt
+            && root.GetProperty("tripId").GetGuid() == TripId
+            && root.GetProperty("previousStatus").GetString() is "PENDING_PAYMENT" or "CONFIRMED"
             && root.GetProperty("refundOverride").GetBoolean()
             && root.GetProperty("cancellationReason").GetString() == "OPERATOR_CANCELLED_TRIP";
     }

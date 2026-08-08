@@ -30,13 +30,27 @@ describe('Day 23 booking.cancelled contract:', () => {
   it('accepts only the complete canonical producer shape', () => {
     expect(BOOKING_CANCELLED_ROUTING_KEY).toBe('booking.booking.cancelled');
     expect(BookingCancelledEventSchema.safeParse(canonical).success).toBe(true);
-    expect(BookingCancelledEventSchema.safeParse({ ...canonical, extra: true }).success).toBe(false);
-    expect(BookingCancelledEventSchema.safeParse({ ...canonical, eventId: 'not-a-uuid' }).success).toBe(false);
-    expect(BookingCancelledEventSchema.safeParse({ ...canonical, occurredAt: '2026-07-17' }).success).toBe(false);
-    expect(BookingCancelledEventSchema.safeParse({ ...canonical, refundAmount: -1 }).success).toBe(false);
-    expect(BookingCancelledEventSchema.safeParse({ ...canonical, refundAmount: '12.5' }).success).toBe(false);
-    expect(BookingCancelledEventSchema.safeParse({ ...canonical, cancellationReason: ' ' }).success).toBe(false);
-    expect(BookingCancelledEventSchema.safeParse({ ...canonical, ticketCodes: [''] }).success).toBe(false);
+    expect(BookingCancelledEventSchema.safeParse({ ...canonical, extra: true }).success).toBe(
+      false,
+    );
+    expect(
+      BookingCancelledEventSchema.safeParse({ ...canonical, eventId: 'not-a-uuid' }).success,
+    ).toBe(false);
+    expect(
+      BookingCancelledEventSchema.safeParse({ ...canonical, occurredAt: '2026-07-17' }).success,
+    ).toBe(false);
+    expect(BookingCancelledEventSchema.safeParse({ ...canonical, refundAmount: -1 }).success).toBe(
+      false,
+    );
+    expect(
+      BookingCancelledEventSchema.safeParse({ ...canonical, refundAmount: '12.5' }).success,
+    ).toBe(false);
+    expect(
+      BookingCancelledEventSchema.safeParse({ ...canonical, cancellationReason: ' ' }).success,
+    ).toBe(false);
+    expect(BookingCancelledEventSchema.safeParse({ ...canonical, ticketCodes: [''] }).success).toBe(
+      false,
+    );
     const { eventId, ...withoutIdentity } = canonical;
     expect(eventId).toBe(canonical.eventId);
     expect(BookingCancelledEventSchema.safeParse(withoutIdentity).success).toBe(false);
@@ -46,13 +60,25 @@ describe('Day 23 booking.cancelled contract:', () => {
     expect(OperationalBookingCancelledEventSchema.safeParse(operational).success).toBe(true);
     expect(BookingCancelledConsumerEventSchema.safeParse(operational).success).toBe(true);
     expect(
-      OperationalBookingCancelledEventSchema.safeParse({ ...operational, tripId: undefined }).success,
+      OperationalBookingCancelledEventSchema.safeParse({ ...operational, tripId: undefined })
+        .success,
     ).toBe(false);
     expect(
-      OperationalBookingCancelledEventSchema.safeParse({ ...operational, previousStatus: 'CANCELLED' }).success,
+      OperationalBookingCancelledEventSchema.safeParse({
+        ...operational,
+        previousStatus: 'CANCELLED',
+      }).success,
     ).toBe(false);
     expect(
-      OperationalBookingCancelledEventSchema.safeParse({ ...operational, seatNumbers: [] }).success,
+      OperationalBookingCancelledEventSchema.safeParse({
+        ...operational,
+        ticketCodes: [],
+        ticketCount: 0,
+        seatNumbers: [],
+      }).success,
+    ).toBe(true);
+    expect(
+      OperationalBookingCancelledEventSchema.safeParse({ ...operational, ticketCount: 2 }).success,
     ).toBe(false);
   });
 
@@ -63,9 +89,19 @@ describe('Day 23 booking.cancelled contract:', () => {
     expect(BookingCancelledLegacyEventSchema.safeParse(legacy).success).toBe(true);
     expect(BookingCancelledConsumerEventSchema.safeParse(canonical).success).toBe(true);
     expect(BookingCancelledConsumerEventSchema.safeParse(legacy).success).toBe(true);
-    expect(BookingCancelledConsumerEventSchema.safeParse({ ...legacy, eventId: canonical.eventId }).success).toBe(false);
-    expect(BookingCancelledConsumerEventSchema.safeParse({ ...legacy, occurredAt: canonical.occurredAt }).success).toBe(false);
-    expect(BookingCancelledConsumerEventSchema.safeParse({ ...canonical, eventId: 'bad' }).success).toBe(false);
-    expect(BookingCancelledConsumerEventSchema.safeParse({ ...legacy, extra: true }).success).toBe(false);
+    expect(
+      BookingCancelledConsumerEventSchema.safeParse({ ...legacy, eventId: canonical.eventId })
+        .success,
+    ).toBe(false);
+    expect(
+      BookingCancelledConsumerEventSchema.safeParse({ ...legacy, occurredAt: canonical.occurredAt })
+        .success,
+    ).toBe(false);
+    expect(
+      BookingCancelledConsumerEventSchema.safeParse({ ...canonical, eventId: 'bad' }).success,
+    ).toBe(false);
+    expect(BookingCancelledConsumerEventSchema.safeParse({ ...legacy, extra: true }).success).toBe(
+      false,
+    );
   });
 });

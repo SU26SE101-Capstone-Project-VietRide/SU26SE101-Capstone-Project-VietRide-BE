@@ -98,7 +98,7 @@ public sealed class TripCancelledIntegrationEventHandlerTests
                 .SingleAsync(row => row.EventType == BookingCancelledEvent.EventTypeValue);
             using var payload = JsonDocument.Parse(outbox.Payload);
             payload.RootElement.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
-                ["eventId", "occurredAt", "bookingId", "bookingCode", "userId", "refundAmount", "refundOverride", "cancellationReason", "ticketCodes", "ticketCount"]);
+                ["eventId", "occurredAt", "bookingId", "bookingCode", "userId", "refundAmount", "refundOverride", "cancellationReason", "ticketCodes", "ticketCount", "tripId", "previousStatus", "seatNumbers"]);
             payload.RootElement.GetProperty("eventId").GetGuid().Should().Be(outbox.Id);
             payload.RootElement.GetProperty("occurredAt").GetDateTimeOffset().Should().Be(CancelledAt);
             payload.RootElement.GetProperty("bookingId").GetGuid().Should().Be(booking.Id);
@@ -108,8 +108,11 @@ public sealed class TripCancelledIntegrationEventHandlerTests
             payload.RootElement.GetProperty("refundOverride").GetBoolean().Should().BeTrue();
             payload.RootElement.GetProperty("cancellationReason").GetString().Should()
                 .Be(BookingCancellationReason.OPERATOR_CANCELLED_TRIP.ToString());
+            payload.RootElement.GetProperty("tripId").GetGuid().Should().Be(tripId);
+            payload.RootElement.GetProperty("previousStatus").GetString().Should().Be("CONFIRMED");
             payload.RootElement.GetProperty("ticketCount").GetInt32().Should().Be(0);
             payload.RootElement.GetProperty("ticketCodes").GetArrayLength().Should().Be(0);
+            payload.RootElement.GetProperty("seatNumbers").GetArrayLength().Should().Be(0);
         }
         finally
         {
