@@ -7,7 +7,6 @@ public sealed record GetAdminBookingStatsAggregateItemResult(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OperatorName,
     DateOnly? Date,
     int TotalBookings,
-    long TotalRevenue,
     int TotalCancellations,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? TotalNoShows,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? TotalPartialNoShows,

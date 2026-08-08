@@ -4,4 +4,5 @@ public sealed record AdminRevenueAnalyticsResponse(
     AdminRevenuePeriod Period,
     AdminRevenueSummary Summary,
     IReadOnlyList<AdminRevenueMonthItem> Monthly,
-    IReadOnlyList<AdminTopOperatorItem> TopOperators);
+    IReadOnlyList<AdminTopOperatorItem> TopOperators,
+    DateTime GeneratedAt);

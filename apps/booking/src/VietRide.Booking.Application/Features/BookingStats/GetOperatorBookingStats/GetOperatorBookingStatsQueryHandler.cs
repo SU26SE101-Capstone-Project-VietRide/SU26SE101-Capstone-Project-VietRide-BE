@@ -50,8 +50,7 @@ public sealed class GetOperatorBookingStatsQueryHandler
 
         return new GetOperatorBookingStatsResult(
             items,
-            items.Sum(item => item.TotalBookings),
-            items.Sum(item => item.TotalRevenue));
+            items.Sum(item => item.TotalBookings));
     }
 
     private static IReadOnlyList<GetOperatorBookingStatsItemResult> BuildMonthlyItems(
@@ -66,7 +65,6 @@ public sealed class GetOperatorBookingStatsQueryHandler
                     OperatorId: null,
                     group.Key,
                     group.Sum(row => row.TotalBookings),
-                    group.Sum(row => row.TotalRevenue),
                     group.Sum(row => row.TotalCancellations),
                     TotalNoShows: null,
                     TotalPartialNoShows: null,
@@ -78,7 +76,6 @@ public sealed class GetOperatorBookingStatsQueryHandler
                 OperatorId: null,
                 month,
                 TotalBookings: 0,
-                TotalRevenue: 0,
                 TotalCancellations: 0,
                 TotalNoShows: null,
                 TotalPartialNoShows: null,
@@ -91,7 +88,6 @@ public sealed class GetOperatorBookingStatsQueryHandler
             row.OperatorId,
             row.Date,
             row.TotalBookings,
-            row.TotalRevenue,
             row.TotalCancellations,
             row.TotalNoShows,
             TotalPartialNoShows: 0,

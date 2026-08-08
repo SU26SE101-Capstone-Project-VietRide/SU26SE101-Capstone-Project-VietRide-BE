@@ -35,8 +35,12 @@ public sealed class AdminDashboardEndpointIntegrationTests
         using var document = JsonDocument.Parse(responseBody);
         var data = document.RootElement.GetProperty("data");
         data.GetProperty("period").GetProperty("timezone").GetString().Should().Be("Asia/Ho_Chi_Minh");
-        data.GetProperty("totalRevenue").GetProperty("currentValue").GetInt64().Should().Be(1_500);
-        data.GetProperty("totalRevenue").GetProperty("changePercent").GetDecimal().Should().Be(50m);
+        data.TryGetProperty("totalRevenue", out _).Should().BeFalse();
+        data.GetProperty("totalProjectRevenueVnd").GetProperty("currentValue").GetInt64().Should().Be(1_500);
+        data.GetProperty("netTransportRevenueVnd").GetProperty("currentValue").GetInt64().Should().Be(1_200);
+        data.GetProperty("netTicketRevenueVnd").GetProperty("currentValue").GetInt64().Should().Be(1_000);
+        data.GetProperty("netParcelRevenueVnd").GetProperty("currentValue").GetInt64().Should().Be(200);
+        data.GetProperty("subscriptionRevenueVnd").GetProperty("currentValue").GetInt64().Should().Be(300);
         data.GetProperty("activeOperators").GetProperty("currentValue").GetInt64().Should().Be(1);
         data.GetProperty("activeUsers").GetProperty("trend").GetString().Should().Be("UP");
         data.GetProperty("bookings").GetProperty("previousValue").GetInt64().Should().Be(5);
@@ -51,6 +55,7 @@ public sealed class AdminDashboardEndpointIntegrationTests
     {
         _factory.BookingStatsRepository.ClearReceivedCalls();
         _factory.IdentityDashboard.ClearReceivedCalls();
+        _factory.PaymentRevenue.ClearReceivedCalls();
         using var client = _factory.CreateAuthenticatedClient("OPERATOR_ADMIN", OperatorId);
 
         var response = await client.GetAsync(
@@ -60,6 +65,7 @@ public sealed class AdminDashboardEndpointIntegrationTests
         await _factory.BookingStatsRepository.DidNotReceiveWithAnyArgs()
             .GetAdminAggregateStatsAsync(default, default, default!, default);
         await _factory.IdentityDashboard.DidNotReceiveWithAnyArgs().GetAsync(default, default, default);
+        await _factory.PaymentRevenue.DidNotReceiveWithAnyArgs().GetAsync(default, default, default);
     }
 
     [Fact]
@@ -99,6 +105,11 @@ public sealed class AdminDashboardEndpointIntegrationTests
                 Arg.Any<DateOnly>(),
                 Arg.Any<CancellationToken>())
             .Returns<Task<IdentityDashboardMetricsDto>>(_ => throw new AdminDashboardUnavailableException());
+        _factory.PaymentRevenue.GetAsync(
+                Arg.Any<DateOnly>(),
+                Arg.Any<DateOnly>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new PaymentRevenueSummaryDto(0, 0, 0, 0, 0));
         using var client = _factory.CreateAuthenticatedClient("SYSTEM_ADMIN");
 
         var response = await client.GetAsync(
@@ -108,6 +119,27 @@ public sealed class AdminDashboardEndpointIntegrationTests
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, responseBody);
         using var document = JsonDocument.Parse(responseBody);
         document.RootElement.GetProperty("error").GetProperty("code").GetString().Should().Be("UPSTREAM_UNAVAILABLE");
+        document.RootElement.TryGetProperty("data", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Summary_PaymentFailureReturns503WithoutBookingStatsFallback()
+    {
+        ConfigureHappyPath();
+        _factory.PaymentRevenue.GetAsync(
+                new DateOnly(2026, 7, 1),
+                new DateOnly(2026, 7, 31),
+                Arg.Any<CancellationToken>())
+            .Returns<Task<PaymentRevenueSummaryDto>>(_ => throw new AdminDashboardUnavailableException());
+        using var client = _factory.CreateAuthenticatedClient("SYSTEM_ADMIN");
+
+        var response = await client.GetAsync(
+            "/v1/admin/dashboard/summary?from=2026-07-01&to=2026-07-31");
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("UPSTREAM_UNAVAILABLE");
         document.RootElement.TryGetProperty("data", out _).Should().BeFalse();
     }
 
@@ -143,6 +175,10 @@ public sealed class AdminDashboardEndpointIntegrationTests
                 [new IdentityDashboardOperatorStatusCountDto("APPROVED", 1)]));
         _factory.IdentityDashboard.GetAsync(previousFrom, previousTo, Arg.Any<CancellationToken>())
             .Returns(new IdentityDashboardMetricsDto(10, [OperatorId], [], []));
+        _factory.PaymentRevenue.GetAsync(currentFrom, currentTo, Arg.Any<CancellationToken>())
+            .Returns(new PaymentRevenueSummaryDto(1_500, 1_200, 1_000, 200, 300));
+        _factory.PaymentRevenue.GetAsync(previousFrom, previousTo, Arg.Any<CancellationToken>())
+            .Returns(new PaymentRevenueSummaryDto(1_000, 800, 700, 100, 200));
     }
 
     private static AdminBookingStatsAggregateReadModel Stats(int bookings, long revenue)

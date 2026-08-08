@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.59.0
+> **Phiên bản:** 1.60.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-07
+> **Cập nhật lần cuối:** 2026-08-08
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -2118,7 +2118,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `POST /internal/v1/trips/{tripId}/book-seats` | Booking | Convert HELD → BOOKED khi payment success (API contract canonical name; was `confirm-seats`) |
 | `GET /internal/v1/trips/{tripId}/passengers-pending` | Booking | Cho operator dashboard |
 | `GET /internal/v1/stations/{id}` · `GET /internal/v1/stops/{id}` · `GET /internal/v1/routes/{id}` | All services | Trip internal-auth required; raw DTO lookup. Station active returns canonical resolution; merged soft-delete returns original identity plus terminal `canonicalStationId`; ordinary soft-delete/missing returns `STATION_NOT_FOUND`. Stop not found returns `STOP_NOT_FOUND`. Errors use ADR 0004 envelope. |
-| `GET /internal/v1/reports/platform/trips?from=&to=` | Payment | Raw completed-Trip earned metrics grouped by operator; `status=COMPLETED`, `completed_at` in UTC `[from,to)` |
+| `GET /internal/v1/reports/platform/trips?from=&to=` | Booking | Raw completed-Trip count grouped by operator; `status=COMPLETED`, `completed_at` in UTC `[from,to)` |
 | `GET /internal/v1/trips/{tripId}/cargo/capacity` | Parcel | Lấy available cargo capacity |
 | `POST /internal/v1/trips/{tripId}/cargo/reserve` · `remeasure` · `load` · `release` | Parcel | Idempotent single-Trip cargo-ledger mutation and counter update |
 | `POST /internal/v1/trips/{sourceTripId}/cargo/transfer` | Parcel | Exact `{parcelId,targetTripId,targetState:RESERVED\|LOADED,allowCapacityOverflow}`; lock source/target by ascending UUID and atomically release source plus reserve/load target in one Trip-local transaction. `RESERVED` always enforces capacity; `LOADED` permits explicit overflow only for approved substitution recovery. |
@@ -2137,7 +2137,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `GET /internal/v1/bookings/trips/{tripId}/stops/{stopId}/pending-passenger-count?operatorId=` | Trip | Raw exact `{tripId,stopId,pendingPassengerCount}`. Predicate is `Booking.status=CONFIRMED AND Passenger.boardingStatus=PENDING AND Booking.tripId=:tripId AND Booking.pickupStopId=:stopId AND Booking.operatorId=:operatorId`. Valid Internal JWT only; malformed/all-zero UUID → `422 VALIDATION_ERROR`, invalid JWT → `401 AUTH_TOKEN_INVALID`; no Trip/Stop lookup, tenant claim, or absent-reference `403`/`404`. |
 | `GET /internal/v1/bookings/{id}/access-check?userId=` | Tracking | Verify Socket.IO joinTripTracking authz |
 | `GET /internal/v1/vouchers/by-code/{code}` | Booking (own service); also exposed for admin reports |
-| `GET /internal/v1/reports/platform/bookings?from=&to=` | Payment | Raw completed-Booking count/revenue grouped by operator; `status=COMPLETED`, `completed_at` in UTC `[from,to)` |
+| `GET /internal/v1/reports/platform/bookings?from=&to=` | Booking/raw verification | Raw completed-Booking count grouped by operator; legacy money field không thay Payment ledger; `status=COMPLETED`, `completed_at` in UTC `[from,to)` |
 
 #### Payment & Wallet Service
 
@@ -2147,6 +2147,9 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `POST /internal/v1/payments/batch-charge` | Booking | WALLET batch charge for round-trip: per-item Payment `referenceType=BOOKING`, per-item wallet ledger `referenceType=BOOKING_PAYMENT`, all-or-nothing in one Payment DB transaction |
 | `POST /internal/v1/payments/vnpay-init` | Booking, Parcel | Tạo VNPay redirect URL |
 | `POST /internal/v1/payments/redirect-sessions/lookup` | Booking, Parcel | Read-only raw redirect lookup; Internal JWT, `[SkipIdempotency]`, `Cache-Control: no-store`, 1–100 unique references, one `AsNoTracking` query; latest attempt first then strict owner/context/VNPAY/PENDING_REDIRECT/future persisted dueAt/trusted-authority eligibility |
+| `GET /internal/v1/revenue/admin-summary?from=&to=` | Booking | Raw canonical project revenue và independent settlement summary; input calendar ICT, persistence range UTC half-open |
+| `GET /internal/v1/revenue/operators/{operatorId}/summary?from=&to=` | Parcel | Raw canonical operator ticket/parcel revenue, gồm gross Parcel và signed refund; input calendar ICT, persistence range UTC half-open |
+| `POST /internal/v1/revenue/backfills/parcel-voucher-reversals?dryRun=` | Vận hành nội bộ | Dry-run/apply append-only idempotent Parcel voucher reversal backfill; không qua Gateway |
 | `GET /internal/v1/wallets/{userId}/balance` | Booking (preview) | Check balance UI trước checkout |
 | `POST /internal/v1/refunds` | Booking, Parcel | Trigger refund (event-driven preferred — HTTP fallback) |
 
@@ -2156,7 +2159,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 |---|---|---|
 | `GET /internal/v1/parcels/{id}` | Tracking, Notification | Verify Socket.IO joinTripTracking hoặc resolve recipient policy từ snapshot `{ parcelId, tripId, status, senderUserId, recipientUserId?, operatorId, dropoffStopId? }`; trả ADR 0004 envelope và vẫn đọc được terminal rows |
 | `GET /internal/v1/parcels/{id}/access-check?userId=` | Tracking | Same |
-| `GET /internal/v1/reports/platform/parcels?from=&to=` | Payment | Raw delivery-confirmed count/signed net revenue grouped by operator; `confirmed_at` in UTC `[from,to)` |
+| `GET /internal/v1/reports/platform/parcels?from=&to=` | Booking | Raw delivery-confirmed count grouped by operator; legacy money field không thay Payment ledger; `confirmed_at` in UTC `[from,to)` |
 
 #### Tracking Service
 
@@ -2566,9 +2569,9 @@ vận hành không in full payload, contact, IP hoặc user-agent.
 #### Earned platform report
 
 Booking sở hữu public facade `GET /v1/admin/reports/platform?from=&to=` từ Day 42; Payment không
-đọc foreign DB và vẫn là authoritative ledger source. Cả hai RFC3339
-UTC boundary bắt buộc, `from < to`, tối đa 366 ngày, interval `[from,to)`. Ba source vận hành cung cấp
-metrics count:
+đọc foreign DB và vẫn là authoritative ledger source. Public `from/to` là ngày ICT inclusive theo
+`YYYY-MM-DD`, `from <= to`, tối đa 366 ngày. Booking chuẩn hóa chúng thành UTC half-open
+`[fromUtc,toUtcExclusive)` trước khi query/call ba source vận hành cung cấp metrics count:
 
 - Booking: `COMPLETED`, anchor `completed_at`, count. Doanh thu cuối cùng không lấy từ amount của
   Booking mà lấy từ Payment ledger.
@@ -2577,13 +2580,14 @@ metrics count:
   vận hành của Parcel mà lấy từ Payment ledger.
 
 Earned live vẫn là anchor cho count vận hành; không dùng payment-ledger time, non-terminal row hoặc
-Stats/cache chưa reconciliation làm nguồn count. Payment ledger là authority cuối cùng cho
-`bookingRevenueVnd`/`parcelRevenueVnd`; paid Booking `NO_SHOW` có thể cộng revenue ledger nhưng
+Stats/cache chưa reconciliation làm nguồn count. Payment ledger là authority cuối cùng cho public
+`netTicketRevenueVnd`/`netParcelRevenueVnd`; raw internal platform-ledger DTO tạm giữ tên legacy
+`bookingRevenueVnd`/`parcelRevenueVnd`. Paid Booking `NO_SHOW` có thể cộng revenue ledger nhưng
 `completedBookingCount` vẫn bằng 0. Source PostgreSQL đọc `SUM(BIGINT)` dưới dạng NUMERIC rồi
 checked-convert từng group và total về Int64. Booking checked mọi count/totals, union operator IDs
 cùng Payment ledger, lookup Identity theo chunk 500, giữ missing operator với tên null, sort net
-revenue giảm dần rồi operator ID. Totals phải bằng sum `byOperator`; `parcelRevenueVnd`/`netRevenueVnd`
-có thể âm và không clamp.
+revenue giảm dần rồi operator ID. Totals phải bằng sum `byOperator`; public
+`netTicketRevenueVnd`/`netParcelRevenueVnd`/`netTransportRevenueVnd` có thể âm và không clamp.
 
 Booking gọi bốn nguồn Trip/Parcel/Payment-ledger và Booking local song song với timeout 5 giây,
 sau đó mới lookup Identity. Canonical upstream
@@ -2601,7 +2605,7 @@ Parcel  (confirmed_at, operator_id) WHERE status='DELIVERY_CONFIRMED' AND confir
 
 Day 40 là live indexed-report baseline. Day 42 materializes/validates Stats, đối chiếu projection
 với live operational source trong chính từng service, rồi promote Booking-owned Redis hot read sau
-reconciliation thành công. Redis TTL là năm phút; exact UTC range và `platform-report:v2` là một
+reconciliation thành công. Redis TTL là 60 giây; exact UTC range và `platform-report:v3` là một
 phần của key. Day 41 sở hữu sáu operator XLSX route và ClosedXML writer; không cross-DB query hoặc
 Payment attribution table mới.
 
@@ -2679,20 +2683,55 @@ new dependencies, cross-database foreign keys, or enrichment of the existing pub
 - Dashboard `activeUsers` means the account's current latest `last_login_at` falls in the requested
   period; it is not a full login-history metric. `activeOperators` means currently
   `APPROVED + is_active` and having at least one BookingStats booking in the period.
-- Operator ticket revenue is signed Booking ledger revenue/refund plus VietRide-funded voucher
-  credit whose reference is `BOOKING`; Parcel revenue uses the equivalent `PARCEL` entries.
-  The exact negative `ADJUSTMENT` whose reference is `BOOKING|PARCEL` and note is
-  `reverse-vietride-funded-voucher` is included in its matching category. Operator-funded voucher
-  audit entries and adjustments whose reference is `MANUAL` are excluded. Consequently
-  `totalRevenueVnd = ticketRevenueVnd + parcelRevenueVnd`.
-- Admin analytics deliberately defines `platformRevenueVnd` as completed subscription payments,
-  `paidToOperatorsVnd` as settled payouts, and `grossRevenueVnd` as their sum. These names do not
-  represent ticket/parcel gross sales.
-- For comparisons, previous zero with current positive is `UP`; both zero is `FLAT`; in both cases
-  `changePercent` is `0`. All date/month buckets use `Asia/Ho_Chi_Minh` unless an existing endpoint
-  explicitly requires UTC boundaries.
+- Payment là financial source of truth cho mọi Dashboard, Revenue Analytics, Platform Report và
+  export có tiền. Booking/Trip/Parcel chỉ sở hữu count vận hành; không được fallback financial về
+  BookingStats/ParcelStats khi Payment lỗi.
+- Canonical revenue predicate chỉ nhận Booking/Parcel revenue, refund,
+  `VOUCHER_VIETRIDE_FUNDED_CREDIT` đúng reference và typed
+  `VIETRIDE_FUNDED_VOUCHER_REVERSAL`. `note` chỉ để audit, không quyết định category. Manual,
+  generic entitlement, legacy unclassified, operator-funded audit và reference khác đều bị loại.
+- `netTransportRevenueVnd = netTicketRevenueVnd + netParcelRevenueVnd`;
+  `totalProjectRevenueVnd = netTransportRevenueVnd + subscriptionRevenueVnd`.
+  `subscriptionRevenueVnd` chỉ gồm SUBSCRIPTION Payment `SUCCEEDED` theo `succeeded_at`; v1 không
+  có subscription refund/proration. `paidToOperatorsVnd` là settlement cash-flow độc lập, không
+  thuộc revenue.
+- VietRide-funded voucher credit là operator entitlement/KPI quản trị, không phải passenger cash;
+  các revenue API không phải báo cáo kế toán pháp lý. Refund theo kỳ `created_at` có thể làm tháng
+  âm và không được clamp.
+- For comparisons, previous=0/current=0 trả `0/FLAT`; previous=0/current khác 0 trả
+  `changePercent=null` và trend theo dấu current. Input/bucket theo lịch
+  `Asia/Ho_Chi_Minh`, nhưng mọi persistence filter và internal service range phải được chuẩn hóa
+  thành UTC half-open `[fromUtc,toUtcExclusive)` trước khi query.
 - All UI-gap public mutations require `Idempotency-Key`; all public responses use ADR 0004. Internal APIs
   require Internal JWT, return raw DTOs on success, and are never exposed through Gateway.
+
+#### Unified financial reporting contract (2026-08-07)
+
+Canonical adjustment taxonomy:
+
+| Reason | DB semantics | Revenue |
+|---|---|---|
+| `VIETRIDE_FUNDED_VOUCHER_REVERSAL` | amount âm, reference `BOOKING|PARCEL` | recognized theo reference |
+| `GENERIC_BOOKING_REFUND_ENTITLEMENT` | amount 0, reference `BOOKING` | marker entitlement, bị loại |
+| `MANUAL_WALLET_ADJUSTMENT` | amount khác 0, reference `MANUAL` | bị loại |
+| `LEGACY_UNCLASSIFIED` | chỉ dữ liệu lịch sử, application không tạo mới | bị loại và phải audit trước enforce rollout |
+
+`ADJUSTMENT` luôn có reason; non-adjustment luôn null. DB CHECK enforce presence và semantics;
+`note` không được dùng làm predicate. Canonical ledger revenue dùng `created_at`; subscription
+`SUCCEEDED` dùng `succeeded_at`; settlement `SETTLED` dùng `settled_at`.
+
+Payment expose raw Internal-JWT-only
+`GET /internal/v1/revenue/admin-summary` và
+`GET /internal/v1/revenue/operators/{operatorId}/summary`; không route qua Gateway. Booking dùng
+admin summary cho Dashboard, Payment ledger cho Platform Report; Parcel dùng operator summary cho
+summary/legacy CSV. Financial downstream timeout tổng 5 giây, retry tối đa một lần với GET
+transient, circuit 5 failed operations/open 30 giây/half-open một probe. Lỗi hoặc malformed trả
+`503 UPSTREAM_UNAVAILABLE`, không dùng local financial fallback.
+
+Financial cache key phải versioned theo scope/operator/range và TTL tối đa 60 giây. Booking
+Platform Report dùng `platform-report:v3`; Payment analytics/internal summaries dùng `revenue:v2`.
+Parcel không đặt cache full response thứ hai. `generatedAt` là UTC; support/QA phải chấp nhận độ
+trễ hiển thị tối đa 60 giây sau giao dịch mới.
 
 ---
 
@@ -3882,6 +3921,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.60.0** | 2026-08-08 | Codex | **MINOR** — Chuẩn hóa Payment làm financial source of truth cho Dashboard/Analytics/Platform Report/export; khóa canonical revenue predicate và typed adjustment taxonomy, tách settlement khỏi revenue, chuẩn hóa ICT calendar input thành UTC half-open persistence range, cache tối đa 60 giây và fail-closed 503 cho Booking/Parcel financial consumers. |
 | **1.59.0** | 2026-08-07 | Codex | **MINOR** — Freeze Mobile gap contracts: passenger Trip search exposes only `SCHEDULED`; round-trip route identity and leg-scoped seat conflicts; effective-route geometry/ETag; STOP/STATION ETA and passenger-history tracking targets; atomic notification read-all plus snapshot cursor pagination; System Admin `SUSPENDED -> APPROVED` operator reactivation with ActivityLog and unchanged subscription; RAG 429 documents `RAG_RATE_LIMIT_EXCEEDED`. Adds two UUID-v4-required mutations, raising the executable inventory to 190/173/17. No new dependency or integration event. |
 | **1.58.0** | 2026-08-06 | Codex | **MINOR** — Hoàn thiện Manager Web Trip gaps: immutable Trip seat-layout snapshot, canonical usable passenger capacity, case-insensitive seat validation, operator-admin TripSeat disable/enable with row locking/audit/idempotency, operator shuttle history, batched pending-shuttle passenger enrichment, and method-aware Gateway routing. |
 | **1.57.0** | 2026-08-05 | Codex | **MINOR** — Hoàn thiện Tracking Phase 12: giữ fallback `STOPS_ONLY` cho Route thiếu polyline, làm rõ Google/Local ETA fallback và UNKNOWN, khóa quy tắc chọn stop/recalculate, bổ sung delay state 24h, Outbox `dedupeKey` unique, transition `DELAYED`/`DELAY_CLEARED` và contract ETA additive tương thích ngược. |

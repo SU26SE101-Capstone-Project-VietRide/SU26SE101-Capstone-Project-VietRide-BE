@@ -1,10 +1,12 @@
 using FluentAssertions;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Core;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Operator;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Payment.UnitTests.Features.RevenueAnalytics;
 
@@ -48,13 +50,15 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandlerTests
 
         result.Period.Should().Be(new OperatorRevenueAnalyticsPeriod(
             "2026-07",
+            null,
+            "month",
             new DateOnly(2026, 7, 1),
             new DateOnly(2026, 7, 31),
             RevenueAnalyticsPeriodRules.Timezone));
-        result.Summary.TotalRevenueVnd.Should().Be(new RevenueComparison(1_400, 600, 133.33m, "UP"));
-        result.Summary.TicketRevenueVnd.Should().Be(new RevenueComparison(900, 600, 50m, "UP"));
-        result.Summary.ParcelRevenueVnd.Should().Be(new RevenueComparison(500, 0, 0m, "UP"));
-        result.Summary.AverageRevenuePerTripVnd.Should().Be(new RevenueComparison(700, 600, 16.67m, "UP"));
+        result.Summary.NetRevenueVnd.Should().Be(new RevenueComparison(1_400, 600, 133.33m, "UP"));
+        result.Summary.NetTicketRevenueVnd.Should().Be(new RevenueComparison(900, 600, 50m, "UP"));
+        result.Summary.NetParcelRevenueVnd.Should().Be(new RevenueComparison(500, 0, null, "UP"));
+        result.Summary.AverageNetRevenuePerTripVnd.Should().Be(new RevenueComparison(700, 600, 16.67m, "UP"));
         result.Monthly.Should().HaveCount(12);
         result.Monthly.Select(item => item.Month).Should().StartWith("2025-08").And.EndWith("2026-07");
         result.Monthly.Single(item => item.Month == "2026-06").Should().Be(
@@ -62,7 +66,7 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandlerTests
         result.Monthly.Single(item => item.Month == "2026-07").Should().Be(
             new OperatorRevenueMonthItem("2026-07", 1_400, 900, 500, 2));
         result.Monthly.Where(item => item.Month is not "2026-06" and not "2026-07")
-            .Should().OnlyContain(item => item.RevenueVnd == 0 && item.TripCount == 0);
+            .Should().OnlyContain(item => item.NetRevenueVnd == 0 && item.TripCount == 0);
         result.RoutePerformance.Should().Equal(
             new OperatorRoutePerformanceItem(
                 RouteA, "Route A", "Origin A", "Destination A", 5, 4, 2, 1, 1_300, 80m),
@@ -101,10 +105,10 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandlerTests
             new GetOperatorRevenueAnalyticsQuery(OperatorId, "2026-07"),
             CancellationToken.None);
 
-        result.Summary.TotalRevenueVnd.CurrentValue.Should().Be(7);
-        result.Summary.AverageRevenuePerTripVnd.CurrentValue.Should().Be(4);
+        result.Summary.NetRevenueVnd.CurrentValue.Should().Be(7);
+        result.Summary.AverageNetRevenuePerTripVnd.CurrentValue.Should().Be(4);
         result.Monthly[^1].TripCount.Should().Be(2);
-        result.RoutePerformance.Single().RevenueVnd.Should().Be(5);
+        result.RoutePerformance!.Single().NetRevenueVnd.Should().Be(5);
     }
 
     [Fact]
@@ -151,13 +155,38 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandlerTests
             new GetOperatorRevenueAnalyticsQuery(OperatorId, "2026-07"),
             CancellationToken.None);
 
-        result.Monthly.Should().HaveCount(12).And.OnlyContain(item => item.RevenueVnd == 0);
-        result.Summary.TotalRevenueVnd.Should().Be(new RevenueComparison(0, 0, 0m, "FLAT"));
+        result.Monthly.Should().HaveCount(12).And.OnlyContain(item => item.NetRevenueVnd == 0);
+        result.Summary.NetRevenueVnd.Should().Be(new RevenueComparison(0, 0, 0m, "FLAT"));
         result.RoutePerformance.Should().ContainSingle().Which.CompletionRatePercent.Should().Be(0);
         trip.SummaryCallCount.Should().Be(0);
     }
 
-    private GetOperatorRevenueAnalyticsQueryHandler CreateHandler() => new(repository, trip);
+    [Fact]
+    public async Task Handle_YearModeComparesPreviousYearAndOmitsRoutePerformance()
+    {
+        repository.Rows =
+        [
+            new OperatorRevenueLedgerReadModel(new DateOnly(2026, 7, 1), TripA, 100, -20, 1, 1),
+        ];
+
+        var result = await CreateHandler().Handle(
+            new GetOperatorRevenueAnalyticsQuery(OperatorId, null, 2026, "month"),
+            CancellationToken.None);
+
+        result.Period.Year.Should().Be(2026);
+        result.Period.Month.Should().BeNull();
+        result.Monthly.Should().HaveCount(12);
+        result.Monthly.Single(item => item.Month == "2026-07").NetRevenueVnd.Should().Be(80);
+        result.Summary.NetRevenueVnd.Should().Be(new RevenueComparison(80, 0, null, "UP"));
+        result.RoutePerformance.Should().BeNull();
+        trip.RouteCallCount.Should().Be(0);
+        trip.SummaryCallCount.Should().Be(0);
+        repository.LastFrom.Should().Be(DateTimeOffset.Parse("2024-12-31T17:00:00Z"));
+        repository.LastTo.Should().Be(DateTimeOffset.Parse("2026-12-31T17:00:00Z"));
+    }
+
+    private GetOperatorRevenueAnalyticsQueryHandler CreateHandler()
+        => new(repository, trip, new TestClock(), new StubRevenueCache());
 
     private static TripRevenueSummaryItem Summary(
         Guid tripId,
@@ -194,10 +223,17 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandlerTests
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task<IReadOnlyList<TopOperatorPayoutReadModel>> GetTopOperatorPayoutsAsync(
+        public Task<IReadOnlyList<TopOperatorRevenueReadModel>> GetTopOperatorRevenueAsync(
             DateTimeOffset fromUtc,
             DateTimeOffset toUtc,
             int top,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<OperatorRevenueSummaryReadModel> GetOperatorRevenueSummaryAsync(
+            Guid operatorId,
+            DateTimeOffset fromUtc,
+            DateTimeOffset toUtc,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }
@@ -236,5 +272,25 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandlerTests
             IReadOnlyList<Guid> operatorIds,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+    }
+
+    private sealed class TestClock : IClock
+    {
+        public DateTimeOffset UtcNow => DateTimeOffset.Parse("2026-08-07T00:00:00Z");
+    }
+
+    private sealed class StubRevenueCache : IRevenueReportCache
+    {
+        public Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default)
+            where T : class
+            => Task.FromResult<T?>(null);
+
+        public Task SetAsync<T>(
+            string key,
+            T value,
+            TimeSpan expiration,
+            CancellationToken cancellationToken = default)
+            where T : class
+            => Task.CompletedTask;
     }
 }

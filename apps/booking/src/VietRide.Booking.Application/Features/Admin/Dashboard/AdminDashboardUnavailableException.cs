@@ -5,7 +5,7 @@ namespace VietRide.Booking.Application.Features.Admin.Dashboard;
 public sealed class AdminDashboardUnavailableException : Exception, ICodedHttpException
 {
     public AdminDashboardUnavailableException(Exception? innerException = null)
-        : base("Identity dashboard metrics are temporarily unavailable.", innerException)
+        : base("Admin dashboard upstream metrics are temporarily unavailable.", innerException)
     {
     }
 

@@ -14,13 +14,16 @@ public sealed class GetAdminDashboardSummaryQueryHandler
 
     private readonly IBookingStatsRepository _stats;
     private readonly IIdentityDashboardMetricsClient _identity;
+    private readonly IPaymentRevenueSummaryClient _payment;
 
     public GetAdminDashboardSummaryQueryHandler(
         IBookingStatsRepository stats,
-        IIdentityDashboardMetricsClient identity)
+        IIdentityDashboardMetricsClient identity,
+        IPaymentRevenueSummaryClient payment)
     {
         _stats = stats;
         _identity = identity;
+        _payment = payment;
     }
 
     public async Task<AdminDashboardSummaryResponse> Handle(
@@ -47,15 +50,27 @@ public sealed class GetAdminDashboardSummaryQueryHandler
             range.PreviousFrom,
             range.PreviousTo,
             cancellationToken);
-        await Task.WhenAll(currentIdentityTask, previousIdentityTask);
+        var currentRevenueTask = _payment.GetAsync(
+            range.CurrentFrom,
+            range.CurrentTo,
+            cancellationToken);
+        var previousRevenueTask = _payment.GetAsync(
+            range.PreviousFrom,
+            range.PreviousTo,
+            cancellationToken);
+        await Task.WhenAll(
+            currentIdentityTask,
+            previousIdentityTask,
+            currentRevenueTask,
+            previousRevenueTask);
         var currentIdentity = await currentIdentityTask;
         var previousIdentity = await previousIdentityTask;
+        var currentRevenue = await currentRevenueTask;
+        var previousRevenue = await previousRevenueTask;
 
         var approvedOperatorIds = currentIdentity.ApprovedActiveOperatorIds.ToHashSet();
         var currentBookings = currentStats.Sum(row => (long)row.TotalBookings);
         var previousBookings = previousStats.Sum(row => (long)row.TotalBookings);
-        var currentRevenue = currentStats.Sum(row => row.TotalRevenue);
-        var previousRevenue = previousStats.Sum(row => row.TotalRevenue);
         var currentActiveOperators = CountActiveOperators(currentStats, approvedOperatorIds);
         var previousActiveOperators = CountActiveOperators(previousStats, approvedOperatorIds);
 
@@ -69,7 +84,11 @@ public sealed class GetAdminDashboardSummaryQueryHandler
 
         return new AdminDashboardSummaryResponse(
             new AdminDashboardPeriodResponse(range.CurrentFrom, range.CurrentTo, IctTimezone),
-            Compare(currentRevenue, previousRevenue),
+            Compare(currentRevenue.TotalProjectRevenueVnd, previousRevenue.TotalProjectRevenueVnd),
+            Compare(currentRevenue.NetTransportRevenueVnd, previousRevenue.NetTransportRevenueVnd),
+            Compare(currentRevenue.NetTicketRevenueVnd, previousRevenue.NetTicketRevenueVnd),
+            Compare(currentRevenue.NetParcelRevenueVnd, previousRevenue.NetParcelRevenueVnd),
+            Compare(currentRevenue.SubscriptionRevenueVnd, previousRevenue.SubscriptionRevenueVnd),
             Compare(currentActiveOperators, previousActiveOperators),
             Compare(currentIdentity.ActiveUserCount, previousIdentity.ActiveUserCount),
             Compare(currentBookings, previousBookings),
@@ -147,10 +166,10 @@ public sealed class GetAdminDashboardSummaryQueryHandler
     private static AdminDashboardComparisonResponse Compare(long current, long previous)
     {
         var trend = current == previous ? "FLAT" : current > previous ? "UP" : "DOWN";
-        var changePercent = previous == 0
-            ? 0m
+        decimal? changePercent = previous == 0
+            ? current == 0 ? 0m : null
             : Math.Round(
-                ((decimal)current - previous) * 100m / previous,
+                ((decimal)current - previous) * 100m / Math.Abs((decimal)previous),
                 2,
                 MidpointRounding.AwayFromZero);
         return new AdminDashboardComparisonResponse(current, previous, changePercent, trend);

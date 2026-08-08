@@ -49,7 +49,9 @@ public static class InfrastructureServiceCollectionExtensions
             .AddHttpMessageHandler<CorrelationIdDelegatingHandler>();
         services.AddHttpClient<IPaymentPlatformLedgerClient, PaymentPlatformLedgerClient>(client =>
             ConfigurePlatformReportClient(client, ResolvePaymentBaseUrl(configuration)))
-            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>();
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddPolicyHandler(CreatePaymentReportingCircuitBreakerPolicy())
+            .AddPolicyHandler(CreatePaymentReportingRetryPolicy());
         services.AddHttpClient<IIdentityPlatformReportClient, IdentityPlatformReportClient>(client =>
             ConfigurePlatformReportClient(client, ResolveIdentityBaseUrl(configuration)))
             .AddHttpMessageHandler<CorrelationIdDelegatingHandler>();
@@ -122,6 +124,16 @@ public static class InfrastructureServiceCollectionExtensions
             .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
             .AddPolicyHandler(CreateIdentityUserRetryPolicy())
             .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+
+        services
+            .AddHttpClient<IPaymentRevenueSummaryClient, PaymentRevenueSummaryClient>(client =>
+            {
+                ConfigurePlatformReportClient(client, ResolvePaymentBaseUrl(configuration));
+            })
+            .AddHttpMessageHandler<CorrelationIdDelegatingHandler>()
+            .AddHttpMessageHandler<InternalJwtDelegatingHandler>()
+            .AddPolicyHandler(CreatePaymentReportingCircuitBreakerPolicy())
+            .AddPolicyHandler(CreatePaymentReportingRetryPolicy());
 
         // Identity operator lookup client (Task 17.0).
         if (UseIdentityDevStub(configuration))
@@ -329,6 +341,15 @@ public static class InfrastructureServiceCollectionExtensions
             .OrResult(response => (int)response.StatusCode >= 500)
             .WaitAndRetryAsync(retryCount, delayProvider);
     }
+
+    public static IAsyncPolicy<HttpResponseMessage> CreatePaymentReportingRetryPolicy()
+        => HttpResiliencePolicies.GetRetryPolicy(retryCount: 1);
+
+    public static IAsyncPolicy<HttpResponseMessage> CreatePaymentReportingCircuitBreakerPolicy(
+        TimeSpan? breakDuration = null)
+        => HttpResiliencePolicies.GetCircuitBreakerPolicy(
+            failuresBeforeBreak: 5,
+            breakDuration: breakDuration ?? TimeSpan.FromSeconds(30));
 
     public static TimeSpan GetIdentityUserRetryDelay(int attempt)
         => attempt switch

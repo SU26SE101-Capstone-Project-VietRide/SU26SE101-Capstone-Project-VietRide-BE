@@ -52,6 +52,7 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
         dataSourceBuilder.MapEnum<OperatorWalletTransactionType>($"{SchemaName}.operator_wallet_transaction_type", translator);
         dataSourceBuilder.MapEnum<OperatorWalletTransactionRef>($"{SchemaName}.operator_wallet_transaction_ref", translator);
         dataSourceBuilder.MapEnum<OperatorLedgerEntryType>($"{SchemaName}.operator_ledger_entry_type", translator);
+        dataSourceBuilder.MapEnum<OperatorLedgerAdjustmentReason>($"{SchemaName}.operator_ledger_adjustment_reason", translator);
         dataSourceBuilder.MapEnum<OperatorLedgerReferenceType>($"{SchemaName}.operator_ledger_reference_type", translator);
         dataSourceBuilder.MapEnum<OperatorTripSettlementStatus>($"{SchemaName}.operator_trip_settlement_status", translator);
         dataSourceBuilder.MapEnum<OperatorTripSettlementMethod>($"{SchemaName}.operator_trip_settlement_method", translator);
@@ -102,6 +103,7 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
         modelBuilder.HasPostgresEnum(SchemaName, "operator_wallet_transaction_type", Enum.GetNames<OperatorWalletTransactionType>());
         modelBuilder.HasPostgresEnum(SchemaName, "operator_wallet_transaction_ref", Enum.GetNames<OperatorWalletTransactionRef>());
         modelBuilder.HasPostgresEnum(SchemaName, "operator_ledger_entry_type", Enum.GetNames<OperatorLedgerEntryType>());
+        modelBuilder.HasPostgresEnum(SchemaName, "operator_ledger_adjustment_reason", Enum.GetNames<OperatorLedgerAdjustmentReason>());
         modelBuilder.HasPostgresEnum(SchemaName, "operator_ledger_reference_type", Enum.GetNames<OperatorLedgerReferenceType>());
         modelBuilder.HasPostgresEnum(SchemaName, "operator_trip_settlement_status", Enum.GetNames<OperatorTripSettlementStatus>());
         modelBuilder.HasPostgresEnum(SchemaName, "operator_trip_settlement_method", Enum.GetNames<OperatorTripSettlementMethod>());

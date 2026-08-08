@@ -15,6 +15,7 @@ using NSubstitute;
 using StackExchange.Redis;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Admin;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Core;
@@ -40,14 +41,14 @@ public sealed class AdminRevenueAnalyticsEndpointTests : IClassFixture<AdminReve
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
             .Returns(
-                [new AdminRevenueMonthReadModel(new DateOnly(2026, 7, 1), 700, 300)],
+                [new AdminRevenueMonthReadModel(new DateOnly(2026, 7, 1), 500, 200, 700, 300)],
                 Array.Empty<AdminRevenueMonthReadModel>());
-        factory.Repository.GetTopOperatorPayoutsAsync(
+        factory.Repository.GetTopOperatorRevenueAsync(
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
-            .Returns([new TopOperatorPayoutReadModel(operatorId, 300)]);
+            .Returns([new TopOperatorRevenueReadModel(operatorId, 300)]);
         factory.Identity.GetAsync(Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<CancellationToken>())
             .Returns([new OperatorSummaryItem(operatorId, "Operator A", null)]);
         factory.Trip.GetVehicleCountsAsync(Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<CancellationToken>())
@@ -62,8 +63,11 @@ public sealed class AdminRevenueAnalyticsEndpointTests : IClassFixture<AdminReve
         using var document = JsonDocument.Parse(body);
         document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         var data = document.RootElement.GetProperty("data");
-        data.GetProperty("summary").GetProperty("grossRevenueVnd").GetProperty("currentValue")
-            .GetInt64().Should().Be(1_000);
+        data.GetProperty("summary").GetProperty("revenue").GetProperty("totalProjectRevenueVnd")
+            .GetProperty("currentValue").GetInt64().Should().Be(1_400);
+        data.GetProperty("summary").GetProperty("settlement").GetProperty("paidToOperatorsVnd")
+            .GetProperty("currentValue").GetInt64().Should().Be(300);
+        data.GetProperty("generatedAt").GetDateTime().Kind.Should().Be(DateTimeKind.Utc);
         data.GetProperty("topOperators")[0].GetProperty("vehicleCount").GetInt32().Should().Be(4);
     }
 
@@ -99,12 +103,12 @@ public sealed class AdminRevenueAnalyticsEndpointTests : IClassFixture<AdminReve
     public async Task MissingRequiredEnrichment_Returns503UpstreamUnavailable()
     {
         var operatorId = Guid.NewGuid();
-        factory.Repository.GetTopOperatorPayoutsAsync(
+        factory.Repository.GetTopOperatorRevenueAsync(
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
-            .Returns([new TopOperatorPayoutReadModel(operatorId, 100)]);
+            .Returns([new TopOperatorRevenueReadModel(operatorId, 100)]);
         factory.Trip.GetVehicleCountsAsync(Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<CancellationToken>())
             .Returns([new TripVehicleCountItem(operatorId, 2)]);
         using var client = factory.CreateRoleClient("SYSTEM_ADMIN");
@@ -148,12 +152,12 @@ public sealed class AdminRevenueAnalyticsFactory : WebApplicationFactory<Program
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
             .Returns(Array.Empty<AdminRevenueMonthReadModel>());
-        Repository.GetTopOperatorPayoutsAsync(
+        Repository.GetTopOperatorRevenueAsync(
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
-            .Returns(Array.Empty<TopOperatorPayoutReadModel>());
+            .Returns(Array.Empty<TopOperatorRevenueReadModel>());
         Identity.GetAsync(Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<CancellationToken>())
             .Returns(Array.Empty<OperatorSummaryItem>());
         Trip.GetVehicleCountsAsync(Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<CancellationToken>())
@@ -180,10 +184,12 @@ public sealed class AdminRevenueAnalyticsFactory : WebApplicationFactory<Program
             services.RemoveAll<IRevenueAnalyticsRepository>();
             services.RemoveAll<IIdentityOperatorSummaryClient>();
             services.RemoveAll<ITripRevenueAnalyticsClient>();
+            services.RemoveAll<IRevenueReportCache>();
             services.RemoveAll<IConnectionMultiplexer>();
             services.AddSingleton(Repository);
             services.AddSingleton(Identity);
             services.AddSingleton(Trip);
+            services.AddSingleton<IRevenueReportCache, RevenueAnalyticsTestCache>();
             services.AddSingleton<IConnectionMultiplexer>(InMemoryIdempotencyRedis.Create());
             services.AddAuthentication(options =>
                 {

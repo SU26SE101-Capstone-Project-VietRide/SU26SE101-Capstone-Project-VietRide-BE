@@ -1,6 +1,7 @@
 using FluentAssertions;
 using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.Parcels.Reports;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.UnitTests.Features;
@@ -17,9 +18,17 @@ public sealed class ExportParcelReportQueryHandlerCompatibilityTests
         var stats = ParcelStats.Create(operatorId, new DateOnly(2026, 7, 18));
         var statsRepository = Substitute.For<IParcelStatsRepository>();
         statsRepository.QueryNoTracking().Returns(new[] { stats }.AsAsyncQueryable());
+        var paymentRevenue = Substitute.For<IPaymentOperatorRevenueSummaryClient>();
+        paymentRevenue.GetAsync(
+                operatorId,
+                new DateOnly(2026, 7, 18),
+                new DateOnly(2026, 7, 18),
+                Arg.Any<CancellationToken>())
+            .Returns(new PaymentOperatorRevenueSummaryDto(700, -200, 500));
         var handler = new ExportParcelReportQueryHandler(
             statsRepository,
             Substitute.For<IParcelRepository>(),
+            paymentRevenue,
             new FixedClock());
 
         var result = await handler.Handle(
@@ -30,8 +39,8 @@ public sealed class ExportParcelReportQueryHandlerCompatibilityTests
                 "csv"),
             CancellationToken.None);
 
-        const string header = "operatorId,from,to,totalParcels,totalLoaded,totalDelivered,totalRejected,totalReturned,totalRevenue,totalRefunded,source";
-        var row = $"{operatorId:D},2026-07-18,2026-07-18,0,0,0,0,0,0,0,ParcelStats";
+        const string header = "operatorId,from,to,totalParcels,totalLoaded,totalDelivered,totalRejected,totalReturned,grossParcelRevenueVnd,parcelRefundsVnd,netParcelRevenueVnd,source";
+        var row = $"{operatorId:D},2026-07-18,2026-07-18,0,0,0,0,0,700,-200,500,ParcelStats";
         result.FileName.Should().Be("parcel-report-20260718-20260718.csv");
         result.ContentType.Should().Be("text/csv");
         result.Content.Should().Be($"{header}{Environment.NewLine}{row}{Environment.NewLine}");

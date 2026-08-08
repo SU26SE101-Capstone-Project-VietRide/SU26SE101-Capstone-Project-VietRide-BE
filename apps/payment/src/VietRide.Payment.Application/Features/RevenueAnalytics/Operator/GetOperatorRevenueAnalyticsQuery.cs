@@ -4,4 +4,6 @@ namespace VietRide.Payment.Application.Features.RevenueAnalytics.Operator;
 
 public sealed record GetOperatorRevenueAnalyticsQuery(
     Guid OperatorId,
-    string? Month) : IQuery<OperatorRevenueAnalyticsResponse>;
+    string? Month,
+    int? Year = null,
+    string? GroupBy = null) : IQuery<OperatorRevenueAnalyticsResponse>;

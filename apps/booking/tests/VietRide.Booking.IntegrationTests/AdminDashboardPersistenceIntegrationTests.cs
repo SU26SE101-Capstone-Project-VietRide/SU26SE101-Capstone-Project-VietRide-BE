@@ -47,17 +47,22 @@ public sealed class AdminDashboardPersistenceIntegrationTests
         await using var readScope = _factory.Services.CreateAsyncScope();
         var repository = readScope.ServiceProvider.GetRequiredService<IBookingStatsRepository>();
         var identity = Substitute.For<IIdentityDashboardMetricsClient>();
+        var payment = Substitute.For<IPaymentRevenueSummaryClient>();
         identity.GetAsync(currentFrom, currentTo, Arg.Any<CancellationToken>())
             .Returns(new IdentityDashboardMetricsDto(20, [approvedB, approvedA], [], []));
         identity.GetAsync(previousFrom, previousTo, Arg.Any<CancellationToken>())
             .Returns(new IdentityDashboardMetricsDto(10, [approvedA, unapproved], [], []));
-        var handler = new GetAdminDashboardSummaryQueryHandler(repository, identity);
+        payment.GetAsync(currentFrom, currentTo, Arg.Any<CancellationToken>())
+            .Returns(new PaymentRevenueSummaryDto(1_500, 1_200, 1_000, 200, 300));
+        payment.GetAsync(previousFrom, previousTo, Arg.Any<CancellationToken>())
+            .Returns(new PaymentRevenueSummaryDto(1_000, 800, 700, 100, 200));
+        var handler = new GetAdminDashboardSummaryQueryHandler(repository, identity, payment);
 
         var result = await handler.Handle(
             new GetAdminDashboardSummaryQuery(currentFrom, currentTo),
             CancellationToken.None);
 
-        result.TotalRevenue.Should().Be(new AdminDashboardComparisonResponse(1_500, 1_000, 50m, "UP"));
+        result.TotalProjectRevenueVnd.Should().Be(new AdminDashboardComparisonResponse(1_500, 1_000, 50m, "UP"));
         result.Bookings.Should().Be(new AdminDashboardComparisonResponse(15, 10, 50m, "UP"));
         result.ActiveOperators.Should().Be(new AdminDashboardComparisonResponse(2, 1, 100m, "UP"));
         result.ActiveUsers.Should().Be(new AdminDashboardComparisonResponse(20, 10, 100m, "UP"));

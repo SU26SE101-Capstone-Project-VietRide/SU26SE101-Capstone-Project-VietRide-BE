@@ -15,6 +15,7 @@ using NSubstitute;
 using StackExchange.Redis;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Core;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Operator;
 
@@ -71,8 +72,9 @@ public sealed class OperatorRevenueAnalyticsEndpointTests : IClassFixture<Operat
         using var document = JsonDocument.Parse(body);
         document.RootElement.GetProperty("success").GetBoolean().Should().BeTrue();
         var data = document.RootElement.GetProperty("data");
-        data.GetProperty("summary").GetProperty("totalRevenueVnd").GetProperty("currentValue")
+        data.GetProperty("summary").GetProperty("netRevenueVnd").GetProperty("currentValue")
             .GetInt64().Should().Be(1_000);
+        data.GetProperty("summary").TryGetProperty("totalRevenueVnd", out _).Should().BeFalse();
         data.GetProperty("monthly").GetArrayLength().Should().Be(12);
         data.GetProperty("routePerformance")[0].GetProperty("completionRatePercent")
             .GetDecimal().Should().Be(75m);
@@ -219,9 +221,11 @@ public sealed class OperatorRevenueAnalyticsFactory : WebApplicationFactory<Prog
         {
             services.RemoveAll<IRevenueAnalyticsRepository>();
             services.RemoveAll<ITripRevenueAnalyticsClient>();
+            services.RemoveAll<IRevenueReportCache>();
             services.RemoveAll<IConnectionMultiplexer>();
             services.AddSingleton(Repository);
             services.AddSingleton(Trip);
+            services.AddSingleton<IRevenueReportCache, RevenueAnalyticsTestCache>();
             services.AddSingleton<IConnectionMultiplexer>(InMemoryIdempotencyRedis.Create());
             services.AddAuthentication(options =>
                 {

@@ -9,13 +9,19 @@ public interface IRevenueAnalyticsRepository
         DateTimeOffset toUtc,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<TopOperatorPayoutReadModel>> GetTopOperatorPayoutsAsync(
+    Task<IReadOnlyList<TopOperatorRevenueReadModel>> GetTopOperatorRevenueAsync(
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
         int top,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<OperatorRevenueLedgerReadModel>> GetOperatorRevenueLedgerAsync(
+        Guid operatorId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default);
+
+    Task<OperatorRevenueSummaryReadModel> GetOperatorRevenueSummaryAsync(
         Guid operatorId,
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,

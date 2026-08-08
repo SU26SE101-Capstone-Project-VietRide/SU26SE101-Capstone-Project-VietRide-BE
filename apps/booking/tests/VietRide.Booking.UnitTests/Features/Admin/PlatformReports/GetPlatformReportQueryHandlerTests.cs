@@ -12,9 +12,9 @@ namespace VietRide.Booking.UnitTests.Features.Admin.PlatformReports;
 
 public sealed class GetPlatformReportQueryHandlerTests
 {
-    private const string From = "2026-07-01T00:00:00Z";
-    private const string To = "2026-08-01T00:00:00Z";
-    private const string CacheKey = "platform-report:v2:2026-07-01T00:00:00.0000000Z:2026-08-01T00:00:00.0000000Z";
+    private const string From = "2026-07-01";
+    private const string To = "2026-07-31";
+    private const string CacheKey = "platform-report:v3:2026-06-30T17:00:00.0000000Z:2026-07-31T17:00:00.0000000Z";
 
     [Fact]
     public async Task Handle_CacheHit_ReturnsCachedValueWithoutCallingUpstream()
@@ -33,7 +33,7 @@ public sealed class GetPlatformReportQueryHandlerTests
     }
 
     [Fact]
-    public async Task Handle_CacheMiss_CallsUpstreamAndStoresExactRangeForFiveMinutes()
+    public async Task Handle_CacheMiss_ConvertsIctInclusiveRangeAndCachesForSixtySeconds()
     {
         var cache = new FakeCache();
         var client = new FakeClient();
@@ -43,12 +43,12 @@ public sealed class GetPlatformReportQueryHandlerTests
 
         result.Totals.Should().Be(new PlatformReportTotals(1, 1, 1, 100_000, 50_000, 150_000));
         client.CallCount.Should().Be(1);
-        client.From.Should().Be(DateTimeOffset.Parse(From));
-        client.To.Should().Be(DateTimeOffset.Parse(To));
+        client.From.Should().Be(DateTimeOffset.Parse("2026-06-30T17:00:00Z"));
+        client.To.Should().Be(DateTimeOffset.Parse("2026-07-31T17:00:00Z"));
         cache.SetCalls.Should().ContainSingle();
         cache.SetCalls[0].Key.Should().Be(CacheKey);
         cache.SetCalls[0].Value.Should().BeSameAs(result);
-        cache.SetCalls[0].Ttl.Should().Be(TimeSpan.FromMinutes(5));
+        cache.SetCalls[0].Ttl.Should().Be(TimeSpan.FromSeconds(60));
     }
 
     [Fact]
@@ -354,7 +354,7 @@ public sealed class GetPlatformReportQueryHandlerTests
                 Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
             .Returns<IReadOnlyList<ParcelPlatformReportItem>>(
-                parcelRows ?? [new(OperatorId, 1, 50_000)]);
+                parcelRows ?? [new(OperatorId, 1)]);
         var ledger = Substitute.For<IPaymentPlatformLedgerClient>();
         ledger.GetAsync(
                 Arg.Any<DateTimeOffset>(),
@@ -384,9 +384,9 @@ public sealed class GetPlatformReportQueryHandlerTests
         IReadOnlyList<PlatformReportOperatorItem>? operators = null)
         => new(
             new PlatformReportPeriod(
-                DateTime.Parse(From).ToUniversalTime(),
-                DateTime.Parse(To).ToUniversalTime(),
-                "UTC"),
+                new DateOnly(2026, 7, 1),
+                new DateOnly(2026, 7, 31),
+                "Asia/Ho_Chi_Minh"),
             new PlatformReportTotals(1, 1, 1, 100_000, 50_000, 150_000),
             operators ??
             [
