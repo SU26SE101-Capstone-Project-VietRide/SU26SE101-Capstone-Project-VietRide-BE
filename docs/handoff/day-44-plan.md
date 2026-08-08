@@ -339,7 +339,7 @@ parallel-safe.
 
 | Task | Status | Review verdict | Date | Notes |
 |---|---|---|---|---|
-| 44.1 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 patch round; no scope expansion. |
+| 44.1 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 patch round; later human-approved E.164 corrective patch re-reviewed. |
 | 44.2 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 patch round; human-approved README/schema header scope expansion. |
 | 44.3 | ⬜ todo | — | — | — |
 | 44.4 | ⬜ todo | — | — | — |

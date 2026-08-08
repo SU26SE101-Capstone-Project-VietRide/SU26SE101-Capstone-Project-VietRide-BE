@@ -92,8 +92,9 @@ their listed Operator ID; Passengers carry `operatorId=null`.
 
 Account profile natural keys are exact: display names are `Day44 Operator {A|B|C} Admin`,
 `Day44 Driver {A|B|C}{1|2|3}`, `Day44 Assistant {A|B|C}`, and `Day44 Passenger {01..10}`.
-Phones are `+849044401{01|02|03}` for Operator Admins, `+84904441{A-index}{driver-index}` for
-Drivers (A/B/C indexes `1/2/3`), `+849044402{01|02|03}` for Assistants, and
+Phones are `+849044401{01|02|03}` for Operator Admins,
+`+849044410{operatorIndex}{driverIndex}` for Drivers (operator A/B/C indexes `1/2/3`, yielding
+`+84904441011` through `+84904441033`), `+849044402{01|02|03}` for Assistants, and
 `+849044403{01..10}` for Passengers. All email/phone pairs are unique; avatar, date-of-birth,
 gender, and OAuth fields are null.
 
