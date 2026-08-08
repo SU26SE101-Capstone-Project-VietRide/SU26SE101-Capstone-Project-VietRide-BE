@@ -7,6 +7,7 @@ draw.io mxGraph XML with table-shape boxes (no edges) per service.
 
 Run from repo root:
   python3 db-schema/_global/_drawio_generator.py
+  python3 db-schema/_global/_drawio_generator.py rag-ai
 
 Each row is rendered as a tableRow with 3 cells:
   c1 (50px): "PK" / "FK" / "" marker
@@ -16,6 +17,7 @@ Each row is rendered as a tableRow with 3 cells:
 Tables are arranged in a 4-column grid with 60px gaps.
 """
 
+import argparse
 import os
 from dataclasses import dataclass, field
 from typing import List, Tuple
@@ -1159,7 +1161,8 @@ def get_specs():
                 Col("id", "uuid", pk=True),
                 Col("title", "varchar(500)"),
                 Col("description", "text"),
-                Col("fileUrl", "text"),
+                Col("storageProvider", "rag_storage_provider"),
+                Col("storagePath", "text"),
                 Col("fileType", "enum"),
                 Col("accessLevel", "enum"),
                 Col("status", "enum"),
@@ -1176,7 +1179,7 @@ def get_specs():
                 Col("chunkIndex", "int"),
                 Col("content", "text"),
                 Col("tokenCount", "int"),
-                Col("embedding", "vector(1536)"),
+                Col("embedding", "halfvec(2048)"),
                 Col("createdAt", "timestamptz"),
             ], rg_fill, rg_stroke),
             Table("RagConversation", [
@@ -1223,8 +1226,17 @@ SERVICE_DIAGRAM_NAMES = {
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Generate VietRide draw.io schema diagrams.")
+    parser.add_argument(
+        "service",
+        nargs="?",
+        choices=SERVICE_DIAGRAM_NAMES,
+        help="Generate only one service diagram; omit to generate every diagram.",
+    )
+    args = parser.parse_args()
     specs = get_specs()
-    for service, tables in specs.items():
+    selected_specs = {args.service: specs[args.service]} if args.service else specs
+    for service, tables in selected_specs.items():
         out_path = os.path.join(SCHEMA_ROOT, service, "schema.drawio")
         xml = render_service(service, SERVICE_DIAGRAM_NAMES[service], tables)
         with open(out_path, "w", encoding="utf-8", newline="\n") as f:

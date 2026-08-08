@@ -6,7 +6,7 @@
 -- =============================================================================
 -- pgvector extension required for embedding similarity search.
 -- Storage provider: Cloudinary raw assets.
--- Chat provider: OpenRouter nex-agi/nex-n2-pro:free.
+-- Chat provider: OpenRouter nvidia/nemotron-3-ultra-550b-a55b:free.
 -- Embedding model: OpenRouter nvidia/llama-nemotron-embed-vl-1b-v2:free.
 -- Embedding dimension: 2048.
 -- =============================================================================
