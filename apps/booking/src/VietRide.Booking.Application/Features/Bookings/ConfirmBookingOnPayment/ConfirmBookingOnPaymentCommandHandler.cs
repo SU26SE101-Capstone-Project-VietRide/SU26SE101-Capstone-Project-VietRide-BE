@@ -591,6 +591,8 @@ public sealed class ConfirmBookingOnPaymentCommandHandler
             snapshot.BookingCode ?? snapshot.BookingId.ToString("N"),
             snapshot.TripId,
             snapshot.TicketCodes,
+            snapshot.PassengerSeatAssignments.Select(assignment => assignment.SeatNumber).ToArray(),
+            trip!.DepartureDateTime,
             new BookingLocationSnapshot(snapshot.PickupStationId, snapshot.PickupStopId, null),
             new BookingLocationSnapshot(snapshot.DropoffStationId, snapshot.DropoffStopId, null),
             trip?.DriverUserId,

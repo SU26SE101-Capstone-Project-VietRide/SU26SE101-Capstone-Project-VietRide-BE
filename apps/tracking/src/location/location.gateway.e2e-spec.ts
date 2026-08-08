@@ -66,6 +66,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   let sharedPublishGps: jest.Mock;
   let sharedPublishEta: jest.Mock;
   let sharedPublishStatus: jest.Mock;
+  let gateway: LocationGateway;
 
   beforeAll(async () => {
     const generated = await generateKeyPair('RS256');
@@ -169,6 +170,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       ],
     }).compile();
 
+    gateway = moduleRef.get(LocationGateway);
     app = moduleRef.createNestApplication();
     await app.listen(0);
     port = readListeningPort(app);
@@ -238,6 +240,38 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       scope: 'BOOKING_OWNER',
     });
     socket.disconnect();
+  });
+
+  it('broadcasts booking updates only to authorized crew rooms', async () => {
+    const driver = await connectSocket(await signIdentityToken('DRIVER'));
+    const passenger = await connectSocket(await signIdentityToken('PASSENGER'));
+    await emitWithAck<JoinTripTrackingAck>(driver, 'joinTripTracking', { tripId: TEST_TRIP_ID });
+    await emitWithAck<JoinTripTrackingAck>(passenger, 'joinTripTracking', { tripId: TEST_TRIP_ID });
+    const crewEvent = waitForEvent<Record<string, unknown>>(driver, 'booking:updated');
+    const passengerListener = jest.fn();
+    passenger.on('booking:updated', passengerListener);
+
+    gateway.emitPassengerBoarded({
+      eventId: '44444444-4444-4444-8444-444444444444',
+      occurredAt: '2026-08-08T01:00:00.000Z',
+      bookingId: '55555555-5555-4555-8555-555555555555',
+      bookingCode: 'VR-20260808-ABCDEFGH',
+      tripId: TEST_TRIP_ID,
+      passengerRecordId: '66666666-6666-4666-8666-666666666666',
+      seatNumber: 'A01',
+      ticketCode: 'VT-20260808-ABCDEFGH',
+      boardedAt: '2026-08-08T01:00:00.000Z',
+    });
+
+    await expect(crewEvent).resolves.toEqual(expect.objectContaining({
+      tripId: TEST_TRIP_ID,
+      reason: 'PASSENGER_BOARDED',
+      seatNumbers: ['A01'],
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(passengerListener).not.toHaveBeenCalled();
+    driver.disconnect();
+    passenger.disconnect();
   });
 
   it('denies gps:update for passenger tokens', async () => {

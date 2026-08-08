@@ -35,6 +35,8 @@ export const OperationalBookingCreatedEventSchema = z
     tripId: z.string().uuid(),
     status: z.literal('CONFIRMED'),
     ticketCodes: z.array(z.string().trim().min(1)).min(1),
+    seatNumbers: z.array(z.string().trim().min(1)).min(1),
+    departureDateTime: z.string().datetime({ offset: true }),
     passengerCount: z.number().int().positive(),
     pickup: BookingLocationSchema,
     dropoff: BookingLocationSchema,
@@ -45,6 +47,10 @@ export const OperationalBookingCreatedEventSchema = z
   .refine((event) => event.passengerCount === event.ticketCodes.length, {
     message: 'passengerCount must equal ticketCodes length',
     path: ['passengerCount'],
+  })
+  .refine((event) => event.seatNumbers.length === event.ticketCodes.length, {
+    message: 'seatNumbers length must equal ticketCodes length',
+    path: ['seatNumbers'],
   });
 export type OperationalBookingCreatedEvent = z.infer<
   typeof OperationalBookingCreatedEventSchema

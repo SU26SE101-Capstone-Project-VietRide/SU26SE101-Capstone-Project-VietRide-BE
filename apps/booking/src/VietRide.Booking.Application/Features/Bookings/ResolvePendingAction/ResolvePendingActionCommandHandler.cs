@@ -216,7 +216,10 @@ public sealed class ResolvePendingActionCommandHandler(
             true,
             reason.ToString(),
             booking.Tickets.Select(ticket => ticket.TicketCode.Value).Order(StringComparer.Ordinal).ToArray(),
-            booking.Tickets.Count);
+            booking.Tickets.Count,
+            booking.TripId,
+            BookingStatus.CONFIRMED.ToString(),
+            booking.Passengers.Select(passenger => passenger.SeatNumber).OfType<string>().Order(StringComparer.Ordinal).ToArray());
         await outbox.EnqueueAsync(
             eventId,
             BookingCancelledIntegrationEvent.EventTypeValue,

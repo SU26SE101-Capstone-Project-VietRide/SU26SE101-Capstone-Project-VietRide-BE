@@ -6,6 +6,7 @@ using VietRide.Booking.Application.Features.Boarding.TickPassengerBoarded;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
@@ -24,6 +25,7 @@ public sealed class TickPassengerBoardedCommandHandlerTests
     private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
     private readonly ITripServiceClient _tripServiceClient = Substitute.For<ITripServiceClient>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
 
     [Fact]
     public async Task Handle_PendingPassenger_MarksBoardedAndSetsBoardedAt()
@@ -43,6 +45,12 @@ public sealed class TickPassengerBoardedCommandHandlerTests
         passenger.BoardingStatus.Should().Be(PassengerBoardingStatus.BOARDED);
         passenger.BoardedAt.Should().Be(Now);
         booking.Tickets.Single().Status.Should().Be(TicketStatus.USED);
+        await _outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(),
+            "booking.passenger.boarded",
+            Arg.Is<string>(payload => payload.Contains(booking.Id.ToString(), StringComparison.OrdinalIgnoreCase)
+                && payload.Contains("A01", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -117,7 +125,7 @@ public sealed class TickPassengerBoardedCommandHandlerTests
     }
 
     private TickPassengerBoardedCommandHandler CreateHandler()
-        => new(_bookings, _tripServiceClient, _clock);
+        => new(_bookings, _tripServiceClient, _clock, _outbox);
 
     private void Arrange(
         IReadOnlyList<BookingEntity> bookings,

@@ -11,7 +11,10 @@ public sealed record BookingCancelledIntegrationEvent(
     bool RefundOverride,
     string CancellationReason,
     IReadOnlyCollection<string> TicketCodes,
-    int TicketCount)
+    int TicketCount,
+    Guid TripId,
+    string PreviousStatus,
+    IReadOnlyCollection<string> SeatNumbers)
 {
     public const string EventTypeValue = "booking.booking.cancelled";
 }

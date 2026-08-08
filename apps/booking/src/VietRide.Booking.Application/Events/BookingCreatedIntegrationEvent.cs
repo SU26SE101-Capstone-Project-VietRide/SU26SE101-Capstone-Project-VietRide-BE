@@ -15,6 +15,8 @@ public sealed class BookingCreatedIntegrationEvent : IntegrationEventBase
         string bookingCode,
         Guid tripId,
         IReadOnlyList<string> ticketCodes,
+        IReadOnlyList<string> seatNumbers,
+        DateTimeOffset departureDateTime,
         BookingLocationSnapshot pickup,
         BookingLocationSnapshot dropoff,
         Guid? driverUserId,
@@ -25,6 +27,9 @@ public sealed class BookingCreatedIntegrationEvent : IntegrationEventBase
         if (tripId == Guid.Empty) throw new ArgumentException("Trip id is required.", nameof(tripId));
         if (string.IsNullOrWhiteSpace(bookingCode)) throw new ArgumentException("Booking code is required.", nameof(bookingCode));
         if (ticketCodes is null || ticketCodes.Count == 0) throw new ArgumentException("At least one ticket code is required.", nameof(ticketCodes));
+        if (seatNumbers is null || seatNumbers.Count == 0) throw new ArgumentException("At least one seat number is required.", nameof(seatNumbers));
+        if (seatNumbers.Count != ticketCodes.Count) throw new ArgumentException("Seat and ticket counts must match.", nameof(seatNumbers));
+        if (departureDateTime == default) throw new ArgumentException("Departure time is required.", nameof(departureDateTime));
 
         EventId = Guid.NewGuid();
         OccurredAt = occurredAt.UtcDateTime;
@@ -32,6 +37,8 @@ public sealed class BookingCreatedIntegrationEvent : IntegrationEventBase
         BookingCode = bookingCode.Trim();
         TripId = tripId;
         TicketCodes = ticketCodes;
+        SeatNumbers = seatNumbers;
+        DepartureDateTime = departureDateTime;
         PassengerCount = ticketCodes.Count;
         Pickup = pickup;
         Dropoff = dropoff;
@@ -47,6 +54,8 @@ public sealed class BookingCreatedIntegrationEvent : IntegrationEventBase
     public Guid TripId { get; }
     public string Status => "CONFIRMED";
     public IReadOnlyList<string> TicketCodes { get; }
+    public IReadOnlyList<string> SeatNumbers { get; }
+    public DateTimeOffset DepartureDateTime { get; }
     public int PassengerCount { get; }
     public BookingLocationSnapshot Pickup { get; }
     public BookingLocationSnapshot Dropoff { get; }

@@ -1,8 +1,11 @@
+using System.Text.Json;
 using MediatR;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Events;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Booking.Application.Features.Boarding.TickPassengerBoarded;
@@ -13,15 +16,20 @@ public sealed class TickPassengerBoardedCommandHandler
     private readonly IBookingRepository _bookings;
     private readonly ITripServiceClient _tripServiceClient;
     private readonly IClock _clock;
+    private readonly IIntegrationEventOutbox _outbox;
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public TickPassengerBoardedCommandHandler(
         IBookingRepository bookings,
         ITripServiceClient tripServiceClient,
-        IClock clock)
+        IClock clock,
+        IIntegrationEventOutbox outbox)
     {
         _bookings = bookings;
         _tripServiceClient = tripServiceClient;
         _clock = clock;
+        _outbox = outbox;
     }
 
     public async Task<TickPassengerBoardedResult> Handle(
@@ -108,6 +116,22 @@ public sealed class TickPassengerBoardedCommandHandler
         var boardedAt = _clock.UtcNow;
         passenger.MarkBoarded(boardedAt);
         ticket.MarkUsed(boardedAt);
+
+        var eventId = Guid.NewGuid();
+        var boardedEvent = new PassengerBoardedIntegrationEvent(
+            eventId,
+            boardedAt,
+            booking.Id,
+            booking.BookingCode.Value,
+            request.TripId,
+            passenger.Id,
+            passenger.SeatNumber ?? throw new InvalidOperationException("Boarded passenger must have a seat number."),
+            ticket.TicketCode.Value);
+        await _outbox.EnqueueAsync(
+            eventId,
+            boardedEvent.EventType,
+            JsonSerializer.Serialize(boardedEvent, JsonOptions),
+            cancellationToken);
 
         return new TickPassengerBoardedResult(
             passenger.Id,
