@@ -1,0 +1,78 @@
+name: day44-e2e
+
+services:
+  postgres:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-postgres
+    ports: ['${POSTGRES_PORT:-34400}:5432']
+  pgbouncer:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-pgbouncer
+    ports: ['${PGBOUNCER_PORT:-34401}:5432']
+  redis:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-redis
+    ports: ['${REDIS_PORT:-34402}:6379']
+  rabbitmq:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-rabbitmq
+    ports: ['${RABBITMQ_PORT:-34403}:5672', '${RABBITMQ_MGMT_PORT:-34404}:15672']
+  identity:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-identity
+    ports: ['${IDENTITY_PORT:-34405}:5001']
+  trip:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-trip
+    ports: ['${TRIP_PORT:-34406}:5002']
+  booking:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-booking
+    ports: ['${BOOKING_PORT:-34407}:5003']
+  payment:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-payment
+    ports: ['${PAYMENT_PORT:-34408}:5004']
+  parcel:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-parcel
+    ports: ['${PARCEL_PORT:-34409}:5005']
+  tracking:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-tracking
+    ports: ['${TRACKING_PORT:-34410}:3001']
+  notification:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-notification
+    ports: ['${NOTIFICATION_PORT:-34411}:3002']
+  rag:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-rag
+    environment:
+      OPENROUTER_API_KEY: day44-disabled-provider-sentinel
+      OPENROUTER_BASE_URL: http://provider-trap:8080
+      CLOUDINARY_CLOUD_NAME: day44-disabled-cloudinary
+      CLOUDINARY_API_KEY: day44-disabled-cloudinary-key
+      CLOUDINARY_API_SECRET: day44-disabled-cloudinary-secret
+    ports: ['${RAG_PORT:-34412}:3003']
+    depends_on:
+      provider-trap:
+        condition: service_healthy
+  provider-trap:
+    image: node:20-alpine
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-provider-trap
+    profiles: ['app']
+    command:
+      - node
+      - -e
+      - >-
+        const fs=require('node:fs'),http=require('node:http');
+        fs.writeFileSync('/tmp/request-count','0');
+        http.createServer((req,res)=>{if(req.url==='/health'){res.writeHead(200);res.end('ok');return;}
+        const n=Number(fs.readFileSync('/tmp/request-count','utf8'))+1;
+        fs.writeFileSync('/tmp/request-count',String(n));res.writeHead(503);res.end('disabled');}).listen(8080,'0.0.0.0');
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 2s
+      timeout: 2s
+      retries: 15
+  gateway:
+    container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-gateway
+    ports: !reset []
+
+networks:
+  default:
+    name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-net
+    internal: true

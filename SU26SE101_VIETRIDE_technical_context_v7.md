@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-07 (Mobile contract gaps and operator reactivation)
+> **Cập nhật:** 2026-08-08 (RAG provider, storage, and vector contract reconciliation)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -302,7 +302,7 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 | **Redis 7** | Cache, seat locking (TTL), session, rate limiting, idempotency keys, GPS last-known location | |
 | **RabbitMQ** | Message broker | Xem lý do ở mục 2.3 |
 | **Firebase FCM** | Push notification đến mobile | Firebase Admin SDK phía server |
-| **Firebase Storage** | Object storage — avatars, tài liệu RAG, ảnh xe | Dùng luôn Firebase vì đã có FCM — 1 project, 1 SDK, 5GB free |
+| **Media/document storage** | Cloudinary cho tài liệu RAG; Firebase Storage cho client media | RAG upload server-side dưới dạng Cloudinary raw asset; Firebase giữ avatar/ảnh xe/parcel/incident |
 | **Docker + Docker Compose** | Local dev + production deploy | |
 | **Nginx** | Reverse proxy, SSL termination, gzip | |
 | **GitHub Actions** | CI/CD pipeline | |
@@ -403,8 +403,8 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 | **VNPay** | Cổng thanh toán, nạp ví | Redirect-based, HMAC-SHA512 signature verify |
 | **Firebase FCM** | Push notification mobile | Firebase Admin SDK |
 | **Firebase Storage** | Client upload ảnh vehicle/logo/parcel/incident/avatar | 5GB free; RAG và invoice vẫn server-owned |
-| **LLM API** | Generate câu trả lời RAG | Claude API (`claude-sonnet-4-6` — model string `claude-sonnet-4-6`) hoặc GPT-4o, streaming SSE |
-| **OpenAI Embedding API** | Embed chunks cho RAG retrieval | Model `text-embedding-3-small` — 1536 dims, rẻ hơn ada-002 ~5x, cùng dimension nên drop-in replacement |
+| **OpenRouter LLM API** | Generate câu trả lời RAG | Model `nvidia/nemotron-3-ultra-550b-a55b:free`, streaming SSE |
+| **OpenRouter Embedding API** | Embed chunks cho RAG retrieval | Model `nvidia/llama-nemotron-embed-vl-1b-v2:free` — 2.048 dimensions |
 | **pgvector** | Vector similarity search cho RAG | PostgreSQL extension — thay thế Elasticsearch |
 | **SendGrid / SMTP** | Email — OTP đăng ký, parcel delivery link | Free tier 100 email/ngày |
 
@@ -3570,8 +3570,8 @@ Lịch sử chat lưu lại per session để audit. System Admin phê duyệt t
 
 **RAG Service — entity requirements (PostgreSQL + pgvector):**
 
-- **KnowledgeDocument:** file gốc upload (PDF, DOCX, TXT, MARKDOWN). Fields cần có: title, description (nullable), fileUrl (Firebase Storage signed URL), fileType enum, `accessLevel` enum (PUBLIC | OPERATOR | ADMIN — quyết định role nào query được; `PUBLIC` là FAQ/chính sách passenger in-scope v1), status enum (PENDING_REVIEW | APPROVED | REJECTED | ARCHIVED), uploadedByUserId, approvedByUserId nullable, approvedAt nullable, timestamps.
-- **KnowledgeChunk:** đoạn text được tách từ document (unit retrieval). Fields: documentId FK, chunkIndex (0-indexed), content (text), tokenCount (kiểm soát context window), `embedding` **vector(1536)** dùng pgvector (OpenAI text-embedding-3-small). Cần pgvector index `USING ivfflat (embedding vector_cosine_ops)` cho similarity search performance.
+- **KnowledgeDocument:** file gốc upload (PDF, DOCX, TXT, MARKDOWN). Fields cần có: title, description (nullable), storageProvider `CLOUDINARY`, storagePath (Cloudinary public ID/path, không lưu signed URL dài hạn), fileType enum, `accessLevel` enum (PUBLIC | OPERATOR | ADMIN — quyết định role nào query được; `PUBLIC` là FAQ/chính sách passenger in-scope v1), status enum (PENDING_REVIEW | APPROVED | REJECTED | ARCHIVED), uploadedByUserId, approvedByUserId nullable, approvedAt nullable, timestamps.
+- **KnowledgeChunk:** đoạn text được tách từ document (unit retrieval). Fields: documentId FK, chunkIndex (0-indexed), content (text), tokenCount (kiểm soát context window), `embedding` **halfvec(2048)** dùng pgvector với OpenRouter model `nvidia/llama-nemotron-embed-vl-1b-v2:free`. Dùng HNSW cosine index `USING hnsw (embedding halfvec_cosine_ops)` cho similarity search.
 - **RagConversation:** 1 session chat. Fields: userId, role enum (PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_ADMIN | SYSTEM_ADMIN — để filter accessLevel khi query chunk), startedAt, lastMessageAt.
 - **RagMessage:** từng turn trong conversation. Fields: conversationId FK, role enum (USER | ASSISTANT), content (text), `citedChunkIds` UUID[] (audit trail — các chunk dùng để generate câu trả lời), tokensUsed nullable.
 
@@ -3588,7 +3588,7 @@ Passenger không query được tài liệu OPERATOR/ADMIN. Driver/Assistant kh�
 1. System Admin upload file lên Admin Web
    → POST /rag/documents { title, description, accessLevel } + file binary
    → RAG Service:
-       - Upload file lên Firebase Storage → lấy fileUrl
+       - Upload file lên Cloudinary (`resource_type=raw`) → lưu storagePath
        - INSERT KnowledgeDocument { status = PENDING_REVIEW }
        - Return documentId
 
@@ -3602,7 +3602,7 @@ Passenger không query được tài liệu OPERATOR/ADMIN. Driver/Assistant kh�
    System Admin quản lý tài liệu và không cần tự nhận thông báo cho thao tác duyệt.
 
 3. Background ingest worker trong RAG Service, triggered by local `rag.document.ingest_requested`:
-   a. Download file từ Firebase Storage
+   a. Download file từ Cloudinary
    b. Extract text:
         PDF → pdf-parse library (Node.js)
         DOCX → mammoth library
@@ -3610,9 +3610,8 @@ Passenger không query được tài liệu OPERATOR/ADMIN. Driver/Assistant kh�
    c. Chunk text: chia đoạn ~500 token, overlap 50 token giữa các chunk
         (overlap để tránh mất context ở ranh giới chunk)
    d. FOR EACH chunk:
-        - Gọi OpenAI Embedding API model `text-embedding-3-small` → vector 1536 chiều
-          (Anthropic không có standalone embedding API; chọn OpenAI vì Voyage AI và Anthropic-recommended provider cost cao hơn cho scale capstone.
-           `text-embedding-3-small` rẻ ~5x so với ada-002, dimension giống = 1536 nên schema không đổi.)
+        - Gọi OpenRouter Embedding API model `nvidia/llama-nemotron-embed-vl-1b-v2:free`
+          → vector 2.048 chiều; fail fast nếu provider trả dimension khác `halfvec(2048)` của DB
         - INSERT KnowledgeChunk { documentId, chunkIndex, content, tokenCount, embedding }
    e. UPDATE KnowledgeDocument: đánh dấu embedding complete
 
@@ -3621,11 +3620,11 @@ Passenger không query được tài liệu OPERATOR/ADMIN. Driver/Assistant kh�
    b. pgvector similarity search: SELECT chunk ORDER BY embedding <=> queryVector LIMIT 5
       WHERE document.accessLevel IN (roles_allowed_for_user)
    c. Build context prompt: [system prompt] + [top-5 chunks] + [conversation history] + [user question]
-   d. Call LLM API (claude-sonnet-4-6) với stream = true → SSE response về client
+   d. Call OpenRouter model `nvidia/nemotron-3-ultra-550b-a55b:free` với stream = true → SSE response về client
    e. INSERT RagMessage { role=USER }, INSERT RagMessage { role=ASSISTANT, citedChunkIds=[...] }
 ```
 
-> **Firebase Storage access control cho RAG docs:** File upload lưu trong path `rag/documents/{documentId}/{filename}`. Signed URL TTL 1 giờ — generated khi Admin cần preview, không expose trực tiếp. Client KHÔNG có access trực tiếp vào Firebase Storage bucket — chỉ nhận content qua RAG query API.
+> **Cloudinary access control cho RAG docs:** RAG Service upload server-side dưới dạng raw asset trong folder `rag/documents`, chỉ lưu public ID/path. Khi Admin cần preview/download, backend tạo URL được kiểm soát ngắn hạn; client không nhận provider secret và không upload trực tiếp.
 
 ### 6.9 Saga Pattern — Booking Flow (Hybrid: Sync core + Async side-effects)
 
@@ -4868,10 +4867,10 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **`transportCompanyId` trên Parcel** | Không có — implicit qua `tripId` |
 | **Không dùng** | Elasticsearch (→ pgvector), MongoDB (→ PostgreSQL JSONB), SMS (→ email link), Branch entity |
 | **Frontend** | NextJS (App Router) cho Operator Web + Admin Web. Passenger App và Driver App là 2 app riêng |
-| **File storage** | Firebase Storage (gộp project FCM) |
+| **File storage** | Cloudinary cho tài liệu RAG; Firebase Storage cho client media (avatar, vehicle, parcel, incident) |
 | **Timezone** | Storage UTC · Display ICT (UTC+7) · API ISO 8601 với offset · `departureTime TIME` lưu local ICT |
 | **MediatR** | Pin v11.x (v12+ commercial license) |
-| **LLM** | `claude-sonnet-4-6` |
+| **LLM** | OpenRouter: chat `nvidia/nemotron-3-ultra-550b-a55b:free`; embedding `nvidia/llama-nemotron-embed-vl-1b-v2:free` |
 | **BỎ** | Walk-in booking, CSV import, walk-in parcel — mọi booking/parcel chỉ qua Passenger App |
 
 ### Conventions quan trọng
@@ -5165,8 +5164,8 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 
 #### RAG AI Service
 
-- **`KnowledgeDocument`** — File upload metadata: fileUrl Firebase Storage, fileType, accessLevel PUBLIC | OPERATOR | ADMIN, status PENDING_REVIEW | APPROVED | REJECTED | ARCHIVED, audit fields.
-- **`KnowledgeChunk`** — Đoạn text + `embedding vector(1536)` pgvector. Có ivfflat index cho similarity search.
+- **`KnowledgeDocument`** — File upload metadata: Cloudinary storageProvider/storagePath, fileType, accessLevel PUBLIC | OPERATOR | ADMIN, status PENDING_REVIEW | APPROVED | REJECTED | ARCHIVED, audit fields.
+- **`KnowledgeChunk`** — Đoạn text + `embedding halfvec(2048)` pgvector cho OpenRouter model `nvidia/llama-nemotron-embed-vl-1b-v2:free`. Có HNSW cosine index cho similarity search.
 - **`RagConversation`** — 1 session chat: userId, role (filter accessLevel).
 - **`RagMessage`** — Mỗi turn USER | ASSISTANT trong conversation. Có `citedChunkIds` audit trail.
 - **`OutboxEvent`** cho `DocumentApproved` event.

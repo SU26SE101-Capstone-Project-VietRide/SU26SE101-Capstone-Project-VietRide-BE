@@ -36,6 +36,8 @@
     "e2e:day41": "node scripts/run-day41-excel-export-e2e.mjs",
     "e2e:day42": "node scripts/run-day42-platform-report-e2e.mjs",
     "e2e:day43": "node scripts/run-day43-reliability-e2e.mjs",
+    "seed:demo": "node --require ts-node/register/transpile-only scripts/seed-dev-data.ts",
+    "e2e:day44": "node scripts/run-day44-seed-e2e.mjs",
     "e2e:day41-43": "node scripts/run-day41-43-e2e.mjs",
     "verify:idempotency-inventory": "node scripts/verify-idempotency-inventory.mjs",
     "postman:full:local": "node scripts/run-full-e2e-local.mjs",

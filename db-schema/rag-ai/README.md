@@ -9,7 +9,7 @@ NestJS service xử lý knowledge base ingestion và LLM streaming RAG. Ingest p
 - **Framework:** NestJS + Prisma
 - **Extensions:** `pgcrypto`, `vector` (pgvector)
 - **Storage:** Cloudinary raw assets, DB chỉ lưu `storage_path`/metadata, không lưu signed URL dài hạn.
-- **Chat model thử nghiệm:** `nex-agi/nex-n2-pro:free`
+- **Chat model thử nghiệm:** `nvidia/nemotron-3-ultra-550b-a55b:free`
 - **Embedding model thử nghiệm:** `nvidia/llama-nemotron-embed-vl-1b-v2:free`
 - **Embedding dimension hiện tại:** `2048`
 

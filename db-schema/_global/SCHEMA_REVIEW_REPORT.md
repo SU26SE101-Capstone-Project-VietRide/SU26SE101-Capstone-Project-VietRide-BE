@@ -56,7 +56,7 @@ Cross-checked critical fields per entity:
 - **Parcel:** 40+ field — sender NOT NULL, recipient nullable, dropoffStopId nullable, cargo/settlement fields, hashed `ParcelDeliveryToken` history (no plaintext token columns), dedicated durable Day-32 cargo-recovery operation, review fields (EXTRA_LARGE), durable transfer-confirmation claim, return fields, full timestamps ✅
 - **PlatformWallet / PlatformWalletTransaction / OperatorWallet / OperatorWalletTransaction / OperatorTripSettlement** (v1 wallet model): tất cả field theo v6 Section 4.6 spec ✅
 - **OperatorLedgerEntry:** đã có `trip_id` nullable, **không có** balance_before/after (đúng v6 audit-only sau wallet rewrite) ✅
-- **RAG: KnowledgeChunk.embedding vector(1536)** với IVFFlat cosine index ✅
+- **RAG: KnowledgeChunk.embedding halfvec(2048)** với HNSW cosine index cho OpenRouter model `nvidia/llama-nemotron-embed-vl-1b-v2:free` ✅
 
 JSONB shape fields đều có `COMMENT ON COLUMN` giải thích shape. Snapshot fields complete.
 
@@ -96,7 +96,7 @@ Không enum nào missing value.
 - ✅ Mọi timestamp: `TIMESTAMPTZ` (UTC). Exception: `driver_schedules.departure_time TIME` (local ICT semantic per v6).
 - ✅ Mọi PK: `UUID DEFAULT gen_random_uuid()`. Không SERIAL/BIGSERIAL.
 - ✅ JSON config dùng `JSONB` (cancellationPolicy, parcelNoShowPolicy, luggagePolicy, seatLayoutJson, operatingHours, facilities, dayOfWeek, photoUrls, metadata, bankAccountSnapshot, data, payload). Không có cột nào dùng JSON thuần.
-- ✅ pgvector: `vector(1536)` cho `knowledge_chunks.embedding` + `CREATE EXTENSION IF NOT EXISTS "vector"` ở đầu rag-ai/schema.sql.
+- ✅ pgvector: `halfvec(2048)` cho `knowledge_chunks.embedding` + `CREATE EXTENSION IF NOT EXISTS "vector"` ở đầu rag-ai/schema.sql.
 
 ### 5. Constraint Correctness — ✅ PASS (sau auto-fix M1)
 
@@ -132,7 +132,7 @@ Không enum nào missing value.
 - ✅ Mọi FK column có index (intra-service + logical FK đáng index)
 - ✅ Status enum trong WHERE clause có index (partial khi cần)
 - ✅ Partial unique `uq_booking_pending_actions_active_per_booking (booking_id WHERE resolved_at IS NULL)` đúng pattern v6 Section 8
-- ✅ pgvector ivfflat cosine index trên `knowledge_chunks.embedding` với `WITH (lists = 100)`
+- ✅ pgvector HNSW cosine index `idx_knowledge_chunks_embedding_hnsw` trên `knowledge_chunks.embedding` với `halfvec_cosine_ops`
 - ✅ Composite indexes phù hợp query pattern (vd `activity_logs (user_id, created_at DESC)`, `bookings (passenger_user_id, created_at DESC)`, `gps_trails (trip_id, recorded_at)`, etc.)
 - ✅ Không còn redundant single-column index
 
@@ -349,7 +349,7 @@ User-driven design alignment: `wallets` table đổi từ synthetic `id` PK + `U
 ### Optional Optimizations for v2
 
 1. **Partitioning** `gps_trails` theo `recorded_at` monthly khi > 100M rows.
-2. **HNSW index** thay IVFFlat cho `knowledge_chunks.embedding` nếu cần recall tốt hơn.
+2. **Historical (superseded):** HNSW từng được đề xuất thay IVFFlat; schema hiện tại đã dùng HNSW cho `knowledge_chunks.embedding`.
 3. **Materialized views** cho dashboard reporting (booking_stats, parcel_stats) thay refresh-by-event nếu eventual consistency window quá rộng.
 4. **Bank Withdrawal flow** (v2 in v6 list): thêm entity `OperatorWithdrawalRequest`, `operator_wallet_transaction_ref` enum thêm value `WITHDRAWAL`.
 5. **Counter staff seat disable** (v2 contingency): chỉ relax authorization endpoint — schema không đổi.

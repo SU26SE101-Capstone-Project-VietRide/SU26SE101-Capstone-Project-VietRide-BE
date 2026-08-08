@@ -1,0 +1,9 @@
+CHÍNH SÁCH VẬN HÀNH NHÀ XE A - DAY 44
+
+Tài liệu này chỉ dành cho nhân sự của Day44 Business Operator A với vai trò DRIVER, ASSISTANT, OPERATOR_STAFF hoặc OPERATOR_ADMIN.
+
+Tài xế và phụ xe phải kiểm tra lịch làm việc, phương tiện, danh sách điểm dừng, hành khách và hàng ký gửi trước giờ khởi hành. Tài xế phát GPS khi chuyến bắt đầu để hành khách nhận vị trí và ETA. Phụ xe phối hợp xác nhận hành khách lên xe và kiểm tra hàng hóa trước khi xe rời điểm đón.
+
+OPERATOR_ADMIN có thể đánh dấu một ghế UNAVAILABLE khi ghế đã bán ngoài hệ thống hoặc bị hỏng. Thao tác này không tạo Booking, không thu tiền và không lưu thông tin hành khách. OPERATOR_STAFF không có quyền thực hiện thao tác này.
+
+Mọi thao tác vận hành phải giữ tenant isolation: nhân sự Nhà xe A chỉ được truy cập dữ liệu thuộc Nhà xe A. Không chia sẻ dữ liệu hành khách, parcel, lịch trình nội bộ hoặc thông tin thanh toán cho nhà xe khác.

@@ -344,14 +344,14 @@ Right-click line → **Edit Style** → paste exact string:
 
 | # | From → To | Cardinality | Note |
 |---|---|---|---|
-| 1 | `KnowledgeChunk.documentId → KnowledgeDocument.id` | N:1 | CASCADE; ivfflat embedding index |
+| 1 | `KnowledgeChunk.documentId → KnowledgeDocument.id` | N:1 | CASCADE; HNSW cosine embedding index |
 | 2 | `RagMessage.conversationId → RagConversation.id` | N:1 | CASCADE |
 
 #### Step 8.2: Validation
 - [ ] 2 lines drawn
 - [ ] 2 cluster riêng biệt (Knowledge base + Conversation), không cross 2 cluster (chỉ logical array reference `RagMessage.citedChunkIds UUID[]`)
-- [ ] KnowledgeChunk hiển thị column `embedding vector(1536)` rõ
-- [ ] Note pgvector extension required + IVFFlat cosine index
+- [ ] KnowledgeChunk hiển thị column `embedding halfvec(2048)` rõ
+- [ ] Note pgvector extension required + HNSW `halfvec_cosine_ops` index
 - [ ] RagMessage.citedChunkIds note polymorphic array reference (KHÔNG vẽ line)
 - [ ] Save + Export PNG → `db-schema/rag-ai/erd-rag-ai.png`
 

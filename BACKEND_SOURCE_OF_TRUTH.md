@@ -162,8 +162,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | ioredis | 5.x | |
 | firebase-admin | 12.x | FCM push (Notification) |
 | @sendgrid/mail | 8.x | Email provider (Notification) |
-| openai | 4.x | Embedding (RAG) |
-| @anthropic-ai/sdk | latest | LLM call (RAG) — model `claude-sonnet-4-6` |
+| Provider SDK riêng | Không dùng | RAG gọi OpenRouter chat/embedding bằng built-in `fetch`; Cloudinary raw asset bằng REST API |
 | pgvector | 0.2.x | RAG only |
 | http-proxy-middleware | 3.x | Gateway proxy |
 | jose | 5.x | Gateway JWT sign/verify |
@@ -1103,7 +1102,7 @@ Realtime state (last position, ETA cache, off-route timer) → Redis only.
 
 #### RAG AI (`vietride_rag`)
 
-`KnowledgeDocument` · `KnowledgeChunk` (pgvector) · `RagConversation` · `RagMessage` · `OutboxEvent`
+`KnowledgeDocument` (Cloudinary raw asset metadata) · `KnowledgeChunk` (`halfvec(2048)`, HNSW cosine) · `RagConversation` · `RagMessage` · `OutboxEvent`. Chat và embedding đều gọi OpenRouter; embedding model canonical là `nvidia/llama-nemotron-embed-vl-1b-v2:free`.
 
 ### 4.3 Cross-service logical FK
 
@@ -1124,7 +1123,7 @@ Tham chiếu `db-schema/_global/cross-service-references.md` cho danh sách đ�
 - **`departureTime`:** `TIME` (no TZ), semantic local ICT.
 - **UUID:** `UUID DEFAULT gen_random_uuid()`.
 - **JSON config:** `JSONB`.
-- **pgvector embedding:** `vector(1536)` — chỉ trong `vietride_rag`.
+- **pgvector embedding:** `halfvec(2048)` — chỉ trong `vietride_rag`; HNSW index dùng `halfvec_cosine_ops`.
 - **Soft delete:** `deleted_at timestamptz` (canonical marker) cho Operator, User, Station, Stop, Route, Vehicle. Partial unique index `WHERE deleted_at IS NULL`. `is_active boolean` là **activation flag riêng biệt** (không phải soft-delete) cho Operator, Station, Stop, Route, Vehicle — `User` không có `is_active` (dùng `status` enum). Xem ADR 0003 + markers `ISoftDeletable`/`IActivatable`.
 - **Audit columns:** `created_at TIMESTAMPTZ DEFAULT now()` + `updated_at TIMESTAMPTZ DEFAULT now()` + trigger `trg_set_updated_at` cho UPDATE.
 - **Optimistic concurrency:** `row_version INT DEFAULT 0` cho `wallets`, `platform_wallets`, `operator_wallets`, `operator_trip_settlements`.
@@ -3507,7 +3506,7 @@ permitted.
 
 | Queue / Job | Trigger | Worker logic |
 |---|---|---|
-| `rag:document-ingest` | Enqueued on KnowledgeDocument APPROVED | Parse PDF → chunk → call OpenAI embedding → INSERT KnowledgeChunk |
+| `rag:document-ingest` | Enqueued on KnowledgeDocument APPROVED | Download Cloudinary raw asset → parse → chunk → call OpenRouter embedding model `nvidia/llama-nemotron-embed-vl-1b-v2:free` → validate 2.048 dimensions → INSERT `halfvec(2048)` KnowledgeChunk |
 | `rag:outbox-publisher` | Repeatable every 5s | Outbox poll |
 
 ### 10.3 Retry & DLQ conventions
@@ -3693,23 +3692,27 @@ IDENTITY_BASE_URL=http://identity:5001
 #### RAG AI
 
 ```
-RAG_PORT=3003
-DB_HOST=pgbouncer
-DB_DATABASE=vietride_rag
-OPENAI_API_KEY=...
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-LLM_PROVIDER=anthropic     # anthropic | openai
-ANTHROPIC_API_KEY=...
-ANTHROPIC_MODEL=claude-sonnet-4-6
-FIREBASE_STORAGE_BUCKET=...
-IDENTITY_BASE_URL=http://identity:5001
+PORT=3003
+DATABASE_URL=postgresql://...
+REDIS_URL=redis://...
+RABBITMQ_URL=amqp://...
+OPENROUTER_API_KEY=...
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_CHAT_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
+OPENROUTER_EMBEDDING_MODEL=nvidia/llama-nemotron-embed-vl-1b-v2:free
+RAG_EMBEDDING_DIMENSIONS=auto
+CLOUDINARY_CLOUD_NAME=...
+CLOUDINARY_API_KEY=...
+CLOUDINARY_API_SECRET=...
+CLOUDINARY_RAG_FOLDER=rag/documents
+IDENTITY_INTERNAL_BASE_URL=http://identity:5001
 ```
 
 ### 11.4 Secrets management
 
 - **Local dev:** `.env` file (gitignored).
 - **Production:** Docker secrets hoặc environment variables injected qua deployment platform. Khuyến nghị Vault/AWS Secrets Manager nếu deploy production scale.
-- **NEVER commit:** `INTERNAL_JWT_SECRET`, `USER_JWT_PRIVATE_KEY`, `VNPAY_HASH_SECRET`, `FIREBASE_PRIVATE_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SENDGRID_API_KEY`, `SYSTEM_ADMIN_BOOTSTRAP_PASSWORD`.
+- **NEVER commit:** `INTERNAL_JWT_SECRET`, `USER_JWT_PRIVATE_KEY`, `VNPAY_HASH_SECRET`, `FIREBASE_PRIVATE_KEY`, `OPENROUTER_API_KEY`, `CLOUDINARY_API_SECRET`, `SENDGRID_API_KEY`, `SYSTEM_ADMIN_BOOTSTRAP_PASSWORD`.
 - **Rotation:** xem 6.2 (JWKS key rotation). Internal JWT secret rotation cần coordinate restart toàn bộ services (downtime ~30s).
 
 ### 11.5 docker-compose.yml essentials
@@ -3881,7 +3884,7 @@ Mock qua interface đã định nghĩa ở `Application/Abstractions/`:
 | Firebase FCM | `IFcmPushClient` (Notification) | NSubstitute mock |
 | SendGrid | `ISendGridEmailClient` (Notification) | NSubstitute mock |
 | Google Maps Directions | `IGoogleDirectionsClient` (Tracking) | NSubstitute mock |
-| Anthropic / OpenAI LLM | `ILlmClient`, `IEmbeddingClient` (RAG) | NSubstitute mock (or recorded fixtures) |
+| OpenRouter chat / embedding | `ChatCompletionProvider`, `EmbeddingProvider` (RAG) | Jest mock `fetch` hoặc provider test double; assert model ID, numeric vector và đúng 2.048 dimensions |
 | RabbitMQ broker | `IEventPublisher` (Outbox-aware) | Unit: mock; Integration: Testcontainers real broker |
 | Inter-service HTTP | `ITripServiceClient`, `IIdentityServiceClient`, ... | NSubstitute mock; integration WireMock.NET hoặc real service |
 | Clock | `IClock` | NSubstitute return fixed UTC |
@@ -3922,7 +3925,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
-| **1.60.0** | 2026-08-08 | Codex | **MINOR** — Chuẩn hóa Payment làm financial source of truth cho Dashboard/Analytics/Platform Report/export; khóa canonical revenue predicate và typed adjustment taxonomy, tách settlement khỏi revenue, chuẩn hóa ICT calendar input thành UTC half-open persistence range, cache tối đa 60 giây và fail-closed 503 cho Booking/Parcel financial consumers. |
+| **1.60.0** | 2026-08-08 | Codex | **MINOR** — Reconcile the current RAG contract with runtime and physical DDL (Cloudinary raw document storage, OpenRouter chat/embedding, canonical `nvidia/llama-nemotron-embed-vl-1b-v2:free`, `halfvec(2048)`, HNSW cosine indexing) and standardize Payment as the financial source of truth for Dashboard/Analytics/Platform Report/export with canonical revenue predicates, typed adjustment taxonomy, separated settlement, ICT half-open ranges, 60-second cache, and fail-closed 503 financial consumers. No physical DDL, migration, dependency, provider secret, or integration-event change. |
 | **1.59.0** | 2026-08-07 | Codex | **MINOR** — Freeze Mobile gap contracts: passenger Trip search exposes only `SCHEDULED`; round-trip route identity and leg-scoped seat conflicts; effective-route geometry/ETag; STOP/STATION ETA and passenger-history tracking targets; atomic notification read-all plus snapshot cursor pagination; System Admin `SUSPENDED -> APPROVED` operator reactivation with ActivityLog and unchanged subscription; RAG 429 documents `RAG_RATE_LIMIT_EXCEEDED`. Adds two UUID-v4-required mutations, raising the executable inventory to 190/173/17. No new dependency or integration event. |
 | **1.58.0** | 2026-08-06 | Codex | **MINOR** — Hoàn thiện Manager Web Trip gaps: immutable Trip seat-layout snapshot, canonical usable passenger capacity, case-insensitive seat validation, operator-admin TripSeat disable/enable with row locking/audit/idempotency, operator shuttle history, batched pending-shuttle passenger enrichment, and method-aware Gateway routing. |
 | **1.57.0** | 2026-08-05 | Codex | **MINOR** — Hoàn thiện Tracking Phase 12: giữ fallback `STOPS_ONLY` cho Route thiếu polyline, làm rõ Google/Local ETA fallback và UNKNOWN, khóa quy tắc chọn stop/recalculate, bổ sung delay state 24h, Outbox `dedupeKey` unique, transition `DELAYED`/`DELAY_CLEARED` và contract ETA additive tương thích ngược. |
