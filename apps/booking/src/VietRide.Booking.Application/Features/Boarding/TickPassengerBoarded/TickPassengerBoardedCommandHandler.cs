@@ -2,10 +2,10 @@ using System.Text.Json;
 using MediatR;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
-using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Application.Events;
-using VietRide.Shared.Application.Outbox;
+using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Booking.Application.Features.Boarding.TickPassengerBoarded;
