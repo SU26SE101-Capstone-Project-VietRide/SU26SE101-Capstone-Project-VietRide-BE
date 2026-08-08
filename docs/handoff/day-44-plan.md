@@ -349,7 +349,7 @@ parallel-safe.
 | 44.4 | ✅ done | APPROVE | 2026-08-08 | Approved after 2 review patch rounds; human-approved focused-test command correction. |
 | 44.5 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 patch round; human-approved focused-test command correction. |
 | 44.6 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 review patch round; human-approved bootstrap retry and command corrections. |
-| 44.7 | ⬜ todo | — | — | Offline RAG seed only. |
+| 44.7 | ✅ done | APPROVE | 2026-08-08 | Approved after canonical access correction; human-approved command wrappers. |
 | 44.8 | ⬜ todo | — | — | Exact isolated real-store E2E owner. |
 | 44.9 | ⬜ todo | — | — | — |
 
