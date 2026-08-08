@@ -100,10 +100,10 @@ public sealed class PaymentOperatorRevenueSummaryClientTests
     }
 
     [Fact]
-    public async Task ReportingCircuit_OpensAfterFiveFailuresAndHalfOpenSuccessClosesIt()
+    public async Task ReportingCircuit_OpensAfterFiveFailuresAndRejectsCalls()
     {
         var policy = InfrastructureServiceCollectionExtensions
-            .CreatePaymentReportingCircuitBreakerPolicy(TimeSpan.FromMilliseconds(20));
+            .CreatePaymentReportingCircuitBreakerPolicy();
         for (var attempt = 0; attempt < 5; attempt++)
         {
             using var failure = await policy.ExecuteAsync(() =>
@@ -113,6 +113,18 @@ public sealed class PaymentOperatorRevenueSummaryClientTests
         var whileOpen = () => policy.ExecuteAsync(() =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)));
         await whileOpen.Should().ThrowAsync<BrokenCircuitException>();
+    }
+
+    [Fact]
+    public async Task ReportingCircuit_HalfOpenSuccessClosesIt()
+    {
+        var policy = InfrastructureServiceCollectionExtensions
+            .CreatePaymentReportingCircuitBreakerPolicy(TimeSpan.FromMilliseconds(20));
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            using var failure = await policy.ExecuteAsync(() =>
+                Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        }
 
         await Task.Delay(50);
         using var halfOpenProbe = await policy.ExecuteAsync(() =>
