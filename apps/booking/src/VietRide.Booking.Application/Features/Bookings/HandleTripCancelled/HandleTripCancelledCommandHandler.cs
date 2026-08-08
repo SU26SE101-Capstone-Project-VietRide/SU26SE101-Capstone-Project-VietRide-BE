@@ -36,6 +36,7 @@ public sealed class HandleTripCancelledCommandHandler(
 
             foreach (var booking in eligible)
             {
+                var previousStatus = booking.Status;
                 var refundAmount = booking.Status == BookingStatus.CONFIRMED
                     ? booking.TotalAmount.Amount
                     : 0L;
@@ -67,7 +68,10 @@ public sealed class HandleTripCancelledCommandHandler(
                     true,
                     BookingCancellationReason.OPERATOR_CANCELLED_TRIP.ToString(),
                     booking.Tickets.Select(ticket => ticket.TicketCode.Value).Order(StringComparer.Ordinal).ToArray(),
-                    booking.Tickets.Count);
+                    booking.Tickets.Count,
+                    booking.TripId,
+                    previousStatus.ToString(),
+                    booking.Passengers.Select(passenger => passenger.SeatNumber).OfType<string>().Order(StringComparer.Ordinal).ToArray());
                 await outbox.EnqueueAsync(
                     eventId,
                     BookingCancelledIntegrationEvent.EventTypeValue,

@@ -125,6 +125,7 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
             policy,
             refundOverride);
 
+        var previousStatus = booking.Status;
         var cancelled = await _bookings.TryCancelAsync(
             booking.Id,
             reason,
@@ -180,7 +181,10 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
             refundOverride,
             reason.ToString(),
             booking.Tickets.Select(ticket => ticket.TicketCode.Value).ToArray(),
-            booking.Tickets.Count);
+            booking.Tickets.Count,
+            booking.TripId,
+            previousStatus.ToString(),
+            booking.Passengers.Select(passenger => passenger.SeatNumber).OfType<string>().ToArray());
 
         await _outbox.EnqueueAsync(
             eventId,

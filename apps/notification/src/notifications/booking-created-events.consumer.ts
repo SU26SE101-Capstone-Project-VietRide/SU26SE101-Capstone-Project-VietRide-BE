@@ -82,6 +82,8 @@ export class BookingCreatedEventsConsumer implements OnModuleInit {
               tripId: event.tripId,
               status: event.status,
               ticketCodes: event.ticketCodes,
+              seatNumbers: event.seatNumbers,
+              departureDateTime: event.departureDateTime,
               passengerCount: event.passengerCount,
               pickup: event.pickup,
               dropoff: event.dropoff,

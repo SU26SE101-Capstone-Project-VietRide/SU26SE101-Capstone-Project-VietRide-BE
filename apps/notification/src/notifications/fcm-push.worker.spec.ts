@@ -90,6 +90,21 @@ describe('FcmPushWorker', () => {
     expect(repository.markDeliverySent).toHaveBeenCalledWith(DELIVERY_ID, 'firebase-message-id');
   });
 
+  it.each([NotificationType.BOOKING_CREATED, NotificationType.BOOKING_CANCELLED])(
+    'uses the exact booking notification type in FCM data for %s',
+    async (type) => {
+      repository.findById.mockResolvedValue(createNotification(type));
+      repository.listDeliveriesByNotificationId.mockResolvedValue([createDelivery()]);
+      fcmPushProvider.send.mockResolvedValue({ messageId: 'firebase-message-id' });
+
+      await worker.process(createJob(0));
+
+      expect(fcmPushProvider.send).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ type, notificationType: type }),
+      }));
+    },
+  );
+
   it('blacklists invalid tokens and marks delivery as FAILED', async () => {
     repository.findById.mockResolvedValue(createNotification());
     repository.listDeliveriesByNotificationId.mockResolvedValue([createDelivery()]);
@@ -163,11 +178,11 @@ function createJob(attemptsMade: number): Job<FcmPushJobData> {
   } as Job<FcmPushJobData>;
 }
 
-function createNotification(): Notification {
+function createNotification(type: NotificationType = NotificationType.BOOKING_CONFIRMED): Notification {
   return {
     id: NOTIFICATION_ID,
     userId: USER_ID,
-    type: NotificationType.BOOKING_CONFIRMED,
+    type,
     title: 'Dat ve thanh cong',
     body: 'Ve cua ban da duoc xac nhan.',
     data: { bookingId: 'VR123' },

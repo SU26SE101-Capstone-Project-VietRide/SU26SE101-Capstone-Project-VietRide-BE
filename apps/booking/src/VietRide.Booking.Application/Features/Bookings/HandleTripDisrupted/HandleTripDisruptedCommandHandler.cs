@@ -55,6 +55,7 @@ public sealed class HandleTripDisruptedCommandHandler(
 
             foreach (var booking in eligible)
             {
+                var previousStatus = booking.Status;
                 var refund = BookingDisruptionRefundCalculator.Calculate(booking, trip);
                 booking.Disrupt(request.TerminalAt);
                 bookings.Update(booking);
@@ -88,7 +89,10 @@ public sealed class HandleTripDisruptedCommandHandler(
                         .Select(ticket => ticket.TicketCode.Value)
                         .Order(StringComparer.Ordinal)
                         .ToArray(),
-                    booking.Tickets.Count);
+                    booking.Tickets.Count,
+                    booking.TripId,
+                    previousStatus.ToString(),
+                    booking.Passengers.Select(passenger => passenger.SeatNumber).OfType<string>().Order(StringComparer.Ordinal).ToArray());
                 await outbox.EnqueueAsync(
                     cancelledEventId,
                     BookingCancelledIntegrationEvent.EventTypeValue,

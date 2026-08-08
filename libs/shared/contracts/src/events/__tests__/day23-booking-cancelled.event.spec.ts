@@ -2,6 +2,7 @@ import {
   BookingCancelledConsumerEventSchema,
   BookingCancelledEventSchema,
   BookingCancelledLegacyEventSchema,
+  OperationalBookingCancelledEventSchema,
   BOOKING_CANCELLED_ROUTING_KEY,
 } from '../..';
 
@@ -13,6 +14,16 @@ const canonical = {
   refundAmount: 120000,
   refundOverride: false,
   cancellationReason: 'USER_INITIATED',
+};
+
+const operational = {
+  ...canonical,
+  bookingCode: 'VR-20260717-ABCDEFGH',
+  ticketCodes: ['VT-20260717-ABCDEFGH'],
+  ticketCount: 1,
+  tripId: '44444444-4444-4444-8444-444444444444',
+  previousStatus: 'CONFIRMED',
+  seatNumbers: ['A01'],
 };
 
 describe('Day 23 booking.cancelled contract:', () => {
@@ -29,6 +40,20 @@ describe('Day 23 booking.cancelled contract:', () => {
     const { eventId, ...withoutIdentity } = canonical;
     expect(eventId).toBe(canonical.eventId);
     expect(BookingCancelledEventSchema.safeParse(withoutIdentity).success).toBe(false);
+  });
+
+  it('accepts the operational manifest-change shape without weakening legacy parsing', () => {
+    expect(OperationalBookingCancelledEventSchema.safeParse(operational).success).toBe(true);
+    expect(BookingCancelledConsumerEventSchema.safeParse(operational).success).toBe(true);
+    expect(
+      OperationalBookingCancelledEventSchema.safeParse({ ...operational, tripId: undefined }).success,
+    ).toBe(false);
+    expect(
+      OperationalBookingCancelledEventSchema.safeParse({ ...operational, previousStatus: 'CANCELLED' }).success,
+    ).toBe(false);
+    expect(
+      OperationalBookingCancelledEventSchema.safeParse({ ...operational, seatNumbers: [] }).success,
+    ).toBe(false);
   });
 
   it('permits only the exact legacy identity omission for consumers', () => {

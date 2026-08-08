@@ -4486,9 +4486,9 @@ Server broadcasts to room `trip:{tripId}`:
 - `trip:statusChanged`
 
 Driver và Assistant được Tracking tự động tham gia thêm room nội bộ
-`tracking:trip:{tripId}:crew`. Khi Booking chuyển sang `CONFIRMED`, Booking phát fact
-`booking.booking.created`; Tracking validate fact này và chỉ broadcast `booking:created` vào
-crew room. Passenger room không nhận sự kiện này.
+`trip:crew:{tripId}`. Khi manifest thay đổi, Tracking chỉ broadcast các event booking vào crew
+room; Passenger room không nhận. `booking:created` được giữ tương thích, còn client mới dùng
+`booking:updated` với `reason=BOOKING_CREATED|BOOKING_CANCELLED|PASSENGER_BOARDED|BOOKING_TRANSFERRED`.
 
 ```json
 {
@@ -4499,6 +4499,8 @@ crew room. Passenger room không nhận sự kiện này.
   "tripId": "uuid",
   "status": "CONFIRMED",
   "ticketCodes": ["VT-20260805-ABCDEFGH"],
+  "seatNumbers": ["A01"],
+  "departureDateTime": "2026-08-05T12:00:00.000Z",
   "passengerCount": 1,
   "pickup": { "stationId": "uuid", "stopId": null, "address": null },
   "dropoff": { "stationId": null, "stopId": "uuid", "address": null },
@@ -4508,8 +4510,30 @@ crew room. Passenger room không nhận sự kiện này.
 ```
 
 `eventId` là identity bền vững cho Outbox, RabbitMQ, Notification và Tracking dedupe.
-Notification lưu type `BOOKING_CREATED` cho từng crew recipient hiện có với dedupe riêng theo
-`eventId + recipientUserId`. Các field và event mới đều additive; client cũ có thể bỏ qua.
+Notification lưu type `BOOKING_CREATED` hoặc crew-facing `BOOKING_CANCELLED` cho từng crew
+recipient hiện có với dedupe riêng theo `eventId + recipientUserId`. FCM gửi cả `data.type` và
+`data.notificationType` bằng đúng type; array trong FCM data được JSON stringify.
+
+`booking:updated` là signal invalidate/refetch, không thay thế manifest/seat-map REST:
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-08-05T10:00:01.000Z",
+  "tripId": "uuid",
+  "bookingId": "uuid",
+  "reason": "PASSENGER_BOARDED",
+  "bookingCode": "VR-20260805-ABCDEFGH",
+  "seatNumbers": ["A01"],
+  "passengerRecordId": "uuid",
+  "ticketCode": "VT-20260805-ABCDEFGH",
+  "boardedAt": "2026-08-05T10:00:01.000Z"
+}
+```
+
+Cancellation chỉ fan-out crew khi `previousStatus=CONFIRMED`, và bỏ qua cancellation phát sinh do
+toàn Trip đã terminal. Transfer phát cùng event vào cả crew room Trip cũ và mới, dedupe room nếu
+hai Trip id trùng nhau.
 
 Tracking Phase 10 invariants (legacy fields remain compatible; delay fields below are additive):
 

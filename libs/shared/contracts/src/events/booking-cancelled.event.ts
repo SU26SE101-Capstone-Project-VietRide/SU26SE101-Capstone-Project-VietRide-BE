@@ -22,10 +22,32 @@ const bookingCancelledEventSchema = z
   .strict();
 export type BookingCancelledEvent = z.infer<typeof bookingCancelledEventSchema>;
 
+export const OperationalBookingCancelledEventSchema = z
+  .object({
+    eventId: z.string().uuid(),
+    occurredAt: z.string().datetime({ offset: true }),
+    ...bookingCancelledFields,
+    bookingCode: z.string().trim().min(1),
+    ticketCodes: z.array(z.string().trim().min(1)).min(1),
+    ticketCount: z.number().int().positive(),
+    tripId: z.string().uuid(),
+    previousStatus: z.enum(['PENDING_PAYMENT', 'CONFIRMED']),
+    seatNumbers: z.array(z.string().trim().min(1)).min(1),
+  })
+  .strict()
+  .refine((event) => event.ticketCount === event.ticketCodes.length, {
+    message: 'ticketCount must equal ticketCodes length',
+    path: ['ticketCount'],
+  });
+export type OperationalBookingCancelledEvent = z.infer<
+  typeof OperationalBookingCancelledEventSchema
+>;
+
 const bookingCancelledLegacyEventSchema = z.object(bookingCancelledFields).strict();
 export type BookingCancelledLegacyEvent = z.infer<typeof bookingCancelledLegacyEventSchema>;
 
 const bookingCancelledConsumerEventSchema = z.union([
+  OperationalBookingCancelledEventSchema,
   bookingCancelledEventSchema,
   bookingCancelledLegacyEventSchema,
 ]);
