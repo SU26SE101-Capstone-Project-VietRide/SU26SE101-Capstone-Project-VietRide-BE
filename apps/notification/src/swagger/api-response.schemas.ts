@@ -155,7 +155,7 @@ export const notificationItemSchema: SchemaObject = {
 
 export const pagedNotificationsSchema: SchemaObject = {
   type: 'object',
-  required: ['items', 'page', 'pageSize', 'totalItems', 'totalPages', 'hasNextPage', 'hasPreviousPage'],
+  required: ['items', 'page', 'pageSize', 'totalItems', 'totalPages', 'hasNextPage', 'hasPreviousPage', 'nextCursor'],
   properties: {
     items: {
       type: 'array',
@@ -184,6 +184,11 @@ export const pagedNotificationsSchema: SchemaObject = {
     hasPreviousPage: {
       type: 'boolean',
       example: false,
+    },
+    nextCursor: {
+      type: 'string',
+      nullable: true,
+      description: 'Opaque snapshot continuation cursor.',
     },
   },
 };

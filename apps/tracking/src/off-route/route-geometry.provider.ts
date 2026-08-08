@@ -22,6 +22,7 @@ export type RouteGeometrySource = 'ROUTE_POLYLINE' | 'STOPS_ONLY';
 
 export interface RouteGeometrySnapshot {
   tripId: string;
+  effectiveRouteId?: string;
   points: RouteGeometryPoint[];
   alertRecipientUserIds?: string[];
   geometrySource?: RouteGeometrySource;
@@ -41,7 +42,10 @@ export interface RouteGeometryProvider {
 }
 
 export interface DetailedRouteGeometryProvider extends RouteGeometryProvider {
-  getDetailedRouteGeometry(tripId: string): Promise<RouteGeometryFetchResult>;
+  getDetailedRouteGeometry(
+    tripId: string,
+    options?: { bypassCache?: boolean },
+  ): Promise<RouteGeometryFetchResult>;
 }
 
 export interface RouteProjection {

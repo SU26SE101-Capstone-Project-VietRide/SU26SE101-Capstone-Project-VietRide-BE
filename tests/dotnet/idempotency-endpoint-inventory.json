@@ -2,16 +2,16 @@
   "version": 3,
   "policy": "system-wide-idempotency-contract",
   "expectedSummary": {
-    "mutationSurfaces": 187,
-    "required": 170,
-    "exemptions": 17
+    "mutationSurfaces": 208,
+    "required": 190,
+    "exemptions": 18
   },
   "services": {
     "identity": {
       "stack": "dotnet",
       "servicePrefix": "identity",
       "requireAllMutations": true,
-      "expectedMutationCount": 35,
+      "expectedMutationCount": 36,
       "endpoints": [
         {
           "method": "POST",
@@ -31,6 +31,11 @@
         {
           "method": "POST",
           "path": "/v1/admin/operators/{operatorId:guid}/suspend",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/admin/operators/{operatorId:guid}/reactivate",
           "policy": "required"
         },
         {
@@ -199,7 +204,7 @@
       "stack": "dotnet",
       "servicePrefix": "trip",
       "requireAllMutations": true,
-      "expectedMutationCount": 61,
+      "expectedMutationCount": 79,
       "endpoints": [
         {
           "method": "POST",
@@ -258,6 +263,16 @@
         },
         {
           "method": "POST",
+          "path": "/v1/driver/trips/{tripId:guid}/route-change-proposals",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/trips/{tripId}/route-change-proposals",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
           "path": "/v1/driver/trips/{tripId:guid}/stops/{stopId:guid}/arrive",
           "policy": "required"
         },
@@ -279,6 +294,26 @@
         {
           "method": "POST",
           "path": "/v1/driver/shuttle-trips/{shuttleTripId:guid}/stops/{pickupOrder:int}/pickup",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/shuttle-trips/{shuttleTripId:guid}/stops/{pickupOrder:int}/delivered",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/shuttle-trips/{shuttleTripId:guid}/stops/{pickupOrder:int}/no-show",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/shuttle-trips/{shuttleTripId:guid}/start",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/shuttle-trips/{shuttleTripId:guid}/complete",
           "policy": "required"
         },
         {
@@ -372,6 +407,17 @@
         },
         {
           "method": "PATCH",
+          "path": "/v1/operator/driver-schedules/{id:guid}/deactivate",
+          "policy": "exempt",
+          "reason": "DriverSchedule deactivation is behavior-idempotent and requires no Idempotency-Key."
+        },
+        {
+          "method": "DELETE",
+          "path": "/v1/operator/driver-schedules/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
           "path": "/v1/operator/driver-schedules/{id:guid}/crew",
           "policy": "required"
         },
@@ -406,8 +452,18 @@
           "policy": "required"
         },
         {
+          "method": "POST",
+          "path": "/v1/operator/routes/full",
+          "policy": "required"
+        },
+        {
           "method": "PATCH",
           "path": "/v1/operator/routes/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "PUT",
+          "path": "/v1/operator/routes/{id:guid}/full",
           "policy": "required"
         },
         {
@@ -437,7 +493,37 @@
         },
         {
           "method": "POST",
+          "path": "/v1/operator/route-change-proposals/{proposalId:guid}/approve",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/route-change-proposals/{proposalId}/approve",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/route-change-proposals/{proposalId:guid}/reject",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/route-change-proposals/{proposalId}/reject",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/shuttle-requests/{mainTripId:guid}/{bookingId:guid}/cancel",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
           "path": "/v1/operator/shuttle-trips",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/shuttle-trips/{shuttleTripId:guid}/cancel",
           "policy": "required"
         },
         {
@@ -473,6 +559,16 @@
         {
           "method": "PATCH",
           "path": "/v1/operator/trips/{tripId:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/trips/{tripId:guid}/seats/{seatNumber}/disable",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/trips/{tripId:guid}/seats/{seatNumber}/enable",
           "policy": "required"
         },
         {
@@ -661,7 +757,7 @@
       "stack": "dotnet",
       "servicePrefix": "payment",
       "requireAllMutations": true,
-      "expectedMutationCount": 15,
+      "expectedMutationCount": 16,
       "endpoints": [
         {
           "method": "POST",
@@ -686,6 +782,11 @@
         {
           "method": "POST",
           "path": "/internal/e2e/day38/jobs/{jobName}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/revenue/backfills/parcel-voucher-reversals",
           "policy": "required"
         },
         {
@@ -913,8 +1014,8 @@
       "sourceDirectory": "apps/notification/src",
       "requiredDecorator": "ApiIdempotencyRequired",
       "decoratorFile": "apps/notification/src/swagger/idempotency.swagger.ts",
-      "expectedMutationCount": 3,
-      "expectedRequiredCount": 3,
+      "expectedMutationCount": 4,
+      "expectedRequiredCount": 4,
       "endpoints": [
         {
           "method": "POST",
@@ -924,6 +1025,11 @@
         {
           "method": "POST",
           "path": "/v1/notifications/:notificationId/read",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/notifications/read-all",
           "policy": "required"
         },
         {
@@ -1044,8 +1150,8 @@
   ],
   "coverage": {
     "dotnetRabbitMqRegistrations": 45,
-    "notificationRabbitMqSubscriptionCallsites": 14,
-    "notificationRabbitMqRuntimeBindings": 73,
+    "notificationRabbitMqSubscriptionCallsites": 16,
+    "notificationRabbitMqRuntimeBindings": 80,
     "notificationRabbitMqBindingCollections": [
       {
         "file": "apps/notification/src/notifications/booking-trip-change-events.consumer.ts",
@@ -1073,8 +1179,14 @@
         "name": "TRIP_TRACKING_ALERT_QUEUE_BINDINGS"
       }
     ],
-    "dotnetOutboundHttpCallsites": 28,
+    "dotnetOutboundHttpCallsites": 29,
     "dotnetOutboundHttpExemptions": [
+      {
+        "file": "apps/trip/src/VietRide.Trip.Infrastructure/ExternalClients/GoogleRoutesShuttleDistanceClient.cs",
+        "method": "POST",
+        "match": "directions/v2:computeRoutes",
+        "reason": "Google Routes computes a read-only distance and does not accept the VietRide Idempotency-Key contract."
+      },
       {
         "file": "apps/payment/src/VietRide.Payment.Infrastructure/Http/IdentityFinancialProjectionClient.cs",
         "method": "POST",

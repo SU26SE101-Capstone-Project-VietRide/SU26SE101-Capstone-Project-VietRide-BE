@@ -149,6 +149,7 @@ export class EtaService {
         .set(trackingEtaKey(gps.tripId, nextStop.stopId), JSON.stringify(event), 'EX', etaCacheTtl)
         .set(trackingEtaStateKey(gps.tripId), JSON.stringify(nextState), 'EX', ETA_STATE_TTL_SECONDS)
         .exec();
+      await this.cacheDestinationEta(gps, state, etaCacheTtl);
       return event;
     } finally {
       try {
@@ -156,6 +157,53 @@ export class EtaService {
       } catch (error) {
         this.logger.warn({ err: error, tripId: gps.tripId, stopId: nextStop.stopId }, 'Failed to release ETA lock');
       }
+    }
+  }
+
+  private async cacheDestinationEta(
+    gps: GpsUpdateEvent,
+    state: EtaState | null,
+    ttlSeconds: number,
+  ): Promise<void> {
+    try {
+      const route = this.routeGeometryProvider.peekCachedRouteGeometry(gps.tripId)
+        ?? await this.routeGeometryProvider.getRouteGeometry(gps.tripId);
+      const station = route?.destinationStation;
+      if (!station) return;
+
+      const target: TripStopSnapshot = {
+        stopId: station.stationId,
+        stopName: station.name,
+        latitude: station.latitude,
+        longitude: station.longitude,
+        sequence: Number.MAX_SAFE_INTEGER,
+      };
+      const calculation = await this.calculateWithProviders(gps, target, state);
+      if (!calculation.result) return;
+
+      const result = calculation.result;
+      await this.redis.getClient().set(
+        trackingEtaKey(gps.tripId, station.stationId),
+        JSON.stringify({
+          tripId: gps.tripId,
+          targetKind: 'STATION',
+          stationId: station.stationId,
+          etaMinutes: result.etaMinutes,
+          estimatedArrivalTime: new Date(
+            new Date(gps.recordedAt).getTime()
+              + result.etaMinutes * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND,
+          ).toISOString(),
+          distanceMeters: result.distanceMeters,
+          updatedAt: new Date().toISOString(),
+        }),
+        'EX',
+        ttlSeconds,
+      );
+    } catch (error) {
+      this.logger.warn(
+        { err: error, tripId: gps.tripId },
+        'Skipping destination ETA cache after provider/calculation failure',
+      );
     }
   }
 

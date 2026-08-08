@@ -25,6 +25,7 @@ export const ListNotificationsQuerySchema = z.object({
     .default(DEFAULT_NOTIFICATION_PAGE_SIZE),
   sortBy: SortBySchema.default('createdAt'),
   sortDir: SortDirSchema.default('desc'),
+  cursor: z.string().min(1).max(2048).optional(),
 });
 
 export type ListNotificationsQueryDto = z.infer<typeof ListNotificationsQuerySchema>;

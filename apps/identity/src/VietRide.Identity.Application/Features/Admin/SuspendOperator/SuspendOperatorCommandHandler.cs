@@ -16,17 +16,20 @@ public sealed class SuspendOperatorCommandHandler : IRequestHandler<SuspendOpera
     private readonly IUserRepository _users;
     private readonly IClock _clock;
     private readonly IIntegrationEventOutbox _outbox;
+    private readonly IActivityLogRepository _activityLogs;
 
     public SuspendOperatorCommandHandler(
         IOperatorRepository operators,
         IUserRepository users,
         IClock clock,
-        IIntegrationEventOutbox outbox)
+        IIntegrationEventOutbox outbox,
+        IActivityLogRepository activityLogs)
     {
         _operators = operators;
         _users = users;
         _clock = clock;
         _outbox = outbox;
+        _activityLogs = activityLogs;
     }
 
     public async Task<SuspendOperatorResponseDto> Handle(
@@ -41,6 +44,18 @@ public sealed class SuspendOperatorCommandHandler : IRequestHandler<SuspendOpera
 
         var suspendedAt = _clock.UtcNow;
         TryApplyLifecycleTransition(() => operatorEntity.Suspend(request.Reason, suspendedAt));
+
+        await _activityLogs.AddAsync(
+            ActivityLog.Create(
+                request.CallerUserId,
+                ActivityLogAction.SUSPEND_OPERATOR,
+                JsonSerializer.Serialize(new
+                {
+                    operatorId = operatorEntity.Id,
+                    actorUserId = request.CallerUserId,
+                    source = "SYSTEM_ADMIN_SUSPEND_OPERATOR",
+                })),
+            cancellationToken);
 
         // Enqueue the integration event inside the same transaction the
         // TransactionBehavior commits (BSOT §7.3).

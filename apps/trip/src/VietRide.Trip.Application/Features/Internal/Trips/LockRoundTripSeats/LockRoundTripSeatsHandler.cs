@@ -77,8 +77,10 @@ public sealed class LockRoundTripSeatsHandler : IRequestHandler<LockRoundTripSea
         try
         {
             var unavailableSeats = outboundTrip.FindUnavailableSeats(outboundSeats)
-                .Concat(returnTrip.FindUnavailableSeats(returnSeats))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(seatNumber => new RoundTripSeatConflict("outbound.seatNumbers", seatNumber))
+                .Concat(returnTrip.FindUnavailableSeats(returnSeats)
+                    .Select(seatNumber => new RoundTripSeatConflict("return.seatNumbers", seatNumber)))
+                .Distinct()
                 .ToArray();
             if (unavailableSeats.Length > 0)
             {
@@ -161,9 +163,9 @@ public sealed class LockRoundTripSeatsHandler : IRequestHandler<LockRoundTripSea
     private static LockRoundTripSeatsLegResult ToResult(RoundTripSeatLockReplayLeg leg)
         => new(leg.TripId, leg.SeatLockToken, leg.LockedSeats, leg.ExpiresAt);
 
-    private static ConflictException SeatUnavailable(IReadOnlyList<string> seatNumbers)
+    private static ConflictException SeatUnavailable(IReadOnlyList<RoundTripSeatConflict> conflicts)
         => new(
             "BOOKING_SEAT_UNAVAILABLE",
             "One or more requested seats are unavailable.",
-            seatNumbers.Select(seatNumber => new ValidationError("seatNumbers", seatNumber)).ToArray());
+            conflicts.Select(conflict => new ValidationError(conflict.Field, conflict.SeatNumber)).ToArray());
 }

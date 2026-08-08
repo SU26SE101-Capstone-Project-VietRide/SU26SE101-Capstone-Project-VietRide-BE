@@ -3,7 +3,9 @@ import { z } from 'zod';
 
 export const EtaBaseResponseSchema = z.object({
   tripId: z.string().uuid(),
-  stopId: z.string().uuid(),
+  targetKind: z.enum(['STOP', 'STATION']).default('STOP'),
+  stopId: z.string().uuid().optional(),
+  stationId: z.string().uuid().optional(),
   etaMinutes: z.number().int().positive(),
   estimatedArrivalTime: z.string().datetime(),
   distanceMeters: z.number().int().nonnegative(),
@@ -23,8 +25,14 @@ export class EtaResponseDataDto {
   @ApiProperty({ example: '11111111-1111-4111-8111-111111111111' })
   tripId!: string;
 
-  @ApiProperty({ example: '22222222-2222-4222-8222-222222222222' })
-  stopId!: string;
+  @ApiProperty({ enum: ['STOP', 'STATION'], example: 'STOP' })
+  targetKind!: 'STOP' | 'STATION';
+
+  @ApiProperty({ required: false, example: '22222222-2222-4222-8222-222222222222' })
+  stopId?: string;
+
+  @ApiProperty({ required: false, example: '33333333-3333-4333-8333-333333333333' })
+  stationId?: string;
 
   @ApiProperty({ nullable: true, example: 'Bến xe Miền Tây' })
   stopName!: string | null;

@@ -486,8 +486,9 @@ public sealed class TripServiceClient : ITripServiceClient
             if (string.Equals(code, "BOOKING_SEAT_UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
             {
                 var fields = envelope?.Error?.Fields?
-                    .Where(f => f.Field == "seatNumbers")
-                    .SelectMany(ExtractSeatNumbers)
+                    .Where(f => f.Field is "outbound.seatNumbers" or "return.seatNumbers")
+                    .SelectMany(field => ExtractSeatNumbers(field)
+                        .Select(seatNumber => new RoundTripSeatConflict(field.Field, seatNumber)))
                     .ToList() ?? [];
 
                 return new LockRoundTripSeatsOutcome.SeatUnavailable(fields);

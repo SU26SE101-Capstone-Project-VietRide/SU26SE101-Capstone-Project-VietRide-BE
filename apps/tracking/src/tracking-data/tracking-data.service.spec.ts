@@ -2,9 +2,11 @@ import type { TripDataProvider } from '../eta/trip-data.provider';
 import { TrackingDataRepository } from './tracking-data.repository';
 import { TrackingDataService } from './tracking-data.service';
 import type { EtaResponseDto } from './dto/eta-response.dto';
+import type { DetailedRouteGeometryProvider } from '../off-route/route-geometry.provider';
 
 const ETA: EtaResponseDto = {
   tripId: '11111111-1111-4111-8111-111111111111',
+  targetKind: 'STOP',
   stopId: '33333333-3333-4333-8333-333333333333',
   etaMinutes: 65,
   estimatedArrivalTime: '2026-08-06T03:05:00.000Z',
@@ -81,5 +83,49 @@ describe('TrackingDataService ETA selection', () => {
 
     await expect(service.getEta(ETA.tripId, {})).resolves.toEqual({ eta: null });
     expect(repository.findEta).not.toHaveBeenCalled();
+  });
+
+  it('returns destination-station ETA only for the effective destination', async () => {
+    const destinationStationId = '44444444-4444-4444-8444-444444444444';
+    const stationEta: EtaResponseDto = {
+      ...ETA,
+      targetKind: 'STATION',
+      stopId: undefined,
+      stationId: destinationStationId,
+      delayStatus: 'UNKNOWN',
+      delayed: null,
+      delayMinutes: null,
+    };
+    const repository = {
+      findEta: jest.fn(async () => stationEta),
+    } as unknown as TrackingDataRepository;
+    const trips = { getRouteStops: jest.fn(async () => []) } as TripDataProvider;
+    const routes = {
+      getDetailedRouteGeometry: jest.fn(async () => ({
+        kind: 'ok' as const,
+        snapshot: {
+          tripId: ETA.tripId,
+          points: [],
+          destinationStation: {
+            stationId: destinationStationId,
+            name: 'Da Lat',
+            latitude: 11.94,
+            longitude: 108.44,
+          },
+        },
+      })),
+    } as unknown as DetailedRouteGeometryProvider;
+    const service = new TrackingDataService(repository, trips, routes);
+
+    await expect(service.getEta(ETA.tripId, {
+      targetKind: 'STATION',
+      stationId: destinationStationId,
+    })).resolves.toEqual({ eta: { ...stationEta, stopName: 'Da Lat' } });
+    expect(repository.findEta).toHaveBeenCalledWith(ETA.tripId, destinationStationId, 'STATION');
+
+    await expect(service.getEta(ETA.tripId, {
+      targetKind: 'STATION',
+      stationId: '55555555-5555-4555-8555-555555555555',
+    })).resolves.toEqual({ eta: null });
   });
 });

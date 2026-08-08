@@ -5613,7 +5613,7 @@ Notes: atomically sets `Operator.registrationStatus=REJECTED`, stores reject met
 
 ### POST `/v1/admin/operators/{operatorId}/suspend`
 
-Auth: `SYSTEM_ADMIN`. Idempotency-Key: not required by BSOT §5.6.
+Auth: `SYSTEM_ADMIN`. Idempotency-Key: required, UUID v4.
 
 Request:
 ```json
@@ -5639,7 +5639,7 @@ Errors:
 - `404 RESOURCE_NOT_FOUND` — operator does not exist.
 - `422 VALIDATION_ERROR` — missing reason or invalid lifecycle transition.
 
-Notes: suspend writes no ActivityLog in Day 6 because canonical `activity_log_action` has no `SUSPEND_OPERATOR`. Outbox emission is deferred to Day 10.
+Notes: suspend writes an ActivityLog with action `SUSPEND_OPERATOR`, actor user ID, operator ID and source. The existing suspension Outbox behavior remains unchanged.
 
 ### GET `/v1/operator/users`
 
@@ -9044,3 +9044,35 @@ The five existing proposal integration events remain canonical. CREATED notifies
 and the proposer. APPROVED, REJECTED, SUPERSEDED and EXPIRED notify the current Driver, current
 Assistant and proposer after recipient-ID deduplication. Notification persistence precedes FCM
 enqueue, and crew lookup failure is retryable.
+
+## 2026-08-07 Mobile gap and operator recovery extension
+
+This section supersedes older endpoint descriptions where they conflict.
+
+- Passenger `GET /v1/trips/search` returns only `SCHEDULED` trips. Booking creation still validates
+  the Trip lifecycle as the final write-time guard.
+- `POST /v1/bookings/round-trip` requires the return Trip route to equal the outbound Route's
+  configured `returnRouteId`; mismatch returns `422 BOOKING_ROUND_TRIP_INVALID` with
+  `fields:[{field:"return.tripId",message:"Return trip does not use the configured return route."}]`
+  before any seat hold or payment. `409 BOOKING_SEAT_UNAVAILABLE` identifies conflicts using
+  `outbound.seatNumbers` and `return.seatNumbers`; one-way booking keeps `seatNumbers`.
+- Public Trip route geometry follows the effective Route. An assigned AlternativeRoute supplies
+  its polyline, ordered stops and destination station. Its public ETag changes when the effective
+  Route assignment changes; `effectiveRouteId` exists only on the internal Trip response.
+- `GET /v1/tracking/trips/{tripId}/eta` keeps legacy `stopId`. New callers send either
+  `targetKind=STOP&stopId=<uuid>` or `targetKind=STATION&stationId=<uuid>`. Invalid kind/id pairs
+  return `400 VALIDATION_FAILED`. A non-null response discriminates the target with `targetKind`
+  and the matching `stopId` or `stationId`; cold cache remains `{eta:null}`.
+- Passenger history items add nullable root `trackingTarget`: `{kind:"STOP",stopId}` for an
+  along-route drop-off, `{kind:"STATION",stationId}` for a destination terminal, otherwise null.
+- `POST /v1/notifications/read-all` requires User JWT and UUID-v4 `Idempotency-Key`, has an empty
+  body and returns `{markedCount,readAt}`. The server persists a per-user/key cutoff in Redis for
+  24 hours before atomically marking only unread rows created on or before that cutoff.
+- `GET /v1/notifications` orders by `createdAt DESC, id DESC` and adds nullable `nextCursor` while
+  retaining existing page fields. Passing `cursor` uses opaque snapshot keyset pagination;
+  malformed or filter-mismatched cursors return `400 VALIDATION_FAILED`.
+- `POST /v1/admin/operators/{operatorId}/reactivate` requires `SYSTEM_ADMIN`, UUID-v4
+  `Idempotency-Key`, and an empty body. It permits only `SUSPENDED -> APPROVED`, sets
+  `isActive=true`, preserves subscription/approval/suspension metadata, and does not restore
+  revoked refresh tokens. Invalid state returns `422 VALIDATION_ERROR`.
+- RAG chat HTTP 429 advertises the canonical error code `RAG_RATE_LIMIT_EXCEEDED`.

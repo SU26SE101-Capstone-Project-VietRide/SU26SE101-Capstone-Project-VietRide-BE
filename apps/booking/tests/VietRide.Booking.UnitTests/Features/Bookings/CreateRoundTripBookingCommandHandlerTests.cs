@@ -44,7 +44,7 @@ public class CreateRoundTripBookingCommandHandlerTests
         DestinationStation: new TripStationSnapshot(Guid.NewGuid(), "Đà Nẵng"),
         Stops: [],
         SeatSummary: new TripSeatSummary(40, 38),
-        ReturnRouteId: Guid.NewGuid(),
+        ReturnRouteId: ReturnRouteId,
         DriverUserId: OutboundDriverUserId);
 
     private static readonly TripSnapshot ReturnTrip = new(
@@ -503,6 +503,28 @@ public class CreateRoundTripBookingCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_ReturnTripUsesDifferentRoute_ThrowsRoundTripInvalidBeforeSeatLock()
+    {
+        _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var mismatchedReturnTrip = ReturnTrip with { RouteId = Guid.NewGuid() };
+        _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
+        _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(mismatchedReturnTrip);
+
+        var act = () => BuildSut().Handle(BuildCommand(), CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<CodedValidationException>();
+        exception.Which.ErrorCode.Should().Be("BOOKING_ROUND_TRIP_INVALID");
+        exception.Which.Errors.Should().ContainSingle(error =>
+            error.Field == "return.tripId"
+            && error.Message == "Return trip does not use the configured return route.");
+
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default);
+        await _paymentClient.DidNotReceiveWithAnyArgs()
+            .BatchChargeAsync(default, default!, default!, default!, default);
+    }
+
+    [Fact]
     public async Task Handle_BatchChargeFails_ReleasesBothLocksAndDoesNotConfirm()
     {
         _clock.UtcNow.Returns(DateTimeOffset.UtcNow);
@@ -585,12 +607,21 @@ public class CreateRoundTripBookingCommandHandlerTests
         _tripClient.GetTripSnapshotAsync(OutboundTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(OutboundTrip);
         _tripClient.GetTripSnapshotAsync(ReturnTripId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns(ReturnTrip);
         _tripClient.LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default)
-            .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.SeatUnavailable(["A01"]));
+            .ReturnsForAnyArgs(new LockRoundTripSeatsOutcome.SeatUnavailable(
+            [
+                new RoundTripSeatConflict("outbound.seatNumbers", "A01"),
+                new RoundTripSeatConflict("return.seatNumbers", "B02"),
+            ]));
 
         var act = () => BuildSut().Handle(BuildCommand(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<ConflictException>()
-            .Where(e => e.ErrorCode == "BOOKING_SEAT_UNAVAILABLE");
+        var exception = await act.Should().ThrowAsync<ConflictException>();
+        exception.Which.ErrorCode.Should().Be("BOOKING_SEAT_UNAVAILABLE");
+        exception.Which.Errors.Should().BeEquivalentTo(
+        [
+            new ValidationError("outbound.seatNumbers", "A01"),
+            new ValidationError("return.seatNumbers", "B02"),
+        ]);
 
         await _bookingService.DidNotReceiveWithAnyArgs()
             .ReleaseSeatsAsync(default, default, default!, default);

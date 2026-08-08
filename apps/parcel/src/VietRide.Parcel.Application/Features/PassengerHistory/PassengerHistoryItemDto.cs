@@ -17,4 +17,6 @@ public sealed record PassengerHistoryItemDto(
     TicketHistoryDetailsDto? Ticket,
     ParcelHistoryDetailsDto? Parcel,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    string? PaymentRedirectUrl = null);
+    string? PaymentRedirectUrl = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    PassengerTrackingTargetDto? TrackingTarget = null);

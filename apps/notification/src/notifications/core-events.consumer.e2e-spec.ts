@@ -22,7 +22,7 @@ describe('CoreEventsConsumer registration (e2e)', () => {
 
     await moduleRef.init();
 
-    expect(subscribe).toHaveBeenCalledTimes(5);
+    expect(subscribe).toHaveBeenCalledTimes(6);
     expect(subscribe).toHaveBeenCalledWith(
       'notification:booking-cancelled',
       BOOKING_CANCELLED_ROUTING_KEY,

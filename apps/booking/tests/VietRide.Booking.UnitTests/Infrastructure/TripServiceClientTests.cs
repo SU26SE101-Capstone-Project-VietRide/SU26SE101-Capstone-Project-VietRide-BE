@@ -221,8 +221,8 @@ public class TripServiceClientTests
                 message = "Seat unavailable.",
                 fields = new[]
                 {
-                    new { field = "seatNumbers", message = "A01" },
-                    new { field = "seatNumbers", message = "B01" },
+                    new { field = "outbound.seatNumbers", message = "A01" },
+                    new { field = "return.seatNumbers", message = "B01" },
                 },
             },
         }, JsonOptions);
@@ -232,7 +232,12 @@ public class TripServiceClientTests
             Guid.NewGuid(), ["A01"], Guid.NewGuid(), ["B01"], UserId, "round-idem-3");
 
         result.Should().BeOfType<LockRoundTripSeatsOutcome.SeatUnavailable>();
-        ((LockRoundTripSeatsOutcome.SeatUnavailable)result).UnavailableSeats.Should().BeEquivalentTo(["A01", "B01"]);
+        var unavailable = (LockRoundTripSeatsOutcome.SeatUnavailable)result;
+        unavailable.Conflicts.Should().BeEquivalentTo(
+        [
+            new RoundTripSeatConflict("outbound.seatNumbers", "A01"),
+            new RoundTripSeatConflict("return.seatNumbers", "B01"),
+        ]);
     }
 
     [Fact]

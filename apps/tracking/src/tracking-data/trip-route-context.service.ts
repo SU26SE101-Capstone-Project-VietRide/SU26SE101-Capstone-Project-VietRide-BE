@@ -48,7 +48,7 @@ export class TripRouteContextService {
   ) {}
 
   async getRouteContext(tripId: string): Promise<PublicTripRouteContextResult> {
-    const result = await this.routeGeometryProvider.getDetailedRouteGeometry(tripId);
+    const result = await this.routeGeometryProvider.getDetailedRouteGeometry(tripId, { bypassCache: true });
     if (result.kind === 'not_found') {
       throw new NotFoundException({
         errorCode: 'TRIP_NOT_FOUND',
@@ -84,9 +84,12 @@ export class TripRouteContextService {
       destinationStation: mapStation(snapshot.destinationStation),
     };
 
+    const etagHash = createHash('sha256');
+    if (snapshot.effectiveRouteId) etagHash.update(snapshot.effectiveRouteId);
+    etagHash.update(JSON.stringify(data));
     return {
       data,
-      etag: `"${createHash('sha256').update(JSON.stringify(data)).digest('hex')}"`,
+      etag: `"${etagHash.digest('hex')}"`,
     };
   }
 

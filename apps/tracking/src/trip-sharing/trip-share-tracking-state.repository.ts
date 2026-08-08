@@ -22,6 +22,8 @@ export class TripShareTrackingStateRepository {
     const parsed = this.parse(payload, EtaResponseSchema);
     if (!parsed
       || parsed.tripId.toLowerCase() !== tripId.toLowerCase()
+      || parsed.targetKind !== 'STOP'
+      || !parsed.stopId
       || parsed.stopId.toLowerCase() !== stopId.toLowerCase()) {
       return null;
     }
