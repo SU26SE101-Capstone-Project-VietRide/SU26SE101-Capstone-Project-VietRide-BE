@@ -352,7 +352,7 @@ parallel-safe.
 | 44.6 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 review patch round; human-approved bootstrap retry and command corrections. |
 | 44.7 | ✅ done | APPROVE | 2026-08-08 | Approved after canonical access correction; human-approved command wrappers. |
 | 44.8 | ✅ done | APPROVE | 2026-08-09 | Static PROJECT 28/28; isolated real-store E2E PASS with identical checksum, two runs under 120s, idempotent rerun, RAG/Booking/Parcel readiness, and cleanup proof. |
-| 44.9 | ⬜ todo | — | — | — |
+| 44.9 | ✅ done | APPROVE | 2026-08-09 | Runbook records the verified E2E transcript, safe credential handling, exact commands/markers, rerun behavior, and `/audit-day 44` closeout ownership. |
 
 ## Closed decisions
 
