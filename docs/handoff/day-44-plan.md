@@ -191,7 +191,7 @@ only demo seed/test assets, isolated Compose config, `seed:demo`/`e2e:day44` scr
 | depends on | 44.1. |
 | parallel-safe | yes — disjoint from Task 44.2; later feature modules depend on its IDs. |
 | verification tier | `FOCUSED` |
-| verification commands | `node --test --require ts-node/register/transpile-only --test-name-pattern="Day 44 identity fixture planner" scripts/day44/seed-identity.test.ts` (at least 1 test must execute and pass)<br>`npx tsc --noEmit --target ES2022 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck --ignoreDeprecations 6.0 scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts`<br>`npx eslint scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts`<br>`npx prettier --check scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts`<br>`git diff --check -- scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts` |
+| verification commands | `$previousTsNodeCompilerOptions=$env:TS_NODE_COMPILER_OPTIONS; $env:TS_NODE_COMPILER_OPTIONS='{"module":"commonjs","moduleResolution":"node","ignoreDeprecations":"6.0"}'; try { node --test --require ts-node/register/transpile-only --test-name-pattern="Day 44 identity fixture planner" scripts/day44/seed-identity.test.ts; $testExit=$LASTEXITCODE } finally { $env:TS_NODE_COMPILER_OPTIONS=$previousTsNodeCompilerOptions }; exit $testExit` (human-approved command-ledger correction on 2026-08-08; at least 1 test must execute and pass)<br>`npx tsc --noEmit --target ES2022 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck --ignoreDeprecations 6.0 scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts`<br>`npx eslint scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts`<br>`npx prettier --check scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts`<br>`git diff --check -- scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts` |
 | full regression owner | `audit-day` |
 | invariant flags | LF `.ts`; CRLF `.cs` untouched; CPM no `Version=`; MediatR v11; BCrypt cost 12 through existing Identity lifecycle; no banned/new dependency; no plaintext password/token/OTP/hash; exact role/operator scoping; no cross-DB FK/query/transaction. |
 | acceptance | Focused tests prove the module plans the exact manifest state: existing bootstrap System Admin; Operators A/B/C; 3 Operator Admins; 9 Drivers; 3 Assistants; 10 Passengers; unchanged Starter plus fixed Business Demo; A/B Business and C Starter subscription shapes; calculated per-plan counters including ICT-month Trip counter input. It rejects Production, missing password, non-future start date, random/unlisted IDs, foreign natural-key collisions, and any full-state mismatch. Tests prove it never logs credential material. Real migrated-store counts/state are owned by Task 44.8, not claimed here. |
@@ -341,7 +341,7 @@ parallel-safe.
 |---|---|---|---|---|
 | 44.1 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 patch round; later human-approved E.164 corrective patch re-reviewed. |
 | 44.2 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 patch round; human-approved README/schema header scope expansion. |
-| 44.3 | ⬜ todo | — | — | — |
+| 44.3 | ✅ done | APPROVE | 2026-08-08 | Approved after 1 patch round; human-approved focused-test command correction. |
 | 44.4 | ⬜ todo | — | — | — |
 | 44.5 | ⬜ todo | — | — | Commerce owns paid saga/Invoice consistency. |
 | 44.6 | ⬜ todo | — | — | One-time OpenRouter generation + committed provenance. |
