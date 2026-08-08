@@ -53,6 +53,7 @@ services:
     container_name: vietride_postgres
     profiles: ['infra', 'app']
     restart: unless-stopped
+    command: ['postgres', '-c', 'timezone=Asia/Ho_Chi_Minh']
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-vietride}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vietride_dev}
