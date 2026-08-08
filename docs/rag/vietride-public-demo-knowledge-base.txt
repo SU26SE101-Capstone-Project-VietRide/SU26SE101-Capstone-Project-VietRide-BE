@@ -1,0 +1,9 @@
+HƯỚNG DẪN HÀNH KHÁCH VIETRIDE - DAY 44
+
+Hành khách dùng VietRide để tìm chuyến theo điểm đi, điểm đến và ngày khởi hành. Khi đặt vé, hành khách chọn chuyến, điểm đón, điểm trả, ghế, voucher nếu phù hợp và phương thức thanh toán. Mỗi booking được chọn tối đa 5 ghế.
+
+Ghế được khóa tạm thời trong 10 phút trong lúc hành khách hoàn tất thanh toán. Vé điện tử và mã QR được cấp sau khi thanh toán thành công. Hành khách có thể theo dõi xe theo thời gian thực khi chuyến và thiết bị GPS của tài xế đang ở trạng thái phù hợp.
+
+Điểm đón hoặc điểm trả chỉ được thay đổi trước giờ khởi hành ít nhất 2 giờ. Việc hủy vé phụ thuộc vào trạng thái booking, trạng thái chuyến và chính sách hoàn tiền hiện hành. Booking không thể bị hủy sau khi chuyến đã IN_PROGRESS hoặc COMPLETED.
+
+Ví hành khách có thể được dùng để thanh toán booking hoặc parcel. Tiền hoàn từ booking hoặc parcel được trả về ví theo quy tắc hoàn tiền. Khi cần hỗ trợ, hành khách nên cung cấp booking code và không chia sẻ mật khẩu, OTP hoặc mã QR vé với người không có trách nhiệm.

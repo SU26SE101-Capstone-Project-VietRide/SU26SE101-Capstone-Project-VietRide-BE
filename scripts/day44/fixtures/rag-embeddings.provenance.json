@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "generatorVersion": 1,
+  "provider": "openrouter",
+  "endpoint": "https://openrouter.ai/api/v1/embeddings",
+  "model": "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+  "dimension": 2048,
+  "documents": [
+    {
+      "path": "docs/rag/vietride-public-demo-knowledge-base.txt",
+      "contentSha256": "b8eaafdf39c4f6c779ba27716ec263d51430f9cb4c229a0fc74dea28256e5713"
+    },
+    {
+      "path": "docs/rag/vietride-operator-demo-knowledge-base.txt",
+      "contentSha256": "8ad5d88f831f11cb9d9e68e7726378550fc0462f0d0c1fc905ef3547f5ea0eea"
+    },
+    {
+      "path": "docs/rag/vietride-admin-demo-knowledge-base.txt",
+      "contentSha256": "a459143fba187954b96242748065d1ee24936d45136d609b792a24ce0bd2ec1f"
+    }
+  ],
+  "fixtureSha256": "25cc6954a05ee42c8ff4cdb8a02225427287cedbfd3be1f02359c5fda72753f0"
+}
