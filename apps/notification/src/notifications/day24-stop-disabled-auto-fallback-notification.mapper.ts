@@ -16,7 +16,7 @@ function mapParsedFallback(
     userId: payload.userId,
     type: NotificationType.STOP_DISABLED,
     title: 'Đã tự động chuyển về bến',
-    body: `Vì bạn không phản hồi, vé ${payload.bookingId} đã được chuyển về bến ${payload.fallbackStationId}.`,
+    body: 'Vì bạn không phản hồi, vé của bạn đã được chuyển về bến thay thế.',
     data: {
       eventId: payload.eventId,
       occurredAt: payload.occurredAt,

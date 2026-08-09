@@ -73,6 +73,7 @@ describe('CoreEventsConsumer', () => {
       title: 'Đặt vé thành công',
       body: 'Ve #VR123 da duoc xac nhan.',
       data: { bookingId: BOOKING_ID },
+      action: { type: 'OPEN_BOOKING_DETAIL', params: { bookingId: BOOKING_ID } },
       readAt: null,
       createdAt: '2026-06-01T10:00:00.000Z',
     });
@@ -130,6 +131,7 @@ describe('CoreEventsConsumer', () => {
       title: 'Chuyến đi bị gián đoạn',
       body: 'Vé bị gián đoạn.',
       data: { bookingId: BOOKING_ID },
+      action: { type: 'OPEN_BOOKING_DETAIL', params: { bookingId: BOOKING_ID } },
       readAt: null,
       createdAt: '2026-07-30T03:00:02.000Z',
     });

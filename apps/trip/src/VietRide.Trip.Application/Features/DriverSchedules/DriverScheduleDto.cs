@@ -13,4 +13,5 @@ public sealed record DriverScheduleDto(
     DateOnly? ValidUntil,
     bool IsActive,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    long? BaseFare = null);

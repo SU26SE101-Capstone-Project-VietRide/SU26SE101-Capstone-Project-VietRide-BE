@@ -16,5 +16,8 @@ public sealed class CreateDriverScheduleValidator : AbstractValidator<CreateDriv
         RuleFor(command => command.ValidUntil)
             .GreaterThanOrEqualTo(command => command.ValidFrom)
             .When(command => command.ValidUntil.HasValue);
+        RuleFor(command => command.BaseFare)
+            .GreaterThanOrEqualTo(0)
+            .When(command => command.BaseFare.HasValue);
     }
 }

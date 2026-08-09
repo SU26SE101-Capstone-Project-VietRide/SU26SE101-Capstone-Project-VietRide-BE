@@ -20,6 +20,7 @@ import { NotificationsRepository } from './notifications.repository';
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const NOTIFICATION_ID = '22222222-2222-4222-8222-222222222222';
 const DELIVERY_ID = '33333333-3333-4333-8333-333333333333';
+const BOOKING_ID = '44444444-4444-4444-8444-444444444444';
 const FCM_TOKEN = 'fcm-token-redacted-in-logs';
 
 describe('FcmPushWorker', () => {
@@ -84,7 +85,9 @@ describe('FcmPushWorker', () => {
         notificationId: NOTIFICATION_ID,
         type: 'NOTIFICATION',
         notificationType: NotificationType.BOOKING_CONFIRMED,
-        bookingId: 'VR123',
+        actionType: 'OPEN_BOOKING_DETAIL',
+        actionParams: JSON.stringify({ bookingId: BOOKING_ID }),
+        bookingId: BOOKING_ID,
       }),
     });
     expect(repository.markDeliverySent).toHaveBeenCalledWith(DELIVERY_ID, 'firebase-message-id');
@@ -185,7 +188,11 @@ function createNotification(type: NotificationType = NotificationType.BOOKING_CO
     type,
     title: 'Dat ve thanh cong',
     body: 'Ve cua ban da duoc xac nhan.',
-    data: { bookingId: 'VR123' },
+    data: {
+      bookingId: BOOKING_ID,
+      actionType: 'UNTRUSTED_LEGACY_OVERRIDE',
+      actionParams: '{"bookingId":"untrusted"}',
+    },
     dedupeKey: null,
     readAt: null,
     createdAt: new Date('2026-06-01T10:00:00.000Z'),

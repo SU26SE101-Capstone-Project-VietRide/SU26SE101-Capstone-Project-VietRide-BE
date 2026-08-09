@@ -47,4 +47,26 @@ public sealed class CreateDriverScheduleValidatorTests
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(error => error.PropertyName == "DayOfWeek");
     }
+
+    [Fact]
+    public async Task Validate_NegativeBaseFare_ReturnsValidationError()
+    {
+        var command = new CreateDriverScheduleCommand(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            null,
+            Guid.NewGuid(),
+            null,
+            [1],
+            new TimeOnly(8, 0),
+            new DateOnly(2026, 6, 15),
+            null,
+            true,
+            -1);
+
+        var result = await new CreateDriverScheduleValidator().ValidateAsync(command);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error => error.PropertyName == nameof(CreateDriverScheduleCommand.BaseFare));
+    }
 }

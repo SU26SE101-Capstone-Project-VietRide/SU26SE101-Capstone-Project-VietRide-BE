@@ -2,6 +2,7 @@ using System.Text.Json;
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -99,7 +100,8 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
             request.DepartureTime,
             request.ValidFrom,
             request.ValidUntil,
-            request.IsActive);
+            request.IsActive,
+            request.BaseFare.HasValue ? Money.FromRaw(request.BaseFare.Value) : null);
 
         await driverScheduleRepository.AddAsync(schedule, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);

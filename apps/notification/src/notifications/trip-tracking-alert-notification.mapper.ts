@@ -12,6 +12,7 @@ import {
 } from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
+import { formatTripLabel } from './notification-display';
 import {
   TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY,
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
@@ -308,7 +309,7 @@ function mapTripCargoThresholdCrossed(
     userId,
     type: NotificationType.CARGO_NEAR_FULL_ALERT,
     title: 'Khoang hàng gần đầy',
-    body: `Chuyến ${payload.tripId} đã sử dụng ${payload.percentFull}% sức chứa khoang hàng (${payload.loadedWeightKg}/${payload.maxCargoWeightKg} kg).`,
+    body: `Chuyến xe đã sử dụng ${payload.percentFull}% sức chứa khoang hàng (${payload.loadedWeightKg}/${payload.maxCargoWeightKg} kg).`,
     data: {
       eventId: payload.eventId,
       occurredAt: payload.occurredAt,
@@ -387,7 +388,7 @@ function mapBoardingStarted(
     userId,
     type: NotificationType.TRIP_BOARDING_REMINDER,
     title: 'Chuyến xe bắt đầu đón khách',
-    body: `${formatTripLabel(payload)} đã bắt đầu lên xe. Vui lòng sẵn sàng tại điểm đón.`,
+    body: `${formatTripLabel(payload.routeName)} đã bắt đầu lên xe. Vui lòng sẵn sàng tại điểm đón.`,
     data: buildTripData(payload),
   };
 }
@@ -400,7 +401,7 @@ function mapRouteChanged(
     userId,
     type: NotificationType.TRIP_ROUTE_CHANGED,
     title: 'Lộ trình chuyến xe đã thay đổi',
-    body: `${formatTripLabel(payload)} có điều chỉnh lộ trình. Vui lòng kiểm tra thông tin mới.`,
+    body: `${formatTripLabel()} có điều chỉnh lộ trình. Vui lòng kiểm tra thông tin mới.`,
     data: buildTripData(payload),
   };
 }
@@ -413,7 +414,7 @@ function mapScheduleChanged(
     userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
     title: 'Lịch làm việc của chuyến xe đã thay đổi',
-    body: `Giờ khởi hành chuyến ${payload.tripId} đã đổi sang ${payload.newDeparture}.`,
+    body: `Giờ khởi hành chuyến xe đã đổi sang ${payload.newDeparture}.`,
     data: {
       eventId: payload.eventId,
       occurredAt: payload.occurredAt,
@@ -437,7 +438,7 @@ function mapTripVehicleSwapped(
     userId,
     type: NotificationType.VEHICLE_SWAPPED,
     title: 'Phương tiện chuyến xe đã thay đổi',
-    body: `Phương tiện chuyến ${payload.tripId} đã đổi từ ${payload.oldVehiclePlateNumber} sang ${payload.newVehiclePlateNumber}.`,
+    body: `Phương tiện chuyến xe đã đổi từ ${payload.oldVehiclePlateNumber} sang ${payload.newVehiclePlateNumber}.`,
     data: {
       eventId: payload.eventId,
       occurredAt: payload.occurredAt,
@@ -465,7 +466,7 @@ function mapTripDelayed(
     userId,
     type: NotificationType.TRIP_DELAYED,
     title: 'Chuyến xe bị trễ',
-    body: `${formatTripLabel(payload)} đang bị trễ.${delayText}`,
+    body: `${formatTripLabel()} đang bị trễ.${delayText}`,
     data: buildTripData(payload),
   };
 }
@@ -478,7 +479,7 @@ export function mapIncidentReportedToNotifications(
     userId,
     type: NotificationType.INCIDENT_REPORTED,
     title: 'Có sự cố trên chuyến xe',
-    body: `Chuyến ${payload.tripId} vừa ghi nhận sự cố: ${payload.category}.`,
+    body: `Chuyến xe vừa ghi nhận sự cố: ${payload.category}.`,
     data: {
       incidentId: payload.incidentId,
       tripId: payload.tripId,
@@ -498,7 +499,7 @@ function mapOffRoute(
     userId,
     type: NotificationType.OFF_ROUTE_ALERT,
     title: 'Cảnh báo xe lệch lộ trình',
-    body: `${formatTripLabel(payload)} đang có dấu hiệu lệch lộ trình.`,
+    body: `${formatTripLabel()} đang có dấu hiệu lệch lộ trình.`,
     data: buildTripData(payload),
   };
 }
@@ -527,9 +528,9 @@ function mapApproachingStop(
 }
 
 function mapStopDisabled(payload: BookingStopDisabledAffectedEvent): CreateNotificationDto[] {
-  const stopLabel = `điểm dừng ${payload.stopId}`;
+  const stopLabel = 'Điểm dừng của bạn';
   const replacementText = payload.replacedByStopId
-    ? ` Điểm dừng thay thế: ${payload.replacedByStopId}.`
+    ? ' Nhà xe đã bố trí điểm dừng thay thế.'
     : '';
 
   return payload.recipientUserIds.map((userId) => ({
@@ -605,10 +606,6 @@ function collectRecipientUserIds(payload: RecipientPayload): string[] {
 
 function isString(value: unknown): value is string {
   return typeof value === 'string';
-}
-
-function formatTripLabel(payload: BaseTripAlertPayload): string {
-  return payload.routeName ? `Chuyến ${payload.routeName}` : `Chuyến ${payload.tripId}`;
 }
 
 function buildTripData(payload: BaseTripAlertPayload): Record<string, unknown> {

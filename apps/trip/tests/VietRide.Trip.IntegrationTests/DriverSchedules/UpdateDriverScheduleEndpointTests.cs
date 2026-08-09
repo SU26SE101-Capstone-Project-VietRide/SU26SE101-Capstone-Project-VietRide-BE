@@ -40,11 +40,14 @@ public sealed class UpdateDriverScheduleEndpointTests
     {
         var omitted = JsonSerializer.Deserialize<UpdateDriverScheduleRequest>("{\"isActive\":true}", WebOptions())!;
         var explicitNull = JsonSerializer.Deserialize<UpdateDriverScheduleRequest>("{\"vehicleId\":null}", WebOptions())!;
+        var clearFare = JsonSerializer.Deserialize<UpdateDriverScheduleRequest>("{\"baseFare\":null}", WebOptions())!;
 
         omitted.IsActiveSpecified.Should().BeTrue();
         omitted.VehicleIdSpecified.Should().BeFalse();
         explicitNull.VehicleIdSpecified.Should().BeTrue();
         explicitNull.VehicleId.Should().BeNull();
+        clearFare.BaseFareSpecified.Should().BeTrue();
+        clearFare.BaseFare.Should().BeNull();
         Action unknown = () => JsonSerializer.Deserialize<UpdateDriverScheduleRequest>("{\"routeId\":null}", WebOptions());
         unknown.Should().Throw<JsonException>();
     }
@@ -122,6 +125,7 @@ public sealed class UpdateDriverScheduleEndpointTests
             var preflight = await waiterRepository.GetByIdAsync(seed.ScheduleId, CancellationToken.None);
             preflight.Should().NotBeNull();
             preflight!.DepartureTime.Should().Be(new TimeOnly(8, 0));
+            preflight.BaseFare.Should().Be(Money.FromRaw(400_000));
 
             await using var winnerTransaction = await winnerDb.Database.BeginTransactionAsync();
             var winner = await winnerRepository.AcquireOwnedForUpdateAsync(seed.ScheduleId, seed.OperatorId);
@@ -193,6 +197,7 @@ public sealed class UpdateDriverScheduleEndpointTests
             var persisted = await verification.DriverSchedules.AsNoTracking()
                 .SingleAsync(schedule => schedule.Id == seed.ScheduleId);
             persisted.DepartureTime.Should().Be(new TimeOnly(9, 0));
+            persisted.BaseFare.Should().Be(Money.FromRaw(400_000));
             persisted.IsActive.Should().BeTrue("the stale handler transaction must roll back without overwriting the winner");
         }
         finally
@@ -323,7 +328,8 @@ public sealed class UpdateDriverScheduleEndpointTests
             new TimeOnly(8, 0),
             new DateOnly(2026, 7, 1),
             validUntil: null,
-            isActive: true);
+            isActive: true,
+            baseFare: Money.FromRaw(400_000));
 
         dbContext.AddRange(origin, destination, route, schedule);
         return new ScheduleSeed(operatorId, schedule.Id);

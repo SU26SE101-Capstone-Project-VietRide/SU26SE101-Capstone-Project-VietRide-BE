@@ -4419,7 +4419,24 @@ Auth: required.
 
 Query: `unreadOnly?`, `page?`, `pageSize?`.
 
-Response `200`: paged notifications.
+Response `200`: paged notifications. Each item retains the existing `id`, `userId`, `type`,
+`title`, `body`, `data`, `readAt`, and `createdAt` fields and adds required semantic navigation:
+
+```json
+{
+  "action": {
+    "type": "OPEN_BOOKING_DETAIL",
+    "params": { "bookingId": "uuid" }
+  }
+}
+```
+
+Allowed action types are `OPEN_BOOKING_DETAIL`, `OPEN_CREW_TRIP_BOOKING`, `OPEN_TRIP_DETAIL`,
+`OPEN_TRIP_TRACKING`, `OPEN_PARCEL_DETAIL`, `OPEN_WALLET`, `OPEN_SUBSCRIPTION`,
+`OPEN_SHUTTLE_TRACKING`, and `NONE`. `NONE` always has empty `params`. Missing or malformed legacy
+navigation data resolves to `NONE`; it never fails the inbox read. IDs remain in `data` and
+`action.params` for client navigation but system-generated `title`/`body` use human-readable
+codes/names or a natural-language fallback instead of raw UUIDs. Existing rows are not backfilled.
 
 ### POST `/v1/notifications/{notificationId}/read`
 
@@ -7361,13 +7378,14 @@ Response `200`: updated `VehicleDto` in the ADR 0004 success envelope.
   "departureTime": "08:00:00",
   "validFrom": "2026-07-01",
   "validUntil": "2026-12-31",
+  "baseFare": 400000,
   "isActive": true,
   "createdAt": "2026-06-11T10:00:00Z",
   "updatedAt": "2026-06-11T10:00:00Z"
 }
 ```
 
-`vehicleId`, `assistantUserId`, and `validUntil` are nullable. `dayOfWeek` is a JSON array using `1=Monday`, `2=Tuesday`, ..., `7=Sunday`. `departureTime` is a timezone-free `TIME` value with local ICT semantics.
+`vehicleId`, `assistantUserId`, `validUntil`, and `baseFare` are nullable. `dayOfWeek` is a JSON array using `1=Monday`, `2=Tuesday`, ..., `7=Sunday`. `departureTime` is a timezone-free `TIME` value with local ICT semantics. `baseFare` is an optional recurring override in VND; generated Trips use `DriverSchedule.baseFare ?? Route.baseFare`.
 
 ### POST `/v1/operator/driver-schedules`
 
@@ -7386,6 +7404,7 @@ Request:
   "departureTime": "08:00:00",
   "validFrom": "2026-07-01",
   "validUntil": "2026-12-31",
+  "baseFare": 400000,
   "isActive": true
 }
 ```
@@ -7393,6 +7412,7 @@ Request:
 Validation:
 - `dayOfWeek` must be a non-empty JSON array containing only integers from `1` through `7`. An empty array, a non-integer entry, or an entry outside `1..7` returns `422 VALIDATION_ERROR` with `error.fields.dayOfWeek`.
 - `validUntil`, when present, must be on or after `validFrom`; otherwise return `422 VALIDATION_ERROR` with `error.fields.validUntil`.
+- `baseFare`, when present, must be a non-negative BIGINT-compatible VND amount persisted to the đồng. Omitted or `null` means future generated Trips fall back to `Route.baseFare`.
 - `routeId` must resolve to an active Route owned by the caller's operator. A missing, inactive, or cross-operator Route returns `404 ROUTE_NOT_FOUND`.
 - `vehicleId`, when present, must resolve to a non-soft-deleted Vehicle owned by the caller's operator; otherwise return `404 VEHICLE_NOT_FOUND`.
 - `driverUserId` must resolve through Identity `GET /internal/v1/users/{userId}` to a user with `role=DRIVER` under the caller operator. Missing Identity user, wrong role, wrong operator, or upstream logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields.driverUserId`.
@@ -7418,12 +7438,14 @@ Request is a partial update with exactly these fields:
   "assistantUserId": null,
   "vehicleId": "uuid",
   "validUntil": null,
+  "baseFare": 420000,
   "isActive": true
 }
 ```
 
 `routeId` and `validFrom` are not editable. Omitted means unchanged. Explicit `null` clears only
-`assistantUserId`, `vehicleId`, or `validUntil`; `validUntil:null` restores an open-ended window.
+`assistantUserId`, `vehicleId`, `validUntil`, or `baseFare`; `validUntil:null` restores an open-ended
+window and `baseFare:null` restores Route-fare fallback for Trips generated later.
 Explicit `null` for `departureTime`, `dayOfWeek`, `driverUserId`, or `isActive`, and empty,
 unknown-only, or malformed bodies return `422 VALIDATION_ERROR`. Missing/invalid `applyTo` also
 returns `422 VALIDATION_ERROR`. Changing `departureTime`/`dayOfWeek` through `ALL_PENDING` is the
@@ -7443,13 +7465,17 @@ Scope behavior:
   not call Booking because no generated Trip is mutated. With
   `vehicleId:null`, it clears only the schedule vehicle and every attempted date is skipped using
   the existing `TripGenerationSkipLog` reason `OTHER` with a message identifying that no vehicle
-  is assigned; no new Trip is generated until a vehicle is assigned.
+  is assigned; no new Trip is generated until a vehicle is assigned. A supplied `baseFare` is set
+  or cleared only in this scope; same-value is a no-op. Each newly generated Trip snapshots
+  `DriverSchedule.baseFare ?? Route.baseFare` once.
 - `ALL_PENDING` applies the effective schedule values to every linked Trip whose status is
   `SCHEDULED|BOARDING`. `vehicleId:null` is rejected with `422 VALIDATION_ERROR` before any
   Booking call or mutation because `Trip.vehicleId` is required. Removing a day cancels pending
   Trips that no longer match. Shortening `validUntil` or setting `isActive=false` only stops future
   generation and never cancels/mutates an already generated Trip; clearing `validUntil` or
-  reactivating may generate uncovered future dates only.
+  reactivating may generate uncovered future dates only. Supplying `baseFare` with `ALL_PENDING`
+  returns `422 VALIDATION_ERROR` on `baseFare` before any write or downstream call; generated Trip
+  fares are changed only through the existing Trip PATCH contract.
 
 Validation/execution order is fixed: tenant-scoped schedule load (missing/cross-tenant is masked
 `404 RESOURCE_NOT_FOUND`) → normalize and compute actual changes → same-value no-op `200` → local

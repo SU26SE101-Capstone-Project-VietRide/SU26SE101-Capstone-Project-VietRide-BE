@@ -40,6 +40,7 @@ public sealed class TripGenerationServiceTests
         firstTrip.DepartureDateTime.Offset.Should().Be(TimeSpan.Zero);
         firstTrip.DepartureDateTime.Should().Be(BuildUtcDepartureDateTime(new DateOnly(2026, 6, 16), fixture.Schedule.DepartureTime));
         firstTrip.EstimatedArrivalTime.Should().Be(firstTrip.DepartureDateTime.AddMinutes(180));
+        firstTrip.BaseFare.Amount.Should().Be(250_000);
 
         var firstTripStops = fixture.TripStops.Items
             .Where(stop => stop.TripId == firstTrip.Id)
@@ -55,6 +56,19 @@ public sealed class TripGenerationServiceTests
         firstTripStops[1].AllowDropoff.Should().BeTrue();
         firstTripStops[1].DistanceFromOriginKm.Should().Be(120.5m);
         firstTripStops[1].EstimatedArrivalTime.Should().Be(firstTrip.DepartureDateTime.AddMinutes(210));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_ScheduleBaseFareOverride_SnapshotsOverrideIntoTrips()
+    {
+        var fixture = TripGenerationFixture.Create(
+            routeDurationMinutes: 180,
+            scheduleBaseFare: 400_000);
+
+        await fixture.Service.GenerateAsync(fixture.Schedule.Id, CancellationToken.None);
+
+        fixture.Trips.Items.Should().NotBeEmpty();
+        fixture.Trips.Items.Should().OnlyContain(trip => trip.BaseFare.Amount == 400_000);
     }
 
     [Fact]
@@ -310,7 +324,8 @@ public sealed class TripGenerationServiceTests
             TimeOnly? departureTime = null,
             DateOnly? validFrom = null,
             DateOnly? validUntil = null,
-            ISubscriptionQuotaClient? quotaClient = null)
+            ISubscriptionQuotaClient? quotaClient = null,
+            long? scheduleBaseFare = null)
         {
             var operatorId = Guid.NewGuid();
             var route = Route.Create(
@@ -339,7 +354,8 @@ public sealed class TripGenerationServiceTests
                 departureTime ?? new TimeOnly(8, 0),
                 validFrom ?? new DateOnly(2026, 6, 15),
                 validUntil ?? new DateOnly(2026, 7, 31),
-                isActive: true);
+                isActive: true,
+                scheduleBaseFare.HasValue ? Money.FromRaw(scheduleBaseFare.Value) : null);
 
             var schedules = new InMemoryDriverScheduleRepository([schedule]);
             var routes = new InMemoryRouteRepository([route]);

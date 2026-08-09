@@ -12,4 +12,5 @@ public sealed record CreateDriverScheduleCommand(
     TimeOnly DepartureTime,
     DateOnly ValidFrom,
     DateOnly? ValidUntil,
-    bool IsActive) : IRequest<DriverScheduleDto>;
+    bool IsActive,
+    long? BaseFare = null) : IRequest<DriverScheduleDto>;

@@ -12,6 +12,10 @@ import { EmailSendQueue } from './email-send.queue';
 import { sanitizeEmailTemplateData } from './email-sensitive-data';
 import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
+import {
+  resolveNotificationAction,
+  type NotificationActionDto,
+} from './notification-action';
 import { NotificationsRepository } from './notifications.repository';
 
 export interface NotificationItemDto {
@@ -21,6 +25,7 @@ export interface NotificationItemDto {
   title: string;
   body: string;
   data: unknown;
+  action: NotificationActionDto;
   readAt: string | null;
   createdAt: string;
 }
@@ -201,6 +206,7 @@ export class NotificationsService {
       title: notification.title,
       body: notification.body,
       data: notification.data ?? null,
+      action: resolveNotificationAction(notification.type, notification.data),
       readAt: notification.readAt ? notification.readAt.toISOString() : null,
       createdAt: notification.createdAt.toISOString(),
     };

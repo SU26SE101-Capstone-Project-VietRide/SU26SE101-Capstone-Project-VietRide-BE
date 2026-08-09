@@ -48,24 +48,24 @@ const contentByRoutingKey: Record<
 > = {
   [TRIP_ROUTE_CHANGE_PROPOSAL_CREATED_ROUTING_KEY]: {
     title: 'Có đề xuất đổi lộ trình mới',
-    body: (event) => `Chuyến ${event.tripId} có đề xuất đổi lộ trình: ${event.reason}.`,
+    body: (event) => `Chuyến xe có đề xuất đổi lộ trình: ${event.reason}.`,
   },
   [TRIP_ROUTE_CHANGE_PROPOSAL_APPROVED_ROUTING_KEY]: {
     title: 'Đề xuất đổi lộ trình đã được duyệt',
-    body: (event) => `Đề xuất đổi lộ trình cho chuyến ${event.tripId} đã được duyệt.`,
+    body: () => 'Đề xuất đổi lộ trình cho chuyến xe đã được duyệt.',
   },
   [TRIP_ROUTE_CHANGE_PROPOSAL_REJECTED_ROUTING_KEY]: {
     title: 'Đề xuất đổi lộ trình đã bị từ chối',
     body: (event) =>
-      `Đề xuất đổi lộ trình cho chuyến ${event.tripId} đã bị từ chối${event.rejectionReason ? `: ${event.rejectionReason}` : '.'}`,
+      `Đề xuất đổi lộ trình cho chuyến xe đã bị từ chối${event.rejectionReason ? `: ${event.rejectionReason}` : '.'}`,
   },
   [TRIP_ROUTE_CHANGE_PROPOSAL_SUPERSEDED_ROUTING_KEY]: {
     title: 'Đề xuất đổi lộ trình đã được thay thế',
-    body: (event) => `Đề xuất đổi lộ trình cho chuyến ${event.tripId} đã được thay thế.`,
+    body: () => 'Đề xuất đổi lộ trình cho chuyến xe đã được thay thế.',
   },
   [TRIP_ROUTE_CHANGE_PROPOSAL_EXPIRED_ROUTING_KEY]: {
     title: 'Đề xuất đổi lộ trình đã hết hiệu lực',
-    body: (event) => `Đề xuất đổi lộ trình cho chuyến ${event.tripId} đã hết hiệu lực.`,
+    body: () => 'Đề xuất đổi lộ trình cho chuyến xe đã hết hiệu lực.',
   },
 };
 
@@ -92,7 +92,7 @@ export function mapRouteChangeProposalToNotifications(
       type: notificationTypeByRoutingKey[routingKey],
       title: isCreatedConfirmation ? 'Đã gửi đề xuất đổi lộ trình' : content.title,
       body: isCreatedConfirmation
-        ? `Đề xuất đổi lộ trình cho chuyến ${event.tripId} đã được gửi thành công.`
+        ? 'Đề xuất đổi lộ trình cho chuyến xe đã được gửi thành công.'
         : content.body(event),
       data: {
         eventId: event.eventId,

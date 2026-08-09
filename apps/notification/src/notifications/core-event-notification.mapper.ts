@@ -15,6 +15,7 @@ import {
   WALLET_CREDITED_ROUTING_KEY,
   WALLET_DEBITED_ROUTING_KEY,
 } from './core-events.constants';
+import { formatBookingReference } from './notification-display';
 
 const moneyAmountSchema = z
   .union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)])
@@ -78,7 +79,7 @@ function mapBookingConfirmed(
     userId: payload.userId,
     type: NotificationType.BOOKING_CONFIRMED,
     title: 'Đặt vé thành công',
-    body: `Vé ${formatBookingLabel(payload)} đã được xác nhận.`,
+    body: `Vé ${formatBookingReference(payload.bookingCode)} đã được xác nhận.`,
     data: buildBookingData(payload),
   };
 }
@@ -88,7 +89,7 @@ function mapBookingCancelled(payload: BookingCancelledConsumerEvent): CreateNoti
     userId: payload.userId,
     type: NotificationType.BOOKING_CANCELLED,
     title: 'Vé đã bị hủy',
-    body: `Vé ${formatBookingLabel(payload)} đã bị hủy. Lý do: ${payload.cancellationReason}.`,
+    body: `Vé ${formatBookingReference(payload.bookingCode)} đã bị hủy. Lý do: ${payload.cancellationReason}.`,
     data: buildBookingData(payload),
   };
 }
@@ -124,7 +125,7 @@ function mapBookingRefunded(
     userId: payload.userId,
     type: NotificationType.BOOKING_REFUNDED,
     title: 'Hoàn tiền vé thành công',
-    body: `Khoản hoàn tiền cho vé ${formatBookingLabel(payload)} đã được ghi nhận.${refundText}`,
+    body: `Khoản hoàn tiền cho vé ${formatBookingReference(payload.bookingCode)} đã được ghi nhận.${refundText}`,
     data: buildBookingData(payload),
   };
 }
@@ -151,10 +152,6 @@ function mapWalletDebited(
     body: `Ví VietRide của bạn vừa bị trừ ${formatMoney(payload.amount)} VND.`,
     data: buildWalletData(payload),
   };
-}
-
-function formatBookingLabel(payload: { bookingCode?: string | undefined; bookingId: string }): string {
-  return payload.bookingCode ? `#${payload.bookingCode}` : payload.bookingId;
 }
 
 function formatMoney(amount: z.infer<typeof moneyAmountSchema>): string {

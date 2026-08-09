@@ -56,7 +56,7 @@ public sealed class ListDriverSchedulesHandler(
             });
         var userIds = schedules.SelectMany(x => x.AssistantUserId.HasValue ? new[] { x.DriverUserId, x.AssistantUserId.Value } : new[] { x.DriverUserId }).Distinct().ToArray();
         var users = await identityClient.GetUsersAsync(userIds, cancellationToken);
-        var items = schedules.Select(x => new DriverScheduleDetailDto(x.Id, x.OperatorId, x.RouteId, x.VehicleId, x.DriverUserId, x.AssistantUserId, DriverScheduleMapper.ToDto(x).DayOfWeek, x.DepartureTime, x.ValidFrom, x.ValidUntil, x.IsActive, x.CreatedAt, x.UpdatedAt, routeDtos.GetValueOrDefault(x.RouteId), x.VehicleId is { } vehicleId ? vehicles.GetValueOrDefault(vehicleId) : null, users.GetValueOrDefault(x.DriverUserId), x.AssistantUserId is { } assistantId ? users.GetValueOrDefault(assistantId) : null)).ToList();
+        var items = schedules.Select(x => new DriverScheduleDetailDto(x.Id, x.OperatorId, x.RouteId, x.VehicleId, x.DriverUserId, x.AssistantUserId, DriverScheduleMapper.ToDto(x).DayOfWeek, x.DepartureTime, x.ValidFrom, x.ValidUntil, x.IsActive, x.CreatedAt, x.UpdatedAt, routeDtos.GetValueOrDefault(x.RouteId), x.VehicleId is { } vehicleId ? vehicles.GetValueOrDefault(vehicleId) : null, users.GetValueOrDefault(x.DriverUserId), x.AssistantUserId is { } assistantId ? users.GetValueOrDefault(assistantId) : null, x.BaseFare?.Amount)).ToList();
         return PagedResult<DriverScheduleDetailDto>.Create(items, page, pageSize, total);
     }
 }

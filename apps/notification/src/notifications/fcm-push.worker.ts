@@ -25,6 +25,7 @@ import type {
   FcmPushProvider,
   FcmPushResult,
 } from './fcm-push.types';
+import { resolveNotificationAction } from './notification-action';
 import { NotificationsRepository } from './notifications.repository';
 import { createNotificationLogger } from './notification-logger';
 import { normalizeSafeError } from './safe-error';
@@ -199,10 +200,13 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private toFcmData(notification: Notification): Record<string, string> {
+    const action = resolveNotificationAction(notification.type, notification.data);
     const data: Record<string, string> = {
       notificationId: notification.id,
       type: this.toGenericFcmType(notification.type),
       notificationType: notification.type,
+      actionType: action.type,
+      actionParams: JSON.stringify(action.params),
     };
 
     if (
@@ -214,7 +218,7 @@ export class FcmPushWorker implements OnModuleInit, OnModuleDestroy {
         if (
           value === null ||
           value === undefined ||
-          ['notificationId', 'type', 'notificationType'].includes(key)
+          ['notificationId', 'type', 'notificationType', 'actionType', 'actionParams'].includes(key)
         )
           continue;
         data[key] = typeof value === 'string' ? value : JSON.stringify(value);

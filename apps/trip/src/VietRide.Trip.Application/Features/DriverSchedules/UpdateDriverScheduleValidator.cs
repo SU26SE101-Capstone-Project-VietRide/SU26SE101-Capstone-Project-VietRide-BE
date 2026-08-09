@@ -20,7 +20,8 @@ public sealed class UpdateDriverScheduleValidator : AbstractValidator<UpdateDriv
                 || command.AssistantUserIdSpecified
                 || command.VehicleIdSpecified
                 || command.ValidUntilSpecified
-                || command.IsActiveSpecified)
+                || command.IsActiveSpecified
+                || command.BaseFareSpecified)
             .WithMessage("At least one editable field is required.");
 
         RuleFor(command => command.DepartureTime)
@@ -44,5 +45,14 @@ public sealed class UpdateDriverScheduleValidator : AbstractValidator<UpdateDriv
         RuleFor(command => command.IsActive)
             .NotNull()
             .When(command => command.IsActiveSpecified);
+
+        RuleFor(command => command.BaseFare)
+            .GreaterThanOrEqualTo(0)
+            .When(command => command.BaseFareSpecified && command.BaseFare.HasValue);
+
+        RuleFor(command => command.BaseFare)
+            .Must(_ => false)
+            .WithMessage("baseFare can only be changed with applyTo=FUTURE_ONLY.")
+            .When(command => command.BaseFareSpecified && command.ApplyTo == UpdateDriverScheduleCommand.AllPending);
     }
 }

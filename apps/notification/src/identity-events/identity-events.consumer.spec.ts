@@ -580,6 +580,7 @@ function createNotification(
     title: 'Title',
     body: 'Body',
     data: null,
+    action: { type: 'NONE', params: {} },
     readAt: null,
     createdAt: '2026-06-01T10:00:00.000Z',
   };

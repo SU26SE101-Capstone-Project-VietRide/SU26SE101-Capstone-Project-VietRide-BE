@@ -76,7 +76,7 @@ describe('mapCoreEventToNotification', () => {
       expect.objectContaining({
         type: NotificationType.BOOKING_CANCELLED,
         title: 'Vé đã bị hủy',
-        body: `Vé ${BOOKING_ID} đã bị hủy. Lý do: Passenger cancelled.`,
+        body: 'Vé của bạn đã bị hủy. Lý do: Passenger cancelled.',
       }),
     );
   });
@@ -143,7 +143,7 @@ describe('mapCoreEventToNotification', () => {
       expect.objectContaining({
         type: NotificationType.BOOKING_REFUNDED,
         title: 'Hoàn tiền vé thành công',
-        body: `Khoản hoàn tiền cho vé ${BOOKING_ID} đã được ghi nhận. Số tiền hoàn: 120000 VND.`,
+        body: 'Khoản hoàn tiền cho vé của bạn đã được ghi nhận. Số tiền hoàn: 120000 VND.',
       }),
     );
   });

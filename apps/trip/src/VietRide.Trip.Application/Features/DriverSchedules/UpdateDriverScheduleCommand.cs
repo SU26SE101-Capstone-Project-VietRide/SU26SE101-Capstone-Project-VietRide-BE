@@ -23,7 +23,9 @@ public sealed record UpdateDriverScheduleCommand(
     bool ValidUntilSpecified,
     DateOnly? ValidUntil,
     bool IsActiveSpecified,
-    bool? IsActive) : IRequest<DriverScheduleDto>
+    bool? IsActive,
+    bool BaseFareSpecified = false,
+    long? BaseFare = null) : IRequest<DriverScheduleDto>
 {
     public const string FutureOnly = "FUTURE_ONLY";
     public const string AllPending = "ALL_PENDING";

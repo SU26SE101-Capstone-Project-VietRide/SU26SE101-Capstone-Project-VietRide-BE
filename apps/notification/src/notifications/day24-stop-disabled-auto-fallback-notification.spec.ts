@@ -47,7 +47,7 @@ describe('Day 24 fallback notification:', () => {
       userId: USER_ID,
       type: NotificationType.STOP_DISABLED,
       title: 'Đã tự động chuyển về bến',
-      body: `Vì bạn không phản hồi, vé ${BOOKING_ID} đã được chuyển về bến ${FALLBACK_STATION_ID}.`,
+      body: 'Vì bạn không phản hồi, vé của bạn đã được chuyển về bến thay thế.',
       data: {
         eventId: EVENT_ID,
         occurredAt: '2026-07-18T10:00:00+07:00',

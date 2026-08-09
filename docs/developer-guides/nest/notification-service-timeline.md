@@ -26,6 +26,7 @@
 - [x] Phase 8 — Email delivery pipeline.
 - [x] Phase 9 — Reliability, retention và observability nền.
 - [x] Phase 10 — Hoàn thiện coverage v1, Unicode, recipient routing và final acceptance.
+- [x] Phase 11 — Nội dung không lộ UUID và điều hướng ngữ nghĩa cho FE.
 
 ## Public API hiện hành
 
@@ -33,6 +34,21 @@
 - POST /v1/notifications/{notificationId}/read: owner-only, trả 204.
 - POST /v1/operator/notifications: OPERATOR_ADMIN hoặc OPERATOR_STAFF, tenant-scoped, yêu cầu Idempotency-Key; title/body là nội dung do operator nhập nên không được tự sửa.
 - Các endpoint internal recipient/snapshot không có Gateway route.
+
+## Phase 11 — nội dung thân thiện và điều hướng chuẩn
+
+- `GET /v1/notifications` bổ sung `action={type,params}` nhưng giữ nguyên `data`, `userId` và
+  `deepLink` cũ để tương thích ngược.
+- REST inbox và FCM dùng chung resolver thuần túy; dữ liệu thiếu hoặc sai định dạng trả action
+  `NONE` và không làm hỏng lượt đọc danh sách.
+- Action chỉ bao phủ Booking, Trip/Tracking, Parcel, Wallet, Subscription và Shuttle. Các nhóm
+  chưa có màn hình FE được xác nhận trả `NONE`.
+- Nội dung hệ thống ưu tiên mã/tên hiển thị; khi thiếu snapshot phải dùng cụm từ nghiệp vụ chung,
+  không đưa UUID vào `title` hoặc `body`. Nội dung announcement do operator nhập được giữ nguyên.
+- Không migration, không backfill, không sửa producer và không gọi service khác trong đường đọc
+  `GET /v1/notifications`.
+- Quy tắc Phase 11 thay thế fallback ID của Phase 10 đối với thông báo hệ thống tạo mới; ID vẫn
+  được giữ nguyên trong metadata phục vụ điều hướng và xử lý nghiệp vụ.
 
 ## Phase 10 — phạm vi bắt buộc
 

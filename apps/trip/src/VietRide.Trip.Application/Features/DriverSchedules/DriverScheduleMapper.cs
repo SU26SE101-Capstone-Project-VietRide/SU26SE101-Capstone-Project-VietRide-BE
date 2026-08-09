@@ -20,6 +20,7 @@ public static class DriverScheduleMapper
             schedule.ValidUntil,
             schedule.IsActive,
             schedule.CreatedAt,
-            schedule.UpdatedAt);
+            schedule.UpdatedAt,
+            schedule.BaseFare?.Amount);
     }
 }

@@ -61,7 +61,8 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
                 request.DepartureTime,
                 request.ValidFrom,
                 request.ValidUntil,
-                request.IsActive),
+                request.IsActive,
+                request.BaseFare),
             cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, result);
@@ -172,7 +173,9 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
                 request.ValidUntilSpecified,
                 request.ValidUntil,
                 request.IsActiveSpecified,
-                request.IsActive),
+                request.IsActive,
+                request.BaseFareSpecified,
+                request.BaseFare),
             cancellationToken));
     }
 

@@ -631,6 +631,7 @@ function createNotification(type: NotificationType): {
   title: string;
   body: string;
   data: null;
+  action: { type: 'NONE'; params: Record<string, never> };
   readAt: null;
   createdAt: string;
 } {
@@ -641,6 +642,7 @@ function createNotification(type: NotificationType): {
     title: 'Title',
     body: 'Body',
     data: null,
+    action: { type: 'NONE', params: {} },
     readAt: null,
     createdAt: '2026-06-01T10:00:00.000Z',
   };
