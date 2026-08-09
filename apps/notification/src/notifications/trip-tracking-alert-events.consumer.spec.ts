@@ -148,6 +148,7 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
       title: 'Chuyến xe bị trễ',
       body: 'Chuyen xe bi tre',
       data: { tripId: TRIP_ID },
+      action: { type: 'OPEN_TRIP_TRACKING', params: { tripId: TRIP_ID } },
       readAt: null,
       createdAt: '2026-06-01T10:00:00.000Z',
     });

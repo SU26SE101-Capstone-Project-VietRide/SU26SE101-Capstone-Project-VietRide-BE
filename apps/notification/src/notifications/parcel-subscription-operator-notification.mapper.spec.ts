@@ -376,7 +376,7 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
         userId: USER_ID,
         type: NotificationType.PARCEL_LOADED,
         title: 'Hàng đã được lên xe',
-        body: `Đơn gửi hàng ${PARCEL_ID} đã được tải lên xe.`,
+        body: 'Đơn gửi hàng đã được tải lên xe.',
         data: expect.objectContaining({
           parcelId: PARCEL_ID,
           tripId: TRIP_ID,

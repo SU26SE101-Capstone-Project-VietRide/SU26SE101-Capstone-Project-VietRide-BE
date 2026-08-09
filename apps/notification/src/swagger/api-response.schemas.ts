@@ -1,4 +1,5 @@
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
+import { NOTIFICATION_ACTION_TYPES } from '../notifications/notification-action';
 import { EmailTemplateKey } from '../generated/notification-prisma-client';
 
 const metaSchema: SchemaObject = {
@@ -104,9 +105,32 @@ export function errorEnvelopeSchema(
   };
 }
 
+const notificationActionSchema: SchemaObject = {
+  type: 'object',
+  required: ['type', 'params'],
+  properties: {
+    type: {
+      type: 'string',
+      enum: [...NOTIFICATION_ACTION_TYPES],
+      example: 'OPEN_BOOKING_DETAIL',
+    },
+    params: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        bookingId: { type: 'string', format: 'uuid' },
+        tripId: { type: 'string', format: 'uuid' },
+        parcelId: { type: 'string', format: 'uuid' },
+        shuttleTripId: { type: 'string', format: 'uuid' },
+      },
+      example: { bookingId: '22222222-2222-4222-8222-222222222222' },
+    },
+  },
+};
+
 export const notificationItemSchema: SchemaObject = {
   type: 'object',
-  required: ['id', 'userId', 'type', 'title', 'body', 'data', 'readAt', 'createdAt'],
+  required: ['id', 'userId', 'type', 'title', 'body', 'data', 'action', 'readAt', 'createdAt'],
   properties: {
     id: {
       type: 'string',
@@ -139,6 +163,7 @@ export const notificationItemSchema: SchemaObject = {
         bookingCode: 'VR-1024',
       },
     },
+    action: notificationActionSchema,
     readAt: {
       type: 'string',
       format: 'date-time',

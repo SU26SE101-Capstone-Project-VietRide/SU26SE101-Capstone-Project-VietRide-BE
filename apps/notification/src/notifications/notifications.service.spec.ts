@@ -81,6 +81,10 @@ describe('NotificationsService', () => {
         title: 'Dat ve thanh cong',
         body: 'Ve cua ban da duoc xac nhan.',
         data: { bookingId: '33333333-3333-4333-8333-333333333333' },
+        action: {
+          type: 'OPEN_BOOKING_DETAIL',
+          params: { bookingId: '33333333-3333-4333-8333-333333333333' },
+        },
       }),
     );
     expect(repository.create).toHaveBeenCalledWith({

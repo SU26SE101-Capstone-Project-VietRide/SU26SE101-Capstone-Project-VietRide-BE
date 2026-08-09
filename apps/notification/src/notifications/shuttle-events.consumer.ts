@@ -122,7 +122,7 @@ export class ShuttleEventsConsumer implements OnModuleInit {
           userId: event.driver.userId,
           type: NotificationType.SHUTTLE_ASSIGNED,
           title: 'Bạn được phân công chuyến trung chuyển',
-          body: `Chuyến ${event.shuttleTripId} có điểm đón thứ tự ${event.pickupOrder}.`,
+          body: `Chuyến trung chuyển có điểm đón thứ tự ${event.pickupOrder}.`,
           data,
           dedupeKey: `${routingKey}:${event.bookingId}:driver:${event.driver.userId}`,
         }),
@@ -175,7 +175,7 @@ export class ShuttleEventsConsumer implements OnModuleInit {
         userId,
         type,
         title: `Trung chuyển: ${event.status}`,
-        body: event.reason ?? `ShuttleTrip ${event.shuttleTripId} đã cập nhật trạng thái.`,
+        body: event.reason ?? 'Chuyến trung chuyển đã cập nhật trạng thái.',
         data,
         dedupeKey: `${eventId}:operator:${userId}`,
       })));

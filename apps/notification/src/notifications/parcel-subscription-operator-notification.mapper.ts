@@ -21,6 +21,10 @@ import {
 } from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
+import {
+  formatOperatorLabel,
+  formatParcelLabel,
+} from './notification-display';
 import type { ParcelRecipientSnapshot } from './parcel-recipient.provider';
 import {
   BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
@@ -453,7 +457,7 @@ function mapVoucherConsentAccepted(
     userId,
     type: NotificationType.VOUCHER_CONSENT_ACCEPTED,
     title: 'Đã chấp nhận voucher',
-    body: `${formatOperatorLabel(payload)} đã chấp nhận voucher ${payload.voucherId}.`,
+    body: `${formatOperatorLabel(payload.operatorName)} đã chấp nhận voucher.`,
     data: buildNotificationData(payload),
   };
 }
@@ -466,7 +470,7 @@ function mapVoucherConsentRejected(
     userId,
     type: NotificationType.VOUCHER_CONSENT_REJECTED,
     title: 'Đã từ chối voucher',
-    body: `${formatOperatorLabel(payload)} đã từ chối voucher ${payload.voucherId}.${
+    body: `${formatOperatorLabel(payload.operatorName)} đã từ chối voucher.${
       payload.reason ? ` Lý do: ${payload.reason}.` : ''
     }`,
     data: buildNotificationData(payload),
@@ -550,7 +554,7 @@ function mapParcelDeliveryConfirmationRealerted(
     userId,
     type: NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM,
     title: 'Xác nhận giao hàng đã quá hạn',
-    body: `${formatParcelLabel(payload)} đã quá hạn xác nhận từ ${payload.expiredAt} và cần nhà xe xử lý.`,
+    body: `${formatParcelLabel(payload.parcelCode)} đã quá hạn xác nhận từ ${payload.expiredAt} và cần nhà xe xử lý.`,
     data: buildNotificationData(payload),
   };
 }
@@ -618,7 +622,7 @@ function mapParcelAutoRejected(
       userId,
       type: NotificationType.PARCEL_REJECTED,
       title: 'Đơn gửi hàng bị từ chối do quá hạn',
-      body: `${formatParcelLabel(payload)} đã ${timeoutText} và bị từ chối. Số tiền cọc bị giữ: ${formatMoney(payload.forfeitedDepositVnd)} VND.`,
+      body: `${formatParcelLabel(payload.parcelCode)} đã ${timeoutText} và bị từ chối. Số tiền cọc bị giữ: ${formatMoney(payload.forfeitedDepositVnd)} VND.`,
       data: buildNotificationData(payload),
     };
   }
@@ -634,7 +638,7 @@ function mapParcelAutoRejected(
       'Đơn gửi hàng tự động bị từ chối',
       'đã quá thời gian xử lý và bị từ chối.',
     ),
-    body: `${formatParcelLabel(payload)} đã quá thời gian xử lý và bị từ chối.${refundText}`,
+    body: `${formatParcelLabel(payload.parcelCode)} đã quá thời gian xử lý và bị từ chối.${refundText}`,
   };
 }
 
@@ -646,7 +650,7 @@ function mapParcelReviewRequested(
     userId,
     type: NotificationType.PARCEL_REVIEW_REQUESTED,
     title: 'Cần xem xét đơn gửi hàng',
-    body: `${formatParcelLabel(payload)} cần được nhân viên vận hành xem xét.`,
+    body: `${formatParcelLabel(payload.parcelCode)} cần được nhân viên vận hành xem xét.`,
     data: buildNotificationData(payload),
   };
 }
@@ -659,7 +663,7 @@ function mapParcelReviewApproved(
     userId,
     type: NotificationType.PARCEL_REVIEW_APPROVED,
     title: 'Đơn gửi hàng đã được duyệt',
-    body: `${formatParcelLabel(payload)} đã được duyệt. Vui lòng thanh toán tiền cọc ${formatMoney(payload.depositRequiredVnd)} VND.`,
+    body: `${formatParcelLabel(payload.parcelCode)} đã được duyệt. Vui lòng thanh toán tiền cọc ${formatMoney(payload.depositRequiredVnd)} VND.`,
     data: buildNotificationData(payload),
   };
 }
@@ -672,7 +676,7 @@ function mapParcelFinalPaymentRequested(
     userId,
     type: NotificationType.PARCEL_FINAL_PAYMENT_REQUIRED,
     title: 'Cần thanh toán số dư đơn gửi hàng',
-    body: `${formatParcelLabel(payload)} cần thanh toán số dư ${formatMoney(payload.balanceRequiredVnd)} VND trước ${payload.finalPaymentDeadline}.`,
+    body: `${formatParcelLabel(payload.parcelCode)} cần thanh toán số dư ${formatMoney(payload.balanceRequiredVnd)} VND trước ${payload.finalPaymentDeadline}.`,
     data: buildNotificationData(payload),
   };
 }
@@ -686,7 +690,7 @@ function mapParcelSettlementRecovered(
       userId,
       type: NotificationType.PARCEL_SETTLEMENT_RECOVERED,
       title: 'Đính chính trạng thái đơn gửi hàng',
-      body: `${formatParcelLabel(payload)} đã được khôi phục và hiện sẵn sàng lên xe. Thông báo quá hạn trước đó không còn hiệu lực.`,
+      body: `${formatParcelLabel(payload.parcelCode)} đã được khôi phục và hiện sẵn sàng lên xe. Thông báo quá hạn trước đó không còn hiệu lực.`,
       data: buildNotificationData(payload),
     };
   }
@@ -695,7 +699,7 @@ function mapParcelSettlementRecovered(
     userId,
     type: NotificationType.PARCEL_SETTLEMENT_RECOVERED,
     title: 'Đính chính trạng thái đơn gửi hàng',
-    body: `${formatParcelLabel(payload)} đã được đính chính sang trạng thái đã hủy. Số tiền cần hoàn: ${formatMoney(payload.refundAmountVnd)} VND.`,
+    body: `${formatParcelLabel(payload.parcelCode)} đã được đính chính sang trạng thái đã hủy. Số tiền cần hoàn: ${formatMoney(payload.refundAmountVnd)} VND.`,
     data: buildNotificationData(payload),
   };
 }
@@ -708,7 +712,7 @@ function mapParcelTransferInitiated(
     userId,
     type: NotificationType.PARCEL_IN_TRANSIT,
     title: 'Đơn gửi hàng được chuyển chuyến xe',
-    body: `${formatParcelLabel(payload)} đang được chuyển sang chuyến xe phù hợp hơn.`,
+    body: `${formatParcelLabel(payload.parcelCode)} đang được chuyển sang chuyến xe phù hợp hơn.`,
     data: buildNotificationData(payload),
   };
 }
@@ -764,7 +768,7 @@ function mapParcelPendingOperatorActionRealerted(
     userId,
     type: NotificationType.PARCEL_IN_TRANSIT,
     title: 'Nhắc xử lý đơn gửi hàng',
-    body: `${formatParcelLabel(payload)} vẫn đang chờ nhà xe xử lý thủ công.`,
+    body: `${formatParcelLabel(payload.parcelCode)} vẫn đang chờ nhà xe xử lý thủ công.`,
     data: buildNotificationData(payload),
   };
 }
@@ -774,7 +778,7 @@ function mapTripStopArrived(userId: string, payload: OperatorPayload): CreateNot
     userId,
     type: NotificationType.TRIP_VEHICLE_APPROACHING,
     title: 'Xe đã đến điểm dừng',
-    body: `Chuyến ${payload.tripId ?? 'xe'} đã ghi nhận đến điểm dừng.`,
+    body: 'Chuyến xe đã ghi nhận đến điểm dừng.',
     data: buildNotificationData(payload),
   };
 }
@@ -787,7 +791,7 @@ function mapTripVehicleSubstituted(
     userId,
     type: NotificationType.VEHICLE_SUBSTITUTED,
     title: 'Đã thay xe cho chuyến',
-    body: `Chuyến ${payload.tripId ?? 'xe'} đã được gán xe thay thế.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
+    body: `Chuyến xe đã được gán xe thay thế.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
     data: buildNotificationData(payload),
   };
 }
@@ -800,7 +804,7 @@ function mapSubscriptionLimit(
     userId,
     type: NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED,
     title: 'Vượt giới hạn gói dịch vụ',
-    body: `${formatOperatorLabel(payload)} đã chạm giới hạn gói${payload.planName ? ` ${payload.planName}` : ''}.`,
+    body: `${formatOperatorLabel(payload.operatorName)} đã chạm giới hạn gói${payload.planName ? ` ${payload.planName}` : ''}.`,
     data: buildNotificationData(payload),
   };
 }
@@ -810,7 +814,7 @@ function mapSubscriptionTrial(userId: string, payload: OperatorPayload): CreateN
     userId,
     type: NotificationType.SUBSCRIPTION_TRIAL_EXPIRING,
     title: 'Gói dùng thử sắp hết hạn',
-    body: `${formatOperatorLabel(payload)} sắp hết thời gian dùng thử.`,
+    body: `${formatOperatorLabel(payload.operatorName)} sắp hết thời gian dùng thử.`,
     data: buildNotificationData(payload),
   };
 }
@@ -820,7 +824,7 @@ function mapSubscriptionExpired(userId: string, payload: OperatorPayload): Creat
     userId,
     type: NotificationType.SUBSCRIPTION_EXPIRED,
     title: 'Gói dịch vụ đã hết hạn',
-    body: `${formatOperatorLabel(payload)} đã hết hạn gói dịch vụ.`,
+    body: `${formatOperatorLabel(payload.operatorName)} đã hết hạn gói dịch vụ.`,
     data: buildNotificationData(payload),
   };
 }
@@ -830,7 +834,7 @@ function mapSubscriptionApproved(userId: string, payload: OperatorPayload): Crea
     userId,
     type: NotificationType.SUBSCRIPTION_APPROVED,
     title: 'Gói dịch vụ đã được duyệt',
-    body: `${formatOperatorLabel(payload)} đã được kích hoạt gói dịch vụ.`,
+    body: `${formatOperatorLabel(payload.operatorName)} đã được kích hoạt gói dịch vụ.`,
     data: buildNotificationData(payload),
   };
 }
@@ -843,7 +847,7 @@ function mapSubscriptionPaymentPendingWarn(
     userId,
     type: NotificationType.SUBSCRIPTION_PAYMENT_PENDING_WARN,
     title: 'Cần thanh toán gói dịch vụ',
-    body: `${formatOperatorLabel(payload)} có thanh toán gói dịch vụ sắp đến hạn${payload.dueDate ? ` vào ${payload.dueDate}` : ''}.`,
+    body: `${formatOperatorLabel(payload.operatorName)} có thanh toán gói dịch vụ sắp đến hạn${payload.dueDate ? ` vào ${payload.dueDate}` : ''}.`,
     data: buildNotificationData(payload),
   };
 }
@@ -856,7 +860,7 @@ function mapSubscriptionPaymentAutoReverted(
     userId,
     type: NotificationType.SUBSCRIPTION_PAYMENT_AUTO_REVERTED,
     title: 'Gói dịch vụ đã được hoàn về',
-    body: `${formatOperatorLabel(payload)} đã được hoàn về gói trước đó.`,
+    body: `${formatOperatorLabel(payload.operatorName)} đã được hoàn về gói trước đó.`,
     data: buildNotificationData(payload),
   };
 }
@@ -888,7 +892,7 @@ function mapTripSettlementCompleted(
     userId,
     type: NotificationType.WALLET_CREDITED,
     title: 'Đã tất toán doanh thu chuyến',
-    body: `Đã tất toán ${formatMoney(payload.netAmount)} VND từ chuyến ${payload.tripId} vào ví nhà xe.`,
+    body: `Đã tất toán ${formatMoney(payload.netAmount)} VND từ chuyến xe vào ví nhà xe.`,
     data: buildNotificationData(payload),
   };
 }
@@ -898,7 +902,7 @@ function mapPayoutProcessed(userId: string, payload: OperatorPayload): CreateNot
     userId,
     type: NotificationType.PAYOUT_PROCESSED,
     title: 'Lệnh chi trả đã xử lý',
-    body: `Lệnh chi trả ${payload.payoutId ?? ''} đã được xử lý thành công.`,
+    body: 'Lệnh chi trả đã được xử lý thành công.',
     data: buildNotificationData(payload),
   };
 }
@@ -908,7 +912,7 @@ function mapPayoutFailed(userId: string, payload: OperatorPayload): CreateNotifi
     userId,
     type: NotificationType.PAYOUT_FAILED,
     title: 'Lệnh chi trả thất bại',
-    body: `Lệnh chi trả ${payload.payoutId ?? ''} xử lý thất bại.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
+    body: `Lệnh chi trả xử lý thất bại.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
     data: buildNotificationData(payload),
   };
 }
@@ -1031,17 +1035,9 @@ function buildParcelNotification(
     userId,
     type,
     title,
-    body: `${formatParcelLabel(payload)} ${actionText}${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
+    body: `${formatParcelLabel(payload.parcelCode)} ${actionText}${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
     data: buildNotificationData(payload),
   };
-}
-
-function formatParcelLabel(payload: { parcelId: string; parcelCode?: string | undefined }): string {
-  return payload.parcelCode ? `Đơn ${payload.parcelCode}` : `Đơn gửi hàng ${payload.parcelId}`;
-}
-
-function formatOperatorLabel(payload: OperatorPayload): string {
-  return payload.operatorName ? `Nhà xe ${payload.operatorName}` : `Nhà xe ${payload.operatorId}`;
 }
 
 function formatMoney(amount: z.infer<typeof MoneyAmountSchema>): string {

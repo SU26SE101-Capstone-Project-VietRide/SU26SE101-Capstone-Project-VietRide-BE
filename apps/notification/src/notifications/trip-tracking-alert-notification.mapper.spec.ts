@@ -204,7 +204,7 @@ describe('mapTripTrackingAlertToNotifications maps stop disabled event for expli
         userId: USER_ID,
         type: NotificationType.TRIP_DELAYED,
         title: 'Chuyến xe bị trễ',
-        body: `Chuyến ${TRIP_ID} đang bị trễ. Dự kiến trễ 20 phút.`,
+        body: 'Chuyến xe đang bị trễ. Dự kiến trễ 20 phút.',
       }),
       expect.objectContaining({
         userId: SECOND_USER_ID,
@@ -235,7 +235,7 @@ describe('mapTripTrackingAlertToNotifications maps stop disabled event for expli
           userId: USER_ID,
           type: NotificationType.INCIDENT_REPORTED,
           title: 'Có sự cố trên chuyến xe',
-          body: `Chuyến ${TRIP_ID} vừa ghi nhận sự cố: TRAFFIC_JAM.`,
+          body: 'Chuyến xe vừa ghi nhận sự cố: TRAFFIC_JAM.',
           data: {
             incidentId: INCIDENT_ID,
             tripId: TRIP_ID,
@@ -279,7 +279,9 @@ describe('mapTripTrackingAlertToNotifications maps stop disabled event for expli
     expect(notifications[0]?.userId).toBe(USER_ID);
     expect(notifications[0]?.type).toBe(NotificationType.STOP_DISABLED);
     expect(notifications[0]?.title).toBe('Điểm dừng tạm ngưng phục vụ');
-    expect(notifications[0]?.body).toContain(STOP_ID);
+    expect(notifications[0]?.body).toBe(
+      'Điểm dừng của bạn tạm ngưng phục vụ. Nhà xe đã bố trí điểm dừng thay thế.',
+    );
     expect(notifications[0]?.data).toMatchObject({
       stopId: STOP_ID,
       replacedByStopId: '66666666-6666-4666-8666-666666666666',

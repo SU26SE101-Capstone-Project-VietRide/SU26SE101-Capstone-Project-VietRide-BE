@@ -88,7 +88,7 @@ function mapRouteChangeAutoFallback(
     type: NotificationType.TRIP_ROUTE_CHANGED,
     title: 'Đã tự động chuyển điểm đến',
     body:
-      `Vì bạn chưa phản hồi, xe sẽ đưa bạn đến bến ${payload.fallbackDestinationStationId}; ` +
+      'Vì bạn chưa phản hồi, xe sẽ đưa bạn đến bến thay thế; ' +
       'nhà xe sẽ bố trí xe trung chuyển đưa bạn về điểm dừng ban đầu.',
     data: bookingEventData(payload),
   };
@@ -101,7 +101,7 @@ function mapPendingActionAutoResolved(
     userId: payload.userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
     title: 'Đã chấp nhận lịch chuyến mới',
-    body: `Lịch chuyến ${payload.tripId} đã được tự động chấp nhận.`,
+    body: 'Lịch chuyến xe đã được tự động chấp nhận.',
     data: bookingEventData(payload),
   };
 }
@@ -113,7 +113,7 @@ function mapSeatReassignmentRequired(
     userId: payload.userId,
     type: NotificationType.VEHICLE_SUBSTITUTED,
     title: 'Cần chọn lại ghế',
-    body: `Ghế ${payload.seatNumbers.join(', ')} của bạn trên chuyến ${payload.tripId} cần được chọn lại.`,
+    body: `Ghế ${payload.seatNumbers.join(', ')} của bạn trên chuyến xe cần được chọn lại.`,
     data: bookingEventData(payload),
   };
 }
@@ -125,7 +125,7 @@ function mapScheduleChangeInformational(
     userId: payload.userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
     title: 'Lịch chuyến xe đã thay đổi',
-    body: `Giờ khởi hành chuyến ${payload.tripId} đã thay đổi. Vui lòng kiểm tra lịch mới.`,
+    body: 'Giờ khởi hành chuyến xe đã thay đổi. Vui lòng kiểm tra lịch mới.',
     data: bookingEventData(payload),
   };
 }
@@ -137,7 +137,7 @@ function mapScheduleChangeRequired(
     userId: payload.userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
     title: 'Cần xác nhận lịch chuyến mới',
-    body: `Lịch chuyến ${payload.tripId} đã thay đổi. Vui lòng phản hồi trước ${payload.deadline}.`,
+    body: `Lịch chuyến xe đã thay đổi. Vui lòng phản hồi trước ${payload.deadline}.`,
     data: bookingEventData(payload),
   };
 }
@@ -157,7 +157,7 @@ function mapPendingActionRealerted(payload: BookingPendingActionRealertedEvent):
     userId: payload.userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
     title: 'Nhắc lại: cần xác nhận lịch chuyến mới',
-    body: `Bạn vẫn cần phản hồi về lịch chuyến ${payload.tripId} trước ${payload.deadline}.`,
+    body: `Bạn vẫn cần phản hồi về lịch chuyến xe trước ${payload.deadline}.`,
     data: bookingEventData(payload),
   };
 }

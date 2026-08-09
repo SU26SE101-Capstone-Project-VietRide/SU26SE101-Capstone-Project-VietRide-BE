@@ -139,6 +139,10 @@ describe('NotificationsController (e2e)', () => {
       expect.objectContaining({
         id: NOTIFICATION_ID,
         readAt: null,
+        action: {
+          type: 'OPEN_BOOKING_DETAIL',
+          params: { bookingId: '55555555-5555-4555-8555-555555555555' },
+        },
       }),
     );
   });
