@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
+using VietRide.Payment.Application.Features.Management;
 using VietRide.Payment.Application.Features.OperatorReports;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
@@ -122,8 +123,38 @@ internal sealed class OperatorLedgerEntryRepository : IOperatorLedgerEntryReposi
                 reader.IsDBNull(7) ? null : reader.GetString(7));
         }
     }
-    public Task<long> SumTripNetAmountAsync(Guid operatorId, Guid tripId, CancellationToken cancellationToken)
-        => _db.OperatorLedgerEntries.Where(x => x.OperatorId == operatorId && x.TripId == tripId).SumAsync(x => x.Amount, cancellationToken);
+    public async Task<long> SumTripNetAmountAsync(
+        Guid operatorId,
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        var projection = await GetTripFinancialProjectionsAsync(
+            operatorId,
+            [tripId],
+            cancellationToken).ConfigureAwait(false);
+        return projection.SingleOrDefault()?.NetEntitlementAmount ?? 0;
+    }
+
+    public async Task<IReadOnlyList<TripFinancialProjection>> GetTripFinancialProjectionsAsync(
+        Guid operatorId,
+        IReadOnlyCollection<Guid>? tripIds,
+        CancellationToken cancellationToken)
+    {
+        if (operatorId == Guid.Empty)
+            throw new ArgumentException("Operator id must be non-empty.", nameof(operatorId));
+
+        var normalizedTripIds = tripIds?
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (tripIds is not null && normalizedTripIds!.Length == 0)
+            return [];
+
+        var query = CanonicalTripFinancialProjectionQuery.ForOperator(_db, operatorId);
+        if (normalizedTripIds is not null)
+            query = query.Where(item => normalizedTripIds.Contains(item.TripId));
+        return await query.OrderBy(item => item.TripId).ToListAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     public Task<bool> HasSourceEntryAsync(
         Guid sourceEventId,

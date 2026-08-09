@@ -69,6 +69,18 @@ public sealed class ParcelFinalPaymentTests
         result.BalancePaymentId.Should().Be(PaymentId);
         result.BalanceRequiredVnd.Should().Be(8_000);
         result.FinalPaymentDeadline.Should().Be(Deadline);
+        await payments.Received(1).ChargeParcelPaymentAsync(
+            "PARCEL_ADDITIONAL",
+            ParcelId,
+            SenderUserId,
+            8_000,
+            "VNPAY",
+            "request-key",
+            Arg.Any<CancellationToken>(),
+            Arg.Is<PaymentContextSnapshot>(context =>
+                context.Allocations.Count == 1
+                && context.Allocations[0].ReferenceCode == parcel.ParcelCode),
+            Deadline);
     }
 
     [Fact]

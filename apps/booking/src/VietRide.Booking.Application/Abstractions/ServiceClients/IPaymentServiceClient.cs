@@ -30,7 +30,8 @@ public sealed record PaymentAllocationSnapshot(
     Guid TripId,
     long GrossAmount,
     long VoucherVietRideFundedAmount,
-    long VoucherOperatorFundedAmount);
+    long VoucherOperatorFundedAmount,
+    string? ReferenceCode = null);
 
 public sealed record BatchChargePaymentResult(
     Guid PaymentId,

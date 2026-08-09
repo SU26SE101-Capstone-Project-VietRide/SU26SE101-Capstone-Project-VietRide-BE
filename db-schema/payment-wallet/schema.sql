@@ -421,7 +421,10 @@ CREATE TABLE operator_ledger_entries (
     amount BIGINT NOT NULL,                    -- signed: positive=credit, negative=debit, 0=audit-only
     reference_type operator_ledger_reference_type NOT NULL,
     reference_id UUID NOT NULL,
+    reference_code VARCHAR(64) NULL,             -- bookingCode / parcelCode; nullable for legacy rows
     source_event_id UUID NOT NULL,
+    occurred_at TIMESTAMPTZ NULL,                -- payment/refund business-event time; NULL for legacy rows
+    operator_funded_voucher_amount BIGINT NULL,  -- explicit audit metadata; never parsed from note
     note TEXT NULL,
     actor_type VARCHAR(16) NOT NULL DEFAULT 'SYSTEM',
     actor_user_id UUID NULL,
@@ -451,6 +454,11 @@ CREATE TABLE operator_ledger_entries (
         OR adjustment_reason = 'LEGACY_UNCLASSIFIED'
         OR adjustment_reason IS NULL
     ),
+    CONSTRAINT chk_operator_ledger_entries_operator_funded_voucher_amount CHECK (
+        operator_funded_voucher_amount IS NULL
+        OR (entry_type = 'VOUCHER_OPERATOR_FUNDED_AUDIT'
+            AND operator_funded_voucher_amount > 0)
+    ),
     CONSTRAINT chk_operator_ledger_entries_actor_type CHECK (actor_type IN ('USER', 'SYSTEM'))
 );
 
@@ -463,6 +471,12 @@ CREATE INDEX idx_operator_ledger_entries_reference
     ON operator_ledger_entries (reference_type, reference_id);
 CREATE INDEX idx_operator_ledger_entries_entry_type
     ON operator_ledger_entries (operator_id, entry_type);
+CREATE INDEX idx_operator_ledger_entries_operator_reference_code
+    ON operator_ledger_entries (operator_id, reference_code)
+    WHERE reference_code IS NOT NULL;
+CREATE INDEX idx_operator_ledger_entries_operator_occurred_at
+    ON operator_ledger_entries (operator_id, occurred_at DESC)
+    WHERE occurred_at IS NOT NULL;
 CREATE UNIQUE INDEX uq_operator_ledger_entries_source
     ON operator_ledger_entries (source_event_id, entry_type, reference_id);
 CREATE INDEX idx_operator_ledger_entries_actor_user_id
@@ -481,6 +495,12 @@ COMMENT ON COLUMN operator_ledger_entries.trip_id IS
     'Link to Trip for aggregation in OperatorTripSettlement netAmount computation. NULL for ADJUSTMENT/MANUAL entries.';
 COMMENT ON COLUMN operator_ledger_entries.amount IS
     'Signed BIGINT. Revenue entries positive; refund entries negative; VOUCHER_OPERATOR_FUNDED_AUDIT entries 0 (audit-only).';
+COMMENT ON COLUMN operator_ledger_entries.reference_code IS
+    'Nullable Booking/Parcel reconciliation code. Legacy rows remain NULL and are exposed as PARTIAL.';
+COMMENT ON COLUMN operator_ledger_entries.occurred_at IS
+    'Payment/refund business-event timestamp. Readers fall back to created_at for legacy rows and mark metadata PARTIAL.';
+COMMENT ON COLUMN operator_ledger_entries.operator_funded_voucher_amount IS
+    'Explicit positive operator-funded voucher metadata on VOUCHER_OPERATOR_FUNDED_AUDIT; amount remains 0 and never changes settlement net.';
 
 -- -----------------------------------------------------------------------------
 -- operator_trip_settlements (per-Trip settlement marker)

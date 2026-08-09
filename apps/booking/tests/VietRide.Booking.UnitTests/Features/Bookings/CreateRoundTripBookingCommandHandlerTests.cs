@@ -222,11 +222,17 @@ public class CreateRoundTripBookingCommandHandlerTests
             Arg.Is<IReadOnlyList<BatchChargeItem>>(items =>
                 items.Count == 2
                 && items[0].ReferenceType == "BOOKING"
-                && items[0].ReferenceId != Guid.Empty
+                && items[0].ReferenceId == result.Outbound.BookingId
                 && items[0].Amount == 200_000
+                && items[0].Context != null
+                && items[0].Context!.Allocations.Count == 1
+                && items[0].Context!.Allocations[0].ReferenceCode == result.Outbound.BookingCode
                 && items[1].ReferenceType == "BOOKING"
-                && items[1].ReferenceId != Guid.Empty
-                && items[1].Amount == 180_000),
+                && items[1].ReferenceId == result.Return.BookingId
+                && items[1].Amount == 180_000
+                && items[1].Context != null
+                && items[1].Context!.Allocations.Count == 1
+                && items[1].Context!.Allocations[0].ReferenceCode == result.Return.BookingCode),
             "round-trip-idempotency-key",
             Arg.Any<CancellationToken>());
 
@@ -377,7 +383,15 @@ public class CreateRoundTripBookingCommandHandlerTests
             "VNPAY",
             "round-trip-idempotency-key",
             Arg.Any<CancellationToken>(),
-            Arg.Any<PaymentContextSnapshot>(),
+            Arg.Is<PaymentContextSnapshot>(context =>
+                context.Version == 1
+                && context.Allocations.Count == 2
+                && context.Allocations.Any(allocation =>
+                    allocation.ReferenceId == result.Outbound.BookingId
+                    && allocation.ReferenceCode == result.Outbound.BookingCode)
+                && context.Allocations.Any(allocation =>
+                    allocation.ReferenceId == result.Return.BookingId
+                    && allocation.ReferenceCode == result.Return.BookingCode)),
             returnExpiresAt);
         await _paymentClient.DidNotReceiveWithAnyArgs()
             .BatchChargeAsync(default, default!, default!, default!, default);

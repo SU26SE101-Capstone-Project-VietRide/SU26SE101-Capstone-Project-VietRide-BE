@@ -33,4 +33,5 @@ public sealed record PaymentAllocationSnapshot(
     Guid TripId,
     long GrossAmount,
     long VoucherVietRideFundedAmount,
-    long VoucherOperatorFundedAmount);
+    long VoucherOperatorFundedAmount,
+    string? ReferenceCode = null);

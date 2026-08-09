@@ -6,6 +6,7 @@ using Npgsql;
 using Npgsql.NameTranslation;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
+using VietRide.Payment.Application.Features.Management;
 using VietRide.Payment.Application.Features.OperatorReports;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Core;
 using VietRide.Payment.Domain.Entities;
@@ -24,7 +25,7 @@ public sealed class RevenueAnalyticsRepositoryTests
     private const string ScratchPrefix = "vietride_ui20_revenue_";
 
     [Fact]
-    public async Task PostgreSqlCoreUsesCanonicalSourcesClassificationIctBoundariesAndOneSqlPerRead()
+    public async Task FinancialProjection_PostgreSqlCoreUsesCanonicalSourcesClassificationIctBoundariesAndOneSqlPerRead()
     {
         var databaseName = $"{ScratchPrefix}{Guid.NewGuid():N}";
         var connectionString = CreateConnectionString(databaseName);
@@ -77,6 +78,26 @@ public sealed class RevenueAnalyticsRepositoryTests
             operatorSummary.Should().Be(new OperatorRevenueSummaryReadModel(85, 43, 55, -12));
 
             var operatorLedgerRepository = CreateOperatorLedgerRepository(queryDb);
+            var financialProjection = await operatorLedgerRepository.GetTripFinancialProjectionsAsync(
+                seed.OperatorId,
+                [seed.TripId],
+                CancellationToken.None);
+            financialProjection.Should().ContainSingle().Which.Should().Be(
+                new TripFinancialProjection(
+                    seed.OperatorId,
+                    seed.TripId,
+                    10_184,
+                    10_149,
+                    15,
+                    20,
+                    30,
+                    -7,
+                    10_127,
+                    false));
+            (await operatorLedgerRepository.SumTripNetAmountAsync(
+                seed.OperatorId,
+                seed.TripId,
+                CancellationToken.None)).Should().Be(10_127);
             var platformRows = await operatorLedgerRepository.GetPlatformLedgerMetricsAsync(fromUtc, toUtc);
             platformRows.Should().BeEquivalentTo(new[]
             {
@@ -269,7 +290,14 @@ public sealed class RevenueAnalyticsRepositoryTests
             Ledger(operatorId, tripId, OperatorLedgerEntryType.ADJUSTMENT, -2, OperatorLedgerReferenceType.PARCEL, parcelReference, "reverse-vietride-funded-voucher"),
             Ledger(operatorId, tripId, OperatorLedgerEntryType.ADJUSTMENT, 1_000, OperatorLedgerReferenceType.BOOKING, bookingReference, "other-adjustment"),
             Ledger(operatorId, null, OperatorLedgerEntryType.ADJUSTMENT, 1_000, OperatorLedgerReferenceType.MANUAL, Guid.NewGuid(), "manual"),
-            Ledger(operatorId, tripId, OperatorLedgerEntryType.VOUCHER_OPERATOR_FUNDED_AUDIT, 0, OperatorLedgerReferenceType.BOOKING, bookingReference));
+            Ledger(
+                operatorId,
+                tripId,
+                OperatorLedgerEntryType.VOUCHER_OPERATOR_FUNDED_AUDIT,
+                0,
+                OperatorLedgerReferenceType.BOOKING,
+                bookingReference,
+                operatorFundedVoucherAmount: 20));
         await dbContext.SaveChangesAsync();
 
         clock.UtcNow = atEnd;
@@ -316,7 +344,8 @@ public sealed class RevenueAnalyticsRepositoryTests
         long amount,
         OperatorLedgerReferenceType referenceType,
         Guid referenceId,
-        string? note = null)
+        string? note = null,
+        long? operatorFundedVoucherAmount = null)
     {
         if (entryType == OperatorLedgerEntryType.ADJUSTMENT
             && referenceType != OperatorLedgerReferenceType.MANUAL
@@ -354,7 +383,8 @@ public sealed class RevenueAnalyticsRepositoryTests
                 ? referenceType == OperatorLedgerReferenceType.MANUAL
                     ? OperatorLedgerAdjustmentReason.MANUAL_WALLET_ADJUSTMENT
                     : OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL
-                : null);
+                : null,
+            operatorFundedVoucherAmount: operatorFundedVoucherAmount);
     }
 
     private sealed class CountingCommandInterceptor : DbCommandInterceptor

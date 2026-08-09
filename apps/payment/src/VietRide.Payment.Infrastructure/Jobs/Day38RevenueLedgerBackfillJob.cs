@@ -68,6 +68,7 @@ public sealed class Day38RevenueLedgerBackfillJob
             await _writer.RecordPaymentSucceededAsync(
                 payment.Id,
                 context,
+                payment.SucceededAt ?? payment.CreatedAt,
                 cancellationToken);
         }
 

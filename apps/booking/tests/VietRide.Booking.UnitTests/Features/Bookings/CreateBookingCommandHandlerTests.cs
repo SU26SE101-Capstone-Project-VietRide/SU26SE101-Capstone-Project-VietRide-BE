@@ -141,6 +141,20 @@ public class CreateBookingCommandHandlerTests
         result.DiscountAmount.Should().Be(0);
         result.PaymentRedirectUrl.Should().BeNull();
 
+        await _paymentClient.Received(1).ChargeAsync(
+            "BOOKING",
+            result.BookingId,
+            PassengerUserId,
+            200_000,
+            "WALLET",
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>(),
+            Arg.Is<PaymentContextSnapshot>(context =>
+                context.Version == 1
+                && context.Allocations.Count == 1
+                && context.Allocations[0].ReferenceCode == result.BookingCode),
+            Arg.Any<DateTimeOffset?>());
+
         await _bookings.Received(1)
             .AddAsync(
                 Arg.Is<BookingEntity>(booking => booking.SeatLockToken == SeatLockToken

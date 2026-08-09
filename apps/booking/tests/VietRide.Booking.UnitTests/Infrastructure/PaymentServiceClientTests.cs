@@ -48,6 +48,55 @@ public sealed class PaymentServiceClientTests
     }
 
     [Fact]
+    public async Task ChargeAsync_WithPaymentContext_SerializesReferenceCode()
+    {
+        const string bookingCode = "VR-20260810-ABCD2345";
+        var handler = new FakeMessageHandler(
+            HttpStatusCode.OK,
+            $$"""
+            {
+              "success": true,
+              "statusCode": 200,
+              "data": {
+                "paymentId": "{{PaymentId}}",
+                "status": "SUCCEEDED",
+                "paymentRedirectUrl": null
+              }
+            }
+            """);
+        var client = BuildClient(handler);
+        var context = new PaymentContextSnapshot(
+            1,
+            [
+                new PaymentAllocationSnapshot(
+                    ReferenceId,
+                    "BOOKING",
+                    Guid.Parse("44444444-4444-4444-8444-444444444444"),
+                    Guid.Parse("55555555-5555-4555-8555-555555555555"),
+                    350_000,
+                    0,
+                    0,
+                    bookingCode),
+            ]);
+
+        var outcome = await client.ChargeAsync(
+            "BOOKING",
+            ReferenceId,
+            UserId,
+            350_000,
+            "WALLET",
+            "66666666-6666-4666-8666-666666666666",
+            context: context);
+
+        outcome.Should().BeOfType<ChargeOutcome.Success>();
+        using var body = JsonDocument.Parse(handler.LastBody!);
+        var allocation = body.RootElement
+            .GetProperty("context")
+            .GetProperty("allocations")[0];
+        allocation.GetProperty("referenceCode").GetString().Should().Be(bookingCode);
+    }
+
+    [Fact]
     public async Task ChargeAsync_WhenPaymentDeadlinePassed_ReturnsTypedOutcome()
     {
         var handler = new FakeMessageHandler(

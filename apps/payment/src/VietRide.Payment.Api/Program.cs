@@ -4,6 +4,7 @@ using Serilog;
 using StackExchange.Redis;
 using VietRide.Payment.Application;
 using VietRide.Payment.Application.Features.Internal.Payments.BatchChargePayment;
+using VietRide.Payment.Application.Features.Settlements;
 using VietRide.Payment.Infrastructure;
 using VietRide.Payment.Infrastructure.DependencyInjection;
 using VietRide.Payment.Infrastructure.Jobs;
@@ -112,11 +113,13 @@ if (registerMessaging)
     recurringJobs.AddOrUpdate<TripSettlementEligibilityFlagJob>(
         TripSettlementEligibilityFlagJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "0 19 * * *");
+        TripSettlementSchedule.EligibilityCron,
+        new RecurringJobOptions { TimeZone = TripSettlementSchedule.TimeZone });
     recurringJobs.AddOrUpdate<TripSettlementWeeklyAutoSettleJob>(
         TripSettlementWeeklyAutoSettleJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "0 2 * * 1");
+        TripSettlementSchedule.AutoSettlementCron,
+        new RecurringJobOptions { TimeZone = TripSettlementSchedule.TimeZone });
     recurringJobs.AddOrUpdate<TripSettlementStuckAlertJob>(
         TripSettlementStuckAlertJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),

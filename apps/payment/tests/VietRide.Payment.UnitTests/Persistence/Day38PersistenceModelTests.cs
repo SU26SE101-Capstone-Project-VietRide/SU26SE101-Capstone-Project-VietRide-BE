@@ -44,6 +44,17 @@ public sealed class Day38PersistenceModelTests
         context.Model.FindEntityType(typeof(OperatorLedgerEntry))!.GetIndexes()
             .Single(x => x.GetDatabaseName() == "uq_operator_ledger_entries_source")
             .IsUnique.Should().BeTrue();
+        var ledgerModel = context.Model.FindEntityType(typeof(OperatorLedgerEntry))!;
+        ledgerModel.FindProperty(nameof(OperatorLedgerEntry.ReferenceCode))!.GetColumnName()
+            .Should().Be("reference_code");
+        ledgerModel.FindProperty(nameof(OperatorLedgerEntry.OccurredAt))!.GetColumnName()
+            .Should().Be("occurred_at");
+        ledgerModel.FindProperty(nameof(OperatorLedgerEntry.OperatorFundedVoucherAmount))!.GetColumnName()
+            .Should().Be("operator_funded_voucher_amount");
+        ledgerModel.GetIndexes().Should().Contain(index =>
+            index.GetDatabaseName() == "idx_operator_ledger_entries_operator_reference_code");
+        ledgerModel.GetIndexes().Should().Contain(index =>
+            index.GetDatabaseName() == "idx_operator_ledger_entries_operator_occurred_at");
         context.Model.FindEntityType(typeof(OperatorTripSettlement))!.GetIndexes()
             .Single(x => x.GetDatabaseName() == "uq_operator_trip_settlements_operator_trip")
             .IsUnique.Should().BeTrue();

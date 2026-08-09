@@ -871,7 +871,8 @@ public sealed class CreateRoundTripBookingCommandHandler
             booking.TripId,
             checked(booking.TotalAmount.Amount + booking.DiscountAmount.Amount),
             fundingType == VoucherFundingType.VIETRIDE_FUNDED ? booking.DiscountAmount.Amount : 0,
-            fundingType == VoucherFundingType.OPERATOR_FUNDED ? booking.DiscountAmount.Amount : 0);
+            fundingType == VoucherFundingType.OPERATOR_FUNDED ? booking.DiscountAmount.Amount : 0,
+            booking.BookingCode.Value);
 
     private static void EnsureWalletBatchSucceeded(
         BatchChargeOutcome.Success success,
