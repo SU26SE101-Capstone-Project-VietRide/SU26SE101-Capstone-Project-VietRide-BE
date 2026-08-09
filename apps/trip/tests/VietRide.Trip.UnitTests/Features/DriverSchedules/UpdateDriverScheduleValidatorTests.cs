@@ -55,10 +55,49 @@ public sealed class UpdateDriverScheduleValidatorTests
         new UpdateDriverScheduleValidator().Validate(command).IsValid.Should().BeTrue();
     }
 
+    [Fact]
+    public void FutureOnlyBaseFareSetAndClear_AreAccepted()
+    {
+        var set = ValidCommand() with
+        {
+            DepartureTimeSpecified = false,
+            DepartureTime = null,
+            BaseFareSpecified = true,
+            BaseFare = 400_000,
+        };
+        var clear = set with { BaseFare = null };
+
+        new UpdateDriverScheduleValidator().Validate(set).IsValid.Should().BeTrue();
+        new UpdateDriverScheduleValidator().Validate(clear).IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void NegativeOrAllPendingBaseFare_IsRejected()
+    {
+        var negative = ValidCommand() with
+        {
+            DepartureTimeSpecified = false,
+            DepartureTime = null,
+            BaseFareSpecified = true,
+            BaseFare = -1,
+        };
+        var allPending = negative with
+        {
+            ApplyTo = UpdateDriverScheduleCommand.AllPending,
+            BaseFare = 400_000,
+        };
+
+        new UpdateDriverScheduleValidator().Validate(negative).Errors
+            .Should().Contain(error => error.PropertyName == nameof(UpdateDriverScheduleCommand.BaseFare));
+        new UpdateDriverScheduleValidator().Validate(allPending).Errors
+            .Should().Contain(error => error.PropertyName == nameof(UpdateDriverScheduleCommand.BaseFare));
+    }
+
     private static UpdateDriverScheduleCommand ValidCommand() => new(
         Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "request-1",
         UpdateDriverScheduleCommand.FutureOnly,
         true, new TimeOnly(8, 30),
+        false, null,
         false, null,
         false, null,
         false, null,

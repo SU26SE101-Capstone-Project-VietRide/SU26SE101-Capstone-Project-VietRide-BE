@@ -22,7 +22,7 @@ public sealed class CreateDriverScheduleHandlerTests
     [Fact]
     public async Task Handle_ValidCommand_PersistsScheduleAndReturnsDto()
     {
-        var command = CreateCommand();
+        var command = CreateCommand(baseFare: 400_000);
         var driverSchedules = StubDispatchProxy<IDriverScheduleRepository>.Create();
         var routes = StubDispatchProxy<IRouteRepository>.Create();
         var routeStops = StubDispatchProxy<IRouteStopRepository>.Create();
@@ -53,9 +53,13 @@ public sealed class CreateDriverScheduleHandlerTests
         result.DriverUserId.Should().Be(command.DriverUserId);
         result.DayOfWeek.Should().BeEquivalentTo(command.DayOfWeek);
         result.IsActive.Should().BeTrue();
+        result.BaseFare.Should().Be(400_000);
         driverSchedules.CallCount(nameof(IDriverScheduleRepository.HasDriverConflictAsync)).Should().Be(1);
         driverSchedules.LastArguments(nameof(IDriverScheduleRepository.HasDriverConflictAsync))![5].Should().BeNull();
         driverSchedules.CallCount(nameof(IDriverScheduleRepository.AddAsync)).Should().Be(1);
+        driverSchedules.LastArguments(nameof(IDriverScheduleRepository.AddAsync))![0]
+            .Should().BeOfType<DriverSchedule>()
+            .Which.BaseFare.Should().Be(Money.FromRaw(400_000));
         unitOfWork.CallCount(nameof(IUnitOfWork.SaveChangesAsync)).Should().Be(1);
         scheduler.CallCount(nameof(ITripGenerationJobScheduler.EnqueueScheduleGeneration)).Should().Be(1);
     }
@@ -280,7 +284,7 @@ public sealed class CreateDriverScheduleHandlerTests
     }
 
     [Fact]
-    public async Task OperatorDriverSchedulesController_MapsIsActiveIntoCreateCommand()
+    public async Task OperatorDriverSchedulesController_MapsIsActiveAndBaseFareIntoCreateCommand()
     {
         var response = new DriverScheduleDto(
             Guid.NewGuid(),
@@ -307,14 +311,16 @@ public sealed class CreateDriverScheduleHandlerTests
             response.DepartureTime,
             response.ValidFrom,
             response.ValidUntil,
-            IsActive: false);
+            IsActive: false,
+            BaseFare: 400_000);
 
         var result = await controller.Create(request, CancellationToken.None);
 
         result.Result.Should().BeOfType<ObjectResult>()
             .Which.StatusCode.Should().Be(StatusCodes.Status201Created);
-        mediator.LastRequest.Should().BeOfType<CreateDriverScheduleCommand>()
-            .Which.IsActive.Should().BeFalse();
+        var command = mediator.LastRequest.Should().BeOfType<CreateDriverScheduleCommand>().Subject;
+        command.IsActive.Should().BeFalse();
+        command.BaseFare.Should().Be(400_000);
     }
 
     [Fact]
@@ -387,7 +393,10 @@ public sealed class CreateDriverScheduleHandlerTests
             routeStopDurations.Select((duration, index) => RouteStop.Create(route.Id, Guid.NewGuid(), index + 1, duration, null)).AsQueryable());
     }
 
-    private static CreateDriverScheduleCommand CreateCommand(bool isActive = true, Guid? assistantUserId = null)
+    private static CreateDriverScheduleCommand CreateCommand(
+        bool isActive = true,
+        Guid? assistantUserId = null,
+        long? baseFare = null)
     {
         return new CreateDriverScheduleCommand(
             Guid.NewGuid(),
@@ -399,7 +408,8 @@ public sealed class CreateDriverScheduleHandlerTests
             new TimeOnly(8, 0),
             new DateOnly(2026, 6, 15),
             new DateOnly(2026, 8, 31),
-            isActive);
+            isActive,
+            baseFare);
     }
 
     private sealed class CapturingMediator : IMediator

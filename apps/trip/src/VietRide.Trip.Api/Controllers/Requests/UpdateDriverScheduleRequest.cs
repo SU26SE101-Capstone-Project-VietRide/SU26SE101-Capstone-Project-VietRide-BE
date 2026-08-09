@@ -12,6 +12,7 @@ public sealed class UpdateDriverScheduleRequest
     private Guid? vehicleId;
     private DateOnly? validUntil;
     private bool? isActive;
+    private long? baseFare;
 
     public TimeOnly? DepartureTime { get => departureTime; set { departureTime = value; DepartureTimeSpecified = true; } }
 
@@ -27,6 +28,8 @@ public sealed class UpdateDriverScheduleRequest
 
     public bool? IsActive { get => isActive; set { isActive = value; IsActiveSpecified = true; } }
 
+    public long? BaseFare { get => baseFare; set { baseFare = value; BaseFareSpecified = true; } }
+
     [JsonIgnore] public bool DepartureTimeSpecified { get; private set; }
 
     [JsonIgnore] public bool DayOfWeekSpecified { get; private set; }
@@ -40,4 +43,6 @@ public sealed class UpdateDriverScheduleRequest
     [JsonIgnore] public bool ValidUntilSpecified { get; private set; }
 
     [JsonIgnore] public bool IsActiveSpecified { get; private set; }
+
+    [JsonIgnore] public bool BaseFareSpecified { get; private set; }
 }

@@ -105,6 +105,8 @@ public sealed class TripGenerationService
                 continue;
             }
 
+            var baseFare = schedule.BaseFare ?? route.BaseFare;
+
             var routeStops = routeStopRepository.QueryNoTracking()
                 .Where(routeStop => routeStop.RouteId == schedule.RouteId)
                 .OrderBy(routeStop => routeStop.OrderIndex)
@@ -196,7 +198,7 @@ public sealed class TripGenerationService
                     departureDateTime,
                     etaPlan.DestinationArrivalTime,
                     TripSource.AUTO_FROM_SCHEDULE,
-                    route.BaseFare,
+                    baseFare,
                     vehicle.MaxCargoWeightKg,
                     vehicle.MaxCargoVolumeM3,
                     0m,

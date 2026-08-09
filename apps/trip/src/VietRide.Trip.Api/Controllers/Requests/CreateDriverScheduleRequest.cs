@@ -9,4 +9,5 @@ public sealed record CreateDriverScheduleRequest(
     TimeOnly DepartureTime,
     DateOnly ValidFrom,
     DateOnly? ValidUntil,
-    bool IsActive);
+    bool IsActive,
+    long? BaseFare = null);

@@ -424,12 +424,15 @@ CREATE TABLE driver_schedules (
     departure_time TIME NOT NULL,    -- local ICT
     valid_from DATE NOT NULL,
     valid_until DATE NULL,
+    base_fare BIGINT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     deleted_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_driver_schedules_valid_until_after_from
-        CHECK (valid_until IS NULL OR valid_until >= valid_from)
+        CHECK (valid_until IS NULL OR valid_until >= valid_from),
+    CONSTRAINT chk_driver_schedules_base_fare_non_negative
+        CHECK (base_fare IS NULL OR base_fare >= 0)
 );
 
 CREATE INDEX idx_driver_schedules_operator_active
@@ -445,6 +448,8 @@ COMMENT ON COLUMN driver_schedules.day_of_week IS
     'JSONB array of ints 1-7 (1=Mon). Hangfire weekly job iterates dayOfWeek to generate Trip.';
 COMMENT ON COLUMN driver_schedules.departure_time IS
     'TIME (no timezone). Stored as local ICT semantic.';
+COMMENT ON COLUMN driver_schedules.base_fare IS
+    'Optional recurring fare override. Generated Trips fall back to routes.base_fare when NULL.';
 
 -- -----------------------------------------------------------------------------
 -- driver_schedule_audit_logs (append-only)

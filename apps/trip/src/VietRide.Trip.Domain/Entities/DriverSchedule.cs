@@ -1,6 +1,7 @@
 using System.Text.Json;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Trip.Domain.Entities;
 
@@ -18,6 +19,7 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable, ISoftDeleta
     public TimeOnly DepartureTime { get; private set; }
     public DateOnly ValidFrom { get; private set; }
     public DateOnly? ValidUntil { get; private set; }
+    public Money? BaseFare { get; private set; }
     public bool IsActive { get; private set; } = true;
     public DateTimeOffset? DeletedAt { get; private set; }
 
@@ -33,7 +35,8 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable, ISoftDeleta
         TimeOnly departureTime,
         DateOnly validFrom,
         DateOnly? validUntil,
-        bool isActive)
+        bool isActive,
+        Money? baseFare = null)
     {
         ValidateGuid(operatorId, nameof(operatorId));
         ValidateGuid(routeId, nameof(routeId));
@@ -42,6 +45,7 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable, ISoftDeleta
         ValidateOptionalGuid(assistantUserId, nameof(assistantUserId));
         ValidateDayOfWeek(dayOfWeek);
         ValidateDateRange(validFrom, validUntil);
+        ValidateOptionalBaseFare(baseFare);
 
         return new DriverSchedule
         {
@@ -55,6 +59,7 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable, ISoftDeleta
             DepartureTime = departureTime,
             ValidFrom = validFrom,
             ValidUntil = validUntil,
+            BaseFare = baseFare,
             IsActive = isActive,
         };
     }
@@ -100,6 +105,18 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable, ISoftDeleta
     public void Activate() => IsActive = true;
 
     public void Deactivate() => IsActive = false;
+
+    public bool ChangeBaseFare(Money? baseFare)
+    {
+        ValidateOptionalBaseFare(baseFare);
+        if (BaseFare == baseFare)
+        {
+            return false;
+        }
+
+        BaseFare = baseFare;
+        return true;
+    }
 
     public void SoftDelete(DateTimeOffset deletedAt)
     {
@@ -153,6 +170,14 @@ public sealed class DriverSchedule : BaseEntity<Guid>, IActivatable, ISoftDeleta
         if (validUntil < validFrom)
         {
             throw new ArgumentOutOfRangeException(nameof(validUntil), validUntil, "Valid until cannot precede valid from.");
+        }
+    }
+
+    private static void ValidateOptionalBaseFare(Money? baseFare)
+    {
+        if (baseFare?.Amount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(baseFare), baseFare, "Base fare cannot be negative.");
         }
     }
 }

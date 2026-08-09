@@ -110,6 +110,55 @@ public sealed class UpdateDriverScheduleHandlerTests
     }
 
     [Fact]
+    public async Task FutureOnly_BaseFareSetAndSameValueNoOp_DoNotMutateExistingTrip()
+    {
+        var fixture = Fixture.Create();
+        var existingTrip = fixture.AddTrip(fixture.Now.AddDays(1));
+        var set = fixture.Command(
+            UpdateDriverScheduleCommand.FutureOnly,
+            baseFareSpecified: true,
+            baseFare: 400_000);
+
+        var response = await fixture.Handler.Handle(set, CancellationToken.None);
+
+        response.BaseFare.Should().Be(400_000);
+        fixture.Schedule.BaseFare.Should().Be(Money.FromRaw(400_000));
+        existingTrip.BaseFare.Amount.Should().Be(100_000);
+        fixture.ScheduleAudits.Items.Should().ContainSingle();
+
+        await fixture.Handler.Handle(set, CancellationToken.None);
+
+        fixture.ScheduleAudits.Items.Should().ContainSingle();
+
+        var clear = fixture.Command(
+            UpdateDriverScheduleCommand.FutureOnly,
+            baseFareSpecified: true,
+            baseFare: null);
+        await fixture.Handler.Handle(clear, CancellationToken.None);
+
+        fixture.Schedule.BaseFare.Should().BeNull();
+        existingTrip.BaseFare.Amount.Should().Be(100_000);
+        fixture.ScheduleAudits.Items.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task AllPending_BaseFareFailsBeforeBookingAndTransaction()
+    {
+        var fixture = Fixture.Create();
+        var command = fixture.Command(
+            UpdateDriverScheduleCommand.AllPending,
+            baseFareSpecified: true,
+            baseFare: 400_000);
+
+        var action = () => fixture.Handler.Handle(command, CancellationToken.None);
+
+        var error = await action.Should().ThrowAsync<ValidationException>();
+        error.Which.Errors.Should().Contain(item => item.Field == "baseFare");
+        fixture.Booking.Calls.Should().Be(0);
+        fixture.UnitOfWork.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ExactTwoHourBoundary_WithConfirmedBooking_IsAllowed()
     {
         var fixture = Fixture.Create();
@@ -449,7 +498,9 @@ public sealed class UpdateDriverScheduleHandlerTests
             bool validUntilSpecified = false,
             DateOnly? validUntil = null,
             bool isActiveSpecified = false,
-            bool? isActive = null) =>
+            bool? isActive = null,
+            bool baseFareSpecified = false,
+            long? baseFare = null) =>
             new(
                 Schedule.OperatorId,
                 Schedule.Id,
@@ -469,7 +520,9 @@ public sealed class UpdateDriverScheduleHandlerTests
                 validUntilSpecified,
                 validUntil,
                 isActiveSpecified,
-                isActive);
+                isActive,
+                baseFareSpecified,
+                baseFare);
     }
 
     private abstract class MemoryRepository<TEntity, TId>

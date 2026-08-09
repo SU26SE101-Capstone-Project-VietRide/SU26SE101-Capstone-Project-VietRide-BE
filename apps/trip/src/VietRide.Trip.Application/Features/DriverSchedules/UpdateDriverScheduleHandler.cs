@@ -4,6 +4,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -582,7 +583,8 @@ public sealed class UpdateDriverScheduleHandler
             request.AssistantUserIdSpecified ? request.AssistantUserId : before.AssistantUserId,
             request.VehicleIdSpecified ? request.VehicleId : before.VehicleId,
             request.ValidUntilSpecified ? request.ValidUntil : before.ValidUntil,
-            request.IsActiveSpecified ? request.IsActive!.Value : before.IsActive);
+            request.IsActiveSpecified ? request.IsActive!.Value : before.IsActive,
+            request.BaseFareSpecified ? request.BaseFare : before.BaseFare);
 
     private static IReadOnlyList<string> GetChangedFields(ScheduleState before, ScheduleState after)
     {
@@ -594,6 +596,7 @@ public sealed class UpdateDriverScheduleHandler
         if (before.VehicleId != after.VehicleId) changed.Add("vehicleId");
         if (before.ValidUntil != after.ValidUntil) changed.Add("validUntil");
         if (before.IsActive != after.IsActive) changed.Add("isActive");
+        if (before.BaseFare != after.BaseFare) changed.Add("baseFare");
         return changed;
     }
 
@@ -610,6 +613,11 @@ public sealed class UpdateDriverScheduleHandler
         if (request.ApplyTo == UpdateDriverScheduleCommand.AllPending && effective.VehicleId is null)
         {
             throw ValidationFailure("vehicleId", "ALL_PENDING requires a concrete vehicleId.");
+        }
+
+        if (request.ApplyTo == UpdateDriverScheduleCommand.AllPending && request.BaseFareSpecified)
+        {
+            throw ValidationFailure("baseFare", "baseFare can only be changed with applyTo=FUTURE_ONLY.");
         }
     }
 
@@ -732,6 +740,7 @@ public sealed class UpdateDriverScheduleHandler
             state.VehicleId,
             state.ValidUntil,
             state.IsActive);
+        schedule.ChangeBaseFare(state.BaseFare.HasValue ? Money.FromRaw(state.BaseFare.Value) : null);
         schedule.UpdatedAt = now;
     }
 
@@ -930,7 +939,8 @@ public sealed class UpdateDriverScheduleHandler
         && left.AssistantUserId == right.AssistantUserId
         && left.VehicleId == right.VehicleId
         && left.ValidUntil == right.ValidUntil
-        && left.IsActive == right.IsActive;
+        && left.IsActive == right.IsActive
+        && left.BaseFare == right.BaseFare;
 
     private static bool IsInsideConfirmedBookingCutoff(
         Domain.Entities.Trip trip,
@@ -992,7 +1002,8 @@ public sealed class UpdateDriverScheduleHandler
         Guid? AssistantUserId,
         Guid? VehicleId,
         DateOnly? ValidUntil,
-        bool IsActive)
+        bool IsActive,
+        long? BaseFare)
     {
         public static ScheduleState From(DriverSchedule schedule) =>
             new(
@@ -1002,7 +1013,8 @@ public sealed class UpdateDriverScheduleHandler
                 schedule.AssistantUserId,
                 schedule.VehicleId,
                 schedule.ValidUntil,
-                schedule.IsActive);
+                schedule.IsActive,
+                schedule.BaseFare?.Amount);
     }
 
     private sealed record LockedTrip(

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Persistence.Configurations;
@@ -13,6 +14,9 @@ internal sealed class DriverScheduleConfiguration : IEntityTypeConfiguration<Dri
             tableBuilder.HasCheckConstraint(
                 "chk_driver_schedules_valid_until_after_from",
                 "valid_until IS NULL OR valid_until >= valid_from");
+            tableBuilder.HasCheckConstraint(
+                "chk_driver_schedules_base_fare_non_negative",
+                "base_fare IS NULL OR base_fare >= 0");
         });
 
         builder.HasKey(schedule => schedule.Id)
@@ -53,6 +57,14 @@ internal sealed class DriverScheduleConfiguration : IEntityTypeConfiguration<Dri
         builder.Property(schedule => schedule.ValidUntil)
             .HasColumnName("valid_until")
             .HasColumnType("date");
+
+        builder.Property(schedule => schedule.BaseFare)
+            .HasColumnName("base_fare")
+            .HasColumnType("bigint")
+            .HasConversion(
+                fare => fare.HasValue ? fare.Value.Amount : (long?)null,
+                amount => amount.HasValue ? Money.FromRaw(amount.Value) : (Money?)null)
+            .IsRequired(false);
 
         builder.Property(schedule => schedule.IsActive)
             .HasColumnName("is_active")
