@@ -4,6 +4,7 @@ using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Vehicles;
 using VietRide.Trip.Domain.Entities;
 
@@ -26,6 +27,9 @@ public sealed class TripGenerationService
     private readonly ITripSeatRepository tripSeatRepository;
     private readonly ITripStopRepository tripStopRepository;
     private readonly IVehicleRepository vehicleRepository;
+    private readonly IStationRepository? stationRepository;
+    private readonly IStopRepository? stopRepository;
+    private readonly ITripEtaPlanner? tripEtaPlanner;
     private readonly IIntegrationEventOutbox? outbox;
     private readonly ISubscriptionQuotaClient? quotaClient;
     private readonly List<(Guid OperatorId, Guid AllocationId)> persistedQuotaAllocations = [];
@@ -43,7 +47,10 @@ public sealed class TripGenerationService
         ITripStopFareRepository tripStopFareRepository,
         ITripGenerationSkipLogRepository skipLogRepository,
         IIntegrationEventOutbox? outbox = null,
-        ISubscriptionQuotaClient? quotaClient = null)
+        ISubscriptionQuotaClient? quotaClient = null,
+        IStationRepository? stationRepository = null,
+        IStopRepository? stopRepository = null,
+        ITripEtaPlanner? tripEtaPlanner = null)
     {
         this.clock = clock;
         this.driverScheduleRepository = driverScheduleRepository;
@@ -56,6 +63,9 @@ public sealed class TripGenerationService
         this.skipLogRepository = skipLogRepository;
         this.outbox = outbox;
         this.quotaClient = quotaClient;
+        this.stationRepository = stationRepository;
+        this.stopRepository = stopRepository;
+        this.tripEtaPlanner = tripEtaPlanner;
     }
 
     public async Task<GenerateTripsForScheduleResult> GenerateAsync(
@@ -170,6 +180,12 @@ public sealed class TripGenerationService
                     continue;
                 }
 
+                var etaPlan = await PlanEtaAsync(
+                    route,
+                    routeStops,
+                    departureDateTime,
+                    estimatedTripDurationMinutes.Value,
+                    cancellationToken);
                 var trip = Domain.Entities.Trip.Create(
                     schedule.OperatorId,
                     schedule.RouteId,
@@ -178,13 +194,14 @@ public sealed class TripGenerationService
                     schedule.AssistantUserId,
                     schedule.Id,
                     departureDateTime,
-                    departureDateTime.AddMinutes(estimatedTripDurationMinutes.Value),
+                    etaPlan.DestinationArrivalTime,
                     TripSource.AUTO_FROM_SCHEDULE,
                     route.BaseFare,
                     vehicle.MaxCargoWeightKg,
                     vehicle.MaxCargoVolumeM3,
                     0m,
-                    seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
+                    seatLayoutSnapshotJson: vehicle.SeatLayoutJson,
+                    plannedEtaSource: etaPlan.Source);
 
                 Guid? quotaAllocationId = null;
                 if (quotaClient is not null)
@@ -222,7 +239,7 @@ public sealed class TripGenerationService
                     existingDriverDepartures.Add((schedule.DriverUserId, departureDateTime));
                     existingVehicleDepartures.Add((vehicle.Id, departureDateTime));
                     await AddSeatsAsync(trip.Id, vehicle, cancellationToken);
-                    await AddStopsAsync(trip.Id, departureDateTime, routeStops, cancellationToken);
+                    await AddStopsAsync(trip.Id, departureDateTime, routeStops, etaPlan, cancellationToken);
                     if (outbox is not null)
                     {
                         await outbox.EnqueueAsync(
@@ -487,6 +504,7 @@ public sealed class TripGenerationService
         Guid tripId,
         DateTimeOffset departureDateTime,
         IReadOnlyList<RouteStop> routeStops,
+        TripEtaPlan etaPlan,
         CancellationToken cancellationToken)
     {
         foreach (var routeStop in routeStops)
@@ -496,12 +514,62 @@ public sealed class TripGenerationService
                     tripId,
                     routeStop.StopId,
                     routeStop.OrderIndex,
-                    departureDateTime.AddMinutes(routeStop.EstimatedDurationFromOriginMinutes),
+                    etaPlan.StopArrivalTimes.GetValueOrDefault(
+                        routeStop.StopId,
+                        departureDateTime.AddMinutes(routeStop.EstimatedDurationFromOriginMinutes)),
                     routeStop.AllowPickup,
                     routeStop.AllowDropoff,
                     routeStop.DistanceFromOriginKm),
                 cancellationToken);
         }
+    }
+
+    private async Task<TripEtaPlan> PlanEtaAsync(
+        Domain.Entities.Route route,
+        IReadOnlyList<RouteStop> routeStops,
+        DateTimeOffset departureDateTime,
+        int fallbackDurationMinutes,
+        CancellationToken cancellationToken)
+    {
+        var fallback = new TripEtaPlan(
+            PlannedEtaSource.ROUTE_BASELINE,
+            departureDateTime.AddMinutes(fallbackDurationMinutes),
+            routeStops.ToDictionary(
+                stop => stop.StopId,
+                stop => departureDateTime.AddMinutes(stop.EstimatedDurationFromOriginMinutes)));
+        if (tripEtaPlanner is null || stationRepository is null || stopRepository is null)
+        {
+            return fallback;
+        }
+
+        var stationIds = new[] { route.OriginStationId, route.DestinationStationId };
+        var stations = stationRepository.QueryNoTracking()
+            .Where(station => stationIds.Contains(station.Id))
+            .ToDictionary(station => station.Id);
+        if (!stations.TryGetValue(route.OriginStationId, out var originStation)
+            || !stations.TryGetValue(route.DestinationStationId, out var destinationStation))
+        {
+            return fallback;
+        }
+
+        var stopIds = routeStops.Select(stop => stop.StopId).ToArray();
+        var stopById = stopRepository.QueryNoTracking()
+            .Where(stop => stopIds.Contains(stop.Id))
+            .ToDictionary(stop => stop.Id);
+        if (stopById.Count != routeStops.Count)
+        {
+            return fallback;
+        }
+
+        return await tripEtaPlanner.PlanAsync(
+            route,
+            originStation,
+            destinationStation,
+            routeStops
+                .Select(stop => new TripEtaStopInput(stop, stopById[stop.StopId]))
+                .ToArray(),
+            departureDateTime,
+            cancellationToken);
     }
 
     private static DateTimeOffset BuildDepartureDateTime(DateOnly date, TimeOnly time)

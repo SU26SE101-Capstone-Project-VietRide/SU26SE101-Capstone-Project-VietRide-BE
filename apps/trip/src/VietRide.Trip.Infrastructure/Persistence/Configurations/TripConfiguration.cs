@@ -40,6 +40,10 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
         builder.Property(trip => trip.DriverScheduleId).HasColumnName("driver_schedule_id");
         builder.Property(trip => trip.DepartureDateTime).HasColumnName("departure_date_time");
         builder.Property(trip => trip.EstimatedArrivalTime).HasColumnName("estimated_arrival_time");
+        builder.Property(trip => trip.PlannedEtaSource)
+            .HasColumnName("planned_eta_source")
+            .HasColumnType("vietride_trip.planned_eta_source")
+            .HasDefaultValue(PlannedEtaSource.ROUTE_BASELINE);
         builder.Property(trip => trip.ActualDepartureTime).HasColumnName("actual_departure_time");
         builder.Property(trip => trip.DestinationArrivedAt).HasColumnName("destination_arrived_at");
         builder.Property(trip => trip.DestinationArrivedByUserId).HasColumnName("destination_arrived_by_user_id");

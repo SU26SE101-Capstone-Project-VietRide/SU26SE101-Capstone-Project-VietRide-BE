@@ -25,6 +25,10 @@ export interface EtaTrackingResponseDto {
   eta: EtaResponseDto | null;
 }
 
+export interface EtaBatchTrackingResponseDto {
+  etas: EtaResponseDto[];
+}
+
 @Injectable()
 export class TrackingDataService {
   constructor(
@@ -85,5 +89,33 @@ export class TrackingDataService {
       if (eta) return { eta: { ...eta, stopName: stop.stopName ?? null } };
     }
     return { eta: null };
+  }
+
+  async getEtas(tripId: string): Promise<EtaBatchTrackingResponseDto> {
+    const routeStops = this.tripData ? await this.tripData.getRouteStops(tripId) : [];
+    const completed = new Set(['COMPLETED', 'ARRIVED', 'SKIPPED', 'PICKED_UP', 'DROPPED_OFF', 'CANCELLED']);
+    const etas: EtaResponseDto[] = [];
+    for (const stop of [...routeStops].sort((left, right) => left.sequence - right.sequence)) {
+      if (stop.status && completed.has(stop.status)) continue;
+      const eta = await this.repository.findEta(tripId, stop.stopId, 'STOP');
+      if (eta) {
+        etas.push({
+          ...eta,
+          sequence: stop.sequence,
+          stopName: stop.stopName ?? null,
+        });
+      }
+    }
+
+    const route = this.routeGeometry
+      ? await this.routeGeometry.getDetailedRouteGeometry(tripId)
+      : null;
+    const destination = route?.kind === 'ok' ? route.snapshot.destinationStation : null;
+    if (destination) {
+      const eta = await this.repository.findEta(tripId, destination.stationId, 'STATION');
+      if (eta) etas.push({ ...eta, stopName: destination.name });
+    }
+
+    return { etas };
   }
 }

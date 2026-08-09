@@ -25,6 +25,7 @@ public sealed class TripDbContext : VietRideDbContextBase
     {
         builder.MapEnum<TripStatus>($"{SchemaName}.trip_status", PostgresEnumNameTranslator);
         builder.MapEnum<TripSource>($"{SchemaName}.trip_source", PostgresEnumNameTranslator);
+        builder.MapEnum<PlannedEtaSource>($"{SchemaName}.planned_eta_source", PostgresEnumNameTranslator);
         builder.MapEnum<TripSeatStatus>($"{SchemaName}.trip_seat_status", PostgresEnumNameTranslator);
         builder.MapEnum<TripSeatType>($"{SchemaName}.trip_seat_type", PostgresEnumNameTranslator);
         builder.MapEnum<TripStopStatus>($"{SchemaName}.trip_stop_status", PostgresEnumNameTranslator);
@@ -104,6 +105,7 @@ public sealed class TripDbContext : VietRideDbContextBase
         modelBuilder.HasPostgresExtension("btree_gist");
         modelBuilder.HasPostgresEnum("trip_status", new[] { "SCHEDULED", "BOARDING", "IN_PROGRESS", "COMPLETED", "CANCELLED", "DISRUPTED" });
         modelBuilder.HasPostgresEnum("trip_source", new[] { "MANUAL", "AUTO_FROM_SCHEDULE", "VEHICLE_SUBSTITUTION" });
+        modelBuilder.HasPostgresEnum(SchemaName, "planned_eta_source", new[] { "GOOGLE_ROUTES", "ROUTE_BASELINE" });
         modelBuilder.HasPostgresEnum("trip_seat_status", new[] { "AVAILABLE", "HELD", "BOOKED", "UNAVAILABLE" });
         modelBuilder.HasPostgresEnum("trip_seat_type", new[] { "STANDARD", "SLEEPER_LOWER", "SLEEPER_UPPER", "VIP", "DRIVER_AREA" });
         modelBuilder.HasPostgresEnum("trip_stop_status", new[] { "PENDING", "ARRIVED", "SKIPPED" });

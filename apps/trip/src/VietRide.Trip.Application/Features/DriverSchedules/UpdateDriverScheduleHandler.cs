@@ -39,6 +39,10 @@ public sealed class UpdateDriverScheduleHandler
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
     private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
+    private readonly IRouteStopRepository? routeStops;
+    private readonly IStationRepository? stations;
+    private readonly IStopRepository? stops;
+    private readonly ITripEtaPlanner? tripEtaPlanner;
 
     public UpdateDriverScheduleHandler(
         IDriverScheduleRepository schedules,
@@ -56,7 +60,11 @@ public sealed class UpdateDriverScheduleHandler
         ITripGenerationJobScheduler generationJobs,
         IUnitOfWork unitOfWork,
         IClock clock,
-        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null,
+        IRouteStopRepository? routeStops = null,
+        IStationRepository? stations = null,
+        IStopRepository? stops = null,
+        ITripEtaPlanner? tripEtaPlanner = null)
     {
         this.schedules = schedules;
         this.scheduleAudits = scheduleAudits;
@@ -74,6 +82,10 @@ public sealed class UpdateDriverScheduleHandler
         this.unitOfWork = unitOfWork;
         this.clock = clock;
         this.routeChangeProposals = routeChangeProposals;
+        this.routeStops = routeStops;
+        this.stations = stations;
+        this.stops = stops;
+        this.tripEtaPlanner = tripEtaPlanner;
     }
 
     public async Task<DriverScheduleDto> Handle(
@@ -418,10 +430,18 @@ public sealed class UpdateDriverScheduleHandler
             if (newDeparture != oldDeparture)
             {
                 var delta = newDeparture - oldDeparture;
-                trip.Reschedule(newDeparture, trip.EstimatedArrivalTime.Add(delta));
+                var etaPlan = await TryPlanTripEtaAsync(trip, newDeparture, cancellationToken);
+                trip.Reschedule(
+                    newDeparture,
+                    etaPlan?.DestinationArrivalTime ?? trip.EstimatedArrivalTime.Add(delta),
+                    etaPlan?.Source ?? PlannedEtaSource.ROUTE_BASELINE);
                 foreach (var stop in item.Stops)
                 {
-                    stop.RecomputePlannedArrival(stop.EstimatedArrivalTime.Add(delta));
+                    stop.RecomputePlannedArrival(
+                        etaPlan?.StopArrivalTimes.GetValueOrDefault(
+                            stop.StopId,
+                            stop.EstimatedArrivalTime.Add(delta))
+                        ?? stop.EstimatedArrivalTime.Add(delta));
                 }
 
                 var scheduleChanged = new TripScheduleChangedIntegrationEvent(
@@ -516,6 +536,42 @@ public sealed class UpdateDriverScheduleHandler
                 now,
                 cancellationToken);
         }
+    }
+
+    private async Task<TripEtaPlan?> TryPlanTripEtaAsync(
+        Domain.Entities.Trip trip,
+        DateTimeOffset departureTime,
+        CancellationToken cancellationToken)
+    {
+        if (tripEtaPlanner is null || routeStops is null || stations is null || stops is null)
+            return null;
+
+        var route = routes.QueryNoTracking().FirstOrDefault(route => route.Id == trip.RouteId);
+        if (route is null) return null;
+        var configuredStops = routeStops.QueryNoTracking()
+            .Where(stop => stop.RouteId == route.Id)
+            .OrderBy(stop => stop.OrderIndex)
+            .ToArray();
+        var stationIds = new[] { route.OriginStationId, route.DestinationStationId };
+        var stationById = stations.QueryNoTracking()
+            .Where(station => stationIds.Contains(station.Id))
+            .ToDictionary(station => station.Id);
+        var stopIds = configuredStops.Select(stop => stop.StopId).ToArray();
+        var stopById = stops.QueryNoTracking()
+            .Where(stop => stopIds.Contains(stop.Id))
+            .ToDictionary(stop => stop.Id);
+        if (!stationById.TryGetValue(route.OriginStationId, out var origin)
+            || !stationById.TryGetValue(route.DestinationStationId, out var destination)
+            || stopById.Count != configuredStops.Length)
+            return null;
+
+        return await tripEtaPlanner.PlanAsync(
+            route,
+            origin,
+            destination,
+            configuredStops.Select(stop => new TripEtaStopInput(stop, stopById[stop.StopId])).ToArray(),
+            departureTime,
+            cancellationToken);
     }
 
     private static ScheduleState BuildEffectiveState(UpdateDriverScheduleCommand request, ScheduleState before) =>

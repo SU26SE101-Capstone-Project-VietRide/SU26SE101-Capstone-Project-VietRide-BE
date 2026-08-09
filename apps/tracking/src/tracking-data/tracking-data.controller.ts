@@ -12,6 +12,7 @@ import {
 } from './dto/tracking-data-query.dto';
 import {
   type EtaTrackingResponseDto,
+  type EtaBatchTrackingResponseDto,
   type LatestTrackingResponseDto,
   type TrailTrackingResponseDto,
   TrackingDataService,
@@ -20,6 +21,7 @@ import { TrackingDataAuthGuard } from './tracking-data-auth.guard';
 import {
   ApiErrorEnvelopeDto,
   TrackingEtaEnvelopeDto,
+  TrackingEtaBatchEnvelopeDto,
   TrackingLatestEnvelopeDto,
   TrackingTrailEnvelopeDto,
 } from './dto/swagger-response.dto';
@@ -129,5 +131,20 @@ export class TrackingDataController {
     @Query(new ZodValidationPipe(EtaQuerySchema)) query: EtaQueryDto,
   ): Promise<EtaTrackingResponseDto> {
     return this.trackingDataService.getEta(params.tripId, query);
+  }
+
+  @Get(':tripId/etas')
+  @ApiOperation({ summary: 'Get cached ETA values for all remaining stops and destination' })
+  @ApiParam({ name: 'tripId', type: 'string', format: 'uuid', description: 'The ID of the trip' })
+  @ApiResponse({ status: 200, description: 'Ordered cached ETA values.', type: TrackingEtaBatchEnvelopeDto })
+  @ApiResponse({ status: 400, description: 'Validation error.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 401, description: 'Unauthorized.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 403, description: 'Forbidden.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 404, description: 'Trip not found.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 503, description: 'Authorization provider unavailable.', type: ApiErrorEnvelopeDto })
+  async getEtas(
+    @Param(new ZodValidationPipe(TripIdParamSchema)) params: TripIdParamDto,
+  ): Promise<EtaBatchTrackingResponseDto> {
+    return this.trackingDataService.getEtas(params.tripId);
   }
 }

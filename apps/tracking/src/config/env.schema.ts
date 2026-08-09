@@ -45,6 +45,7 @@ export const envSchema = baseEnvSchema.merge(
     TRACKING_ETA_MIN_INTERVAL_SECONDS: z.coerce.number().int().min(60).default(60),
     TRACKING_ETA_CACHE_TTL_SECONDS: z.coerce.number().int().min(60).default(60),
     TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: z.coerce.number().int().min(300).default(300),
+    TRIP_STOP_DWELL_MINUTES: z.coerce.number().int().nonnegative().default(20),
     TRACKING_GPS_FLUSH_ENABLED: booleanEnvSchema.default(false),
     TRACKING_GPS_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
     TRACKING_TRIP_DELAY_ENABLED: booleanEnvSchema.default(false),
@@ -57,7 +58,10 @@ export const envSchema = baseEnvSchema.merge(
   }),
 );
 
-export type Env = z.infer<typeof envSchema>;
+type ParsedEnv = z.infer<typeof envSchema>;
+export type Env = Omit<ParsedEnv, 'TRIP_STOP_DWELL_MINUTES'> & {
+  TRIP_STOP_DWELL_MINUTES?: number;
+};
 
 export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
   const tripServiceBaseUrl = raw.TRIP_SERVICE_BASE_URL || raw.TRIP_BASE_URL;

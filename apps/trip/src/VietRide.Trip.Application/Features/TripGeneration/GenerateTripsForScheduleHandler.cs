@@ -4,6 +4,7 @@ using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 
 namespace VietRide.Trip.Application.Features.TripGeneration;
 
@@ -21,6 +22,9 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
     private readonly ITripStopRepository tripStopRepository;
     private readonly IUnitOfWork unitOfWork;
     private readonly IVehicleRepository vehicleRepository;
+    private readonly IStationRepository? stationRepository;
+    private readonly IStopRepository? stopRepository;
+    private readonly ITripEtaPlanner? tripEtaPlanner;
     private readonly IIntegrationEventOutbox outbox;
     private readonly ISubscriptionQuotaClient? quotaClient;
 
@@ -38,7 +42,10 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
         ITripGenerationSkipLogRepository skipLogRepository,
         IUnitOfWork unitOfWork,
         IIntegrationEventOutbox outbox,
-        ISubscriptionQuotaClient? quotaClient = null)
+        ISubscriptionQuotaClient? quotaClient = null,
+        IStationRepository? stationRepository = null,
+        IStopRepository? stopRepository = null,
+        ITripEtaPlanner? tripEtaPlanner = null)
     {
         this.clock = clock;
         this.driverScheduleRepository = driverScheduleRepository;
@@ -53,6 +60,9 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
         this.skipLogRepository = skipLogRepository;
         this.unitOfWork = unitOfWork;
         this.outbox = outbox;
+        this.stationRepository = stationRepository;
+        this.stopRepository = stopRepository;
+        this.tripEtaPlanner = tripEtaPlanner;
         this.quotaClient = quotaClient;
     }
 
@@ -73,7 +83,10 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
             tripStopFareRepository,
             skipLogRepository,
             outbox,
-            quotaClient);
+            quotaClient,
+            stationRepository,
+            stopRepository,
+            tripEtaPlanner);
 
         try
         {

@@ -3840,7 +3840,7 @@ UI hỏi: "Bạn có muốn tạo lịch chiều về (HN→SG) cho tài xế A?
 
 `TripStop` là snapshot các điểm dừng của một chuyến cụ thể. Khác với `TripStopFare` (chỉ tồn tại khi operator muốn override `Route.baseFare` cho stop cụ thể), `TripStop` tồn tại cho **mọi chuyến có RouteStop entries** để Driver App hiển thị danh sách stop còn lại và Tracking Service tính ETA per stop.
 
-Fields cần có: tripId + stopId composite key, `orderIndex` (1-indexed, thứ tự dừng trên chuyến), `estimatedArrivalTime` (static baseline — tính từ Trip.departureDateTime + RouteStop.estimatedDurationFromOriginMinutes, **KHÔNG bao giờ update sau khi generate**), `actualArrivalTime` nullable (khi xe thực sự đến — xem note bên dưới về cơ chế set), `actualDepartureTime` nullable (durable Day-24 stop-departure anchor), `status` enum (PENDING | ARRIVED | SKIPPED — SKIPPED khi stop bị disable lúc generate Trip), **`allowPickup` boolean + `allowDropoff` boolean**, **`distanceFromOriginKm` decimal nullable** (snapshot từ RouteStop dùng cho DISRUPTED refund).
+Fields cần có: tripId + stopId composite key, `orderIndex` (1-indexed, thứ tự dừng trên chuyến), `estimatedArrivalTime` (static planned baseline do Trip Service tính; Google Routes traffic-aware là primary, Route metrics là fallback, cộng dwell 20 phút), `actualArrivalTime` nullable (khi xe thực sự đến — xem note bên dưới về cơ chế set), `actualDepartureTime` nullable (durable Day-24 stop-departure anchor), `status` enum (PENDING | ARRIVED | SKIPPED — SKIPPED khi stop bị disable lúc generate Trip), **`allowPickup` boolean + `allowDropoff` boolean**, **`distanceFromOriginKm` decimal nullable** (snapshot từ RouteStop dùng cho DISRUPTED refund). Baseline được recompute khi generate, approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING`; GPS/Tracking không update field này.
 
 > **Cơ chế set `TripStop.actualArrivalTime` — Assistant explicit confirm:**
 > Assistant bấm nút "Đã đến [tên stop]" trong Driver App khi xe dừng tại điểm dừng đó → API call `POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive` → Trip-Route-Vehicle Service set `TripStop.actualArrivalTime = now`, `TripStop.status = ARRIVED`. Nút này chỉ enable khi Trip.status = IN_PROGRESS.
@@ -3873,16 +3873,23 @@ Fields cần có: tripId + stopId composite key, `orderIndex` (1-indexed, thứ 
 **Hai-layer ETA — static vs dynamic:**
 ```
 Layer 1 — Static ETA (trong DB):
-  TripStop.estimatedArrivalTime = Trip.departureDateTime + RouteStop.estimatedDurationFromOriginMinutes
-  → Set một lần khi generate Trip, KHÔNG thay đổi trong suốt chuyến
+  TripStop.estimatedArrivalTime = planned cumulative drive time + 20 phút dwell tại mỗi stop trước đó
+  Trip.estimatedArrivalTime = planned cumulative drive time + 20 phút cho mọi stop trung gian
+  → Google Routes ordered waypoints + TRAFFIC_AWARE tại departureTime là primary
+  → RouteStop/Route cumulative metrics là fallback; không làm thất bại việc tạo Trip
+  → Recompute khi generate Trip, approved pre-departure Route change hoặc DriverSchedule ALL_PENDING
+  → Trip.planned_eta_source lưu GOOGLE_ROUTES|ROUTE_BASELINE; API chỉ public TRAFFIC_AWARE|FALLBACK
   → Dùng làm baseline đo deviation (xe trễ bao nhiêu so với kế hoạch)
   → Passenger App hiển thị trước khi chuyến bắt đầu (không có GPS)
 
 Layer 2 — Dynamic ETA (trong Redis, Tracking Service maintain):
-  Redis key: tracking:eta:{tripId}:{stopId}  (TTL 60s)
-  → Tracking Service update khi GPS thỏa điều kiện (xe di chuyển >500m hoặc ETA < 15 phút)
+  Redis key: tracking:eta:{tripId}:{targetId}  (TTL 60s; target là STOP hoặc destination STATION)
+  → Một batch ordered cho mọi PENDING stop phía trước và bến đích, cộng dwell 20 phút
+  → Update khi next stop đổi, xe di chuyển >500m hoặc ETA next stop < 15 phút
+  → Một lock per Trip; toàn bộ target cache được ghi atomic
+  → Google lỗi/partial batch thì bỏ cả batch và fallback nhất quán bằng route projection/current speed
   → Tracking Service KHÔNG ghi đè TripStop.estimatedArrivalTime trong DB
-  → Passenger App đọc dynamic ETA từ Socket.IO broadcast (không từ TripStop entity)
+  → FE đọc GET /v1/tracking/trips/{tripId}/etas hoặc eta:batch:update; FE không tự tính ETA
 
 Delayed detection (Hangfire/BullMQ mỗi 5 phút):
   dynamicETA = Redis eta:{tripId}:{nextStopId}

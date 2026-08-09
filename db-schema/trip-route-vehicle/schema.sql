@@ -21,6 +21,8 @@ CREATE TYPE trip_source AS ENUM (
     'MANUAL', 'AUTO_FROM_SCHEDULE', 'VEHICLE_SUBSTITUTION'
 );
 
+CREATE TYPE planned_eta_source AS ENUM ('GOOGLE_ROUTES', 'ROUTE_BASELINE');
+
 CREATE TYPE trip_seat_status AS ENUM (
     'AVAILABLE', 'HELD', 'BOOKED', 'UNAVAILABLE'
 );
@@ -481,6 +483,7 @@ CREATE TABLE trips (
     -- Lifecycle timestamps
     departure_date_time TIMESTAMPTZ NOT NULL,
     estimated_arrival_time TIMESTAMPTZ NOT NULL,
+    planned_eta_source planned_eta_source NOT NULL DEFAULT 'ROUTE_BASELINE',
     actual_departure_time TIMESTAMPTZ NULL,
     destination_arrived_at TIMESTAMPTZ NULL,
     destination_arrived_by_user_id UUID NULL, -- logical FK -> identity.users.id

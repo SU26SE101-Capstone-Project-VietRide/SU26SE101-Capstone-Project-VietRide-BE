@@ -18,6 +18,7 @@ public sealed record TripDetailDto(
     TripFareBreakdownDto FareBreakdown)
 {
     public string? Notes { get; init; }
+    public string PlannedEtaQuality { get; init; } = "FALLBACK";
     public int SurchargePercent { get; init; }
     public long SurchargeAmount { get; init; }
     public long EffectiveFare { get; init; } = BaseFare;

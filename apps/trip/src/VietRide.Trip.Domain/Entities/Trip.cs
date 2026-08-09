@@ -21,6 +21,7 @@ public sealed class Trip : BaseEntity<Guid>
     public Guid? DriverScheduleId { get; private set; }
     public DateTimeOffset DepartureDateTime { get; private set; }
     public DateTimeOffset EstimatedArrivalTime { get; private set; }
+    public PlannedEtaSource PlannedEtaSource { get; private set; } = PlannedEtaSource.ROUTE_BASELINE;
     public DateTimeOffset? ActualDepartureTime { get; private set; }
     public DateTimeOffset? DestinationArrivedAt { get; private set; }
     public Guid? DestinationArrivedByUserId { get; private set; }
@@ -93,7 +94,8 @@ public sealed class Trip : BaseEntity<Guid>
         decimal estimatedPassengerLuggageKg,
         bool hasSubstitution = false,
         string? notes = null,
-        JsonElement? seatLayoutSnapshotJson = null)
+        JsonElement? seatLayoutSnapshotJson = null,
+        PlannedEtaSource plannedEtaSource = PlannedEtaSource.ROUTE_BASELINE)
     {
         ValidateGuid(operatorId, nameof(operatorId));
         ValidateGuid(routeId, nameof(routeId));
@@ -121,6 +123,7 @@ public sealed class Trip : BaseEntity<Guid>
             DriverScheduleId = driverScheduleId,
             DepartureDateTime = departureDateTime,
             EstimatedArrivalTime = estimatedArrivalTime,
+            PlannedEtaSource = plannedEtaSource,
             Status = TripStatus.SCHEDULED,
             Source = source,
             HasSubstitution = hasSubstitution,
@@ -152,7 +155,10 @@ public sealed class Trip : BaseEntity<Guid>
         return true;
     }
 
-    public bool ChangeRoute(Guid routeId, DateTimeOffset estimatedArrivalTime)
+    public bool ChangeRoute(
+        Guid routeId,
+        DateTimeOffset estimatedArrivalTime,
+        PlannedEtaSource plannedEtaSource = PlannedEtaSource.ROUTE_BASELINE)
     {
         ValidateGuid(routeId, nameof(routeId));
         ValidateArrivalAfterDeparture(DepartureDateTime, estimatedArrivalTime);
@@ -163,6 +169,7 @@ public sealed class Trip : BaseEntity<Guid>
 
         RouteId = routeId;
         EstimatedArrivalTime = estimatedArrivalTime;
+        PlannedEtaSource = plannedEtaSource;
         return true;
     }
 
@@ -295,7 +302,10 @@ public sealed class Trip : BaseEntity<Guid>
         SeatLayoutSnapshotJson = seatLayoutSnapshotJson.Clone();
     }
 
-    public bool Reschedule(DateTimeOffset departureDateTime, DateTimeOffset estimatedArrivalTime)
+    public bool Reschedule(
+        DateTimeOffset departureDateTime,
+        DateTimeOffset estimatedArrivalTime,
+        PlannedEtaSource plannedEtaSource = PlannedEtaSource.ROUTE_BASELINE)
     {
         ValidateArrivalAfterDeparture(departureDateTime, estimatedArrivalTime);
         if (DepartureDateTime == departureDateTime && EstimatedArrivalTime == estimatedArrivalTime)
@@ -305,6 +315,7 @@ public sealed class Trip : BaseEntity<Guid>
 
         DepartureDateTime = departureDateTime;
         EstimatedArrivalTime = estimatedArrivalTime;
+        PlannedEtaSource = plannedEtaSource;
         return true;
     }
 

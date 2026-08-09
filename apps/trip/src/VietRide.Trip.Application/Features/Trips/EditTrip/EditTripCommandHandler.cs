@@ -35,6 +35,9 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
     private readonly IClock clock;
     private readonly ISender sender;
     private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
+    private readonly IStationRepository? stations;
+    private readonly IStopRepository? stops;
+    private readonly ITripEtaPlanner? tripEtaPlanner;
 
     public EditTripCommandHandler(
         ITripRepository trips,
@@ -51,7 +54,10 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
         IUnitOfWork unitOfWork,
         IClock clock,
         ISender sender,
-        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null,
+        IStationRepository? stations = null,
+        IStopRepository? stops = null,
+        ITripEtaPlanner? tripEtaPlanner = null)
     {
         this.trips = trips;
         this.tripSeats = tripSeats;
@@ -68,6 +74,9 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
         this.clock = clock;
         this.sender = sender;
         this.routeChangeProposals = routeChangeProposals;
+        this.stations = stations;
+        this.stops = stops;
+        this.tripEtaPlanner = tripEtaPlanner;
     }
 
     public async Task<TripDetailDto> Handle(EditTripCommand request, CancellationToken cancellationToken)
@@ -302,10 +311,13 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
         if (changed.Contains(EditTripField.RouteId) && newRoute is not null)
         {
             var beforeRouteId = trip.RouteId;
-            var estimatedArrival = trip.DepartureDateTime.AddMinutes(
-                ResolveEstimatedTripDuration(newRoute, newRouteStops));
+            var etaPlan = await PlanRouteEtaAsync(
+                newRoute,
+                newRouteStops,
+                trip.DepartureDateTime,
+                cancellationToken);
 
-            trip.ChangeRoute(newRoute.Id, estimatedArrival);
+            trip.ChangeRoute(newRoute.Id, etaPlan.DestinationArrivalTime, etaPlan.Source);
             await tripStopFares.DeleteByTripAsync(trip.Id, cancellationToken);
             await tripStops.DeleteByTripAsync(trip.Id, cancellationToken);
             foreach (var routeStop in newRouteStops)
@@ -315,7 +327,9 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
                         trip.Id,
                         routeStop.StopId,
                         routeStop.OrderIndex,
-                        trip.DepartureDateTime.AddMinutes(routeStop.EstimatedDurationFromOriginMinutes),
+                        etaPlan.StopArrivalTimes.GetValueOrDefault(
+                            routeStop.StopId,
+                            trip.DepartureDateTime.AddMinutes(routeStop.EstimatedDurationFromOriginMinutes)),
                         routeStop.AllowPickup,
                         routeStop.AllowDropoff,
                         routeStop.DistanceFromOriginKm),
@@ -413,6 +427,43 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
                 now,
                 cancellationToken);
         }
+    }
+
+    private async Task<TripEtaPlan> PlanRouteEtaAsync(
+        Domain.Entities.Route route,
+        IReadOnlyList<RouteStop> configuredStops,
+        DateTimeOffset departureTime,
+        CancellationToken cancellationToken)
+    {
+        var fallback = new TripEtaPlan(
+            PlannedEtaSource.ROUTE_BASELINE,
+            departureTime.AddMinutes(ResolveEstimatedTripDuration(route, configuredStops)),
+            configuredStops.ToDictionary(
+                stop => stop.StopId,
+                stop => departureTime.AddMinutes(stop.EstimatedDurationFromOriginMinutes)));
+        if (tripEtaPlanner is null || stations is null || stops is null)
+            return fallback;
+
+        var stationIds = new[] { route.OriginStationId, route.DestinationStationId };
+        var stationById = stations.QueryNoTracking()
+            .Where(station => stationIds.Contains(station.Id))
+            .ToDictionary(station => station.Id);
+        var stopIds = configuredStops.Select(stop => stop.StopId).ToArray();
+        var stopById = stops.QueryNoTracking()
+            .Where(stop => stopIds.Contains(stop.Id))
+            .ToDictionary(stop => stop.Id);
+        if (!stationById.TryGetValue(route.OriginStationId, out var origin)
+            || !stationById.TryGetValue(route.DestinationStationId, out var destination)
+            || stopById.Count != configuredStops.Count)
+            return fallback;
+
+        return await tripEtaPlanner.PlanAsync(
+            route,
+            origin,
+            destination,
+            configuredStops.Select(stop => new TripEtaStopInput(stop, stopById[stop.StopId])).ToArray(),
+            departureTime,
+            cancellationToken);
     }
 
     private static IReadOnlySet<EditTripField> GetChangedFields(

@@ -6,6 +6,14 @@ export interface EtaProviderResult {
   etaMinutes: number;
 }
 
+export interface EtaBatchTargetResult extends EtaProviderResult {
+  targetId: string;
+}
+
 export interface EtaProvider {
   calculate(gps: GpsUpdateEvent, stop: TripStopSnapshot): Promise<EtaProviderResult | null>;
+  calculateBatch?(
+    gps: GpsUpdateEvent,
+    targets: TripStopSnapshot[],
+  ): Promise<EtaBatchTargetResult[] | null>;
 }

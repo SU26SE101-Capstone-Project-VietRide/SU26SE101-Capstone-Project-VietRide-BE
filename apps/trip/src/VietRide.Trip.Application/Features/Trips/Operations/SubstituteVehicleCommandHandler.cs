@@ -162,7 +162,8 @@ public sealed class SubstituteVehicleCommandHandler
                 replacementVehicle.MaxCargoVolumeM3,
                 oldTrip.EstimatedPassengerLuggageKg,
                 notes: oldTrip.Notes,
-                seatLayoutSnapshotJson: replacementVehicle.SeatLayoutJson);
+                seatLayoutSnapshotJson: replacementVehicle.SeatLayoutJson,
+                plannedEtaSource: oldTrip.PlannedEtaSource);
             newTrip.MarkBoarding(disruptedAt);
             await trips.AddAsync(newTrip, cancellationToken);
 

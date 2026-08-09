@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.60.0
+> **Phiên bản:** 1.61.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-08
+> **Cập nhật lần cuối:** 2026-08-09
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1480,7 +1480,12 @@ Changing `departureTime`/`dayOfWeek` through `ALL_PENDING` is the only Day-22 pa
 `departureDateTime`; that field is absent from the Trip PATCH body and changed-field registry.
 `trip_stops.estimated_arrival_time` is a static planned baseline: an approved pre-departure Route
 edit or DriverSchedule `ALL_PENDING` cascade may recompute it, while GPS/Tracking dynamic ETA never
-updates the column.
+updates the column. Trip Service plans ordered origin → RouteStops → destination with Google Routes
+`DRIVE`/`TRAFFIC_AWARE` at `departureTime`, adding `TRIP_STOP_DWELL_MINUTES` (default 20) after
+each intermediate stop. Missing coordinates, timeout/quota, malformed legs, or an open circuit use
+cumulative Route metrics without failing Trip creation. `trips.planned_eta_source` stores
+`GOOGLE_ROUTES|ROUTE_BASELINE`; public projections expose only
+`plannedEtaQuality=TRAFFIC_AWARE|FALLBACK`.
 
 ### 5.7 Pagination — `PagedResult<T>` + `QueryOptions` (ADR 0004)
 
@@ -3347,7 +3352,8 @@ Mọi key dùng pattern `<service>:<purpose>:<id>` để namespace per service. 
 | `payment:settlement_insufficient:{settlementId}` | Payment | Insufficient PlatformWallet alert dedupe | 24h |
 | `tracking:latest:{tripId}` | Tracking | Last known GPS position | 5p |
 | `tracking:gps_buffer:{tripId}` | Tracking | GPS trail buffer (list) | đến flush |
-| `tracking:eta:{tripId}:{stopId}` | Tracking | Dynamic ETA cached | 60s |
+| `tracking:eta:{tripId}:{targetId}` | Tracking | Dynamic ETA per remaining STOP or destination STATION | 60s |
+| `tracking:eta_batch_lock:{tripId}` | Tracking | Owner-safe atomic ETA batch calculation lock | 10s |
 | `tracking:trip_delay_state:{tripId}:{stopId}` | Tracking | Evaluated delay state (`stopId`, `delayStatus`, `delayMinutes`, `evaluatedAt`); reads legacy trip-level key during rolling deploy | 24h |
 | `tracking:trip_delay_lock:{tripId}` | Tracking | Owner-safe delay state evaluation lock | 10s |
 | `tracking:off_route_since:{tripId}` | Tracking | Off-route timer start | đến clear |
@@ -3493,7 +3499,7 @@ permitted.
 |---|---|---|
 | `tracking:gps-batch-write` | Repeatable every 5 minutes | Flush Redis `tracking:gps_buffer:*` → batch INSERT GpsTrail |
 | `tracking:outbox-publisher` | Repeatable every 5s | Read `outbox_events` PENDING → publish RabbitMQ |
-| `tracking:eta-recalculate` | On GPS update event (conditional) | Conditional check distance >500m OR ETA <15p → call Google Directions API → update Redis |
+| `tracking:eta-recalculate` | On GPS update event (conditional) | When next stop changes, distance >500m, or next ETA <15p: calculate every remaining PENDING stop plus destination, write all Redis targets atomically, and emit legacy `eta:update` plus `eta:batch:update`. Google partial/error discards the whole provider batch and uses one consistent route/speed fallback. |
 
 #### Notification
 
@@ -3612,7 +3618,10 @@ TRIP_PORT=5002
 DB_CONNECTION=...vietride_trip...
 SEAT_LOCK_TTL_MINUTES=10        # Trip-owned source for SeatLock:TtlMinutes / lock-seats ttlSeconds default 600s.
 GOOGLE_MAPS_API_KEY=...
-GOOGLE_DIRECTIONS_API_KEY=...
+GOOGLE_ROUTES_ENABLED=false
+GOOGLE_ROUTES_API_KEY=...
+TRIP_PLANNED_ETA_TIMEOUT_MS=3000
+TRIP_STOP_DWELL_MINUTES=20
 HANGFIRE_DASHBOARD_USER=admin
 HANGFIRE_DASHBOARD_PASSWORD=...
 IDENTITY_BASE_URL=http://identity:5001
@@ -3664,7 +3673,9 @@ USER_JWT_JWKS_URL=http://identity:5001/v1/.well-known/jwks.json
 GPS_BATCH_INTERVAL_MINUTES=5
 ETA_RECALC_DISTANCE_THRESHOLD_METERS=500
 ETA_RECALC_HIGH_FREQ_THRESHOLD_MINUTES=15
-GOOGLE_DIRECTIONS_API_KEY=...
+TRIP_STOP_DWELL_MINUTES=20
+GOOGLE_ROUTES_ENABLED=false
+GOOGLE_ROUTES_API_KEY=...
 BOOKING_BASE_URL=http://booking:5003
 TRIP_BASE_URL=http://trip:5002
 PARCEL_BASE_URL=http://parcel:5005
@@ -3925,6 +3936,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.61.0** | 2026-08-09 | Codex | **MINOR** — Add backend-owned intercity ETA for every stop and destination. Trip persists Google Routes versus Route-baseline planned source while exposing only `plannedEtaQuality`; Tracking calculates one ordered batch for all remaining targets, writes 60-second Redis entries atomically, exposes `GET /v1/tracking/trips/{tripId}/etas`, and emits additive `eta:batch:update` while preserving legacy `/eta` and `eta:update`. Adds reversible `planned_eta_source` migration and default 20-minute dwell configuration; no dependency or integration event added. |
 | **1.60.0** | 2026-08-08 | Codex | **MINOR** — Reconcile the current RAG contract with runtime and physical DDL (Cloudinary raw document storage, OpenRouter chat/embedding, canonical `nvidia/llama-nemotron-embed-vl-1b-v2:free`, `halfvec(2048)`, HNSW cosine indexing) and standardize Payment as the financial source of truth for Dashboard/Analytics/Platform Report/export with canonical revenue predicates, typed adjustment taxonomy, separated settlement, ICT half-open ranges, 60-second cache, and fail-closed 503 financial consumers. No physical DDL, migration, dependency, provider secret, or integration-event change. |
 | **1.59.0** | 2026-08-07 | Codex | **MINOR** — Freeze Mobile gap contracts: passenger Trip search exposes only `SCHEDULED`; round-trip route identity and leg-scoped seat conflicts; effective-route geometry/ETag; STOP/STATION ETA and passenger-history tracking targets; atomic notification read-all plus snapshot cursor pagination; System Admin `SUSPENDED -> APPROVED` operator reactivation with ActivityLog and unchanged subscription; RAG 429 documents `RAG_RATE_LIMIT_EXCEEDED`. Adds two UUID-v4-required mutations, raising the executable inventory to 190/173/17. No new dependency or integration event. |
 | **1.58.0** | 2026-08-06 | Codex | **MINOR** — Hoàn thiện Manager Web Trip gaps: immutable Trip seat-layout snapshot, canonical usable passenger capacity, case-insensitive seat validation, operator-admin TripSeat disable/enable with row locking/audit/idempotency, operator shuttle history, batched pending-shuttle passenger enrichment, and method-aware Gateway routing. |

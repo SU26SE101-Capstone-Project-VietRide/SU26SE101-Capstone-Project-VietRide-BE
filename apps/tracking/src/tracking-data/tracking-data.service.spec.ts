@@ -12,6 +12,7 @@ const ETA: EtaResponseDto = {
   estimatedArrivalTime: '2026-08-06T03:05:00.000Z',
   distanceMeters: 58_000,
   updatedAt: '2026-08-06T02:00:00.000Z',
+  estimateQuality: 'FALLBACK',
   delayed: false,
   delayStatus: 'ON_TIME',
   delayMinutes: 0,
@@ -127,5 +128,54 @@ describe('TrackingDataService ETA selection', () => {
       targetKind: 'STATION',
       stationId: '55555555-5555-4555-8555-555555555555',
     })).resolves.toEqual({ eta: null });
+  });
+
+  it('returns cached pending stop ETAs in sequence order followed by destination', async () => {
+    const firstStopId = '22222222-2222-4222-8222-222222222222';
+    const destinationStationId = '44444444-4444-4444-8444-444444444444';
+    const repository = {
+      findEta: jest.fn(async (_tripId: string, targetId: string, targetKind: string) => ({
+        ...ETA,
+        targetKind,
+        stopId: targetKind === 'STOP' ? targetId : undefined,
+        stationId: targetKind === 'STATION' ? targetId : undefined,
+      })),
+    } as unknown as TrackingDataRepository;
+    const trips = {
+      getRouteStops: jest.fn(async () => [
+        { stopId: ETA.stopId, stopName: 'Second', latitude: 11, longitude: 107, sequence: 2, status: 'PENDING' },
+        { stopId: firstStopId, stopName: 'First', latitude: 10.8, longitude: 106.8, sequence: 1, status: 'PENDING' },
+        { stopId: '55555555-5555-4555-8555-555555555555', stopName: 'Past', latitude: 10, longitude: 106, sequence: 0, status: 'SKIPPED' },
+      ]),
+    } as TripDataProvider;
+    const routes = {
+      getDetailedRouteGeometry: jest.fn(async () => ({
+        kind: 'ok' as const,
+        snapshot: {
+          tripId: ETA.tripId,
+          points: [],
+          destinationStation: {
+            stationId: destinationStationId,
+            name: 'Destination',
+            latitude: 12,
+            longitude: 108,
+          },
+        },
+      })),
+    } as unknown as DetailedRouteGeometryProvider;
+
+    const result = await new TrackingDataService(repository, trips, routes).getEtas(ETA.tripId);
+
+    expect(result.etas.map((eta) => eta.targetKind === 'STOP' ? eta.stopId : eta.stationId))
+      .toEqual([firstStopId, ETA.stopId, destinationStationId]);
+    expect(result.etas.map((eta) => eta.stopName)).toEqual(['First', 'Second', 'Destination']);
+  });
+
+  it('returns an empty batch for a cold cache without triggering calculation', async () => {
+    const repository = { findEta: jest.fn(async () => null) } as unknown as TrackingDataRepository;
+    const trips = { getRouteStops: jest.fn(async () => []) } as TripDataProvider;
+
+    await expect(new TrackingDataService(repository, trips).getEtas(ETA.tripId))
+      .resolves.toEqual({ etas: [] });
   });
 });
