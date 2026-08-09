@@ -47,7 +47,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
                 table: "trips",
                 type: "vietride_trip.planned_eta_source",
                 nullable: false,
-                defaultValue: PlannedEtaSource.ROUTE_BASELINE);
+                defaultValueSql: "'ROUTE_BASELINE'::vietride_trip.planned_eta_source");
 
         }
 
