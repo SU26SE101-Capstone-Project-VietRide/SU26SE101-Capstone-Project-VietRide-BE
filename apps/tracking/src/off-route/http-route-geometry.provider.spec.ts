@@ -74,10 +74,45 @@ describe('HttpRouteGeometryProvider', () => {
     await expect(provider.getDetailedRouteGeometry(TRIP_ID)).resolves.toEqual({ kind: 'unavailable' });
   });
 
-  it('keeps STOPS_ONLY detailed context while hiding unusable geometry from legacy consumers', async () => {
+  it('builds legacy STOPS_ONLY geometry from origin, intermediate stops and destination', async () => {
     global.fetch = jest.fn(async () => jsonResponse(200, validEnvelope({
       geometrySource: 'STOPS_ONLY',
       points: [{ latitude: 10, longitude: 106 }],
+      intermediateStops: [{
+        stopId: '55555555-5555-4555-8555-555555555555',
+        name: 'Intermediate',
+        sequence: 1,
+        latitude: 10.05,
+        longitude: 106.05,
+      }],
+    }))) as typeof fetch;
+    const provider = createProvider();
+
+    await expect(provider.getDetailedRouteGeometry(TRIP_ID)).resolves.toEqual(
+      expect.objectContaining({ kind: 'ok' }),
+    );
+    expect(provider.peekCachedRouteGeometry(TRIP_ID)?.points).toEqual([
+      { latitude: 10, longitude: 106 },
+      { latitude: 10.05, longitude: 106.05 },
+      { latitude: 10.1, longitude: 106.1 },
+    ]);
+    await expect(provider.getRouteGeometry(TRIP_ID)).resolves.toEqual(
+      expect.objectContaining({
+        destinationStation: expect.objectContaining({
+          stationId: '44444444-4444-4444-8444-444444444444',
+        }),
+      }),
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps STOPS_ONLY geometry hidden when fewer than two fallback coordinates exist', async () => {
+    global.fetch = jest.fn(async () => jsonResponse(200, validEnvelope({
+      geometrySource: 'STOPS_ONLY',
+      points: [{ latitude: 10, longitude: 106 }],
+      originStation: null,
+      intermediateStops: [],
+      destinationStation: null,
     }))) as typeof fetch;
     const provider = createProvider();
 
@@ -86,7 +121,6 @@ describe('HttpRouteGeometryProvider', () => {
     );
     expect(provider.peekCachedRouteGeometry(TRIP_ID)).toBeNull();
     await expect(provider.getRouteGeometry(TRIP_ID)).resolves.toBeNull();
-    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('keeps two-point STOPS_ONLY geometry available to legacy ETA and off-route consumers', async () => {

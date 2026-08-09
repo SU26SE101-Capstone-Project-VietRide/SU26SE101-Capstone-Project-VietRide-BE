@@ -85,6 +85,11 @@ class EtaDataDto {
   eta!: EtaResponseDataDto | null;
 }
 
+class EtaBatchDataDto {
+  @ApiProperty({ type: [EtaResponseDataDto] })
+  etas!: EtaResponseDataDto[];
+}
+
 export class TrackingLatestEnvelopeDto {
   @ApiProperty({ example: true })
   success!: boolean;
@@ -122,6 +127,20 @@ export class TrackingEtaEnvelopeDto {
 
   @ApiProperty({ type: EtaDataDto })
   data!: EtaDataDto;
+
+  @ApiProperty({ type: ApiMetaDto })
+  meta!: ApiMetaDto;
+}
+
+export class TrackingEtaBatchEnvelopeDto {
+  @ApiProperty({ example: true })
+  success!: boolean;
+
+  @ApiProperty({ example: 200 })
+  statusCode!: number;
+
+  @ApiProperty({ type: EtaBatchDataDto })
+  data!: EtaBatchDataDto;
 
   @ApiProperty({ type: ApiMetaDto })
   meta!: ApiMetaDto;

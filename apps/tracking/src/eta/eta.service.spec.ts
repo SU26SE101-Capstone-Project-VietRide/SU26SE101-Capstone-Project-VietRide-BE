@@ -174,7 +174,7 @@ describe('EtaService', () => {
       tripId: TEST_TRIP_ID,
       targetKind: 'STATION',
       stationId: TEST_DESTINATION_STATION_ID,
-      etaMinutes: 12,
+      etaMinutes: 32,
       distanceMeters: 7_500,
     });
     expect(localProvider.calculate).toHaveBeenNthCalledWith(
@@ -184,7 +184,7 @@ describe('EtaService', () => {
     );
   });
 
-  it('still returns the next-stop event when destination ETA calculation fails', async () => {
+  it('discards a partial provider batch and falls back consistently for every target', async () => {
     routePeek.mockReturnValue({
       tripId: TEST_TRIP_ID,
       points: [
@@ -202,9 +202,14 @@ describe('EtaService', () => {
       .mockResolvedValueOnce({ distanceMeters: 7_500, etaMinutes: 12 })
       .mockRejectedValueOnce(new Error('destination provider unavailable'));
 
-    await expect(service.handleGpsUpdate(createGps())).resolves.toEqual(
-      expect.objectContaining({ stopId: TEST_STOP_ID, etaMinutes: 12 }),
-    );
+    const result = await service.handleGpsUpdate(createGps());
+
+    expect(result).toEqual(expect.objectContaining({
+      stopId: TEST_STOP_ID,
+      estimateQuality: 'FALLBACK',
+    }));
+    expect(result?.etas).toHaveLength(2);
+    expect(result?.etas?.every((eta) => eta.estimateQuality === 'FALLBACK')).toBe(true);
   });
 
   it('recalculates after the minimum interval when cached ETA is below 15 minutes', async () => {

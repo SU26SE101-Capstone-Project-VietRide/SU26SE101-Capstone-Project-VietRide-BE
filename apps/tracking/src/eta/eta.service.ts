@@ -6,37 +6,60 @@ import { trackingEtaKey } from '../location/location.constants';
 import type { GpsUpdateEvent } from '../location/location.service';
 import { ROUTE_GEOMETRY_PROVIDER } from '../off-route/off-route.constants';
 import { projectPointToRoute, type RouteGeometryProvider } from '../off-route/route-geometry.provider';
+import { ENV_TOKEN } from '../app/tokens';
+import type { Env } from '../config/env.schema';
 import {
   EARTH_RADIUS_METERS,
   ETA_CACHE_TTL_SECONDS,
+  ETA_DEFAULT_SPEED_KMH,
   ETA_FAILURE_COOLDOWN_SECONDS,
-  ETA_LOCK_TTL_SECONDS,
   ETA_GOOGLE_FAILURE_THRESHOLD,
+  ETA_LOCK_TTL_SECONDS,
   ETA_MIN_INTERVAL_SECONDS,
-  GOOGLE_ETA_PROVIDER,
-  LOCAL_ETA_PROVIDER,
+  ETA_MIN_SPEED_KMH,
   ETA_RECALCULATE_DISTANCE_THRESHOLD_METERS,
   ETA_RECALCULATE_SOON_THRESHOLD_MINUTES,
   ETA_STATE_TTL_SECONDS,
   ETA_STOP_REACHED_DISTANCE_METERS,
+  GOOGLE_ETA_PROVIDER,
+  LOCAL_ETA_PROVIDER,
+  METERS_PER_KILOMETER,
   MILLISECONDS_PER_SECOND,
+  SECONDS_PER_HOUR,
   SECONDS_PER_MINUTE,
-  trackingEtaLockKey,
+  trackingEtaBatchLockKey,
   trackingEtaStateKey,
   TRIP_DATA_PROVIDER,
 } from './eta.constants';
-import type { EtaProvider, EtaProviderResult } from './eta-provider';
+import type { EtaBatchTargetResult, EtaProvider } from './eta-provider';
 import type { TripDataProvider, TripStopSnapshot } from './trip-data.provider';
-import { ENV_TOKEN } from '../app/tokens';
-import type { Env } from '../config/env.schema';
 
-export interface EtaUpdateEvent {
+export type EstimateQuality = 'TRAFFIC_AWARE' | 'FALLBACK';
+
+export interface EtaTargetUpdateEvent {
   tripId: string;
-  stopId: string;
+  targetKind: 'STOP' | 'STATION';
+  stopId?: string;
+  stationId?: string;
+  stopName: string | null;
+  sequence?: number;
   etaMinutes: number;
   estimatedArrivalTime: string;
   distanceMeters: number;
   updatedAt: string;
+  estimateQuality: EstimateQuality;
+}
+
+export interface EtaUpdateEvent {
+  tripId: string;
+  stopId: string;
+  targetKind?: 'STOP';
+  etaMinutes: number;
+  estimatedArrivalTime: string;
+  distanceMeters: number;
+  updatedAt: string;
+  estimateQuality?: EstimateQuality;
+  etas?: EtaTargetUpdateEvent[];
 }
 
 interface EtaState {
@@ -50,8 +73,10 @@ interface EtaState {
   googleFailureCount: number;
   cooldownUntil?: string;
 }
-interface ProviderCalculation {
-  result: EtaProviderResult | null;
+
+interface BatchProviderCalculation {
+  results: EtaBatchTargetResult[] | null;
+  estimateQuality: EstimateQuality;
   googleFailureCount: number;
   cooldownUntil?: string;
 }
@@ -83,7 +108,10 @@ export class EtaService {
     try {
       return await this.calculateEta(gps);
     } catch (error) {
-      this.logger.warn({ err: error, tripId: gps.tripId }, 'Skipping ETA calculation after provider/calculation failure');
+      this.logger.warn(
+        { err: error, tripId: gps.tripId },
+        'Skipping ETA calculation after provider/calculation failure',
+      );
       return null;
     }
   }
@@ -91,155 +119,271 @@ export class EtaService {
   private async calculateEta(gps: GpsUpdateEvent): Promise<EtaUpdateEvent | null> {
     const stops = await this.tripDataProvider.getRouteStops(gps.tripId);
     const state = await this.readState(gps.tripId);
-    const nextStop = this.findNextStop(stops, gps, state);
+    const remainingStops = this.findRemainingStops(stops, gps, state);
+    const nextStop = remainingStops[0];
     if (!nextStop) return null;
 
     const cached = await this.readCachedEta(gps.tripId, nextStop.stopId);
     if (!this.shouldRecalculate(gps, state, cached, nextStop.stopId)) return null;
-    const lockKey = trackingEtaLockKey(gps.tripId, nextStop.stopId);
+    const lockKey = trackingEtaBatchLockKey(gps.tripId);
     const owner = randomUUID();
-    const acquired = await this.redis.getClient().set(lockKey, owner, 'EX', ETA_LOCK_TTL_SECONDS, 'NX');
+    const acquired = await this.redis.getClient().set(
+      lockKey,
+      owner,
+      'EX',
+      ETA_LOCK_TTL_SECONDS,
+      'NX',
+    );
     if (acquired !== 'OK') return null;
 
     try {
-      const calculation = await this.calculateWithProviders(gps, nextStop, state);
-      if (!calculation.result) {
-        await this.redis.getClient().set(trackingEtaStateKey(gps.tripId), JSON.stringify({
-          ...state,
-          latitude: gps.latitude,
-          longitude: gps.longitude,
-          stopId: nextStop.stopId,
-          stopSequence: nextStop.sequence,
-          lastProviderCallAt: new Date().toISOString(),
-          googleFailureCount: calculation.googleFailureCount,
-          ...(calculation.cooldownUntil ? { cooldownUntil: calculation.cooldownUntil } : {}),
-        }), 'EX', ETA_STATE_TTL_SECONDS);
+      const route = this.routeGeometryProvider.peekCachedRouteGeometry(gps.tripId)
+        ?? await this.routeGeometryProvider.getRouteGeometry(gps.tripId);
+      const destination = route?.destinationStation;
+      const targets: TripStopSnapshot[] = [
+        ...remainingStops,
+        ...(destination
+          ? [{
+              stopId: destination.stationId,
+              stopName: destination.name,
+              latitude: destination.latitude,
+              longitude: destination.longitude,
+              sequence: Number.MAX_SAFE_INTEGER,
+            }]
+          : []),
+      ];
+      const calculation = await this.calculateBatchWithProviders(gps, targets, state);
+      if (!calculation.results) {
+        await this.writeFailureState(gps, nextStop, state, calculation);
         return null;
       }
-      const result = calculation.result;
-      const event: EtaUpdateEvent = {
-        tripId: gps.tripId,
-        stopId: nextStop.stopId,
-        etaMinutes: result.etaMinutes,
-        estimatedArrivalTime: new Date(new Date(gps.recordedAt).getTime() + result.etaMinutes * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND).toISOString(),
-        distanceMeters: result.distanceMeters,
-        updatedAt: new Date().toISOString(),
-      };
-      const route = this.routeGeometryProvider.peekCachedRouteGeometry(gps.tripId);
-      const progress = route ? projectPointToRoute(gps, route.points)?.progressMeters : undefined;
-      const nextProgress = progress === undefined
+
+      const updatedAt = new Date().toISOString();
+      const baseTime = Date.now();
+      const resultById = new Map(calculation.results.map((result) => [result.targetId, result]));
+      const events: EtaTargetUpdateEvent[] = [];
+      for (const target of targets) {
+        const result = resultById.get(target.stopId);
+        if (!result) return null;
+        const isDestination = target.sequence === Number.MAX_SAFE_INTEGER;
+        events.push({
+          tripId: gps.tripId,
+          targetKind: isDestination ? 'STATION' : 'STOP',
+          ...(isDestination ? { stationId: target.stopId } : { stopId: target.stopId }),
+          stopName: target.stopName ?? null,
+          ...(!isDestination ? { sequence: target.sequence } : {}),
+          etaMinutes: result.etaMinutes,
+          estimatedArrivalTime: new Date(
+            baseTime + result.etaMinutes * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND,
+          ).toISOString(),
+          distanceMeters: result.distanceMeters,
+          updatedAt,
+          estimateQuality: calculation.estimateQuality,
+        });
+      }
+
+      const nextEvent = events.find(
+        (event): event is EtaTargetUpdateEvent & { targetKind: 'STOP'; stopId: string } =>
+          event.targetKind === 'STOP' && event.stopId === nextStop.stopId,
+      );
+      if (!nextEvent) return null;
+
+      const routeProgress = route ? projectPointToRoute(gps, route.points)?.progressMeters : undefined;
+      const nextProgress = routeProgress === undefined
         ? state?.lastRouteProgressMeters
-        : Math.max(progress, state?.lastRouteProgressMeters ?? 0);
+        : Math.max(routeProgress, state?.lastRouteProgressMeters ?? 0);
       const stateWithoutCooldown: EtaState = { ...(state ?? { googleFailureCount: 0 }) };
       delete stateWithoutCooldown.cooldownUntil;
       const nextState: EtaState = {
         ...stateWithoutCooldown,
         latitude: gps.latitude,
         longitude: gps.longitude,
-        etaMinutes: event.etaMinutes,
+        etaMinutes: nextEvent.etaMinutes,
         stopId: nextStop.stopId,
         stopSequence: nextStop.sequence,
         ...(nextProgress !== undefined ? { lastRouteProgressMeters: nextProgress } : {}),
-        lastProviderCallAt: new Date().toISOString(),
+        lastProviderCallAt: updatedAt,
         googleFailureCount: calculation.googleFailureCount,
         ...(calculation.cooldownUntil ? { cooldownUntil: calculation.cooldownUntil } : {}),
       };
       const etaCacheTtl = this.env.TRACKING_ETA_CACHE_TTL_SECONDS ?? ETA_CACHE_TTL_SECONDS;
-      await this.redis.getClient().multi()
-        .set(trackingEtaKey(gps.tripId, nextStop.stopId), JSON.stringify(event), 'EX', etaCacheTtl)
-        .set(trackingEtaStateKey(gps.tripId), JSON.stringify(nextState), 'EX', ETA_STATE_TTL_SECONDS)
-        .exec();
-      await this.cacheDestinationEta(gps, state, etaCacheTtl);
-      return event;
+      const transaction = this.redis.getClient().multi();
+      for (const event of events) {
+        const targetId = event.targetKind === 'STOP' ? event.stopId : event.stationId;
+        if (targetId) {
+          transaction.set(
+            trackingEtaKey(gps.tripId, targetId),
+            JSON.stringify(event),
+            'EX',
+            etaCacheTtl,
+          );
+        }
+      }
+      transaction.set(
+        trackingEtaStateKey(gps.tripId),
+        JSON.stringify(nextState),
+        'EX',
+        ETA_STATE_TTL_SECONDS,
+      );
+      await transaction.exec();
+
+      return { ...nextEvent, etas: events };
     } finally {
       try {
         await this.redis.getClient().eval(RELEASE_LOCK_SCRIPT, 1, lockKey, owner);
       } catch (error) {
-        this.logger.warn({ err: error, tripId: gps.tripId, stopId: nextStop.stopId }, 'Failed to release ETA lock');
+        this.logger.warn({ err: error, tripId: gps.tripId }, 'Failed to release ETA batch lock');
       }
     }
   }
 
-  private async cacheDestinationEta(
+  private async calculateBatchWithProviders(
     gps: GpsUpdateEvent,
+    targets: TripStopSnapshot[],
     state: EtaState | null,
-    ttlSeconds: number,
-  ): Promise<void> {
-    try {
-      const route = this.routeGeometryProvider.peekCachedRouteGeometry(gps.tripId)
-        ?? await this.routeGeometryProvider.getRouteGeometry(gps.tripId);
-      const station = route?.destinationStation;
-      if (!station) return;
-
-      const target: TripStopSnapshot = {
-        stopId: station.stationId,
-        stopName: station.name,
-        latitude: station.latitude,
-        longitude: station.longitude,
-        sequence: Number.MAX_SAFE_INTEGER,
-      };
-      const calculation = await this.calculateWithProviders(gps, target, state);
-      if (!calculation.result) return;
-
-      const result = calculation.result;
-      await this.redis.getClient().set(
-        trackingEtaKey(gps.tripId, station.stationId),
-        JSON.stringify({
-          tripId: gps.tripId,
-          targetKind: 'STATION',
-          stationId: station.stationId,
-          etaMinutes: result.etaMinutes,
-          estimatedArrivalTime: new Date(
-            new Date(gps.recordedAt).getTime()
-              + result.etaMinutes * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND,
-          ).toISOString(),
-          distanceMeters: result.distanceMeters,
-          updatedAt: new Date().toISOString(),
-        }),
-        'EX',
-        ttlSeconds,
-      );
-    } catch (error) {
-      this.logger.warn(
-        { err: error, tripId: gps.tripId },
-        'Skipping destination ETA cache after provider/calculation failure',
-      );
-    }
-  }
-
-  private async calculateWithProviders(gps: GpsUpdateEvent, stop: TripStopSnapshot, state: EtaState | null): Promise<ProviderCalculation> {
-    const googleEnabled = this.env.GOOGLE_ROUTES_ENABLED === true && Boolean(this.env.GOOGLE_ROUTES_API_KEY);
-    const cooldownActive = Boolean(state?.cooldownUntil && new Date(state.cooldownUntil).getTime() > Date.now());
+  ): Promise<BatchProviderCalculation> {
+    const googleEnabled = this.env.GOOGLE_ROUTES_ENABLED === true
+      && Boolean(this.env.GOOGLE_ROUTES_API_KEY);
+    const cooldownActive = Boolean(
+      state?.cooldownUntil && new Date(state.cooldownUntil).getTime() > Date.now(),
+    );
     let googleFailureCount = state?.googleFailureCount ?? 0;
     let cooldownUntil = state?.cooldownUntil;
     if (googleEnabled && !cooldownActive) {
-      const googleResult = await this.googleProvider.calculate(gps, stop);
-      if (googleResult) return { result: googleResult, googleFailureCount: 0 };
+      const googleResults = await this.calculateProviderBatch(this.googleProvider, gps, targets);
+      if (googleResults) {
+        return {
+          results: googleResults,
+          estimateQuality: 'TRAFFIC_AWARE',
+          googleFailureCount: 0,
+        };
+      }
       googleFailureCount += 1;
       if (googleFailureCount >= ETA_GOOGLE_FAILURE_THRESHOLD) {
-        cooldownUntil = new Date(Date.now() + (this.env.TRACKING_ETA_FAILURE_COOLDOWN_SECONDS ?? ETA_FAILURE_COOLDOWN_SECONDS) * 1000).toISOString();
+        cooldownUntil = new Date(
+          Date.now()
+            + (this.env.TRACKING_ETA_FAILURE_COOLDOWN_SECONDS ?? ETA_FAILURE_COOLDOWN_SECONDS)
+              * MILLISECONDS_PER_SECOND,
+        ).toISOString();
       }
     }
+
+    const localResults = await this.calculateProviderBatch(this.localProvider, gps, targets)
+      ?? this.calculateDirectFallback(gps, targets);
     return {
-      result: await this.localProvider.calculate(gps, stop),
+      results: localResults,
+      estimateQuality: 'FALLBACK',
       googleFailureCount,
       ...(cooldownUntil ? { cooldownUntil } : {}),
     };
   }
 
-  private findNextStop(stops: TripStopSnapshot[], gps: GpsUpdateEvent, state: EtaState | null): TripStopSnapshot | null {
+  private async calculateProviderBatch(
+    provider: EtaProvider,
+    gps: GpsUpdateEvent,
+    targets: TripStopSnapshot[],
+  ): Promise<EtaBatchTargetResult[] | null> {
+    try {
+      if (provider.calculateBatch) return await provider.calculateBatch(gps, targets);
+      const results: EtaBatchTargetResult[] = [];
+      const dwellMinutes = this.env.TRIP_STOP_DWELL_MINUTES ?? 20;
+      for (let index = 0; index < targets.length; index += 1) {
+        const target = targets[index];
+        if (!target) return null;
+        const result = await provider.calculate(gps, target);
+        if (!result) return null;
+        results.push({
+          targetId: target.stopId,
+          distanceMeters: result.distanceMeters,
+          etaMinutes: result.etaMinutes + dwellMinutes * index,
+        });
+      }
+      return results;
+    } catch (error) {
+      this.logger.warn({ err: error, tripId: gps.tripId }, 'ETA batch provider failed');
+      return null;
+    }
+  }
+
+  private calculateDirectFallback(
+    gps: GpsUpdateEvent,
+    targets: TripStopSnapshot[],
+  ): EtaBatchTargetResult[] {
+    const speedKmh = Math.max(gps.speedKmh ?? ETA_DEFAULT_SPEED_KMH, ETA_MIN_SPEED_KMH);
+    const metersPerSecond = speedKmh * METERS_PER_KILOMETER / SECONDS_PER_HOUR;
+    const dwellMinutes = this.env.TRIP_STOP_DWELL_MINUTES ?? 20;
+    let latitude = gps.latitude;
+    let longitude = gps.longitude;
+    let cumulativeDistance = 0;
+    return targets.map((target, index) => {
+      cumulativeDistance += calculateDistanceMeters(
+        latitude,
+        longitude,
+        target.latitude,
+        target.longitude,
+      );
+      latitude = target.latitude;
+      longitude = target.longitude;
+      return {
+        targetId: target.stopId,
+        distanceMeters: Math.round(cumulativeDistance),
+        etaMinutes: Math.max(
+          1,
+          Math.ceil(cumulativeDistance / metersPerSecond / SECONDS_PER_MINUTE)
+            + dwellMinutes * index,
+        ),
+      };
+    });
+  }
+
+  private findRemainingStops(
+    stops: TripStopSnapshot[],
+    gps: GpsUpdateEvent,
+    state: EtaState | null,
+  ): TripStopSnapshot[] {
     const sorted = [...stops].sort((left, right) => left.sequence - right.sequence);
     const route = this.routeGeometryProvider.peekCachedRouteGeometry(gps.tripId);
     const vehicleProjection = route ? projectPointToRoute(gps, route.points) : null;
-    const currentProgress = Math.max(vehicleProjection?.progressMeters ?? 0, state?.lastRouteProgressMeters ?? 0);
-    return sorted.find((stop) => {
+    const currentProgress = Math.max(
+      vehicleProjection?.progressMeters ?? 0,
+      state?.lastRouteProgressMeters ?? 0,
+    );
+    return sorted.filter((stop) => {
       if (stop.status && COMPLETED_STOP_STATUSES.has(stop.status)) return false;
       if (state?.stopSequence !== undefined && stop.sequence < state.stopSequence) return false;
-      if (calculateDistanceMeters(gps.latitude, gps.longitude, stop.latitude, stop.longitude) <= ETA_STOP_REACHED_DISTANCE_METERS) return false;
+      if (calculateDistanceMeters(
+        gps.latitude,
+        gps.longitude,
+        stop.latitude,
+        stop.longitude,
+      ) <= ETA_STOP_REACHED_DISTANCE_METERS) return false;
       const projection = route ? projectPointToRoute(stop, route.points) : null;
       if (projection && projection.progressMeters <= currentProgress) return false;
       return true;
-    }) ?? null;
+    });
+  }
+
+  private async writeFailureState(
+    gps: GpsUpdateEvent,
+    nextStop: TripStopSnapshot,
+    state: EtaState | null,
+    calculation: BatchProviderCalculation,
+  ): Promise<void> {
+    await this.redis.getClient().set(
+      trackingEtaStateKey(gps.tripId),
+      JSON.stringify({
+        ...state,
+        latitude: gps.latitude,
+        longitude: gps.longitude,
+        stopId: nextStop.stopId,
+        stopSequence: nextStop.sequence,
+        lastProviderCallAt: new Date().toISOString(),
+        googleFailureCount: calculation.googleFailureCount,
+        ...(calculation.cooldownUntil ? { cooldownUntil: calculation.cooldownUntil } : {}),
+      }),
+      'EX',
+      ETA_STATE_TTL_SECONDS,
+    );
   }
 
   private async readState(tripId: string): Promise<EtaState | null> {
@@ -259,7 +403,11 @@ export class EtaService {
     if (!payload) return null;
     try {
       const parsed = JSON.parse(payload) as EtaUpdateEvent;
-      return parsed.tripId === tripId && parsed.stopId === stopId && Number.isFinite(parsed.etaMinutes) ? parsed : null;
+      return parsed.tripId === tripId
+        && parsed.stopId === stopId
+        && Number.isFinite(parsed.etaMinutes)
+        ? parsed
+        : null;
     } catch {
       return null;
     }
@@ -274,23 +422,39 @@ export class EtaService {
     if (!state?.lastProviderCallAt) return true;
     if (!cached && state.stopId !== selectedStopId) return true;
     const interval = this.env.TRACKING_ETA_MIN_INTERVAL_SECONDS ?? ETA_MIN_INTERVAL_SECONDS;
-    if (Date.now() - new Date(state.lastProviderCallAt).getTime() < interval * 1000) return false;
+    if (Date.now() - new Date(state.lastProviderCallAt).getTime() < interval * 1_000) return false;
     if (!cached) return true;
-    if ((cached.etaMinutes ?? state.etaMinutes ?? Number.POSITIVE_INFINITY) < ETA_RECALCULATE_SOON_THRESHOLD_MINUTES) return true;
+    if ((cached.etaMinutes ?? state.etaMinutes ?? Number.POSITIVE_INFINITY)
+      < ETA_RECALCULATE_SOON_THRESHOLD_MINUTES) return true;
     if (state.latitude === undefined || state.longitude === undefined) return true;
-    return calculateDistanceMeters(gps.latitude, gps.longitude, state.latitude, state.longitude) > ETA_RECALCULATE_DISTANCE_THRESHOLD_METERS;
+    return calculateDistanceMeters(
+      gps.latitude,
+      gps.longitude,
+      state.latitude,
+      state.longitude,
+    ) > ETA_RECALCULATE_DISTANCE_THRESHOLD_METERS;
   }
 }
 
-export function calculateDistanceMeters(latitudeA: number, longitudeA: number, latitudeB: number, longitudeB: number): number {
+export function calculateDistanceMeters(
+  latitudeA: number,
+  longitudeA: number,
+  latitudeB: number,
+  longitudeB: number,
+): number {
   const latARadians = degreesToRadians(latitudeA);
   const latBRadians = degreesToRadians(latitudeB);
   const deltaLat = degreesToRadians(latitudeB - latitudeA);
   const deltaLon = degreesToRadians(longitudeB - longitudeA);
-  const haversine = Math.sin(deltaLat / 2) ** 2 + Math.cos(latARadians) * Math.cos(latBRadians) * Math.sin(deltaLon / 2) ** 2;
-  return EARTH_RADIUS_METERS * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  const haversine = Math.sin(deltaLat / 2) ** 2
+    + Math.cos(latARadians)
+      * Math.cos(latBRadians)
+      * Math.sin(deltaLon / 2) ** 2;
+  return EARTH_RADIUS_METERS
+    * 2
+    * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
 function degreesToRadians(value: number): number {
-  return (value * Math.PI) / 180;
+  return value * Math.PI / 180;
 }

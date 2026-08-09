@@ -91,6 +91,13 @@ public static class InfrastructureServiceCollectionExtensions
                 var baseUrl = configuration["GOOGLE_ROUTES_BASE_URL"] ?? "https://routes.googleapis.com";
                 client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
             });
+        services.AddHttpClient<ITripEtaPlanner, GoogleRoutesTripEtaPlanner>(client =>
+            {
+                var baseUrl = configuration["GOOGLE_ROUTES_BASE_URL"] ?? "https://routes.googleapis.com";
+                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+            })
+            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
         services.AddScoped<ShuttleDispatchSafetyJob>();
         services.AddScoped<AutoBoardingJob>();
         services.AddScoped<AutoStartFallbackJob>();

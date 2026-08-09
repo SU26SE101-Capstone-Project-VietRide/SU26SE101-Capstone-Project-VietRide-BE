@@ -340,6 +340,28 @@ describe('TrackingDataController REST fallback (e2e)', () => {
     expect(response.body.data?.latest).toBeNull();
   });
 
+  it('returns an empty ETA batch on cold cache without synchronous calculation', async () => {
+    const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
+    const response = await getJson<ApiEnvelope<{ etas: unknown[] }>>(
+      `/v1/tracking/trips/${TEST_TRIP_ID}/etas`,
+      token,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.data?.etas).toEqual([]);
+  });
+
+  it('uses the existing trip authorization for the ETA batch endpoint', async () => {
+    const token = await signIdentityToken('PASSENGER', UNAUTHORIZED_USER_ID);
+    const response = await getJson<ApiEnvelope<unknown>>(
+      `/v1/tracking/trips/${TEST_TRIP_ID}/etas`,
+      token,
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.body.error?.code).toBe('ACCESS_DENIED');
+  });
+
   it('returns trail points with pagination metadata', async () => {
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
     const response = await getJson<ApiEnvelope<{

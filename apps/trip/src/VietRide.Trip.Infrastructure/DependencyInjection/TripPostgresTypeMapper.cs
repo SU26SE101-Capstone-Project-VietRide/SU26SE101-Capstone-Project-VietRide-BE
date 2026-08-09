@@ -14,6 +14,7 @@ public static class TripPostgresTypeMapper
         // throws "More than one PostgreSQL type was found with the name ..." on write.
         dataSourceBuilder.MapEnum<TripStatus>("vietride_trip.trip_status", new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<TripSource>("vietride_trip.trip_source", new NpgsqlNullNameTranslator());
+        dataSourceBuilder.MapEnum<PlannedEtaSource>("vietride_trip.planned_eta_source", new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<TripSeatStatus>("vietride_trip.trip_seat_status", new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<TripSeatType>("vietride_trip.trip_seat_type", new NpgsqlNullNameTranslator());
         dataSourceBuilder.MapEnum<TripStopFareSource>("vietride_trip.trip_stop_fare_source", new NpgsqlNullNameTranslator());

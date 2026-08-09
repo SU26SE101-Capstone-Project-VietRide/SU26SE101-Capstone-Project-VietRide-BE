@@ -351,9 +351,17 @@ export class LocationGateway implements OnGatewayInit {
     await this.offRouteService.handleGpsUpdate(rawEvent);
     const etaUpdate = await this.etaService.handleGpsUpdate(event);
     if (etaUpdate) {
-      const tripDelayEtaUpdate = await this.tripDelayService.handleEtaUpdate(etaUpdate);
+      const { etas, ...nextEtaUpdate } = etaUpdate;
+      const tripDelayEtaUpdate = await this.tripDelayService.handleEtaUpdate(nextEtaUpdate);
       const { statusTransition, ...etaPayload } = tripDelayEtaUpdate;
       this.server.to(trackingTripRoom(event.tripId)).emit('eta:update', etaPayload);
+      if (etas) {
+        this.server.to(trackingTripRoom(event.tripId)).emit('eta:batch:update', {
+          tripId: event.tripId,
+          etas,
+          updatedAt: etaPayload.updatedAt,
+        });
+      }
       this.publishSharedEta(etaPayload);
       if (statusTransition) {
         this.server.to(trackingTripRoom(event.tripId)).emit('trip:statusChanged', {

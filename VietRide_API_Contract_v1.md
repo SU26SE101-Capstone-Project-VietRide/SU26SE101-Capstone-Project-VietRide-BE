@@ -2069,6 +2069,9 @@ Response `200`: trip detail with route, stations, stops, seat summary, fare summ
 
 Trip detail includes nullable `destinationArrivedAt` (ISO-8601 datetime with offset). It is
 `null` until the assigned Driver/Assistant records physical arrival at the destination terminal.
+Trip detail also includes `plannedEtaQuality=TRAFFIC_AWARE|FALLBACK`. This is a public quality
+classification only; the internal route provider/source is not exposed. `Trip.estimatedArrivalTime`
+and every stop `estimatedArrivalTime` are planned timestamps calculated by the backend.
 
 Each stop includes `stopId`, `name`, `address`, `latitude`, `longitude`, `isActive`,
 `orderIndex`, `allowPickup`, `allowDropoff`, `status` (`PENDING|ARRIVED|SKIPPED`),
@@ -2940,7 +2943,9 @@ Booking projection contains any `PENDING_PAYMENT|CONFIRMED` Booking. Otherwise T
 rebuilds Trip stops, per-stop fares, and the static planned ETA baseline from the new Route, with
 local HELD/BOOKED seat races revalidated under lock. An approved pre-departure Route edit or a
 DriverSchedule `ALL_PENDING` cascade may recompute this baseline; GPS/Tracking dynamic ETA never
-updates it.
+updates it. Planned recomputation uses ordered Google Routes traffic-aware legs at Trip departure,
+adds the configured stop dwell (default 20 minutes), and falls back to cumulative Route metrics
+without failing the mutation.
 
 Vehicle compatibility is keyed by normalized `seatNumber` and uses this comparison only:
 `STANDARD < SLEEPER_UPPER < SLEEPER_LOWER < VIP`. The rank never affects pricing.
@@ -4483,6 +4488,7 @@ Error ack:
 Server broadcasts to room `trip:{tripId}`:
 - `gps:update`
 - `eta:update`
+- `eta:batch:update`
 - `trip:statusChanged`
 
 Driver và Assistant được Tracking tự động tham gia thêm room nội bộ
@@ -4543,16 +4549,19 @@ Tracking Phase 10 invariants (legacy fields remain compatible; delay fields belo
   fingerprints and off-route detection.
 - A geometry cache miss emits raw GPS immediately and warms Trip geometry asynchronously with
   in-flight request deduplication; the live GPS acknowledgement never waits for Trip HTTP.
-- ETA uses cumulative route distance and monotonic stop sequence/progress guards. Google Routes is
-  primary only when `GOOGLE_ROUTES_ENABLED=true`; Local Route ETA is the fallback. Provider calls
-  are throttled to 60 seconds, require more than 500 m movement or an ETA under 15 minutes, and
-  use a per-trip-stop Redis lock, a 60-second ETA cache and a three-failure/300-second cooldown.
+- ETA uses cumulative route distance and monotonic stop sequence/progress guards. One calculation
+  covers all remaining `PENDING` stops plus the destination station. Google Routes is primary only
+  when `GOOGLE_ROUTES_ENABLED=true`; Local Route ETA/direct route projection is the fallback.
+  Provider calls are throttled to 60 seconds, require the next stop to change, more than 500 m
+  movement, or a next-stop ETA under 15 minutes, and use one per-Trip Redis lock, atomic 60-second
+  caches and a three-failure/300-second cooldown.
   A newly selected stop with no cache is calculated immediately even when the previous stop was
   calculated less than 60 seconds ago. `STOPS_ONLY` geometry is refreshed after 30 seconds;
   Route polyline geometry uses the configured longer cache TTL.
 - Default E2E uses a fake Google Routes HTTP server. Real Google E2E is opt-in with
-  `RUN_REAL_GOOGLE_E2E=true`; no `etaSource`, snap metadata or traffic metadata is added to the
-  public response shape.
+  `RUN_REAL_GOOGLE_E2E=true`. Public responses expose only
+  `estimateQuality=TRAFFIC_AWARE|FALLBACK`; provider names, snap metadata and traffic metadata
+  remain internal.
 
 `eta:update` keeps the legacy boolean `delayed` and adds the following fields:
 
@@ -4564,9 +4573,42 @@ Tracking Phase 10 invariants (legacy fields remain compatible; delay fields belo
   "estimatedArrivalTime": "2026-08-05T10:12:00.000Z",
   "distanceMeters": 8500,
   "updatedAt": "2026-08-05T10:00:01.000Z",
+  "estimateQuality": "TRAFFIC_AWARE",
   "delayed": false,
   "delayStatus": "ON_TIME",
   "delayMinutes": 0
+}
+```
+
+`eta:batch:update` is emitted after the same atomic cache write and contains the ordered remaining
+targets. `targetKind=STOP` uses `stopId`; the terminal target uses `targetKind=STATION` and
+`stationId`:
+
+```json
+{
+  "tripId": "uuid",
+  "etas": [
+    {
+      "targetKind": "STOP",
+      "stopId": "uuid",
+      "sequence": 2,
+      "etaMinutes": 12,
+      "estimatedArrivalTime": "2026-08-05T10:12:00.000Z",
+      "distanceMeters": 8500,
+      "updatedAt": "2026-08-05T10:00:01.000Z",
+      "estimateQuality": "TRAFFIC_AWARE"
+    },
+    {
+      "targetKind": "STATION",
+      "stationId": "uuid",
+      "etaMinutes": 95,
+      "estimatedArrivalTime": "2026-08-05T11:35:00.000Z",
+      "distanceMeters": 112000,
+      "updatedAt": "2026-08-05T10:00:01.000Z",
+      "estimateQuality": "TRAFFIC_AWARE"
+    }
+  ],
+  "updatedAt": "2026-08-05T10:00:01.000Z"
 }
 ```
 
@@ -4607,6 +4649,7 @@ fields and adds:
     "estimatedArrivalTime": "2026-08-05T10:12:00.000Z",
     "distanceMeters": 8500,
     "updatedAt": "2026-08-05T10:00:01.000Z",
+    "estimateQuality": "TRAFFIC_AWARE",
     "delayed": null,
     "delayStatus": "UNKNOWN",
     "delayMinutes": null
@@ -4618,6 +4661,17 @@ fields and adds:
 only when its `stopId` matches the requested ETA stop; a state belonging to another stop returns
 `UNKNOWN` and does not clear or apply the warning. A reconnecting client should call this endpoint
 to restore the latest known state instead of waiting for another socket event.
+
+### GET `/v1/tracking/trips/{tripId}/etas`
+
+Auth: Identity User Access Token and the same Tracking authorization used by the trip socket and
+legacy `/eta` endpoint.
+
+Response `200` uses the ADR 0004 envelope with `data.etas`, ordered by stop sequence followed by
+the destination station. Each item contains `targetKind`, `stopId?`, `stationId?`, `stopName`,
+`sequence?`, `etaMinutes`, `estimatedArrivalTime`, `distanceMeters`, `updatedAt`, and
+`estimateQuality`. Finalized `ARRIVED|SKIPPED` stops are omitted. A cold/expired cache returns
+`{"etas":[]}`; this request never invokes Google synchronously.
 
 ### Shuttle tracking
 
@@ -9087,6 +9141,10 @@ This section supersedes older endpoint descriptions where they conflict.
   `targetKind=STOP&stopId=<uuid>` or `targetKind=STATION&stationId=<uuid>`. Invalid kind/id pairs
   return `400 VALIDATION_FAILED`. A non-null response discriminates the target with `targetKind`
   and the matching `stopId` or `stationId`; cold cache remains `{eta:null}`.
+- `GET /v1/tracking/trips/{tripId}/etas` is the preferred display read for intercity Trips. It
+  returns only cached remaining targets in route order and never triggers a synchronous provider
+  call; cold cache is `{etas:[]}`. FE falls back to Trip detail planned timestamps and never
+  computes route distance or ETA locally.
 - Passenger history items add nullable root `trackingTarget`: `{kind:"STOP",stopId}` for an
   along-route drop-off, `{kind:"STATION",stationId}` for a destination terminal, otherwise null.
 - `POST /v1/notifications/read-all` requires User JWT and UUID-v4 `Idempotency-Key`, has an empty

@@ -5,10 +5,11 @@ import type { Env } from '../config/env.schema';
 describe('Google Routes ETA adapter (fake HTTP E2E)', () => {
   let server: Server;
   let baseUrl: string;
-  let responseMode: 'success' | 'timeout' | '429' | '500' | 'malformed';
+  let responseMode: 'success' | 'batch' | 'timeout' | '429' | '500' | 'malformed';
+  let batchTargetCounts: number[];
 
   beforeAll(async () => {
-    server = createServer((request, response) => {
+    server = createServer(async (request, response) => {
       if (request.url !== '/directions/v2:computeRoutes') {
         response.statusCode = 404;
         response.end();
@@ -18,6 +19,23 @@ describe('Google Routes ETA adapter (fake HTTP E2E)', () => {
       if (responseMode === '429' || responseMode === '500') {
         response.statusCode = Number(responseMode);
         response.end();
+        return;
+      }
+      if (responseMode === 'batch') {
+        let rawBody = '';
+        for await (const chunk of request) rawBody += chunk.toString();
+        const body = JSON.parse(rawBody) as { intermediates?: unknown[] };
+        const targetCount = (body.intermediates?.length ?? 0) + 1;
+        batchTargetCounts.push(targetCount);
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({
+          routes: [{
+            legs: Array.from({ length: targetCount }, () => ({
+              distanceMeters: 1_000,
+              duration: '60s',
+            })),
+          }],
+        }));
         return;
       }
       response.setHeader('content-type', 'application/json');
@@ -33,6 +51,7 @@ describe('Google Routes ETA adapter (fake HTTP E2E)', () => {
 
   beforeEach(() => {
     responseMode = 'success';
+    batchTargetCounts = [];
   });
 
   afterAll(async () => {
@@ -66,6 +85,28 @@ describe('Google Routes ETA adapter (fake HTTP E2E)', () => {
   it('aborts a timed-out Google request', async () => {
     responseMode = 'timeout';
     await expect(calculate(createProvider(20))).resolves.toBeNull();
+  });
+
+  it('calculates and chunks ordered ETA targets with dwell time', async () => {
+    responseMode = 'batch';
+    const targets = Array.from({ length: 28 }, (_, index) => ({
+      stopId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      latitude: 10 + index / 100,
+      longitude: 106 + index / 100,
+      sequence: index + 1,
+    }));
+
+    const result = await createProvider().calculateBatch({
+      tripId: '11111111-1111-4111-8111-111111111111',
+      latitude: 10,
+      longitude: 106,
+      recordedAt: '2026-07-31T00:00:00.000Z',
+    }, targets);
+
+    expect(batchTargetCounts).toEqual([26, 2]);
+    expect(result).toHaveLength(28);
+    expect(result?.[0]).toEqual({ targetId: targets[0]?.stopId, distanceMeters: 1_000, etaMinutes: 1 });
+    expect(result?.[27]).toEqual({ targetId: targets[27]?.stopId, distanceMeters: 28_000, etaMinutes: 568 });
   });
 
   function createProvider(timeoutMs = 1_000): GoogleRoutesEtaProvider {

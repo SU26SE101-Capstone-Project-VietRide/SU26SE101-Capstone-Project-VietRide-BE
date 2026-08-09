@@ -394,7 +394,11 @@ public sealed class TripHandlerProjectionTests
         var origin = Station.Create("Bến xe Miền Đông", "ben-xe-mien-dong", "Hồ Chí Minh", "Hồ Chí Minh");
         var destination = Station.Create("Bến xe Đà Lạt", "ben-xe-da-lat", "Đà Lạt", "Lâm Đồng");
         var route = Route.Create(operatorId, "HCM - Đà Lạt", origin.Id, destination.Id, Money.FromRaw(400000), 310m, 420);
-        var trip = CreateTrip(operatorId, route.Id, DateTimeOffset.Parse("2026-07-21T01:00:00Z"));
+        var trip = CreateTrip(
+            operatorId,
+            route.Id,
+            DateTimeOffset.Parse("2026-07-21T01:00:00Z"),
+            PlannedEtaSource.GOOGLE_ROUTES);
         var destinationArrivedAt = DateTimeOffset.Parse("2026-07-21T08:30:00Z");
         trip.MarkDestinationArrived(destinationArrivedAt, Guid.NewGuid());
 
@@ -420,6 +424,7 @@ public sealed class TripHandlerProjectionTests
         var result = await handler.Handle(new GetTripDetailQuery(trip.Id), CancellationToken.None);
 
         result.DestinationArrivedAt.Should().Be(destinationArrivedAt);
+        result.PlannedEtaQuality.Should().Be("TRAFFIC_AWARE");
         result.Stops.Select(stop => stop.Status).Should().Equal("PENDING", "ARRIVED", "SKIPPED");
         result.Stops[0].ActualArrivalTime.Should().BeNull();
         result.Stops[1].ActualArrivalTime.Should().Be(stopArrivedAt);
@@ -509,7 +514,11 @@ public sealed class TripHandlerProjectionTests
         result.Stops.Select(stop => stop.FareFromThisStop).Should().Equal(350_000, 280_000, null);
     }
 
-    private static DomainTrip CreateTrip(Guid operatorId, Guid routeId, DateTimeOffset departure)
+    private static DomainTrip CreateTrip(
+        Guid operatorId,
+        Guid routeId,
+        DateTimeOffset departure,
+        PlannedEtaSource plannedEtaSource = PlannedEtaSource.ROUTE_BASELINE)
     {
         return DomainTrip.Create(
             operatorId,
@@ -523,7 +532,9 @@ public sealed class TripHandlerProjectionTests
             TripSource.AUTO_FROM_SCHEDULE,
             Money.FromRaw(400000),
             null,
-            0m);
+            null,
+            0m,
+            plannedEtaSource: plannedEtaSource);
     }
 
     private sealed class SearchFixture

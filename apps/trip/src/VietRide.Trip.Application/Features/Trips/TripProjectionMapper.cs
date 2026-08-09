@@ -123,6 +123,9 @@ internal static class TripProjectionMapper
                 SurchargePeriodName = baseFareAdjustment.SurchargePeriodName,
             })
         {
+            PlannedEtaQuality = trip.PlannedEtaSource == PlannedEtaSource.GOOGLE_ROUTES
+                ? "TRAFFIC_AWARE"
+                : "FALLBACK",
             SurchargePercent = baseFareAdjustment.SurchargePercent,
             SurchargeAmount = baseFareAdjustment.SurchargeAmount,
             EffectiveFare = baseFareAdjustment.EffectiveFare,

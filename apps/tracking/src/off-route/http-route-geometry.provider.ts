@@ -206,7 +206,31 @@ export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider 
   }
 
   private toLegacySnapshot(result: RouteGeometryFetchResult): RouteGeometrySnapshot | null {
-    if (result.kind !== 'ok' || result.snapshot.points.length < 2) return null;
-    return result.snapshot;
+    if (result.kind !== 'ok') return null;
+    if (result.snapshot.points.length >= 2) return result.snapshot;
+
+    const intermediatePoints = result.snapshot.intermediateStops
+      ? result.snapshot.intermediateStops.map((stop) => ({
+          latitude: stop.latitude,
+          longitude: stop.longitude,
+        }))
+      : result.snapshot.points;
+    const fallbackPoints: RouteGeometryPoint[] = [
+      ...(result.snapshot.originStation
+        ? [{
+            latitude: result.snapshot.originStation.latitude,
+            longitude: result.snapshot.originStation.longitude,
+          }]
+        : []),
+      ...intermediatePoints,
+      ...(result.snapshot.destinationStation
+        ? [{
+            latitude: result.snapshot.destinationStation.latitude,
+            longitude: result.snapshot.destinationStation.longitude,
+          }]
+        : []),
+    ];
+    if (fallbackPoints.length < 2) return null;
+    return { ...result.snapshot, points: fallbackPoints };
   }
 }

@@ -10,6 +10,7 @@ export const ETA_STOP_REACHED_DISTANCE_METERS = 50;
 export const ETA_LOCK_TTL_SECONDS = 10;
 export const ETA_FAILURE_COOLDOWN_SECONDS = 300;
 export const ETA_GOOGLE_FAILURE_THRESHOLD = 3;
+export const ETA_MAX_TARGETS_PER_GOOGLE_REQUEST = 26;
 export const METERS_PER_KILOMETER = 1_000;
 export const SECONDS_PER_HOUR = 3_600;
 export const SECONDS_PER_MINUTE = 60;
@@ -24,6 +25,6 @@ export function trackingEtaStateKey(tripId: string): string {
   return `tracking:eta_state:${tripId}`;
 }
 
-export function trackingEtaLockKey(tripId: string, stopId: string): string {
-  return `tracking:eta_lock:${tripId}:${stopId}`;
+export function trackingEtaBatchLockKey(tripId: string): string {
+  return `tracking:eta_batch_lock:${tripId}`;
 }
