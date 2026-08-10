@@ -10,7 +10,8 @@ public sealed record ChargePaymentRequest(
     long Amount,
     string Method,
     PaymentContextV1? Context,
-    DateTimeOffset? DueAt = null)
+    DateTimeOffset? DueAt = null,
+    string? PaymentReturnMode = null)
 {
     public ChargePaymentCommand ToCommand(string? idempotencyKey, string clientIpAddress)
         => new(
@@ -22,5 +23,6 @@ public sealed record ChargePaymentRequest(
             Context,
             idempotencyKey,
             clientIpAddress,
-            DueAt);
+            DueAt,
+            PaymentReturnMode);
 }

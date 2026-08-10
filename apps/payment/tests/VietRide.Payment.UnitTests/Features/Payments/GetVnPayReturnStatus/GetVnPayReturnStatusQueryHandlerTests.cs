@@ -22,13 +22,15 @@ public sealed class GetVnPayReturnStatusQueryHandlerTests
             Money.FromRaw(150_000),
             txnRef,
             "return-status-idempotency",
-            "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html");
+            "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+            VnPayReturnMode.OPERATOR_WEB);
         var vnPay = new FakeVnPayClient(validSignature: true, expectedMerchant: true);
         var payments = new FakePaymentRepository(payment);
         var parameters = new Dictionary<string, string>
         {
             ["vnp_TmnCode"] = "TEST_MERCHANT",
             ["vnp_TxnRef"] = txnRef,
+            ["vnp_Amount"] = "15000000",
             ["vnp_SecureHash"] = "signed-hash",
         };
         var handler = new GetVnPayReturnStatusQueryHandler(vnPay, payments);

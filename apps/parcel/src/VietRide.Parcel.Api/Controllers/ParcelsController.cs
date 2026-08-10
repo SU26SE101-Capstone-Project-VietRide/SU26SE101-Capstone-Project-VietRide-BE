@@ -113,6 +113,7 @@ public sealed class ParcelsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status426UpgradeRequired)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<ParcelDepositPaymentResponse>> StartDepositPaymentAsync(
         Guid parcelId,
@@ -124,7 +125,8 @@ public sealed class ParcelsController : ControllerBase
                 parcelId,
                 CurrentUserClaims.GetUserId(User),
                 request.PaymentMethod,
-                Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString()),
+                Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString(),
+                request.PaymentReturnMode),
             cancellationToken);
         return Ok(result);
     }
@@ -137,6 +139,7 @@ public sealed class ParcelsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status426UpgradeRequired)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<ParcelFinalPaymentResponse>> StartFinalPaymentAsync(
         Guid parcelId,
@@ -148,7 +151,8 @@ public sealed class ParcelsController : ControllerBase
                 parcelId,
                 CurrentUserClaims.GetUserId(User),
                 request.PaymentMethod,
-                Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString()),
+                Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString(),
+                request.PaymentReturnMode),
             cancellationToken);
         return Ok(result);
     }

@@ -75,7 +75,6 @@ export class AppModule implements NestModule {
       // Deep-link endpoints served on the apex domain (no user JWT).
       { path: '.well-known/*path', method: RequestMethod.ALL },
       { path: 'auth/set-password', method: RequestMethod.GET },
-      { path: 'payments/return', method: RequestMethod.GET },
       { path: 'v1/auth/register', method: RequestMethod.ALL },
       { path: 'v1/auth/verify-email', method: RequestMethod.ALL },
       { path: 'v1/auth/resend-verification-email', method: RequestMethod.POST },
@@ -89,6 +88,7 @@ export class AppModule implements NestModule {
       { path: 'v1/operators/register', method: RequestMethod.ALL },
       { path: 'v1/payments/vnpay-ipn', method: RequestMethod.ALL },
       { path: 'v1/payments/vnpay-topup-ipn', method: RequestMethod.ALL },
+      { path: 'v1/payments/vnpay-mobile-sdk-return', method: RequestMethod.GET },
       { path: 'v1/identity/health', method: RequestMethod.ALL },
       { path: 'v1/trip/health', method: RequestMethod.ALL },
       { path: 'v1/booking/health', method: RequestMethod.ALL },

@@ -14,4 +14,5 @@ public sealed record CreateSubscriptionPaymentCommand(
     SubscriptionPaymentContextV1 Context,
     string IdempotencyKey,
     string ClientIpAddress,
-    DateTimeOffset? DueAt = null) : IRequest<CreateSubscriptionPaymentResult>;
+    DateTimeOffset? DueAt = null,
+    string? ReturnMode = null) : IRequest<CreateSubscriptionPaymentResult>;

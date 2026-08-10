@@ -11,7 +11,8 @@ public interface IPaymentServiceClient
         string idempotencyKey,
         CancellationToken cancellationToken = default,
         PaymentContextSnapshot? context = null,
-        DateTimeOffset? dueAt = null);
+        DateTimeOffset? dueAt = null,
+        string? paymentReturnMode = null);
 
     Task<RefundOutcome> RefundParcelPaymentAsync(
         Guid userId,
@@ -35,3 +36,8 @@ public sealed record PaymentAllocationSnapshot(
     long VoucherVietRideFundedAmount,
     long VoucherOperatorFundedAmount,
     string? ReferenceCode = null);
+
+public sealed record VnPaySdkMetadata(
+    string TmnCode,
+    string Scheme,
+    bool IsSandbox);

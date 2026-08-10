@@ -95,9 +95,19 @@ GOOGLE_OAUTH_CLIENT_SECRET=...
 VNPAY_TMN_CODE=...
 VNPAY_HASH_SECRET=...
 VNPAY_BASE_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
-VNPAY_RETURN_URL=https://app.vietride.online/payments/return
+VNPAY_WEB_RETURN_URL=https://app.vietride.online/payments/return
+VNPAY_MOBILE_SDK_RETURN_URL=https://api.vietride.online/v1/payments/vnpay-mobile-sdk-return
+VNPAY_SDK_SCHEME=vietride
+VNPAY_IS_SANDBOX=false
+VNPAY_WEB_ENABLED=false
+VNPAY_MOBILE_SDK_ENABLED=false
 VNPAY_IPN_URL=https://api.vietride.online/v1/payments/vnpay-ipn
 VNPAY_PAYMENT_TIMEOUT_MINUTES=15
+
+# Hạ tầng deep-link Android dùng chung, không còn tham gia VNPay return.
+ANDROID_PACKAGE=com.vietride.passenger
+DEEPLINK_APP_SCHEME=vietride
+DEEPLINK_ANDROID_SHA256_FINGERPRINTS=<release-fingerprints>
 
 # Tracking Phase 13 — capability link chia sẻ Main Trip
 TRACKING_SHARE_TOKEN_SECRET=<openssl rand -hex 32>
@@ -110,6 +120,12 @@ TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS=60
 
 `VNPAY_PAYMENT_TIMEOUT_MINUTES` is the legacy null-`DueAt` fallback. Persisted payment deadlines
 remain authoritative, so this setting does not extend Booking's 10-minute Trip seat lock.
+
+Hai cờ `VNPAY_WEB_ENABLED` và `VNPAY_MOBILE_SDK_ENABLED` mặc định `false` để triển khai an toàn.
+Chỉ bật từng kênh sau khi URL tương ứng, merchant VNPay và client của kênh đó đã được kiểm thử.
+`/payments/return` thuộc frontend Web; callback kỹ thuật Mobile SDK đi thẳng vào Payment tại
+`/v1/payments/vnpay-mobile-sdk-return`. Cả hai đường return chỉ xác minh/hiển thị kết quả; IPN vẫn
+là nguồn duy nhất được phép thay đổi trạng thái thanh toán.
 
 > The single-port FE/BE split is done **inside nginx by path** (`/` → FE, `/v1/` → gateway),
 > not by exposing ports — so the actual server port number never matters here. The tunnel

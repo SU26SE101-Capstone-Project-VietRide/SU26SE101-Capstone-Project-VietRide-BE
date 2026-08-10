@@ -26,12 +26,20 @@ public class DevPaymentServiceClientStubTests
         var referenceId = Guid.NewGuid();
 
         var result = await _sut.ChargeParcelPaymentAsync(
-            "PARCEL", referenceId, Guid.NewGuid(), 150_000, "VNPAY", "idem-2");
+            "PARCEL",
+            referenceId,
+            Guid.NewGuid(),
+            150_000,
+            "VNPAY",
+            "idem-2",
+            paymentReturnMode: "MOBILE_SDK");
 
         result.Kind.Should().Be(ChargeOutcomeKind.Success);
         result.Result.Should().NotBeNull();
         result.Result!.Status.Should().Be("PENDING");
         result.Result.PaymentRedirectUrl.Should().Contain(referenceId.ToString("N"));
+        result.Result.PaymentReturnMode.Should().Be("MOBILE_SDK");
+        result.Result.VnPaySdk.Should().Be(new VnPaySdkMetadata("DEVTMN", "vietride", true));
     }
 
     [Fact]

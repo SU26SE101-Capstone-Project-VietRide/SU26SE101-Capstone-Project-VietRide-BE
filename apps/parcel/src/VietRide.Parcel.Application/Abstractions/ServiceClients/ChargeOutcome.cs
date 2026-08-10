@@ -10,4 +10,6 @@ public enum ChargeOutcomeKind
 public sealed record ChargeOutcome(
     ChargeOutcomeKind Kind,
     ChargeResult? Result,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    int? ErrorStatusCode = null,
+    string? ErrorCode = null);

@@ -110,7 +110,9 @@ public sealed class BookingsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status426UpgradeRequired)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status502BadGateway)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> CreateBooking(
         [FromBody] CreateBookingRequest request,
         CancellationToken ct)
@@ -141,7 +143,8 @@ public sealed class BookingsController : ControllerBase
                     request.ShuttleDropoff.Address,
                     request.ShuttleDropoff.Latitude,
                     request.ShuttleDropoff.Longitude),
-            IdempotencyKey: GetRequiredIdempotencyKey());
+            IdempotencyKey: GetRequiredIdempotencyKey(),
+            PaymentReturnMode: request.PaymentReturnMode);
 
         var result = await _sender.Send(command, ct);
 
@@ -164,7 +167,9 @@ public sealed class BookingsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status426UpgradeRequired)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status502BadGateway)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> CreateRoundTripBooking(
         [FromBody] CreateRoundTripBookingRequest request,
         CancellationToken ct)
@@ -178,7 +183,8 @@ public sealed class BookingsController : ControllerBase
             ToCommandLeg(request.Outbound),
             ToCommandLeg(request.Return),
             request.VoucherCode,
-            request.PaymentMethod);
+            request.PaymentMethod,
+            request.PaymentReturnMode);
 
         var result = await _sender.Send(command, ct);
 

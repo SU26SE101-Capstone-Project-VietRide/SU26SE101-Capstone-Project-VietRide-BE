@@ -158,7 +158,24 @@ public class CreateRoundTripBookingCommandHandlerTests
             [new CreateRoundTripBookingCommand.RoundTripSeatRequest("A01")],
             withShuttle ? new CreateRoundTripBookingCommand.RoundTripShuttlePickupCommand("45 Le Loi", 10.7750m, 106.7010m) : null),
         voucherCode,
-        paymentMethod);
+        paymentMethod,
+        string.Equals(paymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase)
+            ? "MOBILE_SDK"
+            : null);
+
+    [Fact]
+    public async Task Handle_WhenVnPayReturnModeIsMissing_RequiresMobileAppUpdateBeforeSideEffects()
+    {
+        var command = BuildCommand(paymentMethod: "VNPAY") with { PaymentReturnMode = null };
+
+        var act = () => BuildSut().Handle(command, CancellationToken.None);
+
+        await act.Should().ThrowAsync<BookingPaymentException>()
+            .Where(exception => exception.StatusCode == 426
+                && exception.ErrorCode == "MOBILE_APP_UPDATE_REQUIRED");
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .LockRoundTripSeatsAsync(default, default!, default, default!, default, default!, default, default);
+    }
 
     [Fact]
     public async Task Handle_WalletPayment_HappyPath_BatchesChargeOnce_AndConfirmsBothLegs()
@@ -392,7 +409,8 @@ public class CreateRoundTripBookingCommandHandlerTests
                 && context.Allocations.Any(allocation =>
                     allocation.ReferenceId == result.Return.BookingId
                     && allocation.ReferenceCode == result.Return.BookingCode)),
-            returnExpiresAt);
+            returnExpiresAt,
+            "MOBILE_SDK");
         await _paymentClient.DidNotReceiveWithAnyArgs()
             .BatchChargeAsync(default, default!, default!, default!, default);
     }

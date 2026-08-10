@@ -1,5 +1,8 @@
 namespace VietRide.Booking.Application.Features.Bookings.CreateBooking;
 
+using System.Text.Json.Serialization;
+using VietRide.Booking.Application.Abstractions.ServiceClients;
+
 /// <summary>
 /// Response DTO for POST /v1/bookings (201 Created).
 /// Shape per VietRide_API_Contract_v1.md lines 706-721.
@@ -12,7 +15,9 @@ public sealed record CreateBookingResult(
     long DiscountAmount,
     Guid? PaymentId,
     string? PaymentRedirectUrl,
-    IReadOnlyList<CreateBookingTicketResult> Tickets);
+    IReadOnlyList<CreateBookingTicketResult> Tickets,
+    string? PaymentReturnMode = null,
+    [property: JsonPropertyName("vnpaySdk")] VnPaySdkMetadata? VnPaySdk = null);
 
 public sealed record CreateBookingTicketResult(
     Guid TicketId,

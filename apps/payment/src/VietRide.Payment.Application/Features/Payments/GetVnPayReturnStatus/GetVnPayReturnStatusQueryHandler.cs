@@ -1,3 +1,4 @@
+using System.Globalization;
 using MediatR;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
@@ -20,7 +21,7 @@ public sealed class GetVnPayReturnStatusQueryHandler
         _payments = payments;
     }
 
-    public Task<VnPayReturnStatusResponse> Handle(
+    public async Task<VnPayReturnStatusResponse> Handle(
         GetVnPayReturnStatusQuery request,
         CancellationToken cancellationToken)
     {
@@ -40,18 +41,35 @@ public sealed class GetVnPayReturnStatusQueryHandler
                 "vnp_TxnRef is required.");
         }
 
-        var payment = _payments.QueryNoTracking().FirstOrDefault(candidate =>
-            candidate.Method == PaymentMethod.VNPAY
-            && candidate.VnPayTxnRef == txnRef)
+        var payment = await _payments.FindVnPayPaymentByTxnRefAsync(txnRef, cancellationToken)
+            .ConfigureAwait(false)
             ?? throw new CodedNotFoundException(
                 "PAYMENT_NOT_FOUND",
                 "Payment was not found.");
 
-        return Task.FromResult(new VnPayReturnStatusResponse(
+        if (payment.ReturnMode != VnPayReturnMode.OPERATOR_WEB)
+        {
+            throw new CodedNotFoundException(
+                "PAYMENT_NOT_FOUND",
+                "Payment was not found.");
+        }
+
+        if (!request.Parameters.TryGetValue("vnp_Amount", out var rawAmount)
+            || !long.TryParse(rawAmount, NumberStyles.None, CultureInfo.InvariantCulture, out var providerAmount)
+            || providerAmount <= 0
+            || providerAmount % 100 != 0
+            || providerAmount / 100 != payment.Amount.Amount)
+        {
+            throw new CodedValidationException(
+                "PAYMENT_AMOUNT_INVALID",
+                "VNPay return amount does not match the payment session.");
+        }
+
+        return new VnPayReturnStatusResponse(
             txnRef,
             payment.Id,
             payment.ReferenceType.ToString(),
             payment.ReferenceId,
-            payment.Status.ToString()));
+            payment.Status.ToString());
     }
 }

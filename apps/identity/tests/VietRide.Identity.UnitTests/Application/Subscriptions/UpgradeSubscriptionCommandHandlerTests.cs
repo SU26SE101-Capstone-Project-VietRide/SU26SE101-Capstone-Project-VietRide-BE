@@ -1,12 +1,14 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
+using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Subscriptions.UpgradeSubscription;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure.Messaging;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
@@ -16,6 +18,16 @@ namespace VietRide.Identity.UnitTests.Application.Subscriptions;
 public sealed class UpgradeSubscriptionCommandHandlerTests
 {
     private static readonly DateTimeOffset Now = new(2026, 7, 15, 10, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void PublicUpgradeRequest_DoesNotExposeClientControlledReturnUrl()
+    {
+        typeof(SubscriptionUpgradeRequest)
+            .GetProperties()
+            .Select(property => property.Name)
+            .Should()
+            .NotContain("ReturnUrl");
+    }
 
     [Fact]
     public void PendingPayment_KeepsActiveEntitlementPlanAndUsesFifteenMinuteAttemptDeadline()
@@ -32,6 +44,7 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
             Guid.NewGuid(),
             SubscriptionBillingPeriod.MONTHLY,
             Money.FromRaw(500_000),
+            SubscriptionPaymentMethod.VNPAY,
             "idem-vnpay",
             SubscriptionFallbackPolicy.RESTORE_CURRENT,
             Now,
@@ -110,7 +123,6 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
                 targetPlan.Id,
                 "MONTHLY",
                 "WALLET",
-                null,
                 "idem-wallet",
                 "203.0.113.10"),
             CancellationToken.None);
@@ -122,6 +134,7 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
         captured.Should().NotBeNull();
         captured!.OperatorId.Should().Be(operatorId);
         captured.PaymentMethod.Should().Be("WALLET");
+        captured.ReturnMode.Should().Be("OPERATOR_WEB");
         captured.Snapshot.PlanName.Should().Be("Pro");
         captured.Snapshot.PeriodFrom.Should().Be(Now);
         captured.Snapshot.PeriodTo.Should().Be(Now.AddMonths(1));
@@ -130,15 +143,15 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
         subscription.PaymentMethod.Should().BeNull();
         createdAttempt.Should().NotBeNull();
         createdAttempt!.Status.Should().Be(SubscriptionUpgradeAttemptStatus.INITIATED);
+        createdAttempt.PaymentMethod.Should().Be(SubscriptionPaymentMethod.WALLET);
         await unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
     }
 
     [Theory]
-    [InlineData("VNPAY", null, false)]
-    [InlineData("WALLET", "https://app.vietride.test/result", false)]
-    [InlineData("VNPAY", "https://app.vietride.test/result", true)]
-    [InlineData("WALLET", null, true)]
-    public void Validator_EnforcesMethodSpecificReturnUrl(string method, string? returnUrl, bool valid)
+    [InlineData("VNPAY", true)]
+    [InlineData("WALLET", true)]
+    [InlineData("CARD", false)]
+    public void Validator_EnforcesSupportedPaymentMethod(string method, bool valid)
     {
         var validator = new UpgradeSubscriptionCommandValidator();
 
@@ -147,11 +160,87 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
             Guid.NewGuid(),
             "MONTHLY",
             method,
-            returnUrl,
             "idem",
             "203.0.113.10"));
 
         result.IsValid.Should().Be(valid);
+    }
+
+    [Fact]
+    public async Task Handle_ReplayedIdempotencyKeyWithDifferentPaymentMethod_ThrowsMismatch()
+    {
+        var operatorId = Guid.NewGuid();
+        var targetPlan = SubscriptionPlan.Create(
+            "Pro",
+            null,
+            Money.FromRaw(500_000),
+            Money.FromRaw(5_000_000),
+            20,
+            20,
+            10,
+            10,
+            20,
+            1_000,
+            true,
+            true,
+            true);
+        var subscription = OperatorSubscription.CreateActiveTrial(
+            operatorId,
+            SubscriptionPlan.StarterPlanId,
+            Now.AddDays(-10),
+            Now.AddDays(20));
+        var replay = SubscriptionUpgradeAttempt.Create(
+            subscription.Id,
+            operatorId,
+            targetPlan.Id,
+            SubscriptionBillingPeriod.MONTHLY,
+            targetPlan.PricePerMonth,
+            SubscriptionPaymentMethod.WALLET,
+            "idem-replay",
+            Now,
+            Now.AddMinutes(15));
+        var operatorTenant = Operator.CreateApproved(
+            "VietRide Bus",
+            "BRN-001",
+            "0312345678",
+            "billing@vietride.test",
+            "+84901234567",
+            Guid.NewGuid(),
+            Now.AddDays(-30));
+        var subscriptions = Substitute.For<IOperatorSubscriptionRepository>();
+        var plans = Substitute.For<ISubscriptionPlanRepository>();
+        var attempts = Substitute.For<ISubscriptionUpgradeAttemptRepository>();
+        var operators = Substitute.For<IOperatorRepository>();
+        var payments = Substitute.For<ISubscriptionPaymentClient>();
+        var unitOfWork = Substitute.For<IUnitOfWork>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now);
+        plans.GetByIdAsync(targetPlan.Id, Arg.Any<CancellationToken>()).Returns(targetPlan);
+        operators.GetByIdNoTrackingAsync(operatorId, Arg.Any<CancellationToken>()).Returns(operatorTenant);
+        subscriptions.GetCurrentByOperatorIdForUpdateAsync(operatorId, Arg.Any<CancellationToken>()).Returns(subscription);
+        attempts.GetByIdempotencyKeyAsync("idem-replay", Arg.Any<CancellationToken>()).Returns(replay);
+        var handler = new UpgradeSubscriptionCommandHandler(
+            subscriptions,
+            plans,
+            attempts,
+            operators,
+            payments,
+            unitOfWork,
+            clock);
+
+        var action = () => handler.Handle(
+            new UpgradeSubscriptionCommand(
+                operatorId,
+                targetPlan.Id,
+                "MONTHLY",
+                "VNPAY",
+                "idem-replay",
+                "203.0.113.10"),
+            CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<CodedValidationException>();
+        exception.Which.ErrorCode.Should().Be("IDEMPOTENCY_KEY_MISMATCH");
+        await payments.DidNotReceiveWithAnyArgs().CreateAsync(default!, default);
     }
 
     [Fact]
@@ -171,6 +260,7 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
             planId,
             SubscriptionBillingPeriod.MONTHLY,
             Money.FromRaw(500_000),
+            SubscriptionPaymentMethod.WALLET,
             "idem-wallet",
             Now,
             Now.AddMinutes(15));

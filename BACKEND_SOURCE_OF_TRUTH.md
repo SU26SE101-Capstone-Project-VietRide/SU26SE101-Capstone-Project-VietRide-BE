@@ -869,7 +869,7 @@ export const ROUTE_TABLE: ProxyRoute[] = [
       { method: 'POST', path: '/v1/parcels/delivery/undo-reject' },
     ] },
   { prefix: '/v1/parcels',      target: env.PARCEL_BASE_URL,       authRequired: true  },
-  { prefix: '/v1/payments',     target: env.PAYMENT_BASE_URL,      authRequired: 'mixed' /* vnpay-ipn callback public */ },
+  { prefix: '/v1/payments',     target: env.PAYMENT_BASE_URL,      authRequired: 'mixed' /* VNPay IPN + signed return callbacks public */ },
   { prefix: '/v1/wallet',       target: env.PAYMENT_BASE_URL,      authRequired: true  },
   { prefix: '/v1/notifications',target: env.NOTIFICATION_BASE_URL, authRequired: true  },
   { prefix: '/v1/rag',          target: env.RAG_BASE_URL,          authRequired: true  },
@@ -893,10 +893,12 @@ Request
   → Response
 ```
 
-**Exceptions (viết controller tay, KHÔNG proxy):**
+**Public Gateway exceptions:**
 
 - `GET /health`, `GET /ready` — Gateway tự handle (check downstream service reachable optional)
-- VNPay IPN callback (`GET` canonical, temporary `POST` compatibility on `/v1/payments/vnpay-ipn` and `/v1/payments/vnpay-topup-ipn`) — public, signature verify ở Payment Service, Gateway chỉ forward (KHÔNG sign Internal JWT vì call này external)
+- VNPay IPN callback (`GET` canonical, temporary `POST` compatibility on `/v1/payments/vnpay-ipn` and `/v1/payments/vnpay-topup-ipn`) — public, Gateway forward với anonymous Internal JWT; Payment Service vẫn bắt buộc tự xác minh HMAC.
+- `GET /v1/payments/vnpay-mobile-sdk-return` — public callback kỹ thuật, Gateway forward sang Payment; Payment xác minh HMAC và chỉ trả raw redirect SDK, không thay đổi trạng thái nghiệp vụ.
+- `/payments/return` thuộc frontend Web SPA và không được Gateway/Nginx chặn bằng payment bridge.
 
 #### 3.4.3 Folder layout
 
@@ -1165,6 +1167,7 @@ NestJS services KHÔNG dùng Hangfire — dùng **BullMQ** (Redis-backed). Xem S
 | `/v1/.well-known/jwks.json` | Public (services fetch) | None | Identity Service only |
 | `/v1/payments/vnpay-ipn`, `/v1/payments/vnpay-topup-ipn` | VNPay callback | HMAC-SHA512 signature | ✓ + Nginx IP whitelist |
 | `GET /v1/payments/vnpay-return-status` | VNPay browser return status (read-only) | HMAC-SHA512 query + expected merchant | ✓ |
+| `GET /v1/payments/vnpay-mobile-sdk-return` | VNPay Mobile SDK technical return (raw redirect, read-only) | HMAC-SHA512 query + merchant/session/amount/mode | ✓ |
 
 Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → bump `/v2/...`, giữ `/v1/...` deprecated tối thiểu 1 quarter.
 
@@ -3599,8 +3602,8 @@ USER_JWT_JWKS_URL=http://identity:5001/v1/.well-known/jwks.json
 USER_JWT_JWKS_CACHE_TTL_SECONDS=3600
 INTERNAL_JWT_SECRET=...
 RATE_LIMIT_DEFAULT_PER_MIN=120
-APP_DEEP_LINK=vietride://payments/return
 ANDROID_PACKAGE=com.vietride.passenger
+DEEPLINK_APP_SCHEME=vietride
 DEEPLINK_ANDROID_SHA256_FINGERPRINTS=       # release fingerprint; blank until Passenger signs release
 
 IDENTITY_BASE_URL=http://identity:5001
@@ -3675,7 +3678,12 @@ DB_CONNECTION=...vietride_payment...
 VNPAY_TMN_CODE=...
 VNPAY_HASH_SECRET=...
 VNPAY_BASE_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
-VNPAY_RETURN_URL=https://app.vietride.online/payments/return
+VNPAY_WEB_RETURN_URL=https://app.vietride.online/payments/return
+VNPAY_MOBILE_SDK_RETURN_URL=https://api.vietride.online/v1/payments/vnpay-mobile-sdk-return
+VNPAY_SDK_SCHEME=vietride
+VNPAY_IS_SANDBOX=false
+VNPAY_WEB_ENABLED=false
+VNPAY_MOBILE_SDK_ENABLED=false
 VNPAY_IPN_URL=https://api.vietride.online/v1/payments/vnpay-ipn
 VNPAY_PAYMENT_TIMEOUT_MINUTES=15
 SUBSCRIPTION_TRIAL_DAYS=30

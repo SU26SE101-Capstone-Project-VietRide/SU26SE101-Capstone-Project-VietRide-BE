@@ -9,6 +9,5 @@ public sealed record UpgradeSubscriptionCommand(
     Guid PlanId,
     string BillingPeriod,
     string PaymentMethod,
-    string? ReturnUrl,
     string IdempotencyKey,
     string ClientIpAddress) : IRequest<SubscriptionUpgradeResponseDto>;

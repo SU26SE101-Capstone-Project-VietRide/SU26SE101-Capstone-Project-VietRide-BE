@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Exceptions;
+using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Payment.Infrastructure.VnPay;
@@ -43,6 +44,21 @@ public sealed class VnPayClient : IVnPayClient
         string vnPayTxnRef,
         string clientIpAddress,
         DateTimeOffset createdAt)
+        => CreateTopUpRedirectUrl(
+            userId,
+            amount,
+            vnPayTxnRef,
+            clientIpAddress,
+            createdAt,
+            VnPayReturnMode.MOBILE_SDK);
+
+    public string CreateTopUpRedirectUrl(
+        Guid userId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt,
+        VnPayReturnMode returnMode)
     {
         if (amount.Amount < _options.MinimumTopUpAmount)
             throw new ArgumentOutOfRangeException(nameof(amount), "Top-up amount is below the configured minimum.");
@@ -52,6 +68,7 @@ public sealed class VnPayClient : IVnPayClient
             vnPayTxnRef,
             clientIpAddress,
             createdAt,
+            returnMode,
             $"VietRide wallet top-up {vnPayTxnRef} for user {userId}");
     }
 
@@ -62,12 +79,15 @@ public sealed class VnPayClient : IVnPayClient
         string vnPayTxnRef,
         string clientIpAddress,
         DateTimeOffset createdAt)
-        => BuildRedirectUrl(
+        => CreateBookingPaymentRedirectUrl(
+            bookingId,
+            userId,
             amount,
             vnPayTxnRef,
             clientIpAddress,
             createdAt,
-            $"VietRide booking payment {bookingId} for user {userId}");
+            null,
+            VnPayReturnMode.MOBILE_SDK);
 
     public string CreateBookingPaymentRedirectUrl(
         Guid bookingId,
@@ -77,11 +97,31 @@ public sealed class VnPayClient : IVnPayClient
         string clientIpAddress,
         DateTimeOffset createdAt,
         DateTimeOffset? expiresAt)
+        => CreateBookingPaymentRedirectUrl(
+            bookingId,
+            userId,
+            amount,
+            vnPayTxnRef,
+            clientIpAddress,
+            createdAt,
+            expiresAt,
+            VnPayReturnMode.MOBILE_SDK);
+
+    public string CreateBookingPaymentRedirectUrl(
+        Guid bookingId,
+        Guid userId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt,
+        DateTimeOffset? expiresAt,
+        VnPayReturnMode returnMode)
         => BuildRedirectUrl(
             amount,
             vnPayTxnRef,
             clientIpAddress,
             createdAt,
+            returnMode,
             $"VietRide booking payment {bookingId} for user {userId}",
             expiresAt);
 
@@ -93,23 +133,51 @@ public sealed class VnPayClient : IVnPayClient
         string clientIpAddress,
         DateTimeOffset createdAt,
         DateTimeOffset? expiresAt = null)
+        => CreateSubscriptionPaymentRedirectUrl(
+            upgradeAttemptId,
+            operatorId,
+            amount,
+            vnPayTxnRef,
+            clientIpAddress,
+            createdAt,
+            expiresAt,
+            VnPayReturnMode.OPERATOR_WEB);
+
+    public string CreateSubscriptionPaymentRedirectUrl(
+        Guid upgradeAttemptId,
+        Guid operatorId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt,
+        DateTimeOffset? expiresAt,
+        VnPayReturnMode returnMode)
         => BuildRedirectUrl(
             amount,
             vnPayTxnRef,
             clientIpAddress,
             createdAt,
+            returnMode,
             $"VietRide subscription payment {upgradeAttemptId} for operator {operatorId}",
             expiresAt);
+
+    public VnPaySdkConfiguration GetMobileSdkConfiguration()
+    {
+        EnsureReturnModeEnabled(VnPayReturnMode.MOBILE_SDK);
+        return new VnPaySdkConfiguration(_options.TmnCode, _options.SdkScheme, _options.IsSandbox);
+    }
 
     private string BuildRedirectUrl(
         Money amount,
         string vnPayTxnRef,
         string clientIpAddress,
         DateTimeOffset createdAt,
+        VnPayReturnMode returnMode,
         string orderInfo,
         DateTimeOffset? expiresAt = null)
     {
         EnsureSignatureOptions();
+        var returnUrl = ResolveReturnUrl(returnMode);
 
         var parameters = new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
@@ -123,7 +191,7 @@ public sealed class VnPayClient : IVnPayClient
             ["vnp_Locale"] = Locale,
             ["vnp_OrderInfo"] = orderInfo,
             ["vnp_OrderType"] = DefaultOrderType,
-            ["vnp_ReturnUrl"] = _options.ReturnUrl,
+            ["vnp_ReturnUrl"] = returnUrl,
             ["vnp_TxnRef"] = vnPayTxnRef,
             ["vnp_ExpireDate"] = FormatVnPayDate(expiresAt ?? createdAt.AddMinutes(_options.PaymentTimeoutMinutes)),
         };
@@ -133,6 +201,39 @@ public sealed class VnPayClient : IVnPayClient
         parameters["vnp_SecureHash"] = secureHash;
 
         return BuildPaymentUrl(parameters);
+    }
+
+    private string ResolveReturnUrl(VnPayReturnMode returnMode)
+    {
+        EnsureReturnModeEnabled(returnMode);
+
+        var returnUrl = returnMode switch
+        {
+            VnPayReturnMode.OPERATOR_WEB => _options.WebReturnUrl,
+            VnPayReturnMode.MOBILE_SDK => _options.MobileSdkReturnUrl,
+            _ => throw new ArgumentOutOfRangeException(nameof(returnMode), returnMode, "Unsupported VNPay return mode."),
+        };
+
+        if (!Uri.TryCreate(returnUrl, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new PaymentVnPayException($"VNPay return URL for mode '{returnMode}' is not configured correctly.");
+        }
+
+        return uri.AbsoluteUri;
+    }
+
+    private void EnsureReturnModeEnabled(VnPayReturnMode returnMode)
+    {
+        var enabled = returnMode switch
+        {
+            VnPayReturnMode.OPERATOR_WEB => _options.WebEnabled,
+            VnPayReturnMode.MOBILE_SDK => _options.MobileSdkEnabled,
+            _ => throw new ArgumentOutOfRangeException(nameof(returnMode), returnMode, "Unsupported VNPay return mode."),
+        };
+
+        if (!enabled)
+            throw new VnPayReturnModeDisabledException(returnMode);
     }
 
     public bool VerifySignature(IReadOnlyDictionary<string, string> parameters)

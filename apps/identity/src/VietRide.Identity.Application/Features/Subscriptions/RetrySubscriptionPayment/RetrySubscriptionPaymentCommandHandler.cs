@@ -12,6 +12,8 @@ namespace VietRide.Identity.Application.Features.Subscriptions.RetrySubscription
 public sealed class RetrySubscriptionPaymentCommandHandler
     : IRequestHandler<RetrySubscriptionPaymentCommand, SubscriptionUpgradeResponseDto>
 {
+    private const string OperatorWebReturnMode = "OPERATOR_WEB";
+
     private readonly ISubscriptionUpgradeAttemptRepository _attempts;
     private readonly IOperatorSubscriptionRepository _subscriptions;
     private readonly ISubscriptionPlanRepository _plans;
@@ -56,9 +58,10 @@ public sealed class RetrySubscriptionPaymentCommandHandler
                 attempt.OperatorId,
                 attempt.TargetPlanId,
                 attempt.BillingPeriod.ToString(),
-                SubscriptionPaymentMethod.VNPAY.ToString(),
+                attempt.PaymentMethod.ToString(),
                 attempt.Amount.Amount,
                 snapshot,
+                OperatorWebReturnMode,
                 request.IdempotencyKey,
                 request.ClientIpAddress,
                 attempt.DueAt),

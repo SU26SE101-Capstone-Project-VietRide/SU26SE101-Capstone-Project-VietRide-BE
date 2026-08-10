@@ -5,6 +5,7 @@ using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Events;
 using VietRide.Payment.Application.Models;
+using VietRide.Payment.Application.Exceptions;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -50,6 +51,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
     {
         var referenceType = ParseReferenceType(request.ReferenceType);
         var method = ParseMethod(request.Method);
+        var returnMode = ParseReturnMode(request, method);
         var now = _clock.UtcNow;
         var dueAt = request.DueAt ?? now.AddMinutes(15);
         if (dueAt <= now)
@@ -72,6 +74,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             .ConfigureAwait(false);
         if (replay is not null)
         {
+            EnsureReplayMatches(replay, request, referenceType, method, returnMode, contextJson);
             return ToResult(replay);
         }
 
@@ -87,7 +90,8 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
 
         return method == PaymentMethod.WALLET
             ? await ChargeWalletAsync(request, amount, contextJson, dueAt, cancellationToken).ConfigureAwait(false)
-            : await CreateVnPayPendingRedirectAsync(request, amount, contextJson, dueAt, cancellationToken).ConfigureAwait(false);
+            : await CreateVnPayPendingRedirectAsync(request, amount, contextJson, dueAt, returnMode!.Value, cancellationToken)
+                .ConfigureAwait(false);
     }
 
     private async Task<ChargePaymentResult> ChargeWalletAsync(
@@ -137,6 +141,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
         Money amount,
         string contextJson,
         DateTimeOffset dueAt,
+        VnPayReturnMode returnMode,
         CancellationToken cancellationToken)
     {
         var referenceType = ParseReferenceType(request.ReferenceType);
@@ -149,7 +154,8 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             vnPayTxnRef,
             request.ClientIpAddress,
             now,
-            dueAt);
+            dueAt,
+            returnMode);
 
         var payment = PaymentEntity.CreatePendingRedirectVnPay(
             referenceType,
@@ -159,7 +165,8 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             vnPayTxnRef,
             request.IdempotencyKey!,
             redirectUrl,
-            dueAt);
+            dueAt,
+            returnMode);
         payment.AttachContext(contextJson);
 
         await _payments.AddAsync(payment, cancellationToken).ConfigureAwait(false);
@@ -220,8 +227,58 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
             cancellationToken);
     }
 
-    private static ChargePaymentResult ToResult(PaymentEntity payment)
-        => new(payment.Id, payment.Status.ToString(), payment.PaymentRedirectUrl, payment.DueAt);
+    private ChargePaymentResult ToResult(PaymentEntity payment)
+        => new(
+            payment.Id,
+            payment.Status.ToString(),
+            payment.PaymentRedirectUrl,
+            payment.DueAt,
+            payment.ReturnMode?.ToString(),
+            payment.ReturnMode == VnPayReturnMode.MOBILE_SDK
+                ? _vnPayClient.GetMobileSdkConfiguration()
+                : null);
+
+    private static VnPayReturnMode? ParseReturnMode(ChargePaymentCommand request, PaymentMethod method)
+    {
+        if (method != PaymentMethod.VNPAY)
+            return null;
+
+        if (string.IsNullOrWhiteSpace(request.PaymentReturnMode))
+            throw new MobileAppUpdateRequiredException();
+
+        if (!Enum.TryParse<VnPayReturnMode>(request.PaymentReturnMode, ignoreCase: true, out var returnMode)
+            || returnMode != VnPayReturnMode.MOBILE_SDK)
+        {
+            throw new CodedValidationException(
+                "PAYMENT_RETURN_MODE_INVALID",
+                "paymentReturnMode must be MOBILE_SDK.");
+        }
+
+        return returnMode;
+    }
+
+    private static void EnsureReplayMatches(
+        PaymentEntity payment,
+        ChargePaymentCommand request,
+        PaymentReferenceType referenceType,
+        PaymentMethod method,
+        VnPayReturnMode? returnMode,
+        string contextJson)
+    {
+        if (payment.ReferenceType != referenceType
+            || payment.ReferenceId != request.ReferenceId
+            || payment.UserId != request.UserId
+            || payment.Amount.Amount != request.Amount
+            || payment.Method != method
+            || payment.ReturnMode != returnMode
+            || !string.Equals(payment.Context, contextJson, StringComparison.Ordinal)
+            || (request.DueAt.HasValue && payment.DueAt != request.DueAt))
+        {
+            throw new CodedValidationException(
+                "IDEMPOTENCY_KEY_MISMATCH",
+                "Idempotency-Key was already used with a different payment request.");
+        }
+    }
 
     private static PaymentReferenceType ParseReferenceType(string value)
         => Enum.TryParse<PaymentReferenceType>(value, ignoreCase: false, out var referenceType)

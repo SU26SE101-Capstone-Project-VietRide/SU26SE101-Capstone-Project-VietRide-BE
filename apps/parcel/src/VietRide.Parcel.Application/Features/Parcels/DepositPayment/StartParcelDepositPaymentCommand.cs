@@ -8,4 +8,5 @@ public sealed record StartParcelDepositPaymentCommand(
     Guid ParcelId,
     Guid SenderUserId,
     string PaymentMethod,
-    string IdempotencyKey) : IRequest<ParcelDepositPaymentResponse>;
+    string IdempotencyKey,
+    string? PaymentReturnMode = null) : IRequest<ParcelDepositPaymentResponse>;

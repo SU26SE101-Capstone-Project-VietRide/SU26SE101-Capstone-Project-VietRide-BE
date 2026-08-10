@@ -129,8 +129,25 @@ public static class InfrastructureServiceCollectionExtensions
             options.TmnCode = configuration["VNPAY_TMN_CODE"] ?? options.TmnCode;
             options.HashSecret = configuration["VNPAY_HASH_SECRET"] ?? options.HashSecret;
             options.BaseUrl = configuration["VNPAY_BASE_URL"] ?? options.BaseUrl;
-            options.ReturnUrl = configuration["VNPAY_RETURN_URL"] ?? options.ReturnUrl;
+            options.WebReturnUrl = configuration["VNPAY_WEB_RETURN_URL"] ?? options.WebReturnUrl;
+            options.MobileSdkReturnUrl = configuration["VNPAY_MOBILE_SDK_RETURN_URL"] ?? options.MobileSdkReturnUrl;
+            options.SdkScheme = configuration["VNPAY_SDK_SCHEME"] ?? options.SdkScheme;
             options.IpnUrl = configuration["VNPAY_IPN_URL"] ?? options.IpnUrl;
+            if (bool.TryParse(configuration["VNPAY_IS_SANDBOX"], out var isSandbox))
+            {
+                options.IsSandbox = isSandbox;
+            }
+
+            if (bool.TryParse(configuration["VNPAY_WEB_ENABLED"], out var webEnabled))
+            {
+                options.WebEnabled = webEnabled;
+            }
+
+            if (bool.TryParse(configuration["VNPAY_MOBILE_SDK_ENABLED"], out var mobileSdkEnabled))
+            {
+                options.MobileSdkEnabled = mobileSdkEnabled;
+            }
+
             if (int.TryParse(configuration["VNPAY_PAYMENT_TIMEOUT_MINUTES"], out var timeoutMinutes))
             {
                 options.PaymentTimeoutMinutes = timeoutMinutes;
@@ -144,9 +161,13 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddOptions<VnPayOptions>()
             .Validate(options => options.PaymentTimeoutMinutes > 0, "VNPay payment timeout must be positive.")
             .Validate(options => IsAbsoluteHttpsUrl(options.BaseUrl)
-                && IsAllowedReturnUrl(options.ReturnUrl)
+                && IsAllowedReturnUrl(options.WebReturnUrl)
+                && IsAbsoluteHttpsUrl(options.MobileSdkReturnUrl)
                 && IsAbsoluteHttpsUrl(options.IpnUrl), "VNPay URLs must be absolute HTTPS URLs.")
             .Validate(options => HasCanonicalVnPayIpnPath(options.IpnUrl), "VNPay IPN URL must use /v1/payments/vnpay-ipn.")
+            .Validate(options => HasCanonicalVnPayMobileSdkReturnPath(options.MobileSdkReturnUrl),
+                "VNPay Mobile SDK return URL must use /v1/payments/vnpay-mobile-sdk-return.")
+            .Validate(options => Uri.CheckSchemeName(options.SdkScheme), "VNPay SDK scheme must be a valid URI scheme.")
             .Validate(options => !string.Equals(configuration["ASPNETCORE_ENVIRONMENT"], "Production", StringComparison.OrdinalIgnoreCase)
                 || (!string.IsNullOrWhiteSpace(options.TmnCode) && !string.IsNullOrWhiteSpace(options.HashSecret)),
                 "VNPay TMN code and hash secret are required in production.")
@@ -326,4 +347,11 @@ public static class InfrastructureServiceCollectionExtensions
     private static bool HasCanonicalVnPayIpnPath(string? value)
         => Uri.TryCreate(value, UriKind.Absolute, out var uri)
             && string.Equals(uri.AbsolutePath.TrimEnd('/'), "/v1/payments/vnpay-ipn", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasCanonicalVnPayMobileSdkReturnPath(string? value)
+        => Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && string.Equals(
+                uri.AbsolutePath.TrimEnd('/'),
+                "/v1/payments/vnpay-mobile-sdk-return",
+                StringComparison.OrdinalIgnoreCase);
 }

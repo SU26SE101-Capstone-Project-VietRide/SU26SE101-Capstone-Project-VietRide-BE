@@ -127,23 +127,4 @@ describe('DeeplinkController', () => {
       expect(withoutStore.body).not.toContain('play.google.com');
     });
   });
-
-  describe('GET /payments/return bridge', () => {
-    it('serves a no-store page that forwards the VNPay query to the configured deep link', () => {
-      const controller = new DeeplinkController(
-        makeEnv({ APP_DEEP_LINK: 'vietride://payments/return' }),
-      );
-      const res = makeRes();
-
-      controller.paymentReturnPage(res);
-
-      expect(res.headers['Cache-Control']).toBe('no-store');
-      expect(res.type).toHaveBeenCalledWith('html');
-      expect(res.body).toContain('vietride://payments/return');
-      expect(res.body).toContain('/v1/payments/vnpay-return-status');
-      expect(res.body).toContain('PENDING_REDIRECT');
-      expect(res.body).toContain('window.location.search');
-      expect(res.body).toContain('IPN');
-    });
-  });
 });

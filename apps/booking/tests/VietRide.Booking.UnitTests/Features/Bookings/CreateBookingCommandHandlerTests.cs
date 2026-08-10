@@ -104,7 +104,24 @@ public class CreateBookingCommandHandlerTests
                 .ToList(),
             VoucherCode: voucherCode,
             PaymentMethod: paymentMethod,
-            ShuttlePickup: shuttlePickup);
+            ShuttlePickup: shuttlePickup,
+            PaymentReturnMode: string.Equals(paymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase)
+                ? "MOBILE_SDK"
+                : null);
+
+    [Fact]
+    public async Task Handle_WhenVnPayReturnModeIsMissing_RequiresMobileAppUpdateBeforeSideEffects()
+    {
+        var command = BuildCommand(paymentMethod: "VNPAY") with { PaymentReturnMode = null };
+
+        var act = () => BuildSut().Handle(command, CancellationToken.None);
+
+        await act.Should().ThrowAsync<BookingPaymentException>()
+            .Where(exception => exception.StatusCode == 426
+                && exception.ErrorCode == "MOBILE_APP_UPDATE_REQUIRED");
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .LockSeatsAsync(default, default!, default, default!, default, default);
+    }
 
     // -----------------------------------------------------------------------
     // Happy path — WALLET → CONFIRMED
@@ -620,7 +637,8 @@ public class CreateBookingCommandHandlerTests
             Arg.Any<string>(),
             Arg.Any<CancellationToken>(),
             Arg.Any<PaymentContextSnapshot>(),
-            expiresAt);
+            expiresAt,
+            "MOBILE_SDK");
     }
 
     [Fact]

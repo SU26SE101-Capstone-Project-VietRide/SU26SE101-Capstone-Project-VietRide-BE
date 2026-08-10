@@ -245,7 +245,12 @@ services:
       VNPAY_TMN_CODE: ${VNPAY_TMN_CODE:?VNPAY_TMN_CODE is required}
       VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:?VNPAY_HASH_SECRET is required}
       VNPAY_BASE_URL: ${VNPAY_BASE_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
-      VNPAY_RETURN_URL: ${VNPAY_RETURN_URL}
+      VNPAY_WEB_RETURN_URL: ${VNPAY_WEB_RETURN_URL:-https://app.vietride.online/payments/return}
+      VNPAY_MOBILE_SDK_RETURN_URL: ${VNPAY_MOBILE_SDK_RETURN_URL:-https://api.vietride.online/v1/payments/vnpay-mobile-sdk-return}
+      VNPAY_SDK_SCHEME: ${VNPAY_SDK_SCHEME:-vietride}
+      VNPAY_IS_SANDBOX: '${VNPAY_IS_SANDBOX:-false}'
+      VNPAY_WEB_ENABLED: '${VNPAY_WEB_ENABLED:-false}'
+      VNPAY_MOBILE_SDK_ENABLED: '${VNPAY_MOBILE_SDK_ENABLED:-false}'
       InvoiceStorage__Bucket: ${INVOICE_STORAGE_BUCKET:?INVOICE_STORAGE_BUCKET is required in production}
       InvoiceStorage__StableBaseUrl: ${INVOICE_STORAGE_STABLE_BASE_URL:?INVOICE_STORAGE_STABLE_BASE_URL is required in production}
       OperatorWeb__InvoiceDetailBaseUrl: ${OPERATOR_WEB_INVOICE_DETAIL_BASE_URL:?OPERATOR_WEB_INVOICE_DETAIL_BASE_URL is required in production}
@@ -315,9 +320,8 @@ services:
       RAG_BASE_URL: http://rag:3003
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      # Deep link (Android App Links) — optional; empty = endpoints return 404.
+      # General Android deep-link infrastructure; independent of the VNPay return flow.
       DEEPLINK_ANDROID_PACKAGE: ${DEEPLINK_ANDROID_PACKAGE:-}
-      APP_DEEP_LINK: ${APP_DEEP_LINK:-vietride://payments/return}
       ANDROID_PACKAGE: ${ANDROID_PACKAGE:-com.vietride.passenger}
       DEEPLINK_ANDROID_SHA256_FINGERPRINTS: ${DEEPLINK_ANDROID_SHA256_FINGERPRINTS:-}
       DEEPLINK_APP_SCHEME: ${DEEPLINK_APP_SCHEME:-vietride}

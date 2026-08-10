@@ -168,7 +168,10 @@ public sealed class SubscriptionInvoiceInboxAtomicityTests
                 ["RabbitMq:ExchangeName"] = "vietride.events",
                 ["InvoiceStorage:Provider"] = "E2E_LOCAL",
                 ["VNPAY_BASE_URL"] = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
-                ["VNPAY_RETURN_URL"] = "https://example.test/vnpay-return",
+                ["VNPAY_WEB_RETURN_URL"] = "https://example.test/payments/return",
+                ["VNPAY_MOBILE_SDK_RETURN_URL"] = "https://example.test/v1/payments/vnpay-mobile-sdk-return",
+                ["VNPAY_WEB_ENABLED"] = "true",
+                ["VNPAY_MOBILE_SDK_ENABLED"] = "true",
                 ["VNPAY_IPN_URL"] = "https://example.test/v1/payments/vnpay-ipn",
             })
             .Build();

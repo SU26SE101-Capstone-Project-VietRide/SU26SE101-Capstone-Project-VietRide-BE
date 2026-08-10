@@ -22,6 +22,7 @@ public sealed record SubscriptionPaymentCreationRequest(
     string PaymentMethod,
     long Amount,
     SubscriptionPaymentSnapshot Snapshot,
+    string ReturnMode,
     string IdempotencyKey,
     string ClientIpAddress,
     DateTimeOffset? DueAt = null);

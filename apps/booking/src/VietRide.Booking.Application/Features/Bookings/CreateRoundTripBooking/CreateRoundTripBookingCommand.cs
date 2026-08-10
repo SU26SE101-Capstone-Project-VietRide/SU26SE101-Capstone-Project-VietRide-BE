@@ -14,7 +14,8 @@ public sealed record CreateRoundTripBookingCommand : IRequest<CreateRoundTripBoo
         RoundTripBookingLegCommand outbound,
         RoundTripBookingLegCommand @return,
         string? voucherCode,
-        string paymentMethod)
+        string paymentMethod,
+        string? paymentReturnMode = null)
     {
         PassengerUserId = passengerUserId;
         IdempotencyKey = idempotencyKey;
@@ -22,6 +23,7 @@ public sealed record CreateRoundTripBookingCommand : IRequest<CreateRoundTripBoo
         Return = @return;
         VoucherCode = voucherCode;
         PaymentMethod = paymentMethod;
+        PaymentReturnMode = paymentReturnMode;
     }
 
     public Guid PassengerUserId { get; init; }
@@ -35,6 +37,8 @@ public sealed record CreateRoundTripBookingCommand : IRequest<CreateRoundTripBoo
     public string? VoucherCode { get; init; }
 
     public string PaymentMethod { get; init; }
+
+    public string? PaymentReturnMode { get; init; }
 
     public sealed record RoundTripBookingLegCommand(
         Guid TripId,

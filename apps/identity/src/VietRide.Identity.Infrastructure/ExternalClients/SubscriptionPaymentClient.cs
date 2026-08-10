@@ -33,6 +33,7 @@ public sealed class SubscriptionPaymentClient : ISubscriptionPaymentClient
                 request.PaymentMethod,
                 request.Amount,
                 request.DueAt,
+                request.ReturnMode,
                 Context = request.Snapshot,
             }, options: JsonOptions),
         };

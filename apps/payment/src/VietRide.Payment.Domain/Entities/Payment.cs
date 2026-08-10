@@ -15,6 +15,7 @@ public sealed class Payment : BaseEntity<Guid>
     public Guid? OperatorId { get; private set; }
     public Money Amount { get; private set; }
     public PaymentMethod Method { get; private set; }
+    public VnPayReturnMode? ReturnMode { get; private set; }
     public PaymentStatus Status { get; private set; }
     public string? VnPayTxnRef { get; private set; }
     public string? VnPayResponseCode { get; private set; }
@@ -62,7 +63,8 @@ public sealed class Payment : BaseEntity<Guid>
         string? vnPayTxnRef = null,
         string? idempotencyKey = null,
         string? paymentRedirectUrl = null,
-        DateTimeOffset? dueAt = null)
+        DateTimeOffset? dueAt = null,
+        VnPayReturnMode? vnPayReturnMode = null)
     {
         if (referenceId == Guid.Empty)
             throw new ArgumentException("Reference id cannot be empty.", nameof(referenceId));
@@ -80,6 +82,7 @@ public sealed class Payment : BaseEntity<Guid>
             OperatorId = operatorId,
             Amount = amount,
             Method = method,
+            ReturnMode = vnPayReturnMode,
             Status = PaymentStatus.PENDING_REDIRECT,
             VnPayTxnRef = vnPayTxnRef,
             IdempotencyKey = idempotencyKey,
@@ -130,7 +133,8 @@ public sealed class Payment : BaseEntity<Guid>
         string vnPayTxnRef,
         string idempotencyKey,
         string paymentRedirectUrl,
-        DateTimeOffset? dueAt = null)
+        DateTimeOffset? dueAt = null,
+        VnPayReturnMode vnPayReturnMode = VnPayReturnMode.MOBILE_SDK)
     {
         if (referenceId == Guid.Empty)
             throw new ArgumentException("Reference id is required.", nameof(referenceId));
@@ -153,6 +157,7 @@ public sealed class Payment : BaseEntity<Guid>
             UserId = userId,
             Amount = amount,
             Method = PaymentMethod.VNPAY,
+            ReturnMode = vnPayReturnMode,
             Status = PaymentStatus.PENDING_REDIRECT,
             VnPayTxnRef = vnPayTxnRef,
             IdempotencyKey = idempotencyKey,
@@ -167,9 +172,10 @@ public sealed class Payment : BaseEntity<Guid>
         Money amount,
         string vnPayTxnRef,
         string idempotencyKey,
-        string paymentRedirectUrl)
+        string paymentRedirectUrl,
+        VnPayReturnMode vnPayReturnMode = VnPayReturnMode.MOBILE_SDK)
         => CreatePendingRedirectVnPay(PaymentReferenceType.BOOKING, referenceId, userId, amount,
-            vnPayTxnRef, idempotencyKey, paymentRedirectUrl);
+            vnPayTxnRef, idempotencyKey, paymentRedirectUrl, vnPayReturnMode: vnPayReturnMode);
 
     public static Payment CreatePendingRedirectVnPaySubscription(
         Guid upgradeAttemptId,
@@ -178,7 +184,8 @@ public sealed class Payment : BaseEntity<Guid>
         string vnPayTxnRef,
         string idempotencyKey,
         string paymentRedirectUrl,
-        DateTimeOffset dueAt)
+        DateTimeOffset dueAt,
+        VnPayReturnMode vnPayReturnMode = VnPayReturnMode.OPERATOR_WEB)
     {
         if (upgradeAttemptId == Guid.Empty)
             throw new ArgumentException("Upgrade attempt id is required.", nameof(upgradeAttemptId));
@@ -201,6 +208,7 @@ public sealed class Payment : BaseEntity<Guid>
             OperatorId = operatorId,
             Amount = amount,
             Method = PaymentMethod.VNPAY,
+            ReturnMode = vnPayReturnMode,
             Status = PaymentStatus.PENDING_REDIRECT,
             VnPayTxnRef = vnPayTxnRef,
             IdempotencyKey = idempotencyKey,

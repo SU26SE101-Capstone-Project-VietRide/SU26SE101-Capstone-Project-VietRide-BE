@@ -918,6 +918,17 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes the VNPay Mobile SDK return callback to Payment without a user token', () => {
+    const route = matchRoute(routes, '/v1/payments/vnpay-mobile-sdk-return', 'GET');
+
+    expect(route?.target).toBe(env.PAYMENT_BASE_URL);
+    expect(route?.authRequired).toBe('mixed');
+    expect(route?.publicSubpaths).toContainEqual({
+      method: 'GET',
+      path: '/v1/payments/vnpay-mobile-sdk-return',
+    });
+  });
+
   it('routes parcel delivery token endpoints through the longer mixed prefix', () => {
     const confirmRoute = matchRoute(routes, '/v1/parcels/delivery/confirm');
     const rejectRoute = matchRoute(routes, '/v1/parcels/delivery/reject');

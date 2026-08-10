@@ -88,6 +88,7 @@ public sealed class CreateBookingCommandHandler
         CancellationToken cancellationToken)
     {
         var now = _clock.UtcNow;
+        GuardMobileReturnMode(request.PaymentMethod, request.PaymentReturnMode);
 
         // -----------------------------------------------------------------------
         // 0. Business-rule guard — max 5 seats per booking (BSOT §5.9 registered code 422)
@@ -348,6 +349,7 @@ public sealed class CreateBookingCommandHandler
                 idempotencyKey: chargeIdempotencyKey,
                 context: CreatePaymentContext(booking, baseFare.Amount, discountAmount.Amount, voucherFundingType),
                 dueAt: seatLockExpiresAt,
+                paymentReturnMode: request.PaymentReturnMode,
                 cancellationToken: cancellationToken);
         }
         catch (Exception ex)
@@ -383,7 +385,10 @@ public sealed class CreateBookingCommandHandler
                 request.TripId, seatLockToken, seatNumbers, booking.Id, voucherUsageId, cancellationToken);
             // TODO Day 15/16: map ChargeOutcome.TransportError to a registered BSOT §5.9
             // error code (e.g. PAYMENT_SERVICE_UNAVAILABLE) instead of surfacing 500 INTERNAL_ERROR.
-            throw new BookingPaymentException(502, "PAYMENT_VNPAY_ERROR", transportError.Message);
+            throw new BookingPaymentException(
+                transportError.StatusCode,
+                transportError.ErrorCode,
+                transportError.Message);
         }
 
         var chargeSuccess = (ChargeOutcome.Success)chargeOutcome;
@@ -402,7 +407,9 @@ public sealed class CreateBookingCommandHandler
                 DiscountAmount: booking.DiscountAmount.Amount,
                 PaymentId: chargeSuccess.Data.PaymentId,
                 PaymentRedirectUrl: paymentRedirectUrl,
-                Tickets: ToTicketResults(booking));
+                Tickets: ToTicketResults(booking),
+                PaymentReturnMode: chargeSuccess.Data.PaymentReturnMode,
+                VnPaySdk: chargeSuccess.Data.VnPaySdk);
         }
 
         // -----------------------------------------------------------------------
@@ -535,6 +542,28 @@ public sealed class CreateBookingCommandHandler
                 fundingType == VoucherFundingType.OPERATOR_FUNDED ? discountAmount : 0,
                 booking.BookingCode.Value),
         ]);
+
+    private static void GuardMobileReturnMode(string paymentMethod, string? paymentReturnMode)
+    {
+        if (!string.Equals(paymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (string.IsNullOrWhiteSpace(paymentReturnMode))
+        {
+            throw new BookingPaymentException(
+                426,
+                "MOBILE_APP_UPDATE_REQUIRED",
+                "Update the mobile app to continue with VNPay.");
+        }
+
+        if (!string.Equals(paymentReturnMode, "MOBILE_SDK", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new BookingPaymentException(
+                422,
+                "PAYMENT_RETURN_MODE_INVALID",
+                "paymentReturnMode must be MOBILE_SDK.");
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Helpers

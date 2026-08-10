@@ -61,7 +61,8 @@ public sealed class DevPaymentServiceClient : IPaymentServiceClient
         string idempotencyKey,
         CancellationToken cancellationToken = default,
         PaymentContextSnapshot? context = null,
-        DateTimeOffset? dueAt = null)
+        DateTimeOffset? dueAt = null,
+        string? paymentReturnMode = null)
     {
         if (string.Equals(method, "WALLET", StringComparison.OrdinalIgnoreCase))
         {
@@ -87,7 +88,9 @@ public sealed class DevPaymentServiceClient : IPaymentServiceClient
                 new ChargeResult(
                     Guid.NewGuid(),
                     "PENDING",
-                    $"https://sandbox.vnpay.vn/paymentv2/vpcpay.html?referenceId={referenceId:N}")));
+                    $"https://sandbox.vnpay.vn/paymentv2/vpcpay.html?referenceId={referenceId:N}",
+                    paymentReturnMode,
+                    new VnPaySdkMetadata("DEVTMN", "vietride", true))));
         }
 
         return Task.FromResult<ChargeOutcome>(new ChargeOutcome.TransportError(

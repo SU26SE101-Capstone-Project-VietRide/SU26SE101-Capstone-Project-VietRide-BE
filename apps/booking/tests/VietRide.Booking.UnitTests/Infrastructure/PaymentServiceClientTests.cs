@@ -27,7 +27,9 @@ public sealed class PaymentServiceClientTests
               "data": {
                 "paymentId": "{{PaymentId}}",
                 "status": "PENDING_REDIRECT",
-                "paymentRedirectUrl": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"
+                "paymentRedirectUrl": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+                "paymentReturnMode": "MOBILE_SDK",
+                "vnpaySdk": { "tmnCode": "TESTTMN", "scheme": "vietride", "isSandbox": true }
               }
             }
             """);
@@ -40,11 +42,15 @@ public sealed class PaymentServiceClientTests
             350_000,
             "VNPAY",
             "44444444-4444-4444-8444-444444444444",
-            dueAt: dueAt);
+            dueAt: dueAt,
+            paymentReturnMode: "MOBILE_SDK");
 
-        outcome.Should().BeOfType<ChargeOutcome.Success>();
+        var success = outcome.Should().BeOfType<ChargeOutcome.Success>().Subject;
+        success.Data.PaymentReturnMode.Should().Be("MOBILE_SDK");
+        success.Data.VnPaySdk.Should().Be(new VnPaySdkMetadata("TESTTMN", "vietride", true));
         using var body = JsonDocument.Parse(handler.LastBody!);
         body.RootElement.GetProperty("dueAt").GetDateTimeOffset().Should().Be(dueAt);
+        body.RootElement.GetProperty("paymentReturnMode").GetString().Should().Be("MOBILE_SDK");
     }
 
     [Fact]
@@ -124,6 +130,39 @@ public sealed class PaymentServiceClientTests
 
         outcome.Should().BeOfType<ChargeOutcome.DeadlinePassed>()
             .Which.Message.Should().Be("Payment dueAt must be in the future.");
+    }
+
+    [Fact]
+    public async Task ChargeAsync_WhenMobileSdkIsDisabled_PreservesUpstreamStatusAndCode()
+    {
+        var handler = new FakeMessageHandler(
+            HttpStatusCode.ServiceUnavailable,
+            """
+            {
+              "success": false,
+              "statusCode": 503,
+              "error": {
+                "code": "VNPAY_MOBILE_SDK_DISABLED",
+                "message": "VNPay Mobile SDK is disabled."
+              }
+            }
+            """);
+        var client = BuildClient(handler);
+
+        var outcome = await client.ChargeAsync(
+            "BOOKING",
+            ReferenceId,
+            UserId,
+            350_000,
+            "VNPAY",
+            Guid.NewGuid().ToString("D"),
+            paymentReturnMode: "MOBILE_SDK");
+
+        outcome.Should().BeOfType<ChargeOutcome.TransportError>()
+            .Which.Should().Be(new ChargeOutcome.TransportError(
+                "VNPay Mobile SDK is disabled.",
+                503,
+                "VNPAY_MOBILE_SDK_DISABLED"));
     }
 
     [Fact]

@@ -109,11 +109,20 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
         string idempotencyKey,
         CancellationToken cancellationToken = default,
         PaymentContextSnapshot? context = null,
-        DateTimeOffset? dueAt = null)
+        DateTimeOffset? dueAt = null,
+        string? paymentReturnMode = null)
     {
         try
         {
-            var body = new ChargeRequest(referenceType, referenceId, userId, amount, method, context, dueAt);
+            var body = new ChargeRequest(
+                referenceType,
+                referenceId,
+                userId,
+                amount,
+                method,
+                context,
+                dueAt,
+                paymentReturnMode);
             using var request = BuildJsonRequest(
                 HttpMethod.Post,
                 "/internal/v1/payments/charge",
@@ -135,7 +144,9 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
                 var result = new ChargeResult(
                     envelope.Data.PaymentId,
                     envelope.Data.Status,
-                    envelope.Data.PaymentRedirectUrl);
+                    envelope.Data.PaymentRedirectUrl,
+                    envelope.Data.PaymentReturnMode,
+                    envelope.Data.VnPaySdk);
 
                 return new ChargeOutcome.Success(result);
             }
@@ -162,11 +173,14 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
                     : new ChargeOutcome.TransportError(error.Message);
             }
 
+            var upstreamError = await ReadErrorAsync(
+                response,
+                $"Payment service returned unexpected status {(int)response.StatusCode}.",
+                cancellationToken);
             return new ChargeOutcome.TransportError(
-                await ReadErrorMessageAsync(
-                    response,
-                    $"Payment service returned unexpected status {(int)response.StatusCode}.",
-                    cancellationToken));
+                upstreamError.Message,
+                (int)response.StatusCode,
+                upstreamError.Code ?? "PAYMENT_VNPAY_ERROR");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -252,7 +266,8 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
         long Amount,
         string Method,
         PaymentContextSnapshot? Context,
-        DateTimeOffset? DueAt);
+        DateTimeOffset? DueAt,
+        string? PaymentReturnMode);
 
     private sealed record UpstreamError(string? Code, string Message);
 
@@ -266,7 +281,9 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
     private sealed record ChargeData(
         Guid PaymentId,
         string Status,
-        string? PaymentRedirectUrl);
+        string? PaymentRedirectUrl,
+        string? PaymentReturnMode,
+        VnPaySdkMetadata? VnPaySdk);
 
     private sealed record BatchChargeData(
         IReadOnlyList<BatchChargePaymentData> Payments);

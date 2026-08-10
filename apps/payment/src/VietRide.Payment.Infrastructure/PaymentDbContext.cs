@@ -42,6 +42,7 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
         dataSourceBuilder.MapEnum<PaymentReferenceType>($"{SchemaName}.payment_reference_type", translator);
         dataSourceBuilder.MapEnum<PaymentMethod>($"{SchemaName}.payment_method", translator);
         dataSourceBuilder.MapEnum<PaymentStatus>($"{SchemaName}.payment_status", translator);
+        dataSourceBuilder.MapEnum<VnPayReturnMode>($"{SchemaName}.vnpay_return_mode", translator);
         dataSourceBuilder.MapEnum<TopUpRequestStatus>($"{SchemaName}.top_up_request_status", translator);
         dataSourceBuilder.MapEnum<WalletTransactionType>($"{SchemaName}.wallet_transaction_type", translator);
         dataSourceBuilder.MapEnum<WalletTransactionRef>($"{SchemaName}.wallet_transaction_ref", translator);
@@ -93,6 +94,7 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
         modelBuilder.HasPostgresEnum(SchemaName, "payment_reference_type", Enum.GetNames<PaymentReferenceType>());
         modelBuilder.HasPostgresEnum(SchemaName, "payment_method", Enum.GetNames<PaymentMethod>());
         modelBuilder.HasPostgresEnum(SchemaName, "payment_status", Enum.GetNames<PaymentStatus>());
+        modelBuilder.HasPostgresEnum(SchemaName, "vnpay_return_mode", Enum.GetNames<VnPayReturnMode>());
         modelBuilder.HasPostgresEnum(SchemaName, "top_up_request_status", Enum.GetNames<TopUpRequestStatus>());
         modelBuilder.HasPostgresEnum(SchemaName, "wallet_transaction_type", Enum.GetNames<WalletTransactionType>());
         modelBuilder.HasPostgresEnum(SchemaName, "wallet_transaction_ref", Enum.GetNames<WalletTransactionRef>());

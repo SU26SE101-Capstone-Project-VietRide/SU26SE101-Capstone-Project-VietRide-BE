@@ -75,7 +75,7 @@ describe('createProxyHandler auth enforcement', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it.each(['/.well-known/assetlinks.json', '/auth/set-password', '/payments/return'])(
+  it.each(['/.well-known/assetlinks.json', '/auth/set-password'])(
     'lets %s fall through to Nest controllers',
     async (path) => {
       const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
@@ -92,6 +92,54 @@ describe('createProxyHandler auth enforcement', () => {
       expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
     },
   );
+
+  it('does not intercept the operator Web SPA payment return path', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = makeRequest('/payments/return', {}, 'GET');
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 404,
+      error: { code: 'ROUTE_NOT_FOUND' },
+    });
+    expect(next).not.toHaveBeenCalled();
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+  });
+
+  it('proxies the anonymous VNPay Mobile SDK return to Payment', async () => {
+    const upstreamHandler = jest.fn();
+    createProxyMiddlewareMock.mockReturnValue(
+      upstreamHandler as unknown as ReturnType<typeof createProxyMiddleware>,
+    );
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const path = '/v1/payments/vnpay-mobile-sdk-return?vnp_ResponseCode=24';
+    const req = makeRequest(path, { 'x-request-id': 'req-mobile-return' }, 'GET');
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'anonymous',
+      reqId: 'req-mobile-return',
+    });
+    expect(req.url).toBe(path);
+    expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+      expect.objectContaining({ target: env.PAYMENT_BASE_URL }),
+    );
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+  });
 
   it('returns 401 for POST /v1/auth/logout without Authorization', async () => {
     const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;

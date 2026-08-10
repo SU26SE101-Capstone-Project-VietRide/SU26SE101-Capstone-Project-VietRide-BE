@@ -53,6 +53,8 @@ public sealed class InternalPaymentsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status402PaymentRequired)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status426UpgradeRequired)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<ApiResponse<ChargePaymentResult>>> ChargeAsync(
         [FromBody] ChargePaymentRequest request,
         CancellationToken cancellationToken)
@@ -70,6 +72,7 @@ public sealed class InternalPaymentsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<ApiResponse<CreateSubscriptionPaymentResult>>> CreateSubscriptionAsync(
         [FromBody] CreateSubscriptionPaymentRequest request,
         CancellationToken cancellationToken)

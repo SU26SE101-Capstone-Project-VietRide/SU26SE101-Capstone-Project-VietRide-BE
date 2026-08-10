@@ -4,4 +4,6 @@ public sealed record ChargeResult(
     Guid PaymentId,
     string Status,
     string? PaymentRedirectUrl,
-    DateTimeOffset? DueAt = null);
+    DateTimeOffset? DueAt = null,
+    string? PaymentReturnMode = null,
+    VnPaySdkMetadata? VnPaySdk = null);

@@ -186,7 +186,13 @@ async function restartPayment(tmnCode = '', hashSecret = '') {
     VNPAY_TMN_CODE: tmnCode,
     VNPAY_HASH_SECRET: hashSecret,
     VNPAY_BASE_URL: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
-    VNPAY_RETURN_URL: 'https://app.vietride.online/payments/return',
+    VNPAY_WEB_RETURN_URL: 'https://app.vietride.online/payments/return',
+    VNPAY_MOBILE_SDK_RETURN_URL:
+      'https://api.vietride.online/v1/payments/vnpay-mobile-sdk-return',
+    VNPAY_SDK_SCHEME: 'vietride',
+    VNPAY_IS_SANDBOX: 'true',
+    VNPAY_WEB_ENABLED: 'true',
+    VNPAY_MOBILE_SDK_ENABLED: 'true',
     VNPAY_IPN_URL: 'https://api.vietride.online/v1/payments/vnpay-ipn',
     VNPAY_PAYMENT_TIMEOUT_MINUTES: '10',
   };
@@ -666,6 +672,7 @@ async function testTripAndBookingContract(origin, destination, affected) {
       dropoff: { stationId: destination },
       seats: [{ seatNumber: 'MISS1' }],
       paymentMethod: 'VNPAY',
+      paymentReturnMode: 'MOBILE_SDK',
     },
     502,
     true,
@@ -784,13 +791,18 @@ async function createVnPayBooking(tripId, origin, destination, seatNumber, verif
     dropoff: { stationId: destination },
     seats: [{ seatNumber }],
     paymentMethod: 'VNPAY',
+    paymentReturnMode: 'MOBILE_SDK',
   };
   const idempotencyKey = crypto.randomUUID();
   const result = await api('POST', '/v1/bookings', passengerToken, request, 201, idempotencyKey);
   if (
     result?.data?.status !== 'PENDING_PAYMENT' ||
     !result.data.paymentId ||
-    !result.data.paymentRedirectUrl
+    !result.data.paymentRedirectUrl ||
+    result.data.paymentReturnMode !== 'MOBILE_SDK' ||
+    result.data.vnpaySdk?.tmnCode !== 'E2ETMN' ||
+    result.data.vnpaySdk?.scheme !== 'vietride' ||
+    result.data.vnpaySdk?.isSandbox !== true
   )
     fail(`VNPay booking redirect response mismatch: ${JSON.stringify(result)}`);
   if (verifyReplay) {
@@ -831,7 +843,8 @@ function validateRedirect(data, expectedAmount, verifyExpiry = true) {
   if (
     values.vnp_TmnCode !== 'E2ETMN' ||
     values.vnp_Amount !== String(expectedAmount * 100) ||
-    values.vnp_ReturnUrl !== 'https://app.vietride.online/payments/return'
+    values.vnp_ReturnUrl !==
+      'https://api.vietride.online/v1/payments/vnpay-mobile-sdk-return'
   )
     fail(`VNPay redirect fields mismatch: ${JSON.stringify(values)}`);
   if (signVnPay(values) !== hash) fail('VNPay redirect secure hash is invalid.');
@@ -930,6 +943,7 @@ async function testVnPay(origin, destination) {
       seats: [{ seatNumber: 'GROUP1' }],
     },
     paymentMethod: 'VNPAY',
+    paymentReturnMode: 'MOBILE_SDK',
   };
   const groupKey = crypto.randomUUID();
   const group = await api(
@@ -944,7 +958,11 @@ async function testVnPay(origin, destination) {
   if (
     !groupData?.paymentId ||
     !groupData.paymentRedirectUrl ||
-    groupData.status !== 'PENDING_PAYMENT'
+    groupData.status !== 'PENDING_PAYMENT' ||
+    groupData.paymentReturnMode !== 'MOBILE_SDK' ||
+    groupData.vnpaySdk?.tmnCode !== 'E2ETMN' ||
+    groupData.vnpaySdk?.scheme !== 'vietride' ||
+    groupData.vnpaySdk?.isSandbox !== true
   )
     fail(`Round-trip redirect mismatch: ${JSON.stringify(group)}`);
   const groupReplay = await api(
@@ -1017,6 +1035,7 @@ async function testVnPay(origin, destination) {
         seats: [{ seatNumber: 'GROUPFAIL1' }],
       },
       paymentMethod: 'VNPAY',
+      paymentReturnMode: 'MOBILE_SDK',
     },
     201,
     true,

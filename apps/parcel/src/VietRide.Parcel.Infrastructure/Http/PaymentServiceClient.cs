@@ -30,7 +30,8 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
         string idempotencyKey,
         CancellationToken cancellationToken = default,
         PaymentContextSnapshot? context = null,
-        DateTimeOffset? dueAt = null)
+        DateTimeOffset? dueAt = null,
+        string? paymentReturnMode = null)
     {
         try
         {
@@ -43,6 +44,7 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
                 method,
                 context,
                 dueAt,
+                paymentReturnMode,
             };
 
             using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/v1/payments/charge")
@@ -76,6 +78,7 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
                 case (HttpStatusCode)402:
                 case HttpStatusCode.Conflict:
                 case HttpStatusCode.UnprocessableEntity:
+                case HttpStatusCode.ServiceUnavailable:
                     var errorResponse = await response.Content
                         .ReadFromJsonAsync<ApiResponse>(JsonOptions, cancellationToken)
                         .ConfigureAwait(false);
@@ -87,7 +90,9 @@ public sealed class PaymentServiceClient : IPaymentServiceClient
                             errorResponse?.Error?.Message ?? "Insufficient funds.");
 
                     return new ChargeOutcome(ChargeOutcomeKind.TransportError, null,
-                        $"Payment charge failed: {errorResponse?.Error?.Message ?? $"Status {(int)response.StatusCode}"}");
+                        errorResponse?.Error?.Message ?? $"Payment charge failed with status {(int)response.StatusCode}.",
+                        (int)response.StatusCode,
+                        errorCode);
 
                 default:
                     return new ChargeOutcome(ChargeOutcomeKind.TransportError, null,

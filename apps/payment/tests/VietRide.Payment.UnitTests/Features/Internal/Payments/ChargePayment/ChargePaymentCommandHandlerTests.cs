@@ -128,6 +128,7 @@ public sealed class ChargePaymentCommandHandlerTests
     {
         var userId = Guid.NewGuid();
         var bookingId = Guid.NewGuid();
+        var command = CreateCommand(userId, bookingId, "WALLET", 250_000);
         var existing = PaymentEntity.CreatePendingRedirect(
             PaymentReferenceType.BOOKING,
             bookingId,
@@ -135,13 +136,18 @@ public sealed class ChargePaymentCommandHandlerTests
             PaymentMethod.WALLET,
             userId: userId,
             idempotencyKey: "idem-key");
+        existing.AttachContext(PaymentContextCodec.ValidateAndSerialize(
+            command.Context,
+            command.ReferenceType,
+            command.ReferenceId,
+            command.Amount));
         existing.MarkSucceeded(null, Now);
         var payments = new FakePaymentRepository(userId, Money.FromRaw(350_000), existing);
         var platformWallets = new FakePlatformWalletRepository(Money.FromRaw(1_000_000));
         var outbox = new FakeIntegrationEventOutbox();
         var handler = CreateHandler(payments, platformWallets, outbox: outbox);
 
-        var result = await handler.Handle(CreateCommand(userId, bookingId, "WALLET", 250_000), CancellationToken.None);
+        var result = await handler.Handle(command, CancellationToken.None);
 
         result.PaymentId.Should().Be(existing.Id);
         result.Status.Should().Be("SUCCEEDED");
@@ -230,7 +236,10 @@ public sealed class ChargePaymentCommandHandlerTests
                     0),
             ]),
             idempotencyKey,
-            "203.0.113.10");
+            "203.0.113.10",
+            PaymentReturnMode: string.Equals(method, "VNPAY", StringComparison.Ordinal)
+                ? "MOBILE_SDK"
+                : null);
 
     private sealed class FakePaymentRepository : IPaymentRepository
     {
@@ -415,6 +424,9 @@ public sealed class ChargePaymentCommandHandlerTests
         }
 
         public string RedirectUrl { get; }
+
+        public VnPaySdkConfiguration GetMobileSdkConfiguration()
+            => new("TESTTMN", "vietride", true);
 
         public string CreateTopUpRedirectUrl(
             Guid userId,

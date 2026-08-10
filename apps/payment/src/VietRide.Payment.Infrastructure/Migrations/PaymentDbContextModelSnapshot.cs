@@ -38,6 +38,7 @@ namespace VietRide.Payment.Infrastructure.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "platform_wallet_transaction_ref", new[] { "BOOKING_PAYMENT_HOLD", "PARCEL_PAYMENT_HOLD", "PARCEL_ADDITIONAL_PAYMENT_HOLD", "BOOKING_REFUND", "PARCEL_REFUND", "TRIP_SETTLEMENT", "SUBSCRIPTION_PAYMENT", "MANUAL_ADJUSTMENT" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "platform_wallet_transaction_type", new[] { "CREDIT", "DEBIT" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "top_up_request_status", new[] { "PENDING", "SUCCEEDED", "FAILED", "EXPIRED" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "vnpay_return_mode", new[] { "OPERATOR_WEB", "MOBILE_SDK" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "wallet_transaction_ref", new[] { "TOP_UP", "BOOKING_PAYMENT", "BOOKING_REFUND", "PARCEL_PAYMENT", "PARCEL_REFUND", "MANUAL_ADJUSTMENT", "PARCEL_ADDITIONAL_PAYMENT" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "vietride_payment", "wallet_transaction_type", new[] { "CREDIT", "DEBIT" });
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -285,14 +286,14 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("operator_id");
 
-                    b.Property<Guid>("ReferenceId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("reference_id");
-
                     b.Property<string>("ReferenceCode")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
                         .HasColumnName("reference_code");
+
+                    b.Property<Guid>("ReferenceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reference_id");
 
                     b.Property<OperatorLedgerReferenceType>("ReferenceType")
                         .HasColumnType("vietride_payment.operator_ledger_reference_type")
@@ -726,6 +727,10 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("refunded_at");
 
+                    b.Property<VnPayReturnMode?>("ReturnMode")
+                        .HasColumnType("vietride_payment.vnpay_return_mode")
+                        .HasColumnName("vnpay_return_mode");
+
                     b.Property<PaymentStatus>("Status")
                         .HasColumnType("vietride_payment.payment_status")
                         .HasColumnName("status");
@@ -1121,6 +1126,10 @@ namespace VietRide.Payment.Infrastructure.Migrations
                     b.Property<string>("PaymentRedirectUrl")
                         .HasColumnType("text")
                         .HasColumnName("payment_redirect_url");
+
+                    b.Property<VnPayReturnMode?>("ReturnMode")
+                        .HasColumnType("vietride_payment.vnpay_return_mode")
+                        .HasColumnName("vnpay_return_mode");
 
                     b.Property<TopUpRequestStatus>("Status")
                         .ValueGeneratedOnAdd()

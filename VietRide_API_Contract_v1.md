@@ -1296,6 +1296,14 @@ For VNPay, Booking passes the exact Trip seat-lock `expiresAt` as Payment `dueAt
 has already passed during checkout, the request fails with `422 PAYMENT_DEADLINE_PASSED` and
 Booking runs its existing seat-release compensation.
 
+Mobile VNPay requests must additionally send `"paymentReturnMode":"MOBILE_SDK"`. A pending
+VNPay response includes `paymentReturnMode`, plus
+`vnpaySdk: { tmnCode, scheme, isSandbox }`; `paymentId` is the session id used by the app to poll
+`GET /v1/payments/sessions/{paymentId}`. Missing mode returns
+`426 MOBILE_APP_UPDATE_REQUIRED`; any mode other than `MOBILE_SDK` returns
+`422 PAYMENT_RETURN_MODE_INVALID`. While the Mobile channel rollout flag is off, VNPay checkout
+returns `503 VNPAY_MOBILE_SDK_DISABLED` and never falls back to the legacy bridge.
+
 Errors include the existing validation/not-found/conflict responses plus:
 
 - `502 UPSTREAM_UNAVAILABLE`: the Trip crew snapshot is unavailable or the Trip has no assigned Driver. Booking returns this before locking seats or creating a payment.
@@ -1320,7 +1328,8 @@ Request:
     "seats": [{ "seatNumber": "A01" }]
   },
   "voucherCode": "SUMMER26",
-  "paymentMethod": "VNPAY"
+  "paymentMethod": "VNPAY",
+  "paymentReturnMode": "MOBILE_SDK"
 }
 ```
 
@@ -1336,7 +1345,9 @@ Response `201`:
     "grandTotal": 700000,
     "paymentId": "uuid",
     "status": "PENDING_PAYMENT",
-    "paymentRedirectUrl": "https://vnpay.vn/..."
+    "paymentRedirectUrl": "https://vnpay.vn/...",
+    "paymentReturnMode": "MOBILE_SDK",
+    "vnpaySdk": { "tmnCode": "merchant-code", "scheme": "vietride", "isSandbox": false }
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
@@ -2067,8 +2078,12 @@ Auth: protected.
 
 Response `200`: trip detail with route, stations, stops, seat summary, fare summary.
 
-Trip detail includes nullable `destinationArrivedAt` (ISO-8601 datetime with offset). It is
-`null` until the assigned Driver/Assistant records physical arrival at the destination terminal.
+Trip detail includes nullable `alternativeRouteId` and `destinationArrivedAt` (ISO-8601 datetime
+with offset). `alternativeRouteId` is `null` until an operator applies an AlternativeRoute.
+When it is non-null, `destinationStation`, `estimatedArrivalTime`, and the pending portion of
+`stops` describe that effective AlternativeRoute. Already-`ARRIVED` stop snapshots remain at the
+front of `stops` as immutable operational history. `destinationArrivedAt` is `null` until the
+assigned Driver/Assistant records physical arrival at the effective destination terminal.
 Trip detail also includes `plannedEtaQuality=TRAFFIC_AWARE|FALLBACK`. This is a public quality
 classification only; the internal route provider/source is not exposed. `Trip.estimatedArrivalTime`
 and every stop `estimatedArrivalTime` are planned timestamps calculated by the backend.
@@ -2540,6 +2555,14 @@ AlternativeRoute stops set only `stopId`, while the appended destination Station
 route-change transaction; no cross-database FK or synchronous consumer lookup is permitted.
 The event adds `tripStatus` with exactly `SCHEDULED|BOARDING|IN_PROGRESS`. Neither response nor
 event contains `affectedBookingIds`.
+
+In that same Trip transaction, a successful route change preserves existing `ARRIVED` TripStop
+rows, removes every non-arrived TripStop from the previous effective route, and appends `PENDING`
+TripStops from the selected AlternativeRoute in route order. A selected-route stop already present
+in the preserved arrival history is not duplicated. Planned stop and destination timestamps use
+`actualDepartureTime ?? departureDateTime` as their baseline and the AlternativeRoute duration
+snapshots. Tracking consumes `trip.trip.route_changed` to invalidate route-stop/geometry caches
+and clear stale ETA/off-route state before processing subsequent GPS updates.
 
 Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
 
@@ -3186,19 +3209,25 @@ The server derives `estimatedSizeCategory`; old clients may still send `sizeCate
 
 Auth: owning `PASSENGER`. Idempotency: required.
 
-Request: `{ "paymentMethod": "WALLET|VNPAY" }`.
+Request: `{ "paymentMethod": "WALLET|VNPAY", "paymentReturnMode": "MOBILE_SDK|null" }`.
+`paymentReturnMode` is required and must be `MOBILE_SDK` for VNPay.
 
 The mutation first creates an idempotent soft cargo hold using estimated weight/volume, then creates a Payment whose `dueAt = min(paymentStartedAt + 15 minutes, latestCheckInAt)`. If no positive payment window remains, it does not create a Payment or hold. A zero deposit consumes the validated voucher, keeps the reservation, and moves directly to `RESERVED` without creating a zero-value Payment.
 
-Response `200` data contains `parcelId`, `status`, `depositPaymentId?`, `depositRequiredVnd`, `depositPaidVnd`, `paymentDueAt?`, and `paymentRedirectUrl?`. Payment success is valid only when authoritative `paidAt < paymentDueAt`; fail/expiry moves the Parcel to `EXPIRED`, releases cargo, and does not consume the voucher.
+Response `200` data contains `parcelId`, `status`, `depositPaymentId?`, `depositRequiredVnd`, `depositPaidVnd`, `paymentDueAt?`, `paymentRedirectUrl?`, `paymentReturnMode?`, and `vnpaySdk?`. Payment success is valid only when authoritative `paidAt < paymentDueAt`; fail/expiry moves the Parcel to `EXPIRED`, releases cargo, and does not consume the voucher.
 
 ### POST `/v1/parcels/{parcelId}/final-payment`
 
 Auth: owning `PASSENGER`. Idempotency: required. Allowed only in `PENDING_FINAL_PAYMENT` and before `finalPaymentDeadline`.
 
-Request: `{ "paymentMethod": "WALLET|VNPAY" }`.
+Request: `{ "paymentMethod": "WALLET|VNPAY", "paymentReturnMode": "MOBILE_SDK|null" }`.
+`paymentReturnMode` is required and must be `MOBILE_SDK` for VNPay.
 
-The charged amount is server-derived `max(0, balanceRequiredVnd - balancePaidVnd)`. Response data contains `parcelId`, `status`, `balancePaymentId?`, `balanceRequiredVnd`, `balancePaidVnd`, `finalPaymentDeadline`, and `paymentRedirectUrl?`. A payment with `paidAt >= finalPaymentDeadline` is not added to `balancePaidVnd`; Payment Service owns capture/refund tracking for that late payment.
+The charged amount is server-derived `max(0, balanceRequiredVnd - balancePaidVnd)`. Response data contains `parcelId`, `status`, `balancePaymentId?`, `balanceRequiredVnd`, `balancePaidVnd`, `finalPaymentDeadline`, `paymentRedirectUrl?`, `paymentReturnMode?`, and `vnpaySdk?`. A payment with `paidAt >= finalPaymentDeadline` is not added to `balancePaidVnd`; Payment Service owns capture/refund tracking for that late payment.
+
+For both Parcel VNPay endpoints, missing mode returns `426 MOBILE_APP_UPDATE_REQUIRED`, invalid mode
+returns `422 PAYMENT_RETURN_MODE_INVALID`, and a disabled Mobile channel returns
+`503 VNPAY_MOBILE_SDK_DISABLED` without a bridge fallback.
 
 ### GET `/v1/parcels/received`
 
@@ -4185,9 +4214,9 @@ Response `200`:
 
 ### GET `/v1/payments/vnpay-return-status`
 
-Auth: public VNPay browser return. The complete VNPay query string, including
+Auth: public VNPay Web return. The complete VNPay query string, including
 `vnp_TxnRef`, `vnp_TmnCode`, and `vnp_SecureHash`, is required. Payment verifies
-HMAC-SHA512 and the configured merchant before reading the persisted transaction.
+HMAC-SHA512, configured merchant, amount, and persisted `OPERATOR_WEB` mode before reading the transaction.
 
 This endpoint is read-only. It never transitions Payment or Booking; only the signed
 VNPay IPN can move `PENDING_REDIRECT` to a terminal state and publish the corresponding
@@ -4209,9 +4238,27 @@ Response `200`:
 }
 ```
 
-The HTTPS return bridge polls this resource while displaying a web fallback and may
-also open `vietride://payments/return?<original-signed-query>`. Errors:
-`401 PAYMENT_SIGNATURE_INVALID`, `404 PAYMENT_NOT_FOUND`, `422 VALIDATION_ERROR`.
+The Manager Web SPA uses this read-only resource after VNPay redirects it to
+`VNPAY_WEB_RETURN_URL`. There is no Gateway payment bridge. Errors:
+`401 PAYMENT_SIGNATURE_INVALID`, `404 PAYMENT_NOT_FOUND`, `422 PAYMENT_AMOUNT_INVALID`.
+
+### GET `/v1/payments/vnpay-mobile-sdk-return`
+
+Auth: public, authenticated by the signed VNPay query. This is the technical return URL configured
+as `VNPAY_MOBILE_SDK_RETURN_URL`. Payment verifies HMAC, merchant, transaction reference, amount,
+and persisted `MOBILE_SDK` mode, performs no database or Outbox mutation, then returns a raw `302`:
+
+- signed `vnp_ResponseCode=00` and `vnp_TransactionStatus=00` -> `http://success.sdk.merchantbackapp`
+- signed `vnp_ResponseCode=24` -> `http://cancel.sdk.merchantbackapp`
+- any other authentic result -> `http://fail.sdk.merchantbackapp`
+
+Invalid signature/session/amount/mode returns `400`. The VNPay IPN remains the only state-mutating
+source of truth.
+
+### GET `/v1/payments/sessions/{sessionId}`
+
+Auth: owning `PASSENGER`. Looks up both Payment and wallet Top-up sessions, returns `404` on an
+ownership mismatch, and normalizes status to `PENDING|SUCCEEDED|FAILED|EXPIRED|REFUNDED`.
 
 ### POST `/v1/wallet/top-up`
 
@@ -4221,7 +4268,8 @@ Request:
 ```json
 {
   "amount": 500000,
-  "method": "VNPAY"
+  "method": "VNPAY",
+  "paymentReturnMode": "MOBILE_SDK"
 }
 ```
 
@@ -4233,11 +4281,17 @@ Response `201`:
   "data": {
     "topUpRequestId": "uuid",
     "status": "PENDING",
-    "paymentRedirectUrl": "https://vnpay.vn/..."
+    "paymentRedirectUrl": "https://vnpay.vn/...",
+    "paymentReturnMode": "MOBILE_SDK",
+    "vnpaySdk": { "tmnCode": "merchant-code", "scheme": "vietride", "isSandbox": false }
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
 ```
+
+Missing `paymentReturnMode` returns `426 MOBILE_APP_UPDATE_REQUIRED`; an unsupported mode returns
+`422 PAYMENT_RETURN_MODE_INVALID`; a disabled Mobile channel returns
+`503 VNPAY_MOBILE_SDK_DISABLED` without a bridge fallback.
 
 ### GET `/v1/wallet`
 
@@ -4279,7 +4333,8 @@ Request:
   "userId": "uuid",
   "amount": 350000,
   "method": "VNPAY",
-  "dueAt": "2026-07-30T12:00:00Z"
+  "dueAt": "2026-07-30T12:00:00Z",
+  "paymentReturnMode": "MOBILE_SDK"
 }
 ```
 
@@ -4291,7 +4346,10 @@ Response `200`:
   "data": {
     "paymentId": "uuid",
     "status": "PENDING_REDIRECT",
-    "paymentRedirectUrl": "https://sandbox.vnpayment.vn/..."
+    "paymentRedirectUrl": "https://sandbox.vnpayment.vn/...",
+    "dueAt": "2026-07-30T12:00:00Z",
+    "paymentReturnMode": "MOBILE_SDK",
+    "vnpaySdk": { "tmnCode": "merchant-code", "scheme": "vietride", "isSandbox": false }
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
@@ -4301,6 +4359,10 @@ The request may omit `dueAt` to use the 15-minute default. Booking VNPay supplie
 one-way Trip seat-lock expiry or the earlier round-trip leg expiry. `dueAt <= now` returns
 `422 PAYMENT_DEADLINE_PASSED`. A persisted non-null deadline is authoritative; historical
 persisted-null Payment rows use the legacy `CreatedAt + 15 minutes` fallback.
+For `method=VNPAY`, `paymentReturnMode` is required and must be `MOBILE_SDK`; missing mode returns
+`426 MOBILE_APP_UPDATE_REQUIRED`, invalid mode returns `422 PAYMENT_RETURN_MODE_INVALID`, and a
+disabled channel returns `503 VNPAY_MOBILE_SDK_DISABLED`. For `method=WALLET`, callers omit the
+mode and SDK metadata remains null.
 
 ### POST `/internal/v1/payments/redirect-sessions/lookup`
 
@@ -5182,12 +5244,13 @@ Request:
 {
   "planId": "uuid",
   "billingPeriod": "MONTHLY",
-  "paymentMethod": "VNPAY",
-  "returnUrl": "https://app.vietride.vn/operator/subscription/result"
+  "paymentMethod": "VNPAY"
 }
 ```
 
 `billingPeriod` is `MONTHLY` or `YEARLY`. Identity snapshots the selected active plan's server-side price; the client never supplies an amount.
+For VNPay, Identity always sends internal `returnMode=OPERATOR_WEB`; Payment resolves
+`VNPAY_WEB_RETURN_URL`. The public client cannot provide or override a return URL.
 
 Response `202`:
 ```json
@@ -5210,7 +5273,7 @@ Response `202`:
 }
 ```
 
-Errors: `403 FORBIDDEN`; `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 VALIDATION_ERROR`; `422 IDEMPOTENCY_KEY_MISMATCH`.
+Errors: `403 FORBIDDEN`; `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_PAYMENT_PENDING`; `422 VALIDATION_ERROR`; `422 IDEMPOTENCY_KEY_MISMATCH`; `503 VNPAY_WEB_DISABLED` while the Web channel rollout flag is off.
 
 For `paymentMethod=WALLET`, a successful atomic OperatorWallet charge returns `200`:
 
@@ -5237,7 +5300,7 @@ Additional errors: `402 WALLET_INSUFFICIENT_BALANCE`; `422 IDEMPOTENCY_KEY_REQUI
 
 Auth: `OPERATOR_ADMIN`. `Idempotency-Key` bắt buộc. Chỉ cho phép khi attempt còn trong cửa sổ 15 phút và latest payment là `FAILED` hoặc `EXPIRED`. Mỗi retry tạo `paymentId` và `vnp_TxnRef` mới nhưng không kéo dài `dueAt`.
 
-Response `202` dùng cùng `SubscriptionUpgradeResponseDto` với `paymentRedirectUrl` mới. Errors: `403 SUBSCRIPTION_UPGRADE_FORBIDDEN`; `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_UPGRADE_EXPIRED`; `409 SUBSCRIPTION_PAYMENT_NOT_RETRYABLE`; `422 IDEMPOTENCY_KEY_REQUIRED`.
+Response `202` dùng cùng `SubscriptionUpgradeResponseDto` với `paymentRedirectUrl` mới. Errors: `403 SUBSCRIPTION_UPGRADE_FORBIDDEN`; `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_UPGRADE_EXPIRED`; `409 SUBSCRIPTION_PAYMENT_NOT_RETRYABLE`; `422 IDEMPOTENCY_KEY_REQUIRED`; `503 VNPAY_WEB_DISABLED` while the Web channel rollout flag is off.
 
 VNPay gọi canonical `GET|POST /v1/payments/vnpay-ipn`. `returnUrl` chỉ đưa browser về FE và không được phép mutate Payment hoặc Subscription.
 
