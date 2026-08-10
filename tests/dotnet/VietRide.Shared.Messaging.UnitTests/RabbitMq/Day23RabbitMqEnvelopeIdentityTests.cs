@@ -27,7 +27,12 @@ public sealed class Day23RabbitMqEnvelopeIdentityTests
     public async Task PublishRaw_UsesRowIdentityAndPersistentCanonicalEnvelope(string routingKey)
     {
         var eventId = Guid.NewGuid();
-        var payload = JsonSerializer.Serialize(new { eventId, routingKey });
+        var payload = JsonSerializer.Serialize(new
+        {
+            eventId,
+            routingKey,
+            occurredAt = new DateTimeOffset(2026, 8, 10, 5, 0, 0, TimeSpan.Zero),
+        });
         var properties = Substitute.For<IBasicProperties>();
         var channel = Substitute.For<IModel>();
         channel.IsOpen.Returns(true);
@@ -84,6 +89,12 @@ public sealed class Day23RabbitMqEnvelopeIdentityTests
         properties.DeliveryMode.Should().Be(2);
         properties.MessageId.Should().Be(eventId.ToString("D"));
         properties.Type.Should().Be(routingKey);
-        Encoding.UTF8.GetString(capturedBody.Span).Should().Be(payload);
+        var publishedPayload = Encoding.UTF8.GetString(capturedBody.Span);
+        using var document = JsonDocument.Parse(publishedPayload);
+        document.RootElement.GetProperty("eventId").GetGuid().Should().Be(eventId);
+        document.RootElement.GetProperty("routingKey").GetString().Should().Be(routingKey);
+        document.RootElement.GetProperty("occurredAt").GetString()
+            .Should().Be("2026-08-10T05:00:00.0000000Z");
+        publishedPayload.Should().NotContain("+00:00");
     }
 }

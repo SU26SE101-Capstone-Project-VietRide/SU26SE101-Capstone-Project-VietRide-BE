@@ -2,6 +2,7 @@ import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nes
 import type { Request, Response } from 'express';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { toVietnamIso, transformFrontendTimestamps } from '../time/business-time';
 
 /**
  * Global interceptor that auto-wraps any successful HTTP response into the
@@ -23,7 +24,7 @@ export class ApiResponseInterceptor implements NestInterceptor {
     const res = http.getResponse<Response>();
     const req = http.getRequest<Request>();
 
-    if (req.path === '/internal' || req.path.startsWith('/internal/')) {
+    if (isInternalPath(req.path)) {
       return next.handle();
     }
 
@@ -36,25 +37,29 @@ export class ApiResponseInterceptor implements NestInterceptor {
 
         // Skip if already wrapped (e.g. controller explicitly built envelope)
         if (isAlreadyWrapped(body)) {
-          return body;
+          return transformFrontendTimestamps(body);
         }
 
         const traceId =
           (req.headers['x-request-id'] as string | undefined) ??
           (req as { requestId?: string }).requestId;
 
-        return {
+        return transformFrontendTimestamps({
           success: true as const,
           statusCode: res.statusCode,
           data: body,
           meta: {
             traceId,
-            timestamp: new Date().toISOString(),
+            timestamp: toVietnamIso(new Date()),
           },
-        };
+        });
       }),
     );
   }
+}
+
+function isInternalPath(path: string): boolean {
+  return path === '/internal' || path.startsWith('/internal/');
 }
 
 /** Detect if the body is already an envelope (has `success` + `statusCode`). */

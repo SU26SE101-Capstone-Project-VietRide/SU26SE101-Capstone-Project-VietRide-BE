@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Middleware;
+using VietRide.Shared.Web.Serialization;
 
 namespace VietRide.Shared.Web.Filters;
 
@@ -56,7 +57,7 @@ public sealed class ApiResponseResultFilter : IAlwaysRunResultFilter
         }
 
         var traceId = GetTraceId(context);
-        var meta = ApiMeta.Create(traceId);
+        var meta = ApiTimestampPresentation.CreateMeta(context.HttpContext, traceId);
         var wrapped = Wrap(value, valueType, statusCode, meta);
 
         context.Result = new ObjectResult(wrapped) { StatusCode = statusCode };

@@ -56,8 +56,8 @@ public sealed record ApiFieldError(string Field, string Message);
 public sealed record ApiMeta
 {
     public string TraceId { get; init; } = string.Empty;
-    public string Timestamp { get; init; } = string.Empty;
+    public DateTimeOffset Timestamp { get; init; }
 
     public static ApiMeta Create(string traceId)
-        => new() { TraceId = traceId, Timestamp = DateTime.UtcNow.ToString("O") };
+        => new() { TraceId = traceId, Timestamp = DateTimeOffset.UtcNow };
 }

@@ -5,8 +5,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Shared.Web.DependencyInjection;
 using VietRide.Shared.Web.Idempotency;
+using VietRide.Shared.Web.Serialization;
 
 namespace VietRide.Shared.Web.Middleware;
 
@@ -324,7 +326,11 @@ public sealed class IdempotencyMiddleware
             context.Response.Body = originalBody;
         }
 
-        var responseBytes = buffer.ToArray();
+        var capturedBytes = buffer.ToArray();
+        var responseBytes = ApiTimestampPresentation.TransformCachedJsonForResponse(
+            capturedBytes,
+            context.Response.ContentType,
+            context);
         if (context.Response.StatusCode >= StatusCodes.Status500InternalServerError)
         {
             await ReleaseProcessingAsync(database, processingKey, processingPayload, ownerToken);
@@ -340,7 +346,7 @@ public sealed class IdempotencyMiddleware
             fingerprint,
             context.Response.StatusCode,
             context.Response.ContentType,
-            Convert.ToBase64String(responseBytes));
+            Convert.ToBase64String(NormalizeJsonForCache(capturedBytes, context.Response.ContentType)));
         var responsePayload = JsonSerializer.Serialize(responseEntry, JsonOptions);
         var completed = await CompleteProcessingAsync(
             database,
@@ -395,7 +401,10 @@ public sealed class IdempotencyMiddleware
                 return true;
             }
 
-            responseBytes = Convert.FromBase64String(entry.Body);
+            responseBytes = ApiTimestampPresentation.TransformCachedJsonForResponse(
+                Convert.FromBase64String(entry.Body),
+                entry.ContentType,
+                context);
         }
         catch (FormatException)
         {
@@ -426,6 +435,25 @@ public sealed class IdempotencyMiddleware
             && statusCode is < 100 or >= 200
             && statusCode != StatusCodes.Status204NoContent
             && statusCode != StatusCodes.Status304NotModified;
+    }
+
+    private static byte[] NormalizeJsonForCache(byte[] body, string? contentType)
+    {
+        if (body.Length == 0
+            || contentType is null
+            || !contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+        {
+            return body;
+        }
+
+        try
+        {
+            return UtcJson.NormalizeInstants(body);
+        }
+        catch (JsonException)
+        {
+            return body;
+        }
     }
 
     private static Task<bool> TryAcquireProcessingAsync(
@@ -579,11 +607,13 @@ public sealed class IdempotencyMiddleware
         var envelope = ApiResponse.Failure(
             statusCode,
             new ApiError { Code = code, Message = message },
-            ApiMeta.Create(GetTraceId(context)));
+            ApiTimestampPresentation.CreateMeta(context, GetTraceId(context)));
 
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json";
-        var payload = JsonSerializer.Serialize(envelope, JsonOptions);
+        var payload = JsonSerializer.Serialize(
+            envelope,
+            ApiTimestampPresentation.CreateSerializerOptions(context));
         await context.Response.Body.WriteAsync(
             Encoding.UTF8.GetBytes(payload),
             context.RequestAborted);
