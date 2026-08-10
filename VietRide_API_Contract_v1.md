@@ -1967,9 +1967,16 @@ Auth: `OPERATOR_ADMIN` only. Idempotency: required. Source: v7:674-683. Precondi
 
 Auth: public.
 
-Purpose: FE loads this once at app start and caches it for the origin/destination search UI. FE must not hardcode provinces/cities.
+Purpose: FE loads the current two-level administrative catalog for a cascading province/ward
+origin/destination selector. FE must not hardcode administrative units.
 
-Response `200`: active locations sorted by `sortOrder`, then `name`.
+Query:
+- Omit `parentCode` to list active `PROVINCE|MUNICIPALITY` roots.
+- Send `parentCode=<official-province-code>` to list its active `WARD|COMMUNE|SPECIAL_ZONE` children.
+- `search?` filters code/name inside the selected level for autocomplete using case- and
+  Vietnamese-accent-insensitive contains matching (`Vung Tau` matches `Vũng Tàu`).
+
+Response `200`: matching active locations sorted by `sortOrder`, then `name`.
 ```json
 {
   "success": true,
@@ -1977,11 +1984,14 @@ Response `200`: active locations sorted by `sortOrder`, then `name`.
   "data": [
     {
       "id": "uuid",
-      "code": "HCM",
-      "name": "Ho Chi Minh City",
-      "type": "MUNICIPALITY",
+      "code": "26506",
+      "name": "Phường Vũng Tàu",
+      "type": "WARD",
+      "parentId": "uuid",
+      "parentCode": "79",
+      "parentName": "Thành phố Hồ Chí Minh",
       "isActive": true,
-      "sortOrder": 5
+      "sortOrder": 2563
     }
   ],
   "meta": { "traceId": "req-abc123", "timestamp": "2026-07-08T07:00:00+07:00" }
@@ -1998,20 +2008,25 @@ Endpoints:
 - `PATCH /v1/admin/locations/{id}`
 - `DELETE /v1/admin/locations/{id}` soft-deactivates the location.
 
+Admin `search` uses the same case- and Vietnamese-accent-insensitive code/name matching as the
+public catalog.
+
 Create/update request:
 ```json
 {
-  "code": "HCM",
-  "name": "Ho Chi Minh City",
-  "type": "MUNICIPALITY",
+  "code": "26506",
+  "name": "Phường Vũng Tàu",
+  "type": "WARD",
+  "parentCode": "79",
   "sortOrder": 5,
   "isActive": true
 }
 ```
 
 Rules:
-- `code` is unique and normalized to uppercase.
-- `type` is `PROVINCE` or `MUNICIPALITY`.
+- `code` is a unique official numeric string; leading zeroes are significant.
+- Root `type` is `PROVINCE|MUNICIPALITY` and forbids `parentCode`.
+- Leaf `type` is `WARD|COMMUNE|SPECIAL_ZONE` and requires an active root `parentCode`.
 - Duplicate code returns `409 LOCATION_CODE_CONFLICT`.
 - Missing/inactive location references in station/stop/trip search validation return `422 VALIDATION_ERROR`.
 
@@ -2021,13 +2036,25 @@ Auth: optional/passenger.
 
 Query:
 - Specific station mode: `originStationId`, `destinationStationId`, `departureDate`, `passengerCount`, `allowAlongRoutePickup?`.
-- FE city/province mode: `originLocationCode`, `destinationLocationCode`, `departureDate`, `passengerCount`, `allowAlongRoutePickup?`.
+- Administrative hierarchy mode: `originProvinceCode`, `originWardCode?`,
+  `destinationProvinceCode`, `destinationWardCode?`, `departureDate`, `passengerCount`,
+  `allowAlongRoutePickup?`.
 
-If both station IDs and location codes are sent, station IDs win because they are the more specific filter. Location-code mode finds active Stations under each Location, then searches Routes/Trips using those exact Stations. Response still returns concrete origin/destination Stations for display.
+If both station IDs and hierarchy codes are sent, a complete station-ID pair wins because it is the more
+specific filter. Station-ID mode continues to match exact Route origin/destination terminals.
+Hierarchy mode requires both province codes. Each optional ward code must be an active leaf directly
+under its corresponding province. Omitting a ward expands the scope to every active leaf directly
+under that province. It automatically matches both active Stations and active, non-deleted Stops in
+the resolved scopes. A Stop pickup requires the TripStop snapshot `allowPickup=true`; a Stop dropoff
+requires `allowDropoff=true`; at least one matched pickup must occur before a matched dropoff by
+journey `orderIndex`. `allowAlongRoutePickup` is retained as a deprecated compatibility parameter
+and no longer enables/disables this matching. Response keeps concrete Route origin/destination
+Stations and additionally returns the requested-location pickup/dropoff points.
 
 Errors:
-- `422 VALIDATION_ERROR` if neither a station pair nor a location-code pair is provided.
-- `422 VALIDATION_ERROR` if a location code does not exist or is inactive.
+- `422 VALIDATION_ERROR` if neither a complete station pair nor a complete province pair is provided.
+- `422 VALIDATION_ERROR` if a province is missing/inactive/not top-level, or a ward is
+  missing/inactive/not a leaf/not a direct child of the selected province.
 - No matching station/route/trip returns an empty `200` list.
 
 Response `200`:
@@ -2046,6 +2073,32 @@ Response `200`:
         "estimatedArrivalTime": "2026-05-18T20:00:00+07:00",
         "originStation": { "id": "uuid", "name": "Bến xe Miền Đông" },
         "destinationStation": { "id": "uuid", "name": "Bến xe Mỹ Đình" },
+        "pickupPoints": [
+          {
+            "type": "STATION",
+            "stationId": "uuid",
+            "stopId": null,
+            "name": "Bến xe Miền Đông",
+            "address": "292 Đinh Bộ Lĩnh",
+            "orderIndex": 0,
+            "estimatedTime": "2026-05-18T08:00:00+07:00",
+            "allowPickup": true,
+            "allowDropoff": false
+          }
+        ],
+        "dropoffPoints": [
+          {
+            "type": "STOP",
+            "stationId": null,
+            "stopId": "uuid",
+            "name": "Điểm trả Cầu Giấy",
+            "address": "Cầu Giấy, Hà Nội",
+            "orderIndex": 3,
+            "estimatedTime": "2026-05-18T19:30:00+07:00",
+            "allowPickup": false,
+            "allowDropoff": true
+          }
+        ],
         "availableSeats": 18,
         "baseFare": 400000,
         "allowAlongRoutePickup": true,
@@ -2062,6 +2115,10 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
+
+Only points in the requested origin/destination Locations that participate in at least one valid
+pickup-before-dropoff journey are returned. Point identity is XOR: `STATION` sets only
+`stationId`; `STOP` sets only `stopId`. Arrays are ordered by `orderIndex`, then point id.
 
 ### GET `/v1/trips/{tripId}`
 
@@ -2555,6 +2612,71 @@ This direct `OPERATOR_ADMIN` action remains supported. It does not require a pro
 direct change atomically marks every `PENDING` route-change proposal for the Trip as `SUPERSEDED`
 with `resolutionCode=ROUTE_CHANGED_DIRECTLY` before committing the existing
 `trip.trip.route_changed` fact.
+
+### Incident report and Operator incident reads
+
+#### POST `/v1/driver/trips/{tripId}/incident`
+
+Auth: assigned `DRIVER` or `ASSISTANT`. Idempotency: required UUID-v4 `Idempotency-Key`.
+The existing request contains `category=TRAFFIC_JAM|VEHICLE_BREAKDOWN|ACCIDENT|WEATHER|OTHER`,
+optional trimmed `description` up to 500 characters, at most three owned Firebase HTTPS
+`photoUrls`, and optional `latitude`/`longitude` supplied together. The Trip must be
+`IN_PROGRESS`. Response `201` returns the created incident identity/timestamp; reporting remains
+the only Incident mutation in this contract.
+
+#### GET `/v1/operator/incidents`
+
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`; tenant scope comes only from the JWT `operatorId`.
+Query: `tripId?`, `category?=TRAFFIC_JAM|VEHICLE_BREAKDOWN|ACCIDENT|WEATHER|OTHER`,
+`status?=OPEN|RESOLVED`, inclusive Asia/Ho_Chi_Minh `from?`/`to?` dates, `page?`, `pageSize?`.
+Pagination defaults to `1/20` and range is `1..100`. Results are ordered by `reportedAt DESC`,
+then `incidentId` for deterministic paging.
+
+Response `200` is `PagedResult<OperatorIncidentDto>` in the standard ADR 0004 envelope. The DTO
+used by both list and detail is:
+
+```jsonc
+{
+  "incidentId": "uuid",
+  "category": "VEHICLE_BREAKDOWN",
+  "description": "Engine warning and loss of power",
+  "photoUrls": ["https://firebasestorage.googleapis.com/..."],
+  "latitude": 10.7769,
+  "longitude": 106.7009,
+  "reportedAt": "2026-08-10T09:30:00+07:00",
+  "status": "OPEN",
+  "resolvedAt": null,
+  "resolvedByUserId": null,
+  "resolutionNote": null,
+  "trip": {
+    "tripId": "uuid",
+    "status": "IN_PROGRESS",
+    "departureDateTime": "2026-08-10T07:00:00+07:00",
+    "route": {
+      "routeId": "uuid",
+      "name": "Hồ Chí Minh - Đà Lạt",
+      "originStation": { "stationId": "uuid", "name": "Bến xe Miền Đông" },
+      "destinationStation": { "stationId": "uuid", "name": "Bến xe Đà Lạt" }
+    }
+  },
+  "reporter": {
+    "userId": "uuid",
+    "displayName": "Nguyễn Văn Tài",
+    "role": "DRIVER"
+  }
+}
+```
+
+`status` is derived as `OPEN` when `resolvedAt` is null and `RESOLVED` otherwise. Identity is
+batch-enriched for list reads. If the reporter profile is unavailable, the Incident still returns
+with `reporter.userId`; `displayName` and `role` are null. Invalid filters, date order, UUID or
+pagination return `422 VALIDATION_ERROR`.
+
+#### GET `/v1/operator/incidents/{incidentId}`
+
+Auth and DTO are identical to the list endpoint. Missing and cross-tenant Incident IDs both return
+`404 INCIDENT_NOT_FOUND`; malformed/empty UUID returns `422 VALIDATION_ERROR`. This endpoint is
+read-only and does not resolve an Incident or publish an event.
 
 ### Driver/Assistant Route-Change Proposals
 
@@ -5551,7 +5673,6 @@ Request:
   "taxCode": "0312345678",
   "addressStreet": "123 Le Loi",
   "addressWard": "Ben Nghe",
-  "addressDistrict": "District 1",
   "addressProvince": "Ho Chi Minh City",
   "representativeName": "Nguyen Van Operator",
   "representativePhone": "+84907654321",
@@ -5625,7 +5746,7 @@ Auth: `SYSTEM_ADMIN`.
 
 Response `200`: ADR 0004 envelope whose `data` contains `operatorId`, `name`,
 `businessRegistrationNumber`, `taxCode`, `contactEmail`, `contactPhone`, `logoUrl`, nested
-`address { street, ward, district, province }`, `representativeName`, `representativePhone`,
+`address { street, ward, province }`, `representativeName`, `representativePhone`,
 `registrationStatus`, `isActive`, `createdAt`, `updatedAt`, `approvedAt`, `rejectedAt`,
 `rejectReason`, `suspendedAt`, `suspendReason`, `cancellationPolicy`, `parcelNoShowPolicy`, and
 `luggagePolicy`. Bank-account and subscription fields are intentionally excluded.
@@ -5647,7 +5768,6 @@ Request:
   "taxCode": "0312345678",
   "addressStreet": "123 Le Loi",
   "addressWard": "Ben Nghe",
-  "addressDistrict": "District 1",
   "addressProvince": "Ho Chi Minh City",
   "representativeName": "Nguyen Van Operator",
   "representativePhone": "+84907654321"
@@ -5895,7 +6015,6 @@ Response `200`:
     "address": {
       "street": "123 Le Loi",
       "ward": "Ben Nghe",
-      "district": "District 1",
       "province": "Ho Chi Minh City"
     },
     "representativeName": "Nguyen Van Operator",
@@ -5928,7 +6047,6 @@ Request:
   "logoUrl": "https://cdn.vietride.app/operators/logo.png",
   "addressStreet": "123 Le Loi",
   "addressWard": "Ben Nghe",
-  "addressDistrict": "District 1",
   "addressProvince": "Ho Chi Minh City",
   "representativeName": "Nguyen Van Operator",
   "representativePhone": "+84907654321",
@@ -6355,10 +6473,7 @@ Create-Station branch request (field names derive from `stations` columns; JSON 
 ```json
 {
   "name": "Bến xe Miền Tây",
-  "city": "Ho Chi Minh City",
-  "ward": "An Lac",
-  "locationId": "uuid",
-  "locationCode": "HCM",
+  "locationCode": "26506",
   "latitude": 10.7212345,
   "longitude": 106.6267890,
   "addressStreet": "Kinh Dương Vương",
@@ -6375,6 +6490,9 @@ Create-Station branch request (field names derive from `stations` columns; JSON 
 Branching:
 - `stationId` present -> link existing Station only.
 - station fields present -> create Station + auto-link in one transaction.
+- create branch requires exactly one of `locationId` or official leaf `locationCode`. The Location
+  must be active `WARD|COMMUNE|SPECIAL_ZONE` with an active root parent. `city` and `ward`
+  compatibility snapshots are derived from that hierarchy; client text is not authoritative.
 - create branch requires both `latitude` and `longitude` even though DB columns are nullable; missing either returns `422 VALIDATION_ERROR`.
 - link branch validates the target Station is present and active; missing or inactive `stationId` returns `404 STATION_NOT_FOUND` in the ADR 0004 error envelope.
 - link branch duplicate `(operatorId, stationId)` returns HTTP `200` success envelope with the existing `OperatorStation` mapping; no new mapping is created.
@@ -6457,14 +6575,32 @@ Request:
   "description": "Điểm đón phía trước cổng chính",
   "latitude": 10.7321000,
   "longitude": 106.6142000,
-  "locationId": "uuid",
-  "locationCode": "HCM",
+  "locationCode": "26506",
   "address": "123 Hồng Bàng, Quận 6",
   "googlePlaceId": "ChIJ1234567890"
 }
 ```
 
-Response `201`: created Stop DTO in ADR 0004 envelope.
+Exactly one of `locationId` or `locationCode` is required. It must resolve to an active
+`WARD|COMMUNE|SPECIAL_ZONE` under an active province/municipality; top-level, inactive, missing,
+or ambiguous references return `422 VALIDATION_ERROR`.
+
+Response `201`: created Stop DTO in ADR 0004 envelope. Every public/operator/admin `StopDto`
+includes the canonical leaf `locationId` plus `city` and `ward` names resolved from the current
+Location hierarchy. `city` is the parent province/municipality display name and `ward` is the
+`WARD|COMMUNE|SPECIAL_ZONE` display name. FE does not need a second Location lookup to render the
+Stop address. These fields are read-time projections, not duplicated Stop persistence columns.
+
+```json
+{
+  "id": "uuid",
+  "name": "Trạm dừng Phú Lâm",
+  "locationId": "uuid",
+  "city": "Thành phố Hồ Chí Minh",
+  "ward": "Phường Vũng Tàu",
+  "address": "123 Hồng Bàng"
+}
+```
 
 ### GET `/v1/operator/stops`
 
@@ -7601,7 +7737,9 @@ Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `routeId?
 ### Read-model additions
 
 - `GET /v1/stations/{id}` is public and returns the full active `StationDto`; missing/inactive returns `404 STATION_NOT_FOUND`.
-- `GET /v1/operator/stations` is paged/searchable for operator staff/admin and returns mapping fields plus the full canonical `station` object.
+- `GET /v1/operator/stations` is paged/searchable for operator staff/admin and returns mapping fields plus the full canonical `station` object. Its `search` is case- and Vietnamese-accent-insensitive over Station name.
+- `GET /v1/admin/stations?search=` applies the same matching over Station name and the derived `city`/`ward` snapshots.
+- `GET /v1/operator/stops?search=` and `GET /v1/admin/stops?search=` apply the same matching over Stop name/address.
 - Route list/detail responses include full `originStation` and `destinationStation` while preserving the original station ID fields.
 - `VehicleDto` has nullable `imageUrls`. Create/PATCH accept at most five unique absolute HTTPS URLs; PATCH `[]` clears the list.
 - Internal `GET /internal/v1/users?ids=<guid>&ids=<guid>` accepts 1–100 IDs and returns user summaries with `displayName` and `avatarUrl` for service-to-service schedule enrichment.

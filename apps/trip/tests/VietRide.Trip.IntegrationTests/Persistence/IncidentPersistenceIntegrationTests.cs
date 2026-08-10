@@ -160,6 +160,103 @@ public sealed class IncidentPersistenceIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task OperatorReads_PreserveHistoricalContext_MaskForeignTenant_AndPageDeterministically()
+    {
+        var databaseName = $"vietride_trip_incident_operator_read_{Guid.NewGuid():N}";
+        var clock = new FrozenClock(Now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var ownTrip = await SeedInProgressTripAsync(db);
+            var foreignTrip = await SeedInProgressTripAsync(db);
+            var ownIncidents = new[]
+            {
+                Incident.Create(
+                    ownTrip.Id,
+                    ownTrip.DriverUserId,
+                    IncidentCategory.WEATHER,
+                    "Heavy rain",
+                    null,
+                    null,
+                    null,
+                    Now),
+                Incident.Create(
+                    ownTrip.Id,
+                    ownTrip.DriverUserId,
+                    IncidentCategory.TRAFFIC_JAM,
+                    "Traffic queue",
+                    null,
+                    null,
+                    null,
+                    Now),
+            };
+            var foreignIncident = Incident.Create(
+                foreignTrip.Id,
+                foreignTrip.DriverUserId,
+                IncidentCategory.OTHER,
+                "Foreign tenant incident",
+                null,
+                null,
+                null,
+                Now);
+            db.Incidents.AddRange(ownIncidents);
+            db.Incidents.Add(foreignIncident);
+            await db.SaveChangesAsync();
+
+            var ownRoute = await db.Routes.SingleAsync(route => route.Id == ownTrip.RouteId);
+            var ownOrigin = await db.Stations.SingleAsync(station => station.Id == ownRoute.OriginStationId);
+            var ownDestination = await db.Stations.SingleAsync(station => station.Id == ownRoute.DestinationStationId);
+            ownRoute.SoftDelete(Now);
+            ownOrigin.SoftDelete(Now);
+            ownDestination.SoftDelete(Now);
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+
+            var repository = CreateIncidentRepository(db);
+            var expectedIds = ownIncidents.Select(incident => incident.Id).Order().ToArray();
+            var firstPage = await repository.ListOperatorIncidentsAsync(
+                ownTrip.OperatorId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                1,
+                1);
+            var secondPage = await repository.ListOperatorIncidentsAsync(
+                ownTrip.OperatorId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                2,
+                1);
+            var detail = await repository.GetOperatorIncidentAsync(
+                ownTrip.OperatorId,
+                ownIncidents[0].Id);
+            var maskedForeign = await repository.GetOperatorIncidentAsync(
+                ownTrip.OperatorId,
+                foreignIncident.Id);
+
+            firstPage.TotalItems.Should().Be(2);
+            firstPage.Items.Should().ContainSingle().Which.IncidentId.Should().Be(expectedIds[0]);
+            secondPage.Items.Should().ContainSingle().Which.IncidentId.Should().Be(expectedIds[1]);
+            detail.Should().NotBeNull();
+            detail!.RouteName.Should().Be(ownRoute.Name);
+            detail.OriginStationName.Should().Be(ownOrigin.Name);
+            detail.DestinationStationName.Should().Be(ownDestination.Name);
+            maskedForeign.Should().BeNull();
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
     private static ReportIncidentCommandHandler CreateHandler(
         TripDbContext db,
         IIntegrationEventOutbox outbox,

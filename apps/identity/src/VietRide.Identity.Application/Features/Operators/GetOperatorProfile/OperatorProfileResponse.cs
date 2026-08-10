@@ -35,7 +35,6 @@ public sealed record OperatorProfileResponse(
             new OperatorProfileAddressResponse(
                 operatorProfile.AddressStreet,
                 operatorProfile.AddressWard,
-                operatorProfile.AddressDistrict,
                 operatorProfile.AddressProvince),
             operatorProfile.RepresentativeName,
             operatorProfile.RepresentativePhone,

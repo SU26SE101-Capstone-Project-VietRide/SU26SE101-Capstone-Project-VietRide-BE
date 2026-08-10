@@ -466,7 +466,15 @@ suspend phát Outbox revoke request để Identity gọi Firebase `RevokeRefresh
 **Chức năng:**
 - Đăng ký / đăng nhập (Google OAuth, Email + Password, Email OTP verify khi đăng ký lần đầu)
 - **Quản lý hồ sơ cá nhân:** xem/chỉnh sửa thông tin (tên, số điện thoại, avatar), xem lịch sử chuyến đã đi
-- Tìm kiếm chuyến theo điểm đi, điểm đến, ngày
+- Tìm kiếm chuyến theo điểm đi, điểm đến, ngày bằng danh mục hành chính hiện hành hai cấp. FE chọn
+  tỉnh/thành (`PROVINCE|MUNICIPALITY`) trước rồi chọn tùy chọn phường/xã/đặc khu
+  (`WARD|COMMUNE|SPECIAL_ZONE`). Không chọn cấp xã nghĩa là mở rộng toàn bộ leaf active trực thuộc.
+  Autocomplete Location/Station/Stop không phân biệt hoa thường hay dấu tiếng Việt (`Vung Tau`,
+  `ben xe` vẫn khớp `Vũng Tàu`, `Bến xe`); FE hiển thị tên nhưng gửi official Location code khi
+  search Trip.
+  Search xét Station đầu/cuối và Stop active trong scope; Stop đón phải có
+  `TripStop.allowPickup=true`, Stop trả phải có `TripStop.allowDropoff=true`, và điểm đón phải đứng
+  trước điểm trả. Kết quả trả `pickupPoints`/`dropoffPoints` để passenger chọn Station hoặc Stop.
 - **Xem danh sách nhà xe** đang khai thác tuyến đã chọn (trước khi chọn chuyến cụ thể) — filter/browse theo công ty, giờ khởi hành, giá vé
 - Xem lịch trình, giá vé, ghế trống, thông tin tuyến + danh sách điểm đón/trả
 - Chọn **điểm đón**: tại bến xuất phát (Terminal) hoặc điểm dừng dọc tuyến (Along-route stop). Bến chính lớn có thể có **shuttle service** (xe trung chuyển) — xem section 6.14.
@@ -514,6 +522,10 @@ suspend phát Outbox revoke request để Identity gọi Firebase `RevokeRefresh
   - Tự động kèm GPS hiện tại + tripId
   - Submit → publish `IncidentReported` event → Operator nhận push notification + hiển thị trên dashboard. KHÔNG tự động đổi Trip.status — operator quyết định action (trigger alternative route, vehicle substitution, hủy chuyến).
   - Cần entity `Incident` thuộc Trip-Route-Vehicle Service: tripId, reportedByUserId, category, description, `photoUrls` JSONB string[] nullable (max 3 URLs), lat/lng, reportedAt, resolvedAt nullable, resolvedByUserId nullable, resolutionNote nullable. Notification Service chỉ consume `IncidentReported` event để gửi push/in-app notification, không sở hữu Incident DB.
+  - Dashboard nhà xe đọc sự cố qua `GET /v1/operator/incidents` và
+    `GET /v1/operator/incidents/{incidentId}`. `OPERATOR_ADMIN|OPERATOR_STAFF` chỉ thấy Incident
+    thuộc Trip cùng `operatorId`; missing/cross-tenant đều là `INCIDENT_NOT_FOUND`. List hỗ trợ
+    lọc Trip/category/OPEN|RESOLVED/date và trả reporter + Trip/Route context.
 
 **Chức năng Assistant thêm:**
 - Theo dõi điểm dừng tiếp theo với countdown ETA
@@ -597,7 +609,7 @@ Cùng codebase NextJS với Operator Web, phân biệt qua role SYSTEM_ADMIN. Na
 
 > **Operator registration flow (self-registration + Admin approval):**
 > Có 2 path để Operator tồn tại trong hệ thống:
-> - **Path A — Self-registration (primary):** Nhà xe đăng ký qua form trên web (`POST /v1/operators/register` — public endpoint, không cần auth). Body gồm: `{ name, contactEmail, contactPhone, businessRegistrationNumber, taxCode, addressStreet, addressWard, addressDistrict, addressProvince, representativeName, representativePhone }`. System validate `businessRegistrationNumber` + `taxCode` không trùng operator hiện có (return `OPERATOR_DUPLICATE_REGISTRATION` / `OPERATOR_DUPLICATE_TAX_CODE` nếu trùng). Tạo `Operator { registrationStatus = PENDING }` + 1 User `{ role = OPERATOR_ADMIN, status = PENDING_EMAIL_VERIFICATION, phone = representativePhone }` cho người đại diện (email = contact email). **Auto-assign default `SubscriptionPlan` "Starter (Free Trial)" tới `OperatorSubscription` (status=PENDING_APPROVAL, startedAt/expiresAt=NULL — trial KHÔNG tick cho đến khi Admin APPROVE).** Gửi OTP verify email. Sau khi verify, tài khoản OPERATOR_ADMIN ở trạng thái chờ duyệt — chưa login được vào dashboard (Gateway block role OPERATOR_ADMIN nếu `Operator.registrationStatus != APPROVED`). Cùng transaction đăng ký, Identity ghi Outbox fact `identity.operator.registration_submitted { eventId, occurredAt, operatorId, companyName }`; Notification resolve active `SYSTEM_ADMIN` và gửi "Đơn đăng ký nhà xe mới". System Admin duyệt → atomic transaction: `Operator.registrationStatus = APPROVED` + `OperatorSubscription { status=ACTIVE, startedAt=approvedAt, expiresAt=approvedAt+30 days }` + publish event `identity.operator.approved` → OPERATOR_ADMIN nhận email "Đã duyệt, có thể đăng nhập".
+> - **Path A — Self-registration (primary):** Nhà xe đăng ký qua form trên web (`POST /v1/operators/register` — public endpoint, không cần auth). Body gồm: `{ name, contactEmail, contactPhone, businessRegistrationNumber, taxCode, addressStreet, addressWard, addressProvince, representativeName, representativePhone }`. Địa chỉ operator dùng mô hình hai cấp `ward + province`; không còn `district`. System validate `businessRegistrationNumber` + `taxCode` không trùng operator hiện có (return `OPERATOR_DUPLICATE_REGISTRATION` / `OPERATOR_DUPLICATE_TAX_CODE` nếu trùng). Tạo `Operator { registrationStatus = PENDING }` + 1 User `{ role = OPERATOR_ADMIN, status = PENDING_EMAIL_VERIFICATION, phone = representativePhone }` cho người đại diện (email = contact email). **Auto-assign default `SubscriptionPlan` "Starter (Free Trial)" tới `OperatorSubscription` (status=PENDING_APPROVAL, startedAt/expiresAt=NULL — trial KHÔNG tick cho đến khi Admin APPROVE).** Gửi OTP verify email. Sau khi verify, tài khoản OPERATOR_ADMIN ở trạng thái chờ duyệt — chưa login được vào dashboard (Gateway block role OPERATOR_ADMIN nếu `Operator.registrationStatus != APPROVED`). Cùng transaction đăng ký, Identity ghi Outbox fact `identity.operator.registration_submitted { eventId, occurredAt, operatorId, companyName }`; Notification resolve active `SYSTEM_ADMIN` và gửi "Đơn đăng ký nhà xe mới". System Admin duyệt → atomic transaction: `Operator.registrationStatus = APPROVED` + `OperatorSubscription { status=ACTIVE, startedAt=approvedAt, expiresAt=approvedAt+30 days }` + publish event `identity.operator.approved` → OPERATOR_ADMIN nhận email "Đã duyệt, có thể đăng nhập".
 >
 > Khi Admin reject → atomic transaction:
 > ```
@@ -760,7 +772,7 @@ Khi `Trip.source = VEHICLE_SUBSTITUTION` (Trip_new tạo từ flow 6.12 sau Trip
 **Hangfire auto-generate Trip từ DriverSchedule vượt limit:**
 - Khi `Hangfire weekly job` HOẶC `on-create DriverSchedule trigger` muốn INSERT Trip mới:
   ```
-  FOR EACH ngày trong 14 ngày tới khớp dayOfWeek:
+  FOR EACH ngày từ today đến `today + 30` khớp dayOfWeek:
     IF Operator.currentTripsThisMonth >= maxTripsPerMonth (cho tháng của ngày đó):
       → SKIP generate Trip này (KHÔNG insert)
       → INSERT TripGenerationSkipLog { operatorId, driverScheduleId, skippedDate, reason: "SUBSCRIPTION_LIMIT_EXCEEDED", createdAt }
@@ -3970,15 +3982,15 @@ TRIGGER A — On-create/update DriverSchedule (immediate):
   Khi operator tạo mới DriverSchedule HOẶC update `isActive` từ false → true:
     Trip-Route-Vehicle Service ngay lập tức enqueue Hangfire one-off job (BackgroundJob.Enqueue)
     Job logic giống TRIGGER B nhưng scope chỉ DriverSchedule vừa tạo/update
-    → Generate Trip cho 14 ngày kế tiếp tính từ now
+    → Generate Trip cho 30 ngày kế tiếp tính từ now, bao gồm ngày biên `today + 30`
 
-  Lý do: nếu operator tạo schedule giữa tuần (vd thứ Tư), phải có trip ngay cho 14 ngày tới,
+  Lý do: nếu operator tạo schedule giữa tuần (vd thứ Tư), phải có trip ngay cho 30 ngày tới,
   không chờ Sunday 23:00 (passenger không tìm được chuyến → mất doanh thu, UX kém).
 
 TRIGGER B — Hangfire recurring weekly job:
   Job chạy mỗi CN 23:00:
     FOR EACH DriverSchedule WHERE isActive = true AND validUntil >= today:
-      FOR EACH ngày trong 14 ngày tới khớp dayOfWeek:
+      FOR EACH ngày từ today đến `today + 30` khớp dayOfWeek:
         Check không trùng Trip đã tồn tại (driverId + departureDateTime)
         Tạo Trip {
           operatorId, routeId, driverId, assistantId, vehicleId
@@ -4916,7 +4928,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **Trip pickup/dropoff control** | KHÔNG có flag `allowAlongRoutePickup` / `allowAlongRouteDropoff` ở Trip. KHÔNG có `defaultAllowAlongRoute*` ở Route. `RouteStop` entries là single source of truth, với **2 flag per entry: `allowPickup` + `allowDropoff` (default cả 2 = true, DB CHECK ít nhất 1 = true)** — phân loại pickup-only / dropoff-only / both. TripStop snapshot 2 flag khi Hangfire generate Trip (immutable). Validation booking + parcel: pickupStopId cần `allowPickup=true`; dropoffStopId cần `allowDropoff=true`. Edge case operational stop defer v2 qua `RouteStop.isPublicVisible`. |
 | **Trip fare** | `Trip.baseFare` = giá vé theo chặng/tuyến (áp dụng từ đầu tuyến hoặc bất kỳ along-route stop nào). Booking capture/reuse một handler-start `pricingAt` và dùng `fareFromThisStop` đã được Trip resolve trong snapshot cho pickup stop; explicit precedence là persisted `TripStopFare` có `source=MANUAL_OVERRIDE` → active `RouteStopFareTemplate` half-open tại `pricingAt` → `Trip.baseFare`. Legacy `TEMPLATE_SNAPSHOT` vẫn readable, non-authoritative khi có `pricingAt`, và chỉ tham gia resolution cho legacy compatibility khi omitted `pricingAt`; Day 22 không tạo snapshot row mới. Dropoff miễn phí tại mọi stop, không ảnh hưởng giá. |
 | **Seat lock along-route** | Ghế lock từ đầu chuyến, không phân theo segment. Chi phí operator chấp nhận. |
-| **DriverSchedule** | `dayOfWeek` JSON array + `departureTime TIME` + `baseFare BIGINT nullable`. Hangfire generate Trip 14 ngày kế tiếp qua 2 trigger: (1) immediate on-create/activate, (2) weekly job CN 23:00. Trip mới snapshot `DriverSchedule.baseFare ?? Route.baseFare`; đổi schedule fare chỉ dùng `FUTURE_ONLY`, không sửa Trip đã generate. Idempotent check (driverId + departureDateTime). Không cho 2 schedule active cùng driverId overlap giờ. Vehicle conflict cũng check. |
+| **DriverSchedule** | `dayOfWeek` JSON array + `departureTime TIME` + `baseFare BIGINT nullable`. Hangfire generate Trip theo cửa sổ lăn 30 ngày, bao gồm `today + 30`, qua 2 trigger: (1) immediate on-create/activate, (2) weekly job CN 23:00. Trip mới snapshot `DriverSchedule.baseFare ?? Route.baseFare`; đổi schedule fare chỉ dùng `FUTURE_ONLY`, không sửa Trip đã generate. Idempotent check (driverId + departureDateTime). Không cho 2 schedule active cùng driverId overlap giờ. Vehicle conflict cũng check. |
 | **Alternative Route** | Không có hard-cap toàn cục theo Route chính. Stop sequence riêng hoàn toàn — không reuse `RouteStop`. Quan hệ: `Route → AlternativeRoute → AlternativeRouteStop → Stop`; CUSTOM proposal chỉ tạo AlternativeRoute chính thức khi được approve. |
 | **RouteChangeProposal** | Snapshot đề xuất đổi tuyến của Driver/Assistant được phân công. Type `EXISTING|CUSTOM`; status `PENDING|APPROVED|REJECTED|SUPERSEDED|EXPIRED`; có thể liên kết optional Incident cùng Trip. Nhiều pending cùng Trip được phép, approve một proposal supersede các pending khác. |
 | **Stop độc lập** | Một Stop có thể thuộc nhiều Route. Canonical disable là bodyless `DELETE /v1/operator/stops/{stopId}?replacedByStopId=` cho `OPERATOR_ADMIN`, required UUID-v4 `Idempotency-Key`; set `isActive=false`, giữ `deletedAt`, không xóa RouteStop, và publish `trip.stop.disabled`. `replacedByStopId` nullable self-FK phải active/cùng operator/non-self/cycle-free. Retained PATCH là details-update-only, không đổi `isActive`/`deletedAt` và không emit disable event. Async `booking.stop_disabled.affected` là sole impact source; không có synchronous count/warning seam. Auto-suggest geo proximity defer v2. |
@@ -5251,9 +5263,13 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 
 ## Điều chỉnh Route/Operations và địa chỉ Station — 2026-08-05
 
-- Địa chỉ Station dùng đúng hai cấp `city + ward`: `city` là tỉnh/thành phố trực thuộc trung
-  ương, `ward` là xã/phường/đặc khu. Không lưu `legacy_city`; dữ liệu cũ chưa xác định ward được
-  phép để `ward=null`, còn Station tạo/cập nhật mới bắt buộc đủ hai field.
+- Danh mục Location dùng đúng hai cấp hiện hành: root `PROVINCE|MUNICIPALITY` không có parent; leaf
+  `WARD|COMMUNE|SPECIAL_ZONE` bắt buộc có `parentLocationId` trỏ root. Station/Stop mới bắt buộc trỏ
+  leaf active bằng đúng một `locationId` hoặc mã hành chính chính thức `locationCode`. `city` và
+  `ward` trên Station là compatibility snapshot được suy ra từ hierarchy, không còn là nguồn chuẩn.
+  Public/operator/admin Stop responses cũng trả `city` và `ward` được resolve theo hierarchy tại
+  thời điểm đọc để FE không phải gọi thêm Location API; Stop không persist hai text field này.
+  Không hỗ trợ alias hay mã/tên đơn vị hành chính cũ trong Trip Search.
 - Route detail và các response mutation phải trả ordered stops đủ tên, địa chỉ, tọa độ để FE vẽ
   bản đồ; Route list vẫn là projection nhẹ. Composite Route write là atomic và full update không
   được đổi cặp bến.

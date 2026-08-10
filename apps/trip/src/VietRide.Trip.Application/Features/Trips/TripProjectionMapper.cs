@@ -19,7 +19,9 @@ internal static class TripProjectionMapper
         Station destinationStation,
         IReadOnlyCollection<TripSeat> seats,
         IReadOnlyCollection<TripStop> stops,
-        FareSurchargeAdjustment fareAdjustment)
+        FareSurchargeAdjustment fareAdjustment,
+        IReadOnlyList<SearchTripPointDto>? pickupPoints = null,
+        IReadOnlyList<SearchTripPointDto>? dropoffPoints = null)
     {
         return new SearchTripItem(
             trip.Id,
@@ -40,6 +42,8 @@ internal static class TripProjectionMapper
             EffectiveFare = fareAdjustment.EffectiveFare,
             SurchargePeriodId = fareAdjustment.SurchargePeriodId,
             SurchargePeriodName = fareAdjustment.SurchargePeriodName,
+            PickupPoints = pickupPoints ?? [],
+            DropoffPoints = dropoffPoints ?? [],
         };
     }
 

@@ -238,7 +238,17 @@ describe('Day 44 trip fixture planner', () => {
         ['Bến xe Bến Tre', 10.267025, 106.359834],
       ],
     );
-    assert.ok(result.stations.every((station) => station.locationId === null));
+    assert.deepEqual(
+      result.stations.map((station) => station.locationId),
+      [
+        'fc57f7d4-0a54-5a64-bc15-5fe733230187',
+        '35d39c7c-d0df-544f-adb1-0a3afd83ebf0',
+        '0f1e42d8-25dd-5ef2-8a55-7122622a7301',
+        'c2bcf64d-af68-5fcb-a3b8-168e202b48b7',
+        '69b7c548-70f9-5d30-8eaa-b831f441f243',
+      ],
+    );
+    assert.ok(result.stops.every((stop) => typeof stop.locationId === 'string'));
     assert.ok(result.stops.every((stop) => stop.googlePlaceId === null));
 
     for (const operatorId of new Set(result.routes.map((route) => route.operatorId))) {

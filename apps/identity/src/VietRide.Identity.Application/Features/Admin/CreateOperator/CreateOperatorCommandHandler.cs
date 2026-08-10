@@ -93,7 +93,6 @@ public sealed class CreateOperatorCommandHandler : IRequestHandler<CreateOperato
             contactPhone.ToString(),
             request.AddressStreet.Trim(),
             request.AddressWard.Trim(),
-            request.AddressDistrict.Trim(),
             request.AddressProvince.Trim(),
             request.RepresentativeName.Trim(),
             representativePhone.ToString());

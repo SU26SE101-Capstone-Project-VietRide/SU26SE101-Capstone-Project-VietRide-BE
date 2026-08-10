@@ -15,6 +15,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 
 | Entity | Purpose | Key business fields |
 |---|---|---|
+| `Location` | Danh mục hành chính hiện hành hai cấp. | root `PROVINCE\|MUNICIPALITY`; leaf `WARD\|COMMUNE\|SPECIAL_ZONE`; self-FK `parentLocationId` |
 | `Station` | Bến canonical platform-level (KHÔNG có operatorId). | `slug` UNIQUE, `supportsShuttle`, `operatingHours` JSONB, `facilities` JSONB |
 | `OperatorStation` | Mapping nhà xe ↔ bến. | UNIQUE `(operatorId, stationId)`, `counterLocation`, `instructions` |
 | `Stop` | Điểm dừng dọc tuyến (operator-owned). | `googlePlaceId`, `sharedSuggestion`, `replacedByStopId` self-FK |
@@ -46,6 +47,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 
 ## Design Decisions
 
+- **`Location` follows the current two-level official catalog** — root units have no parent; leaf units must reference a root through `parent_location_id`. Public codes remain strings so leading zeroes are preserved. New Station/Stop records reference active leaf Locations; Station `city`/`ward` remain compatibility snapshots derived from the hierarchy.
 - **`Station` canonical, không có `operatorId`** — operator tự tạo Station (autocomplete dedupe ở UI, xem 4.3). Multiple operators có thể link cùng Station qua OperatorStation.
 - **`OperatorStation.operator_id` là LOGICAL FK** (no `REFERENCES`) tới `vietride_identity.operators` — tránh cross-DB FK constraint. App-layer validate.
 - **`Stop.replaced_by_stop_id` self-FK** với `ON DELETE SET NULL` + CHECK `replaced_by_stop_id <> id` (no self-reference). Cycle detection enforced app-layer.
@@ -76,8 +78,10 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 
 | Index | Columns | Type | Purpose |
 |---|---|---|---|
+| `idx_locations_active_parent_sort` | `(parent_location_id, sort_order, name)` | partial B-tree | Cascade province/municipality → active ward/commune/special-zone lookup |
 | `uq_stations_slug` | `slug` | partial unique | Canonical slug lookup |
-| `idx_stations_city_province` | `(city, province)` | partial B-tree | Search station autocomplete |
+| `idx_stations_city_ward` | `(city, ward)` | partial B-tree | Compatibility snapshot lookup; hierarchy search uses `location_id` |
+| `idx_stations_location_id` | `(location_id)` | partial B-tree | Active Station lookup by leaf Location |
 | `idx_stations_supports_shuttle` | `supports_shuttle` | partial | Shuttle-enabled stations filter |
 | `uq_operator_stations_operator_station` | `(operator_id, station_id)` | unique | Avoid duplicate mapping |
 | `idx_stops_operator_id` | `operator_id` | partial | Operator's stops list |

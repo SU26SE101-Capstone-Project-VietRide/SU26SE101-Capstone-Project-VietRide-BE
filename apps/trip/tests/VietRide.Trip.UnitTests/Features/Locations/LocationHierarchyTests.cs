@@ -1,0 +1,90 @@
+using FluentAssertions;
+using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Trip.Application.Features.Locations;
+using VietRide.Trip.Domain.Entities;
+using VietRide.Trip.UnitTests.Fakes;
+
+namespace VietRide.Trip.UnitTests.Features.Locations;
+
+public sealed class LocationHierarchyTests
+{
+    [Fact]
+    public async Task ListLocations_WithoutParent_ReturnsOnlyActiveRoots()
+    {
+        var hcm = Location.Create("79", "Thành phố Hồ Chí Minh", Location.MunicipalityType, 1);
+        var vungTau = Location.Create("26506", "Phường Vũng Tàu", Location.WardType, hcm.Id, 1);
+        var inactiveProvince = Location.Create("01", "Thành phố Hà Nội", Location.MunicipalityType, 2);
+        inactiveProvince.Deactivate();
+        var handler = new ListLocationsHandler(TestLocationRepository.From(hcm, vungTau, inactiveProvince));
+
+        var result = await handler.Handle(new ListLocationsQuery(null, null), CancellationToken.None);
+
+        result.Should().ContainSingle().Which.Code.Should().Be("79");
+        result[0].ParentId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ListLocations_ByParentAndSearch_ReturnsVungTauWithParentMetadata()
+    {
+        var hcm = Location.Create("79", "Thành phố Hồ Chí Minh", Location.MunicipalityType, 1);
+        var vungTau = Location.Create("26506", "Phường Vũng Tàu", Location.WardType, hcm.Id, 1);
+        var anLac = Location.Create("27460", "Phường An Lạc", Location.WardType, hcm.Id, 2);
+        var handler = new ListLocationsHandler(TestLocationRepository.From(hcm, vungTau, anLac));
+
+        var result = await handler.Handle(new ListLocationsQuery("79", "Vũng Tàu"), CancellationToken.None);
+
+        var item = result.Should().ContainSingle().Which;
+        item.Code.Should().Be("26506");
+        item.Type.Should().Be(Location.WardType);
+        item.ParentId.Should().Be(hcm.Id);
+        item.ParentCode.Should().Be("79");
+        item.ParentName.Should().Be("Thành phố Hồ Chí Minh");
+    }
+
+    [Fact]
+    public async Task CreateLocation_LeafRequiresActiveTopLevelParent()
+    {
+        var hcm = Location.Create("79", "Thành phố Hồ Chí Minh", Location.MunicipalityType, 1);
+        var placeholder = Location.Create("27460", "Phường An Lạc", Location.WardType, hcm.Id, 1);
+        var repository = TestLocationRepository.From(hcm, placeholder);
+        var handler = new CreateLocationHandler(repository, new FakeUnitOfWork());
+
+        var result = await handler.Handle(
+            new CreateLocationCommand("26506", "Phường Vũng Tàu", Location.WardType, 2, true, "79"),
+            CancellationToken.None);
+
+        result.ParentCode.Should().Be("79");
+        result.Type.Should().Be(Location.WardType);
+        repository.Query().Should().Contain(location => location.Code == "26506");
+    }
+
+    [Fact]
+    public async Task CreateLocation_RootRejectsParentCode()
+    {
+        var hcm = Location.Create("79", "Thành phố Hồ Chí Minh", Location.MunicipalityType, 1);
+        var leaf = Location.Create("27460", "Phường An Lạc", Location.WardType, hcm.Id, 1);
+        var handler = new CreateLocationHandler(TestLocationRepository.From(hcm, leaf), new FakeUnitOfWork());
+
+        var act = () => handler.Handle(
+            new CreateLocationCommand("01", "Thành phố Hà Nội", Location.MunicipalityType, 2, true, "79"),
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().Contain(error => error.Field == "parentCode");
+    }
+
+    private sealed class FakeUnitOfWork : IUnitOfWork
+    {
+        public Task BeginTransactionAsync(CancellationToken ct) => Task.CompletedTask;
+
+        public Task CommitAsync(CancellationToken ct) => Task.CompletedTask;
+
+        public Task<T> ExecuteInTransactionAsync<T>(Func<Task<T>> action, CancellationToken ct)
+            => action();
+
+        public Task RollbackAsync(CancellationToken ct) => Task.CompletedTask;
+
+        public Task<int> SaveChangesAsync(CancellationToken ct) => Task.FromResult(1);
+    }
+}

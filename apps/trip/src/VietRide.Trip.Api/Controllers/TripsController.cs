@@ -30,8 +30,10 @@ public sealed class TripsController : ControllerBase
     public async Task<ActionResult<SearchTripsResult>> SearchAsync(
         [FromQuery] Guid? originStationId,
         [FromQuery] Guid? destinationStationId,
-        [FromQuery] string? originLocationCode,
-        [FromQuery] string? destinationLocationCode,
+        [FromQuery] string? originProvinceCode,
+        [FromQuery] string? originWardCode,
+        [FromQuery] string? destinationProvinceCode,
+        [FromQuery] string? destinationWardCode,
         [FromQuery] DateOnly departureDate,
         [FromQuery] int passengerCount,
         [FromQuery] bool? allowAlongRoutePickup,
@@ -44,8 +46,10 @@ public sealed class TripsController : ControllerBase
                 departureDate,
                 passengerCount,
                 allowAlongRoutePickup,
-                originLocationCode,
-                destinationLocationCode),
+                originProvinceCode,
+                originWardCode,
+                destinationProvinceCode,
+                destinationWardCode),
             cancellationToken));
     }
 

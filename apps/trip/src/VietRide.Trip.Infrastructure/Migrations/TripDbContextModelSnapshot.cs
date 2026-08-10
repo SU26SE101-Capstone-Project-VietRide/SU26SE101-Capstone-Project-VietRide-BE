@@ -566,6 +566,10 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("name");
 
+                    b.Property<Guid?>("ParentLocationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parent_location_id");
+
                     b.Property<int>("SortOrder")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -594,11 +598,17 @@ namespace VietRide.Trip.Infrastructure.Migrations
                     b.HasIndex("IsActive", "SortOrder", "Name")
                         .HasDatabaseName("idx_locations_active_sort");
 
+                    b.HasIndex("ParentLocationId", "SortOrder", "Name")
+                        .HasDatabaseName("idx_locations_active_parent_sort")
+                        .HasFilter("parent_location_id IS NOT NULL AND is_active = TRUE");
+
                     b.ToTable("locations", "vietride_trip", t =>
                         {
+                            t.HasCheckConstraint("chk_locations_parent_level", "((type IN ('PROVINCE', 'MUNICIPALITY') AND parent_location_id IS NULL) OR (type IN ('WARD', 'COMMUNE', 'SPECIAL_ZONE') AND parent_location_id IS NOT NULL))");
+
                             t.HasCheckConstraint("chk_locations_sort_order_non_negative", "sort_order >= 0");
 
-                            t.HasCheckConstraint("chk_locations_type", "type IN ('PROVINCE', 'MUNICIPALITY')");
+                            t.HasCheckConstraint("chk_locations_type", "type IN ('PROVINCE', 'MUNICIPALITY', 'WARD', 'COMMUNE', 'SPECIAL_ZONE')");
                         });
                 });
 
@@ -2476,6 +2486,15 @@ namespace VietRide.Trip.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_incidents_trips_trip_id");
+                });
+
+            modelBuilder.Entity("VietRide.Trip.Domain.Entities.Location", b =>
+                {
+                    b.HasOne("VietRide.Trip.Domain.Entities.Location", null)
+                        .WithMany()
+                        .HasForeignKey("ParentLocationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_locations_parent_location_id");
                 });
 
             modelBuilder.Entity("VietRide.Trip.Domain.Entities.OperatorStation", b =>

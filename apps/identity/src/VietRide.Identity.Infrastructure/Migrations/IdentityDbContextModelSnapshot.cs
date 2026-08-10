@@ -232,11 +232,6 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnName("id")
                         .HasDefaultValueSql("gen_random_uuid()");
 
-                    b.Property<string>("AddressDistrict")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("address_district");
-
                     b.Property<string>("AddressProvince")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")

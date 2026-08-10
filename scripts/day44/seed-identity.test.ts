@@ -203,7 +203,6 @@ function expectedOperators(): ReadonlyArray<Record<string, unknown>> {
       logoUrl: null,
       addressStreet: '44 Demo Street',
       addressWard: 'Demo Ward',
-      addressDistrict: 'Demo District',
       addressProvince: 'Hồ Chí Minh',
       representativeName: `Day44 Operator ${letter} Admin`,
       representativePhone: phone,

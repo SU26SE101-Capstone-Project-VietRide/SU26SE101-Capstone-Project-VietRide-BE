@@ -12,7 +12,35 @@ public interface ILocationRepository : IRepository<Location, Guid>
 
     Task<bool> ExistsByCodeAsync(string code, Guid? exceptId, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<Location>> ListActiveAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<Location>> ListActiveTopLevelAsync(string? search, CancellationToken cancellationToken)
+    {
+        var normalizedSearch = search?.Trim();
+        IReadOnlyList<Location> result = QueryNoTracking()
+            .Where(location => location.IsActive && location.ParentLocationId == null)
+            .AsEnumerable()
+            .Where(location => string.IsNullOrWhiteSpace(normalizedSearch)
+                || location.Code.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase)
+                || location.Name.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(location => location.SortOrder)
+            .ThenBy(location => location.Name)
+            .ToList();
+        return Task.FromResult(result);
+    }
+
+    Task<IReadOnlyList<Location>> ListActiveChildrenAsync(Guid parentId, string? search, CancellationToken cancellationToken)
+    {
+        var normalizedSearch = search?.Trim();
+        IReadOnlyList<Location> result = QueryNoTracking()
+            .Where(location => location.IsActive && location.ParentLocationId == parentId)
+            .AsEnumerable()
+            .Where(location => string.IsNullOrWhiteSpace(normalizedSearch)
+                || location.Code.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase)
+                || location.Name.Contains(normalizedSearch, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(location => location.SortOrder)
+            .ThenBy(location => location.Name)
+            .ToList();
+        return Task.FromResult(result);
+    }
 
     Task<PagedResult<Location>> ListAsync(
         int page,

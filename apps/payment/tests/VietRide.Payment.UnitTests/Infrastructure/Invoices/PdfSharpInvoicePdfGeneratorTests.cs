@@ -33,7 +33,6 @@ public sealed class PdfSharpInvoicePdfGeneratorTests
                 "0900000000",
                 "123 Nguyễn Huệ",
                 "Phường Bến Nghé",
-                "Quận 1",
                 "Thành phố Hồ Chí Minh"));
 
         var bytes = await generator.GenerateAsync(document, CancellationToken.None);

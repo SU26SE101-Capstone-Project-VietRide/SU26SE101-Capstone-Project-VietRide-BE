@@ -1529,6 +1529,23 @@ cumulative Route metrics without failing Trip creation. `trips.planned_eta_sourc
 - **Sort:** `sortBy=<field>&sortDir=asc|desc` — **`sortBy` PHẢI nằm trong whitelist của aggregate** (security requirement — ngăn arbitrary-column sort/search → injection / info-leak). Query handler/repository reject bất kỳ field nào không trong allow-list với `400 INVALID_SORT_FIELD`. Default `sortDir=desc`, default `sortBy` do aggregate quyết định (thường `createdAt`).
 - **Soft-delete:** `includeDeleted=true` — chỉ cho phép admin/privileged endpoint (ADR 0003).
 
+#### Trip location search và Operator Incident reads
+
+`GET /v1/trips/search` giữ station-ID mode là exact Route origin/destination. Location-code mode
+tự động xét Station terminal và canonical Stop active/non-deleted cùng Location. Pickup Stop cần
+snapshot `TripStop.allowPickup=true`, dropoff Stop cần `allowDropoff=true`, và phải tồn tại cặp
+pickup có `orderIndex` nhỏ hơn dropoff. `allowAlongRoutePickup` chỉ còn là input tương thích cũ;
+không còn bật/tắt stop matching. Mỗi item giữ Route terminal fields và thêm ordered
+`pickupPoints`/`dropoffPoints` (`STATION|STOP`, XOR id, name/address, order, planned time,
+pickup/dropoff flags) thuộc requested Locations và tham gia được vào ít nhất một cặp hợp lệ.
+
+`GET /v1/operator/incidents` và `GET /v1/operator/incidents/{incidentId}` là read-only,
+`OPERATOR_ADMIN|OPERATOR_STAFF`, tenant scope từ JWT `operatorId`. List hỗ trợ
+`tripId/category/status=OPEN|RESOLVED/from/to/page/pageSize`, default `1/20`, max 100, order
+`reportedAt DESC, incidentId`. Missing/cross-tenant detail đều trả `INCIDENT_NOT_FOUND`. DTO trả
+Incident đầy đủ cùng Trip/Route/departure và reporter; Identity profile missing chỉ làm reporter
+metadata nullable, không che Incident.
+
 ### 5.9 Canonical Error Code Registry
 
 > Phải sync với technical_context_v7 Section 8 "Code & API Conventions". Khi thêm code mới → bump MINOR doc version + thêm vào registry này.
@@ -1626,7 +1643,7 @@ cumulative Route metrics without failing Trip creation. `trips.planned_eta_sourc
 | | `ROUTE_CHANGE_PROPOSAL_NOT_FOUND` | 404 | Proposal không tồn tại hoặc bị tenant-mask cho `OPERATOR_ADMIN` khác operator |
 | | `ROUTE_CHANGE_PROPOSAL_NOT_PENDING` | 409 | Approve/reject proposal đã rời `PENDING`, hoặc Trip không còn editable và pending proposal vừa được expire |
 | | `ROUTE_CHANGE_PROPOSAL_STALE` | 409 | Frozen EXISTING source đã sửa/deactivate, hoặc CUSTOM destination/Stop không còn hợp lệ tại approval |
-| | `INCIDENT_NOT_FOUND` | 404 | Optional proposal `incidentId` không tồn tại hoặc không thuộc cùng Trip |
+| | `INCIDENT_NOT_FOUND` | 404 | Optional proposal `incidentId` không tồn tại/không thuộc cùng Trip, hoặc Operator Incident detail missing/cross-tenant |
 | | `TRIP_ALREADY_TERMINAL` | 409 | Manual complete/fallback/disruption race already produced a terminal state |
 | | `TRIP_VEHICLE_CONFLICT` | 409 | Vehicle trùng giờ trên Trip khác |
 | | `TRIP_DRIVER_CONFLICT` | 409 | Driver trùng giờ |
@@ -3463,7 +3480,7 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
-| `GenerateTripsFromScheduleJob` | Recurring | Weekly Sun 23:00 Asia/Ho_Chi_Minh + immediate on DriverSchedule create/activate | Generate Trip 14 ngày kế tiếp. Idempotent (driverId + departureDateTime) |
+| `GenerateTripsFromScheduleJob` | Recurring | Weekly Sun 23:00 Asia/Ho_Chi_Minh + immediate on DriverSchedule create/activate | Generate Trip theo cửa sổ lăn từ today đến `today + 30` inclusive. Idempotent (driverId + departureDateTime) |
 | `AutoBoardingJob` | Recurring | Every 15 phút | Set SCHEDULED Trips to BOARDING only when `departureDateTime <= now + 30 phút`; publish `trip.trip.boarding_started` |
 | `AutoStartFallbackJob` | Recurring | Every 5 phút | Set BOARDING Trips to IN_PROGRESS only when `departureDateTime < now - 30 phút`; capture `actualDepartureTime`; publish `trip.trip.started` |
 | `AutoCompletedFallbackJob` | Recurring | Every 15 phút | Set IN_PROGRESS Trips to COMPLETED only when `estimatedArrivalTime < now - 30 phút`; publish `trip.trip.completed` |
@@ -3977,6 +3994,10 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.64.2** | 2026-08-10 | Codex | **PATCH** — Enrich every public/operator/admin `StopDto` with hierarchy-derived `city` and `ward` display names while retaining canonical `locationId`. List projections batch Location/parent reads without N+1; Stop persistence, schema, dependencies, endpoint paths, events, and error codes remain unchanged. |
+| **1.64.1** | 2026-08-10 | Codex | **PATCH** — Standardize Location, Operator/Admin Station, and Operator/Admin Stop text filters on PostgreSQL `unaccent(...) ILIKE unaccent(...)` contains matching. Passenger Trip Search remains official-code based; names are autocomplete/display only. No schema, dependency, endpoint, event, or error-code change. |
+| **1.64.0** | 2026-08-10 | Codex | **MINOR** — Replace the flat Trip `Location` catalog with the current official two-level hierarchy: `PROVINCE|MUNICIPALITY` roots and `WARD|COMMUNE|SPECIAL_ZONE` leaves linked by restrictive self-FK. Station/Stop writes require an active leaf; Station city/ward are derived snapshots. Public Location reads support root/child autocomplete, and Trip Search replaces legacy location-code mode with required province plus optional ward scopes on each side while preserving exact station-ID precedence and automatic eligible Stop matching. Import Decision 19/2025/QD-TTg catalog with provenance, deterministic leaf IDs, reversible migration, and no legacy aliases, dependency, service, event, or destructive business-data migration. |
+| **1.63.0** | 2026-08-10 | Codex | **MINOR** — Remove Operator district from current Identity/Payment/address contracts with reversible schema migration and legacy payment-JSON tolerance; expand DriverSchedule Trip generation to rolling `today..today+30`; make Location Trip search include ordered eligible Station/Stop pickup-dropoff points; add tenant-scoped Operator Incident list/detail reads. No new dependency, mutation, integration event, or Incident resolution flow. |
 | **1.62.0** | 2026-08-10 | Codex | **MINOR** — Mở rộng additive bốn operator financial read để tách rõ tiền chờ Trip, hold, eligible, settled và wallet balance; thêm canonical per-trip financial projection, reconciliation metadata/search/date semantics, UTC schedule projection, safe settlement delay, fail-soft Trip enrichment và reversible nullable ledger metadata migration. Booking/Parcel truyền reference code qua payment-context hiện có; không thêm route, dependency, error code hoặc bank withdrawal. |
 | **1.61.0** | 2026-08-09 | Codex | **MINOR** — Add backend-owned intercity ETA for every stop and destination. Trip persists Google Routes versus Route-baseline planned source while exposing only `plannedEtaQuality`; Tracking calculates one ordered batch for all remaining targets, writes 60-second Redis entries atomically, exposes `GET /v1/tracking/trips/{tripId}/etas`, and emits additive `eta:batch:update` while preserving legacy `/eta` and `eta:update`. Adds reversible `planned_eta_source` migration and default 20-minute dwell configuration; no dependency or integration event added. |
 | **1.60.0** | 2026-08-08 | Codex | **MINOR** — Reconcile the current RAG contract with runtime and physical DDL (Cloudinary raw document storage, OpenRouter chat/embedding, canonical `nvidia/llama-nemotron-embed-vl-1b-v2:free`, `halfvec(2048)`, HNSW cosine indexing) and standardize Payment as the financial source of truth for Dashboard/Analytics/Platform Report/export with canonical revenue predicates, typed adjustment taxonomy, separated settlement, Asia/Ho_Chi_Minh half-open ranges, 60-second cache, and fail-closed 503 financial consumers. No physical DDL, migration, dependency, provider secret, or integration-event change. |

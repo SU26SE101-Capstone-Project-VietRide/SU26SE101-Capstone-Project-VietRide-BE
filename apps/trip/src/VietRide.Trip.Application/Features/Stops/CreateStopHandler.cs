@@ -2,6 +2,7 @@ using MediatR;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Features.Locations;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Features.Stops;
@@ -40,6 +41,18 @@ public sealed class CreateStopHandler : IRequestHandler<CreateStopCommand, StopD
             request.OperatorId,
             cancellationToken);
 
+        if (locationRepository is null)
+        {
+            throw new InvalidOperationException("Location repository is required when creating a stop.");
+        }
+
+        var location = await LocationHierarchyGuard.ResolveActiveLeafAsync(
+            locationRepository,
+            request.LocationId,
+            request.LocationCode,
+            nameof(request.LocationId),
+            nameof(request.LocationCode),
+            cancellationToken);
         var stop = Stop.Create(
             request.OperatorId,
             request.Name!,
@@ -48,52 +61,12 @@ public sealed class CreateStopHandler : IRequestHandler<CreateStopCommand, StopD
             request.Description,
             request.Address,
             request.GooglePlaceId,
-            await ResolveLocationIdAsync(request.LocationId, request.LocationCode, cancellationToken));
+            location.Leaf.Id);
 
         await stopRepository.AddAsync(stop, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return StopMapper.ToDto(stop);
+        return StopMapper.ToDto(stop, StopLocationContextResolver.From(location.Leaf, location.Parent));
     }
 
-    private async Task<Guid?> ResolveLocationIdAsync(Guid? locationId, string? locationCode, CancellationToken cancellationToken)
-    {
-        if (locationId.HasValue)
-        {
-            if (locationRepository is null)
-            {
-                throw new InvalidOperationException("Location repository is required when locationId is provided.");
-            }
-
-            var location = await locationRepository.GetActiveByIdAsync(locationId.Value, cancellationToken);
-            if (location is null)
-            {
-                throw new VietRide.Shared.Application.Exceptions.ValidationException(
-                    "Location logical FK validation failed.",
-                    [new VietRide.Shared.Application.Exceptions.ValidationError("locationId", "Location was not found or inactive.")]);
-            }
-
-            return location.Id;
-        }
-
-        if (string.IsNullOrWhiteSpace(locationCode))
-        {
-            return null;
-        }
-
-        if (locationRepository is null)
-        {
-            throw new InvalidOperationException("Location repository is required when locationCode is provided.");
-        }
-
-        var locationByCode = await locationRepository.GetActiveByCodeAsync(locationCode, cancellationToken);
-        if (locationByCode is null)
-        {
-            throw new VietRide.Shared.Application.Exceptions.ValidationException(
-                "Location logical FK validation failed.",
-                [new VietRide.Shared.Application.Exceptions.ValidationError("locationCode", "Location was not found or inactive.")]);
-        }
-
-        return locationByCode.Id;
-    }
 }

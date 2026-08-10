@@ -25,16 +25,25 @@ public sealed class CreateLocationHandler : IRequestHandler<CreateLocationComman
             throw new ConflictException("LOCATION_CODE_CONFLICT", "A location with the same code already exists.");
         }
 
+        var type = request.Type!.Trim().ToUpperInvariant();
+        LocationHierarchyGuard.ValidateOfficialCode(code, type);
+        var parent = await LocationHierarchyGuard.ResolveParentAsync(
+            locationRepository,
+            type,
+            request.ParentCode,
+            null,
+            cancellationToken);
         var location = Location.Create(
             code,
             request.Name!,
-            request.Type!,
+            type,
+            parent?.Id,
             request.SortOrder ?? 0,
             request.IsActive);
 
         await locationRepository.AddAsync(location, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return LocationMapper.ToDto(location);
+        return LocationMapper.ToDto(location, parent);
     }
 }

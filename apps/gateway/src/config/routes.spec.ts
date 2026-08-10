@@ -636,6 +636,22 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes operator incident list and detail reads to Trip with operator role union', () => {
+    const paths = [
+      '/v1/operator/incidents',
+      '/v1/operator/incidents/11111111-1111-4111-8111-111111111111',
+    ] as const;
+
+    paths.forEach((path) => {
+      expect(matchRoute(routes, path, 'GET')).toMatchObject({
+        prefix: '/v1/operator/incidents',
+        target: env.TRIP_BASE_URL,
+        authRequired: 'user',
+        requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+      });
+    });
+  });
+
   it('routes shuttle history reads and creation mutations to Trip with distinct operator roles', () => {
     const requestsRoute = matchRoute(routes, '/v1/operator/shuttle-requests');
     const historyRoute = matchRoute(routes, '/v1/operator/shuttle-trips', 'GET');

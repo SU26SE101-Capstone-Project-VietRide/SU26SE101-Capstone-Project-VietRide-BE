@@ -16,6 +16,7 @@ using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.Internal.Stations;
 using VietRide.Trip.Application.Features.Stations;
 using VietRide.Trip.Domain.Entities;
+using VietRide.Trip.UnitTests.Fakes;
 
 namespace VietRide.Trip.UnitTests.Features.Stations;
 
@@ -291,6 +292,21 @@ public sealed class StationHandlersTests
 
         stationRepository.Entities.Select(station => station.Slug).Should().OnlyHaveUniqueItems();
         stationRepository.Entities.Should().HaveCount(2);
+        var created = stationRepository.Entities.Single(station => station.Id != first.Id);
+        created.City.Should().Be("Thành phố Đà Nẵng");
+        created.Ward.Should().Be("Phường Hải Châu");
+        created.LocationId.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void CreateOrLinkOperatorStationValidator_RequiresExactlyOneLeafLocationReference()
+    {
+        var validator = new CreateOrLinkOperatorStationValidator();
+
+        validator.Validate(CreateStationCommand() with { LocationCode = null })
+            .IsValid.Should().BeFalse();
+        validator.Validate(CreateStationCommand() with { LocationId = Guid.NewGuid() })
+            .IsValid.Should().BeFalse();
     }
 
     [Fact]
@@ -465,13 +481,16 @@ public sealed class StationHandlersTests
             null,
             null,
             null,
-            null);
+            null,
+            null,
+            "20195");
 
     private static CreateOrLinkOperatorStationHandler CreateHandler(
         FakeStationRepository stationRepository,
         FakeOperatorStationRepository operatorStationRepository,
         OperatorWriteEligibilityValidation? eligibility = null) => new(
             new FakeIdentityInternalClient(eligibility ?? OperatorWriteEligibilityValidation.Allowed()),
+            TestLocationRepository.Create(),
             operatorStationRepository,
             stationRepository,
             new FakeUnitOfWork());

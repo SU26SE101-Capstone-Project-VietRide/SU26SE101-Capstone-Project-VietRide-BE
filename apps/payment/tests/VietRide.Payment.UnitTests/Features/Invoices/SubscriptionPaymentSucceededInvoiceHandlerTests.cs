@@ -69,7 +69,6 @@ public sealed class SubscriptionPaymentSucceededInvoiceHandlerTests
                 "0900000000",
                 "1 Nguyễn Huệ",
                 null,
-                "Quận 1",
                 "TP.HCM"));
 
     private sealed class FakeInvoiceRepository : IInvoiceRepository

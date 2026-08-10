@@ -69,15 +69,14 @@ public sealed class UiGapInternalProjectionTests
             operatorTenant.ContactEmail,
             operatorTenant.ContactPhone,
             "https://example.test/logo.jpg",
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null);
+            addressStreet: null,
+            addressWard: null,
+            addressProvince: null,
+            representativeName: null,
+            representativePhone: null,
+            cancellationPolicy: null,
+            parcelNoShowPolicy: null,
+            luggagePolicy: null);
         var repository = Substitute.For<IOperatorRepository>();
         repository.ListSummariesByIdsAsync(
                 Arg.Any<IReadOnlyCollection<Guid>>(),

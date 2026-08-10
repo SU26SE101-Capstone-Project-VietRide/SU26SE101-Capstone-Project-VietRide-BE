@@ -56,13 +56,48 @@ internal sealed class LocationRepository : ILocationRepository
             cancellationToken);
     }
 
-    public async Task<IReadOnlyList<Location>> ListActiveAsync(CancellationToken cancellationToken)
-        => await dbContext.Locations
-            .AsNoTracking()
-            .Where(location => location.IsActive)
+    public async Task<IReadOnlyList<Location>> ListActiveTopLevelAsync(string? search, CancellationToken cancellationToken)
+    {
+        var query = BuildAccentInsensitiveSearchQuery(search)
+            .Where(location => location.IsActive && location.ParentLocationId == null);
+
+        return await query
             .OrderBy(location => location.SortOrder)
             .ThenBy(location => location.Name)
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Location>> ListActiveChildrenAsync(
+        Guid parentId,
+        string? search,
+        CancellationToken cancellationToken)
+    {
+        var query = BuildAccentInsensitiveSearchQuery(search)
+            .Where(location => location.IsActive && location.ParentLocationId == parentId);
+
+        return await query
+            .OrderBy(location => location.SortOrder)
+            .ThenBy(location => location.Name)
+            .ToListAsync(cancellationToken);
+    }
+
+    private IQueryable<Location> BuildAccentInsensitiveSearchQuery(string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return dbContext.Locations.AsNoTracking();
+        }
+
+        var normalized = search.Trim();
+        return dbContext.Locations
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_trip.locations
+                WHERE unaccent(code) ILIKE unaccent('%' || {normalized} || '%')
+                   OR unaccent(name) ILIKE unaccent('%' || {normalized} || '%')
+                """)
+            .AsNoTracking();
+    }
 
     public async Task<PagedResult<Location>> ListAsync(
         int page,
@@ -71,19 +106,11 @@ internal sealed class LocationRepository : ILocationRepository
         bool? isActive,
         CancellationToken cancellationToken)
     {
-        var query = dbContext.Locations.AsNoTracking();
+        var query = BuildAccentInsensitiveSearchQuery(search);
 
         if (isActive.HasValue)
         {
             query = query.Where(location => location.IsActive == isActive.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            var pattern = $"%{search.Trim()}%";
-            query = query.Where(location =>
-                EF.Functions.ILike(location.Code, pattern)
-                || EF.Functions.ILike(location.Name, pattern));
         }
 
         var totalItems = await query.LongCountAsync(cancellationToken);

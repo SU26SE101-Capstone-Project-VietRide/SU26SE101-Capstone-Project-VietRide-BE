@@ -29,9 +29,23 @@ public sealed class ListAdminLocationsHandler : IRequestHandler<ListAdminLocatio
             request.Search,
             request.IsActive,
             cancellationToken);
+        var parentIds = result.Items
+            .Where(location => location.ParentLocationId.HasValue)
+            .Select(location => location.ParentLocationId!.Value)
+            .ToHashSet();
+        var parentsById = locationRepository.QueryNoTracking()
+            .Where(location => parentIds.Contains(location.Id))
+            .ToDictionary(location => location.Id);
 
         return PagedResult<LocationDto>.Create(
-            result.Items.Select(LocationMapper.ToDto).ToList(),
+            result.Items
+                .Select(location => LocationMapper.ToDto(
+                    location,
+                    location.ParentLocationId.HasValue
+                        && parentsById.TryGetValue(location.ParentLocationId.Value, out var parent)
+                            ? parent
+                            : null))
+                .ToList(),
             result.Page,
             result.PageSize,
             result.TotalItems);

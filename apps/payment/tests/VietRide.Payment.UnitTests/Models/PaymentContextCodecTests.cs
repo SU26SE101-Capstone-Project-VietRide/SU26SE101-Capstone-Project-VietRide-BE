@@ -7,6 +7,41 @@ namespace VietRide.Payment.UnitTests.Models;
 public sealed class PaymentContextCodecTests
 {
     [Fact]
+    public void DeserializeTrusted_WhenLegacySubscriptionBuyerContainsAddressDistrict_RemainsCompatible()
+    {
+        var subscriptionId = Guid.NewGuid();
+        var planId = Guid.NewGuid();
+        var json = $$"""
+            {
+              "version": 1,
+              "operatorSubscriptionId": "{{subscriptionId}}",
+              "planId": "{{planId}}",
+              "planName": "Business",
+              "billingPeriod": "MONTHLY",
+              "periodFrom": "2026-08-10T00:00:00Z",
+              "periodTo": "2026-09-10T00:00:00Z",
+              "buyerSnapshot": {
+                "name": "VietRide Bus",
+                "businessRegistrationNumber": "BRN-001",
+                "taxCode": "0312345678",
+                "contactEmail": "billing@vietride.test",
+                "contactPhone": "+84901234567",
+                "addressStreet": "1 Nguyen Hue",
+                "addressWard": "Ben Nghe",
+                "addressDistrict": "District 1",
+                "addressProvince": "Ho Chi Minh City"
+              }
+            }
+            """;
+
+        var context = SubscriptionPaymentContextCodec.DeserializeTrusted(json);
+
+        context.OperatorSubscriptionId.Should().Be(subscriptionId);
+        context.PlanId.Should().Be(planId);
+        context.BuyerSnapshot.AddressProvince.Should().Be("Ho Chi Minh City");
+    }
+
+    [Fact]
     public void DeserializeTrusted_WhenLegacyAllocationHasNoReferenceCode_RemainsCompatible()
     {
         var json = $$"""

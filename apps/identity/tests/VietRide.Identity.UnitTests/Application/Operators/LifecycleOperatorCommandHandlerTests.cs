@@ -235,7 +235,6 @@ public sealed class LifecycleOperatorCommandHandlerTests
             "+84901234567",
             "1 Street",
             "Ward",
-            "District",
             "Province",
             "Operator Admin",
             "+84901234568");

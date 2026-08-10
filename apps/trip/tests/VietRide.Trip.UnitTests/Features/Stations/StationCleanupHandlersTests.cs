@@ -11,6 +11,7 @@ using VietRide.Trip.Application.Features.Internal.Stations;
 using VietRide.Trip.Application.Features.Stations;
 using VietRide.Trip.Application.Features.Stations.MergeStations;
 using VietRide.Trip.Domain.Entities;
+using VietRide.Trip.UnitTests.Fakes;
 
 namespace VietRide.Trip.UnitTests.Features.Stations;
 
@@ -21,16 +22,25 @@ public sealed class StationCleanupHandlersTests
     [Fact]
     public async Task Normalize_PreservesSlugPolicyAndEnqueuesPiiSafeSnapshot()
     {
+        var parent = Location.Create("79", "Thành phố Hồ Chí Minh", Location.MunicipalityType, 1);
+        var leaf = Location.Create("26506", "Phường Vũng Tàu", Location.WardType, parent.Id, 1);
+        var locations = TestLocationRepository.From(parent, leaf);
         var station = Station.Create(
             "Old Name",
             "old-name-city-province",
             "City",
             "Province",
             contactPhone: "0900000000",
-            contactEmail: "secret@example.com");
+            contactEmail: "secret@example.com",
+            locationId: leaf.Id);
         var stations = new FakeStationRepository([station]);
         var outbox = new CapturingOutbox();
-        var handler = new UpdateAdminStationHandler(stations, outbox, new FakeUnitOfWork(), new FrozenClock(Now));
+        var handler = new UpdateAdminStationHandler(
+            stations,
+            locations,
+            outbox,
+            new FakeUnitOfWork(),
+            new FrozenClock(Now));
         var actorId = Guid.NewGuid();
 
         var result = await handler.Handle(new UpdateAdminStationCommand(
@@ -52,7 +62,9 @@ public sealed class StationCleanupHandlersTests
             "127.0.0.1",
             "unit-test"), CancellationToken.None);
 
-        result.Slug.Should().Be("ben-xe-moi-thu-đuc-ho-chi-minh");
+        result.Slug.Should().Be("ben-xe-moi-thanh-pho-ho-chi-minh-phuong-vung-tau");
+        result.City.Should().Be(parent.Name);
+        result.Ward.Should().Be(leaf.Name);
         outbox.Events.Should().ContainSingle();
         outbox.Events[0].EventType.Should().Be("trip.station.normalized");
         outbox.Events[0].Payload.Should().NotContain("contactPhone");

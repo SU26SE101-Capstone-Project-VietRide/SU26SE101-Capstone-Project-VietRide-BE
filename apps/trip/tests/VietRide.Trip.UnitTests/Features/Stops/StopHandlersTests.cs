@@ -16,6 +16,7 @@ using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.Internal.Stops;
 using VietRide.Trip.Application.Features.Stops;
 using VietRide.Trip.Domain.Entities;
+using VietRide.Trip.UnitTests.Fakes;
 
 namespace VietRide.Trip.UnitTests.Features.Stops;
 
@@ -36,7 +37,38 @@ public sealed class StopHandlersTests
         result.GooglePlaceId.Should().Be("opaque-google-place");
         result.Description.Should().Be("Điểm đón trung tâm");
         result.Address.Should().Be("Đường Trung Tâm");
+        result.LocationId.Should().NotBeNull();
+        result.City.Should().Be("Thành phố Đà Nẵng");
+        result.Ward.Should().Be("Phường Hải Châu");
         repository.Entities.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void CreateStopValidator_RequiresExactlyOneLeafLocationReference()
+    {
+        var validator = new CreateStopValidator();
+
+        validator.Validate(CreateCommand() with { LocationCode = null }).IsValid.Should().BeFalse();
+        validator.Validate(CreateCommand() with { LocationId = Guid.NewGuid() }).IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateStop_RejectsTopLevelLocation()
+    {
+        var repository = new FakeStopRepository([]);
+        var handler = new CreateStopHandler(
+            new FakeIdentityInternalClient(OperatorWriteEligibilityValidation.Allowed()),
+            TestLocationRepository.Create(),
+            repository,
+            new FakeUnitOfWork());
+
+        var act = () => handler.Handle(
+            CreateCommand() with { LocationCode = "48" },
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().Contain(error => error.Field == nameof(CreateStopCommand.LocationCode));
+        repository.Entities.Should().BeEmpty();
     }
 
     [Fact]
@@ -138,6 +170,28 @@ public sealed class StopHandlersTests
         result.PageSize.Should().Be(100);
         result.Items.Should().HaveCount(100);
         result.TotalItems.Should().Be(101);
+    }
+
+    [Fact]
+    public async Task ListStops_EnrichesCityAndWardFromLocationHierarchy()
+    {
+        var locations = TestLocationRepository.Create();
+        var stop = Stop.Create(
+            OperatorId,
+            "Bến xe Hải Châu",
+            16.0678m,
+            108.2208m,
+            locationId: locations.Leaf.Id);
+        var handler = new ListStopsHandler(new FakeStopRepository([stop]), locations);
+
+        var result = await handler.Handle(
+            new ListStopsQuery(OperatorId, 1, 20, null),
+            CancellationToken.None);
+
+        var item = result.Items.Should().ContainSingle().Subject;
+        item.LocationId.Should().Be(locations.Leaf.Id);
+        item.City.Should().Be(locations.Parent.Name);
+        item.Ward.Should().Be(locations.Leaf.Name);
     }
 
     [Fact]
@@ -305,13 +359,16 @@ public sealed class StopHandlersTests
             longitude,
             "Điểm đón trung tâm",
             "Đường Trung Tâm",
-            googlePlaceId);
+            googlePlaceId,
+            null,
+            "20195");
 
     private static CreateStopHandler CreateHandler(
         FakeStopRepository repository,
         OperatorWriteEligibilityValidation? eligibility = null)
         => new(
             new FakeIdentityInternalClient(eligibility ?? OperatorWriteEligibilityValidation.Allowed()),
+            TestLocationRepository.Create(),
             repository,
             new FakeUnitOfWork());
 

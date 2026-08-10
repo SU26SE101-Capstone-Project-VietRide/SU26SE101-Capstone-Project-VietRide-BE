@@ -88,7 +88,7 @@ ATK=<admin accessToken>
 curl -s -X POST http://localhost:3000/v1/operators/register -H "content-type:application/json" \
   -d '{"name":"Demo Operator","contactEmail":"ops@example.com","contactPhone":"0981112233",
        "businessRegistrationNumber":"BRN-DEMO-001","taxCode":"TAX-DEMO-001",
-       "addressStreet":"1 Le Loi","addressWard":"Ben Nghe","addressDistrict":"D1","addressProvince":"HCMC",
+       "addressStreet":"1 Le Loi","addressWard":"Ben Nghe","addressProvince":"HCMC",
        "representativeName":"Rep","representativePhone":"0881112233","password":"Passw0rd!23"}'
 OPID=<operatorId>
 

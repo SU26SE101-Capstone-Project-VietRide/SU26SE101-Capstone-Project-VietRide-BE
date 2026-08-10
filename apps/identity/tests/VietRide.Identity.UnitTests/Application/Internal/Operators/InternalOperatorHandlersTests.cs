@@ -201,7 +201,6 @@ public sealed class InternalOperatorHandlersTests
             logoUrl: null,
             addressStreet: null,
             addressWard: null,
-            addressDistrict: null,
             addressProvince: null,
             representativeName: null,
             representativePhone: null,

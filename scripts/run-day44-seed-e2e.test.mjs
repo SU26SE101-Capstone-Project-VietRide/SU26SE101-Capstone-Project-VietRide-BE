@@ -26,6 +26,14 @@ describe('Day 44 seed orchestrator harness', () => {
     for (const marker of [
       'IDEMPOTENT_RERUN=PASS',
       'RAG_READY=PASS',
+      'OPERATOR_DISTRICT_REMOVAL_E2E=PASS',
+      'LOCATION_HIERARCHY_CATALOG_E2E=PASS',
+      'LEAF_LOCATION_RESOURCE_CREATE_E2E=PASS',
+      'ACCENT_INSENSITIVE_RESOURCE_SEARCH_E2E=PASS',
+      'TRIP_LOCATION_STOP_SEARCH_E2E=PASS',
+      'TRIP_30_DAY_GENERATION_E2E=PASS',
+      'OPERATOR_INCIDENT_READ_E2E=PASS',
+      'TRIP_SEARCH_TO_BOOKING_E2E=PASS',
       'BOOKING_READY=PASS',
       'PARCEL_READY=PASS',
       'DAY44_RUN=PASS',
@@ -166,6 +174,7 @@ describe('Day 44 seed orchestrator harness', () => {
     assert.match(source, /return await action\(\)/);
     assert.match(source, /catch \(error\)[\s\S]*emitGatewayDiagnostics\(\);[\s\S]*throw error;/);
     assert.match(source, /await withGatewayDiagnostics\(\(\) => waitForGateway\(\)\)/);
+    assert.match(source, /await withGatewayDiagnostics\(\(\) => currentFeatureSmoke\(\)\)/);
     assert.match(source, /await withGatewayDiagnostics\(\(\) => smoke\(\)\)/);
     assert.doesNotMatch(source, /json \.Config\.Env/);
     const diagnostics = source.indexOf('emitGatewayDiagnostics();');

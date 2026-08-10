@@ -20,8 +20,11 @@ public sealed class LocationsController : ControllerBase
     [HttpGet]
     [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<LocationDto>>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IReadOnlyList<LocationDto>>> GetAsync(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyList<LocationDto>>> GetAsync(
+        [FromQuery] string? parentCode,
+        [FromQuery] string? search,
+        CancellationToken cancellationToken)
     {
-        return Ok(await mediator.Send(new ListLocationsQuery(), cancellationToken));
+        return Ok(await mediator.Send(new ListLocationsQuery(parentCode, search), cancellationToken));
     }
 }

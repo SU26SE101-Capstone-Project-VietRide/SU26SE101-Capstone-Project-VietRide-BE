@@ -5,6 +5,17 @@ namespace VietRide.Trip.Application.Abstractions.Repositories;
 
 public interface IStationRepository : IRepository<Station, Guid>
 {
+    IQueryable<Station> SearchByTextNoTracking(string search, bool includeLocationSnapshots)
+    {
+        var normalized = search.Trim().ToLowerInvariant();
+        var query = QueryNoTracking();
+        return includeLocationSnapshots
+            ? query.Where(station => station.Name.ToLower().Contains(normalized)
+                || station.City.ToLower().Contains(normalized)
+                || (station.Ward != null && station.Ward.ToLower().Contains(normalized)))
+            : query.Where(station => station.Name.ToLower().Contains(normalized));
+    }
+
     Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
         string? q,
         string? city,

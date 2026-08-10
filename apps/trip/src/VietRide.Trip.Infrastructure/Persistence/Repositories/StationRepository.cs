@@ -73,6 +73,30 @@ internal sealed class StationRepository : IStationRepository
     public IQueryable<Station> QueryNoTracking()
         => _dbContext.Stations.AsNoTracking();
 
+    public IQueryable<Station> SearchByTextNoTracking(string search, bool includeLocationSnapshots)
+    {
+        var normalized = search.Trim();
+        return includeLocationSnapshots
+            ? _dbContext.Stations
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM vietride_trip.stations
+                    WHERE deleted_at IS NULL
+                      AND (unaccent(name) ILIKE unaccent('%' || {normalized} || '%')
+                        OR unaccent(city) ILIKE unaccent('%' || {normalized} || '%')
+                        OR unaccent(ward) ILIKE unaccent('%' || {normalized} || '%'))
+                    """)
+                .AsNoTracking()
+            : _dbContext.Stations
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM vietride_trip.stations
+                    WHERE deleted_at IS NULL
+                      AND unaccent(name) ILIKE unaccent('%' || {normalized} || '%')
+                    """)
+                .AsNoTracking();
+    }
+
     public async Task<IReadOnlyList<Station>> SearchActiveByNameAsync(
         string? q,
         string? city,

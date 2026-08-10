@@ -231,7 +231,6 @@ function buyerSnapshot(letter: OperatorLetter): FixtureRow {
     contactPhone: `+8490444000${index}`,
     addressStreet: '44 Demo Street',
     addressWard: 'Demo Ward',
-    addressDistrict: 'Demo District',
     addressProvince: 'Hồ Chí Minh',
   };
 }

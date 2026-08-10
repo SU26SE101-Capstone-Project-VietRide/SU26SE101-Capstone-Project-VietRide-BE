@@ -8,7 +8,6 @@ public sealed record UpdateOperatorProfileRequest(
     string? LogoUrl,
     string AddressStreet,
     string AddressWard,
-    string AddressDistrict,
     string AddressProvince,
     string RepresentativeName,
     string RepresentativePhone,

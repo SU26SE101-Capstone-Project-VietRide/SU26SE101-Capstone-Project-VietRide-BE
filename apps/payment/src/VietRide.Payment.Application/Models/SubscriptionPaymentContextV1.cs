@@ -21,7 +21,6 @@ public sealed record SubscriptionBuyerSnapshotV1(
     string ContactPhone,
     string? AddressStreet,
     string? AddressWard,
-    string? AddressDistrict,
     string? AddressProvince);
 
 public static class SubscriptionPaymentContextCodec

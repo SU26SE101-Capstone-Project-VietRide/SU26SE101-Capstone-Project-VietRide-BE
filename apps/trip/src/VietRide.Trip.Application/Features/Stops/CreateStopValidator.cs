@@ -25,8 +25,13 @@ public sealed class CreateStopValidator : AbstractValidator<CreateStopCommand>
             .WithMessage("Location id must be valid.")
             .When(command => command.LocationId.HasValue);
         RuleFor(command => command.LocationCode)
+            .Length(5)
             .MaximumLength(20)
             .When(command => !string.IsNullOrWhiteSpace(command.LocationCode));
+        RuleFor(command => command)
+            .Must(command => command.LocationId.HasValue ^ !string.IsNullOrWhiteSpace(command.LocationCode))
+            .WithName(nameof(CreateStopCommand.LocationId))
+            .WithMessage("Provide exactly one of locationId or locationCode.");
         RuleFor(command => command.Latitude)
             .NotNull()
             .InclusiveBetween(-90m, 90m);

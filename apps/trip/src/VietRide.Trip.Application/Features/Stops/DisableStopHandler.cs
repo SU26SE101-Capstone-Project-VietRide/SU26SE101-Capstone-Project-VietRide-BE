@@ -16,14 +16,16 @@ public sealed class DisableStopHandler : IRequestHandler<DisableStopCommand, Dis
     private readonly IIdentityInternalClient identity;
     private readonly IIntegrationEventOutbox outbox;
     private readonly IClock clock;
+    private readonly ILocationRepository? locations;
 
     public DisableStopHandler(IStopRepository stops, IIdentityInternalClient identity,
-        IIntegrationEventOutbox outbox, IClock clock)
+        IIntegrationEventOutbox outbox, IClock clock, ILocationRepository? locations = null)
     {
         this.stops = stops;
         this.identity = identity;
         this.outbox = outbox;
         this.clock = clock;
+        this.locations = locations;
     }
 
     public async Task<DisableStopResponse> Handle(DisableStopCommand request, CancellationToken cancellationToken)
@@ -41,7 +43,7 @@ public sealed class DisableStopHandler : IRequestHandler<DisableStopCommand, Dis
         {
             if (stop.ReplacedByStopId == request.ReplacedByStopId)
             {
-                return new DisableStopResponse(StopMapper.ToDto(stop), null);
+                return new DisableStopResponse(ToDto(stop), null);
             }
 
             throw new CodedConflictException("STOP_ALREADY_DISABLED", "Stop is already disabled.");
@@ -65,7 +67,13 @@ public sealed class DisableStopHandler : IRequestHandler<DisableStopCommand, Dis
             JsonSerializer.Serialize(evt, JsonOptions),
             cancellationToken);
 
-        return new DisableStopResponse(StopMapper.ToDto(stop), null);
+        return new DisableStopResponse(ToDto(stop), null);
+    }
+
+    private StopDto ToDto(Domain.Entities.Stop stop)
+    {
+        var locationContexts = StopLocationContextResolver.Resolve(locations, [stop]);
+        return StopMapper.ToDto(stop, locationContexts);
     }
 
     private void ValidateReplacement(Domain.Entities.Stop source, Guid replacementId)
