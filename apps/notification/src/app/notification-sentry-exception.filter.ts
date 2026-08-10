@@ -2,6 +2,7 @@ import { Catch, HttpException, HttpStatus } from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import * as Sentry from '@sentry/nestjs';
 import type { Request, Response } from 'express';
+import { toUtcIso, toVietnamIso } from '@vietride/nest-common';
 import { createNotificationLogger } from '../notifications/notification-logger';
 
 @Catch()
@@ -13,9 +14,7 @@ export class NotificationSentryExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
     const status =
-      exception instanceof HttpException
-        ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+      exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
     const raw = exception instanceof HttpException ? exception.getResponse() : undefined;
     const errorCode = extractErrorCode(raw, status);
     const message = status >= 500 ? 'Internal server error' : extractMessage(raw, exception);
@@ -23,6 +22,8 @@ export class NotificationSentryExceptionFilter implements ExceptionFilter {
     const traceId =
       (request.headers['x-request-id'] as string | undefined) ??
       (request as { requestId?: string }).requestId;
+    const path = request.path ?? (request.originalUrl ?? request.url ?? '').split('?')[0];
+    const internal = path === '/internal' || path.startsWith('/internal/');
 
     if (status >= 500) {
       Sentry.captureException(exception);
@@ -58,7 +59,7 @@ export class NotificationSentryExceptionFilter implements ExceptionFilter {
           message,
           ...(fields ? { fields } : {}),
         },
-        meta: { traceId, timestamp: new Date().toISOString() },
+        meta: { traceId, timestamp: internal ? toUtcIso(new Date()) : toVietnamIso(new Date()) },
       });
     }
   }

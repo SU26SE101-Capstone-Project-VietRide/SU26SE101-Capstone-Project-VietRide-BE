@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- existing event schema exports follow contract naming. */
 import { z } from 'zod';
 import {
   BookingVoucherConsentRequestedEventSchema,
@@ -20,6 +19,7 @@ import {
   type ParcelSettlementRecoveredEvent,
 } from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
+import { formatVietnamDateTime } from '@vietride/nest-common';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
 import {
   formatOperatorLabel,
@@ -148,7 +148,7 @@ const VoucherConsentPayloadSchema = BaseOperatorPayloadSchema.and(
 
 const SubscriptionPaymentPendingWarnPayloadSchema = BaseOperatorPayloadSchema.and(
   z.object({
-    dueDate: z.string().datetime().optional(),
+    dueDate: z.string().datetime({ offset: true }).optional(),
   }),
 );
 
@@ -554,7 +554,7 @@ function mapParcelDeliveryConfirmationRealerted(
     userId,
     type: NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM,
     title: 'Xác nhận giao hàng đã quá hạn',
-    body: `${formatParcelLabel(payload.parcelCode)} đã quá hạn xác nhận từ ${payload.expiredAt} và cần nhà xe xử lý.`,
+    body: `${formatParcelLabel(payload.parcelCode)} đã quá hạn xác nhận từ ${formatVietnamDateTime(payload.expiredAt)} và cần nhà xe xử lý.`,
     data: buildNotificationData(payload),
   };
 }
@@ -676,7 +676,7 @@ function mapParcelFinalPaymentRequested(
     userId,
     type: NotificationType.PARCEL_FINAL_PAYMENT_REQUIRED,
     title: 'Cần thanh toán số dư đơn gửi hàng',
-    body: `${formatParcelLabel(payload.parcelCode)} cần thanh toán số dư ${formatMoney(payload.balanceRequiredVnd)} VND trước ${payload.finalPaymentDeadline}.`,
+    body: `${formatParcelLabel(payload.parcelCode)} cần thanh toán số dư ${formatMoney(payload.balanceRequiredVnd)} VND trước ${formatVietnamDateTime(payload.finalPaymentDeadline)}.`,
     data: buildNotificationData(payload),
   };
 }
@@ -847,7 +847,7 @@ function mapSubscriptionPaymentPendingWarn(
     userId,
     type: NotificationType.SUBSCRIPTION_PAYMENT_PENDING_WARN,
     title: 'Cần thanh toán gói dịch vụ',
-    body: `${formatOperatorLabel(payload.operatorName)} có thanh toán gói dịch vụ sắp đến hạn${payload.dueDate ? ` vào ${payload.dueDate}` : ''}.`,
+    body: `${formatOperatorLabel(payload.operatorName)} có thanh toán gói dịch vụ sắp đến hạn${payload.dueDate ? ` vào ${formatVietnamDateTime(payload.dueDate)}` : ''}.`,
     data: buildNotificationData(payload),
   };
 }

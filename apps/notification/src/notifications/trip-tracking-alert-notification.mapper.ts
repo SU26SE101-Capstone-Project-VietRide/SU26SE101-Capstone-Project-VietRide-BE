@@ -11,6 +11,7 @@ import {
   type TripStopDepartedWithPendingEvent,
 } from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
+import { formatVietnamDateTime } from '@vietride/nest-common';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
 import { formatTripLabel } from './notification-display';
 import {
@@ -80,7 +81,7 @@ const tripCrewChangedPayloadSchema = z.object({
   departureDateTime: z.string().datetime({ offset: true }),
 });
 const boardingStartedPayloadSchema = baseTripAlertPayloadSchema.and(
-  z.object({ boardingStartedAt: z.string().datetime().optional() }),
+  z.object({ boardingStartedAt: z.string().datetime({ offset: true }).optional() }),
 );
 
 const canonicalTripDelayedPayloadSchema = z
@@ -414,7 +415,7 @@ function mapScheduleChanged(
     userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
     title: 'Lịch làm việc của chuyến xe đã thay đổi',
-    body: `Giờ khởi hành chuyến xe đã đổi sang ${payload.newDeparture}.`,
+    body: `Giờ khởi hành chuyến xe đã đổi sang ${formatVietnamDateTime(payload.newDeparture)}.`,
     data: {
       eventId: payload.eventId,
       occurredAt: payload.occurredAt,

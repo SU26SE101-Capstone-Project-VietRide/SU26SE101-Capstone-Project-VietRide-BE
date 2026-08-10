@@ -1,5 +1,8 @@
 import type { Namespace } from 'socket.io';
-import { TripShareRealtimePublisher, type TripShareEtaSource } from './trip-share-realtime.publisher';
+import {
+  TripShareRealtimePublisher,
+  type TripShareEtaSource,
+} from './trip-share-realtime.publisher';
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const GRANT_ID = '22222222-2222-4222-8222-222222222222';
@@ -8,14 +11,16 @@ describe('TripShareRealtimePublisher', () => {
   it('is an idempotent no-op before a namespace is attached', async () => {
     const publisher = new TripShareRealtimePublisher();
 
-    expect(() => publisher.publishGps({
-      tripId: TRIP_ID,
-      latitude: 10.7,
-      longitude: 106.6,
-      speedKmh: 42,
-      headingDeg: 90,
-      recordedAt: '2026-08-03T10:00:00.000Z',
-    })).not.toThrow();
+    expect(() =>
+      publisher.publishGps({
+        tripId: TRIP_ID,
+        latitude: 10.7,
+        longitude: 106.6,
+        speedKmh: 42,
+        headingDeg: 90,
+        recordedAt: '2026-08-03T10:00:00.000Z',
+      }),
+    ).not.toThrow();
     await expect(publisher.revokeGrant(GRANT_ID, 'REVOKED')).resolves.toBeUndefined();
   });
 
@@ -60,23 +65,26 @@ describe('TripShareRealtimePublisher', () => {
         longitude: 106.6,
         heading: 90,
         speedKph: 42,
-        recordedAt: '2026-08-03T10:00:00.000Z',
+        recordedAt: '2026-08-03T17:00:00.000+07:00',
       },
     });
     expect(fixture.emit).toHaveBeenNthCalledWith(2, 'shared:eta:update', {
       eta: {
-        estimatedArrivalAt: '2026-08-03T11:00:00.000Z',
+        estimatedArrivalAt: '2026-08-03T18:00:00.000+07:00',
         remainingSeconds: 3_600,
         delayMinutes: 35,
         delayStatus: 'DELAYED',
-        updatedAt: '2026-08-03T10:00:01.000Z',
+        updatedAt: '2026-08-03T17:00:01.000+07:00',
       },
     });
     expect(fixture.emit).toHaveBeenNthCalledWith(3, 'shared:trip:statusChanged', {
       status: 'DELAYED',
       delayMinutes: 35,
-      updatedAt: '2026-08-03T10:00:01.000Z',
+      updatedAt: '2026-08-03T17:00:01.000+07:00',
     });
+    expect(gpsSource.recordedAt).toBe('2026-08-03T10:00:00.000Z');
+    expect(etaSource.estimatedArrivalTime).toBe('2026-08-03T11:00:00.000Z');
+    expect(statusSource.updatedAt).toBe('2026-08-03T10:00:01.000Z');
     expect(JSON.stringify(fixture.emit.mock.calls)).not.toMatch(/tripId|stopId|forbidden/);
   });
 

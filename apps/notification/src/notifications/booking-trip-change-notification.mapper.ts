@@ -22,6 +22,7 @@ import {
   type BookingTransferredEvent,
 } from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
+import { formatVietnamDateTime } from '@vietride/nest-common';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
 
 export type BookingTripChangeRoutingKey =
@@ -74,7 +75,7 @@ function mapBookingTransferred(payload: BookingTransferredEvent): CreateNotifica
     type: NotificationType.VEHICLE_SUBSTITUTED,
     title: 'Xe thay thế đã được sắp xếp',
     body:
-      `Xe ${payload.newVehiclePlateNumber} khởi hành lúc ${payload.newTripDepartureDateTime}. ` +
+      `Xe ${payload.newVehiclePlateNumber} khởi hành lúc ${formatVietnamDateTime(payload.newTripDepartureDateTime)}. ` +
       `Cập nhật ghế: ${seatChanges.join('; ')}.`,
     data: bookingTransferredData(payload),
   };
@@ -137,7 +138,7 @@ function mapScheduleChangeRequired(
     userId: payload.userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
     title: 'Cần xác nhận lịch chuyến mới',
-    body: `Lịch chuyến xe đã thay đổi. Vui lòng phản hồi trước ${payload.deadline}.`,
+    body: `Lịch chuyến xe đã thay đổi. Vui lòng phản hồi trước ${formatVietnamDateTime(payload.deadline)}.`,
     data: bookingEventData(payload),
   };
 }
@@ -148,7 +149,7 @@ function mapPendingActionRealerted(payload: BookingPendingActionRealertedEvent):
       userId: payload.userId,
       type: NotificationType.VEHICLE_SUBSTITUTED,
       title: 'Nhắc lại: cần chọn lại ghế',
-      body: `Bạn vẫn cần chọn lại ghế ${payload.seatNumbers.join(', ')} trước ${payload.deadline}.`,
+      body: `Bạn vẫn cần chọn lại ghế ${payload.seatNumbers.join(', ')} trước ${formatVietnamDateTime(payload.deadline)}.`,
       data: bookingEventData(payload),
     };
   }
@@ -157,7 +158,7 @@ function mapPendingActionRealerted(payload: BookingPendingActionRealertedEvent):
     userId: payload.userId,
     type: NotificationType.TRIP_SCHEDULE_CHANGED,
     title: 'Nhắc lại: cần xác nhận lịch chuyến mới',
-    body: `Bạn vẫn cần phản hồi về lịch chuyến xe trước ${payload.deadline}.`,
+    body: `Bạn vẫn cần phản hồi về lịch chuyến xe trước ${formatVietnamDateTime(payload.deadline)}.`,
     data: bookingEventData(payload),
   };
 }

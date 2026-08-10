@@ -42,13 +42,13 @@ export class EtaResponseDataDto {
   @ApiProperty({ example: 12 })
   etaMinutes!: number;
 
-  @ApiProperty({ example: '2026-06-19T12:30:00.000Z' })
+  @ApiProperty({ example: '2026-06-19T19:30:00.000+07:00' })
   estimatedArrivalTime!: string;
 
   @ApiProperty({ example: 8500 })
   distanceMeters!: number;
 
-  @ApiProperty({ example: '2026-06-19T12:01:00.000Z' })
+  @ApiProperty({ example: '2026-06-19T19:01:00.000+07:00' })
   updatedAt!: string;
 
   @ApiProperty({ required: false, example: 1 })

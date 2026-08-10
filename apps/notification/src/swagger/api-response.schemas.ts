@@ -13,7 +13,7 @@ const metaSchema: SchemaObject = {
     timestamp: {
       type: 'string',
       format: 'date-time',
-      example: '2026-06-17T09:30:00.000Z',
+      example: '2026-06-17T16:30:00.000+07:00',
     },
   },
 };
@@ -173,7 +173,7 @@ export const notificationItemSchema: SchemaObject = {
     createdAt: {
       type: 'string',
       format: 'date-time',
-      example: '2026-06-17T09:20:00.000Z',
+      example: '2026-06-17T16:20:00.000+07:00',
     },
   },
 };
@@ -274,7 +274,7 @@ export const emailDeliverySchema: SchemaObject = {
     createdAt: {
       type: 'string',
       format: 'date-time',
-      example: '2026-06-17T09:25:00.000Z',
+      example: '2026-06-17T16:25:00.000+07:00',
     },
   },
 };
