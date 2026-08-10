@@ -1,3 +1,5 @@
+using VietRide.Shared.Kernel.Time;
+
 namespace VietRide.Trip.Application.Features.DriverSchedules;
 
 public sealed record DriverScheduleDto(
@@ -14,4 +16,7 @@ public sealed record DriverScheduleDto(
     bool IsActive,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    long? BaseFare = null);
+    long? BaseFare = null)
+{
+    public string TimeZone => BusinessTime.TimeZoneId;
+}

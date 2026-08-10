@@ -10,6 +10,11 @@ import { Reflector } from '@nestjs/core';
 import { createHash } from 'node:crypto';
 import { Observable, catchError, from, mergeMap, of, throwError } from 'rxjs';
 import type { Request, Response } from 'express';
+import {
+  toVietnamIso,
+  transformFrontendTimestamps,
+  transformUtcTimestamps,
+} from '@vietride/nest-common';
 import type { RequestWithRagInternalUser } from '../auth/rag-internal-user.types';
 import { IDEMPOTENCY_REQUIRED_METADATA } from './idempotency.swagger';
 import { IDEMPOTENCY_MULTIPART_DEFERRED_METADATA } from './idempotency.swagger';
@@ -78,14 +83,26 @@ export class RagIdempotencyInterceptor implements NestInterceptor {
           headers: this.responseHeaders(response, captured.length === 0),
           body: captured.length > 0 ? captured.join('') : JSON.stringify(normalizedValue ?? null),
         };
-        return from(this.idempotency.complete(begin.operationId, begin.ownerToken, replay)).pipe(
+        return from(
+          this.idempotency.complete(
+            begin.operationId,
+            begin.ownerToken,
+            this.canonicalizeReplay(replay),
+          ),
+        ).pipe(
           mergeMap(() => of(normalizedValue)),
         );
       }),
       catchError((error: unknown) => {
         if (error instanceof HttpException && error.getStatus() < 500) {
           const replay = this.toClientErrorReplay(error, request);
-          return from(this.idempotency.complete(begin.operationId, begin.ownerToken, replay)).pipe(
+          return from(
+            this.idempotency.complete(
+              begin.operationId,
+              begin.ownerToken,
+              this.canonicalizeReplay(replay),
+            ),
+          ).pipe(
             mergeMap(() => {
               this.writeReplay(response, replay);
               return of(undefined);
@@ -201,9 +218,45 @@ export class RagIdempotencyInterceptor implements NestInterceptor {
     response: Response,
     replay: { statusCode: number; headers: Record<string, string>; body: string },
   ): void {
-    response.status(replay.statusCode);
-    for (const [name, value] of Object.entries(replay.headers)) response.setHeader(name, value);
-    response.end(replay.body);
+    const presented = this.presentReplay(replay);
+    response.status(presented.statusCode);
+    for (const [name, value] of Object.entries(presented.headers)) response.setHeader(name, value);
+    response.end(presented.body);
+  }
+
+  private canonicalizeReplay<T extends {
+    statusCode: number;
+    headers: Record<string, string>;
+    body: string;
+  }>(replay: T): T {
+    return this.transformReplayJson(replay, transformUtcTimestamps);
+  }
+
+  private presentReplay<T extends {
+    statusCode: number;
+    headers: Record<string, string>;
+    body: string;
+  }>(replay: T): T {
+    return this.transformReplayJson(replay, transformFrontendTimestamps);
+  }
+
+  private transformReplayJson<T extends {
+    statusCode: number;
+    headers: Record<string, string>;
+    body: string;
+  }>(replay: T, transform: <V>(value: V) => V): T {
+    const contentType = Object.entries(replay.headers).find(
+      ([name]) => name.toLowerCase() === 'content-type',
+    )?.[1];
+    if (!contentType?.toLowerCase().includes('json') || replay.body.length === 0) {
+      return replay;
+    }
+
+    try {
+      return { ...replay, body: JSON.stringify(transform(JSON.parse(replay.body))) };
+    } catch {
+      return replay;
+    }
   }
 
   private toClientErrorReplay(
@@ -251,7 +304,7 @@ export class RagIdempotencyInterceptor implements NestInterceptor {
         success: false,
         statusCode,
         error: { code, message, ...(errors ? { fields: errors } : {}) },
-        meta: { traceId, timestamp: new Date().toISOString() },
+        meta: { traceId, timestamp: toVietnamIso(new Date()) },
       }),
     };
   }
@@ -281,11 +334,11 @@ export class RagMultipartIdempotencyInterceptor extends RagIdempotencyIntercepto
     const traceId =
       (request.headers['x-request-id'] as string | undefined) ??
       (request as { requestId?: string }).requestId;
-    return {
+    return transformFrontendTimestamps({
       success: true,
       statusCode: response.statusCode,
       data: value,
-      meta: { traceId, timestamp: new Date().toISOString() },
-    };
+      meta: { traceId, timestamp: toVietnamIso(new Date()) },
+    });
   }
 }

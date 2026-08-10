@@ -1,3 +1,5 @@
+using VietRide.Shared.Kernel.Time;
+
 namespace VietRide.Trip.Application.Features.Routes;
 
 public sealed record RouteDepartureScheduleDto(
@@ -6,4 +8,7 @@ public sealed record RouteDepartureScheduleDto(
     TimeOnly DepartureTime,
     DateOnly ValidFrom,
     DateOnly? ValidUntil,
-    bool IsActive);
+    bool IsActive)
+{
+    public string TimeZone => BusinessTime.TimeZoneId;
+}

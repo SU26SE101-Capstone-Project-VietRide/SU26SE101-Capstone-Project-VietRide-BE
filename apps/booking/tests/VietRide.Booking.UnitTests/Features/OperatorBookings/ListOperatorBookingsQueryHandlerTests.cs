@@ -22,7 +22,7 @@ public sealed class ListOperatorBookingsQueryHandlerTests
     private readonly IIdentityUserServiceClient _identity = Substitute.For<IIdentityUserServiceClient>();
 
     [Fact]
-    public async Task Handle_PassesTenantAllFiltersIctIntervalAndPagingToRepository()
+    public async Task Handle_PassesTenantAllFiltersVietnamIntervalAndPagingToRepository()
     {
         var operatorId = Guid.NewGuid();
         var tripId = Guid.NewGuid();
@@ -61,7 +61,7 @@ public sealed class ListOperatorBookingsQueryHandlerTests
     }
 
     [Fact]
-    public async Task Handle_DateFilter_UsesFixedIctMidnightIntervalRegardlessOfHostTimeZone()
+    public async Task Handle_DateFilter_UsesFixedVietnamMidnightIntervalRegardlessOfHostTimeZone()
     {
         _repository.ListOperatorBookingsAsync(Arg.Any<OperatorBookingListCriteria>(), Arg.Any<CancellationToken>())
             .Returns(new OperatorBookingListPage([], 0));

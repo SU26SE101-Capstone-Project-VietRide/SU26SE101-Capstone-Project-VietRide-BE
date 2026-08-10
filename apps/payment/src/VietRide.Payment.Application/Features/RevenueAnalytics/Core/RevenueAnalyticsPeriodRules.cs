@@ -1,13 +1,13 @@
 using System.Globalization;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Payment.Application.Features.RevenueAnalytics.Core;
 
 public static class RevenueAnalyticsPeriodRules
 {
-    public const string Timezone = "Asia/Ho_Chi_Minh";
+    public const string Timezone = BusinessTime.TimeZoneId;
     private const int MaximumRangeDays = 366;
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
 
     public static RevenueAnalyticsRange AdminRange(DateOnly? from, DateOnly? to)
     {
@@ -126,8 +126,8 @@ public static class RevenueAnalyticsPeriodRules
 
     public static int ClampTop(int? top) => Math.Clamp(top ?? 5, 1, 20);
 
-    private static DateTimeOffset ToUtc(DateOnly date)
-        => new DateTimeOffset(date.Year, date.Month, date.Day, 0, 0, 0, IctOffset).ToUniversalTime();
+    private static DateTimeOffset ToUtc(DateOnly date) =>
+        BusinessTime.ToUtc(date, TimeOnly.MinValue);
 
     private static CodedValidationException Validation(string field, string message)
         => new("VALIDATION_ERROR", message, [new ValidationError(field, message)]);

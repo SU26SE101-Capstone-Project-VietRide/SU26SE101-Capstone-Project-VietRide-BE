@@ -31,6 +31,18 @@ public class BookingCodeTests
     }
 
     [Fact]
+    public void Generate_AtVietnamDayBoundary_UsesVietnamCalendarDate()
+    {
+        var instant = new DateTimeOffset(2026, 8, 9, 17, 30, 0, TimeSpan.Zero);
+
+        var booking = BookingCode.Generate(instant);
+        var ticket = TicketCode.Generate(instant);
+
+        booking.Value.Should().StartWith("VR-20260810-");
+        ticket.Value.Should().StartWith("VT-20260810-");
+    }
+
+    [Fact]
     public void Parse_ValidCode_ReturnsCode()
     {
         const string raw = "VR-20260518-ABCD1234";

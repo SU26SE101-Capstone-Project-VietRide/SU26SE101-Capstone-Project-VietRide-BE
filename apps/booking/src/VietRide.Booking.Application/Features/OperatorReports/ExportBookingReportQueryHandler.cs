@@ -30,8 +30,8 @@ public sealed class ExportBookingReportQueryHandler
         var isCancellation = request.Kind == BookingOperatorReportKind.Cancellations;
         var prefix = isCancellation ? "cancellation" : "bookings";
         IReadOnlyList<string> headers = isCancellation
-            ? ["booking_id", "booking_code", "trip_id", "status", "cancelled_at", "cancellation_reason", "total_amount_vnd"]
-            : ["booking_id", "booking_code", "trip_id", "status", "passenger_count", "total_amount_vnd", "created_at", "confirmed_at", "completed_at"];
+            ? ["booking_id", "booking_code", "trip_id", "status", "cancelled_at_asia_ho_chi_minh", "cancellation_reason", "total_amount_vnd"]
+            : ["booking_id", "booking_code", "trip_id", "status", "passenger_count", "total_amount_vnd", "created_at_asia_ho_chi_minh", "confirmed_at_asia_ho_chi_minh", "completed_at_asia_ho_chi_minh"];
         var currencyColumns = isCancellation
             ? (IReadOnlySet<int>)new HashSet<int> { 6 }
             : new HashSet<int> { 5 };
@@ -66,7 +66,7 @@ public sealed class ExportBookingReportQueryHandler
                     ExcelReportCell.TextValue(row.TripId.ToString("D")),
                     ExcelReportCell.TextValue(row.Status),
                     row.CancelledAt.HasValue
-                        ? ExcelReportCell.DateTimeValue(row.CancelledAt.Value.UtcDateTime)
+                        ? ExcelReportCell.DateTimeValue(row.CancelledAt.Value)
                         : ExcelReportCell.BlankValue(),
                     ExcelReportCell.TextValue(row.CancellationReason ?? string.Empty),
                     ExcelReportCell.IntegerValue(row.TotalAmountVnd),
@@ -81,12 +81,12 @@ public sealed class ExportBookingReportQueryHandler
                     ExcelReportCell.TextValue(row.Status),
                     ExcelReportCell.IntegerValue(row.PassengerCount),
                     ExcelReportCell.IntegerValue(row.TotalAmountVnd),
-                    ExcelReportCell.DateTimeValue(row.CreatedAt.UtcDateTime),
+                    ExcelReportCell.DateTimeValue(row.CreatedAt),
                     row.ConfirmedAt.HasValue
-                        ? ExcelReportCell.DateTimeValue(row.ConfirmedAt.Value.UtcDateTime)
+                        ? ExcelReportCell.DateTimeValue(row.ConfirmedAt.Value)
                         : ExcelReportCell.BlankValue(),
                     row.CompletedAt.HasValue
-                        ? ExcelReportCell.DateTimeValue(row.CompletedAt.Value.UtcDateTime)
+                        ? ExcelReportCell.DateTimeValue(row.CompletedAt.Value)
                         : ExcelReportCell.BlankValue(),
                 ]);
             }

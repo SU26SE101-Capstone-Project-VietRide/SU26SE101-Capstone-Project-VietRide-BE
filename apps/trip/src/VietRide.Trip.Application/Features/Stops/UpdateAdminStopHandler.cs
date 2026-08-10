@@ -5,9 +5,22 @@ using VietRide.Trip.Application.Abstractions.Repositories;
 
 namespace VietRide.Trip.Application.Features.Stops;
 
-public sealed class UpdateAdminStopHandler(IStopRepository stops, IUnitOfWork unitOfWork)
-    : IRequestHandler<UpdateAdminStopCommand, StopDto>
+public sealed class UpdateAdminStopHandler : IRequestHandler<UpdateAdminStopCommand, StopDto>
 {
+    private readonly ILocationRepository? locations;
+    private readonly IStopRepository stops;
+    private readonly IUnitOfWork unitOfWork;
+
+    public UpdateAdminStopHandler(
+        IStopRepository stops,
+        IUnitOfWork unitOfWork,
+        ILocationRepository? locations = null)
+    {
+        this.stops = stops;
+        this.unitOfWork = unitOfWork;
+        this.locations = locations;
+    }
+
     public async Task<StopDto> Handle(UpdateAdminStopCommand request, CancellationToken cancellationToken)
     {
         var stop = await stops.GetByIdAsync(request.StopId, cancellationToken)
@@ -19,6 +32,7 @@ public sealed class UpdateAdminStopHandler(IStopRepository stops, IUnitOfWork un
         if (request.IsActive == false) stop.Deactivate();
         stops.Update(stop);
         await unitOfWork.SaveChangesAsync(cancellationToken);
-        return StopMapper.ToDto(stop);
+        var locationContexts = StopLocationContextResolver.Resolve(locations, [stop]);
+        return StopMapper.ToDto(stop, locationContexts);
     }
 }

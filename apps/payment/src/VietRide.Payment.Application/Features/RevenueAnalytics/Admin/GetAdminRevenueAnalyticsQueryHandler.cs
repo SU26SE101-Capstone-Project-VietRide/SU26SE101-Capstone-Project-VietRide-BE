@@ -82,7 +82,7 @@ public sealed class GetAdminRevenueAnalyticsQueryHandler
                     RevenueComparisonFactory.Create(current.Paid, previous.Paid))),
             monthly,
             topOperators,
-            clock.UtcNow.UtcDateTime);
+            clock.UtcNow);
         await cache.SetAsync(cacheKey, result, RevenueReportCacheKeys.Expiration, cancellationToken);
         return result;
     }

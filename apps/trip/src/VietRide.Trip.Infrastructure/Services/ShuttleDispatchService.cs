@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Stops;
@@ -571,9 +572,9 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         return distinctStatuses[0];
     }
 
-    private static (DateOnly From, DateOnly To) ResolveDriverDateRange(DateOnly? from, DateOnly? to)
+    private (DateOnly From, DateOnly To) ResolveDriverDateRange(DateOnly? from, DateOnly? to)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(7).Date);
+        var today = BusinessTime.ToLocalDate(_clock.UtcNow);
         var resolvedFrom = from ?? today;
         var resolvedTo = to ?? today.AddDays(14);
         if (resolvedTo < resolvedFrom)
@@ -588,7 +589,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
     }
 
     private static DateTimeOffset ToUtcBoundary(DateOnly date) =>
-        new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7)).ToUniversalTime();
+        BusinessTime.ToUtc(date, TimeOnly.MinValue);
 
     public async Task<ShuttleTrackingContext> GetTrackingContextAsync(
         Guid shuttleTripId,

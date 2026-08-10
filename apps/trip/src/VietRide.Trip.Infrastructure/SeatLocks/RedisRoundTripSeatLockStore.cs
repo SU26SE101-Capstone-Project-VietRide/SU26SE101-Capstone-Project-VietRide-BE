@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using StackExchange.Redis;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Trip.Application.Abstractions.Services;
 
 namespace VietRide.Trip.Infrastructure.SeatLocks;
@@ -11,7 +12,7 @@ internal sealed class RedisRoundTripSeatLockStore : IRoundTripSeatLockStore
 {
     private const string SeatLockPrefix = "seat_lock";
     private const string IdempotencyPrefix = "trip:round_trip_lock:idempotency";
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private const string LockScript = """
         local idem_key = KEYS[1]

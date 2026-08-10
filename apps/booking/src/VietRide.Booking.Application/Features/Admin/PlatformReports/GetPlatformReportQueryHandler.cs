@@ -7,6 +7,7 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.Internal.Reports.PlatformBookings;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Booking.Application.Features.Admin.PlatformReports;
 
@@ -48,7 +49,7 @@ public sealed class GetPlatformReportQueryHandler
 
     public async Task<PlatformReportResult> Handle(GetPlatformReportQuery request, CancellationToken ct)
     {
-        var range = PlatformReportIctRange.Parse(request.From, request.To);
+        var range = PlatformReportBusinessDateRange.Parse(request.From, request.To);
         var key = BuildCacheKey(range.FromUtc, range.ToUtc);
         var cached = await TryGetCacheAsync(key, ct).ConfigureAwait(false);
         if (TryValidateResult(cached, range))
@@ -110,7 +111,7 @@ public sealed class GetPlatformReportQueryHandler
     }
 
     private async Task<PlatformReportResult> BuildReportAsync(
-        PlatformReportIctRange range,
+        PlatformReportBusinessDateRange range,
         CancellationToken ct)
     {
         Task<IReadOnlyList<PlatformBookingReportItem>> bookingTask;
@@ -161,10 +162,10 @@ public sealed class GetPlatformReportQueryHandler
                 .ThenBy(item => item.OperatorId)
                 .ToArray();
             var result = new PlatformReportResult(
-                new PlatformReportPeriod(range.From, range.To, "Asia/Ho_Chi_Minh"),
+                new PlatformReportPeriod(range.From, range.To, BusinessTime.TimeZoneId),
                 SumTotals(byOperator),
                 byOperator,
-                _clock.UtcNow.UtcDateTime);
+                _clock.UtcNow);
             ValidateResult(result, range);
             return result;
         }
@@ -209,7 +210,7 @@ public sealed class GetPlatformReportQueryHandler
 
     private bool TryValidateResult(
         PlatformReportResult? result,
-        PlatformReportIctRange range)
+        PlatformReportBusinessDateRange range)
     {
         if (result is null)
         {
@@ -230,16 +231,16 @@ public sealed class GetPlatformReportQueryHandler
 
     private void ValidateResult(
         PlatformReportResult result,
-        PlatformReportIctRange range)
+        PlatformReportBusinessDateRange range)
     {
-        var nowUtc = _clock.UtcNow.UtcDateTime;
+        var nowUtc = _clock.UtcNow;
         if (result.ByOperator is null
             || result.Totals is null
             || result.Period is null
             || result.Period.From != range.From
             || result.Period.To != range.To
-            || !string.Equals(result.Period.Timezone, "Asia/Ho_Chi_Minh", StringComparison.Ordinal)
-            || result.GeneratedAt.Kind != DateTimeKind.Utc
+            || !string.Equals(result.Period.Timezone, BusinessTime.TimeZoneId, StringComparison.Ordinal)
+            || result.GeneratedAt.Offset != TimeSpan.Zero
             || result.GeneratedAt < nowUtc.Subtract(CacheTtl)
             || result.GeneratedAt > nowUtc.AddMinutes(1))
         {

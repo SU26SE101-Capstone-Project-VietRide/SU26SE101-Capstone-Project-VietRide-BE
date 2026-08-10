@@ -45,7 +45,6 @@ public sealed record SubscriptionBuyerSnapshot(
     string ContactPhone,
     string? AddressStreet,
     string? AddressWard,
-    string? AddressDistrict,
     string? AddressProvince);
 
 public sealed record SubscriptionPaymentCreationResult(

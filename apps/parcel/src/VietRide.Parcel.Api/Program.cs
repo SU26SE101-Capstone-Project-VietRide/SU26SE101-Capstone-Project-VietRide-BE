@@ -86,48 +86,57 @@ if (registerMessaging)
 {
     using var scope = app.Services.CreateScope();
     var recurringJobs = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
-    var vietnamTimeZone = ResolveVietnamTimeZone();
     recurringJobs.AddOrUpdate<ParcelReviewTimeoutJob>(
         ParcelReviewTimeoutJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "*/5 * * * *");
+        "*/5 * * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<ParcelAdditionalPaymentTimeoutJob>(
         ParcelAdditionalPaymentTimeoutJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "*/5 * * * *");
+        "*/5 * * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<ParcelSettlementTimeoutJob>(
         ParcelSettlementTimeoutJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "*/5 * * * *");
+        "*/5 * * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<ParcelPendingAutoRejectJob>(
         ParcelPendingAutoRejectJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "*/5 * * * *");
+        "*/5 * * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<ParcelLifecycleSweepJob>(
         ParcelLifecycleSweepJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "*/5 * * * *");
+        "*/5 * * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<PendingTransferClaimRecoveryJob>(
         PendingTransferClaimRecoveryJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "*/5 * * * *");
+        "*/5 * * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<PendingCargoRecoveryOperationJob>(
         PendingCargoRecoveryOperationJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "*/5 * * * *");
+        "*/5 * * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<PlatformParcelStatsBackfillJob>(
         PlatformParcelStatsBackfillJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "*/5 * * * *");
+        "*/5 * * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<ParcelTripDisplaySnapshotBackfillJob>(
         ParcelTripDisplaySnapshotBackfillJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "*/5 * * * *");
+        "*/5 * * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<ParcelDeliveryPendingConfirmReminderJob>(
         ParcelDeliveryPendingConfirmReminderJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
-        "0 9 * * *",
-        new RecurringJobOptions { TimeZone = vietnamTimeZone });
+        // 09:00 Asia/Ho_Chi_Minh.
+        "0 2 * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
 }
 
 app.Run();
@@ -135,17 +144,5 @@ app.Run();
 static bool IsWebApplicationFactoryHost()
     => AppDomain.CurrentDomain.GetAssemblies()
         .Any(assembly => assembly.GetName().Name == "Microsoft.AspNetCore.Mvc.Testing");
-
-static TimeZoneInfo ResolveVietnamTimeZone()
-{
-    try
-    {
-        return TimeZoneInfo.FindSystemTimeZoneById("Asia/Saigon");
-    }
-    catch (TimeZoneNotFoundException)
-    {
-        return TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
-    }
-}
 
 public partial class Program;

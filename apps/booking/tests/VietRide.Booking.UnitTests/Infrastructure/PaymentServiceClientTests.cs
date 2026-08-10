@@ -49,8 +49,10 @@ public sealed class PaymentServiceClientTests
         success.Data.PaymentReturnMode.Should().Be("MOBILE_SDK");
         success.Data.VnPaySdk.Should().Be(new VnPaySdkMetadata("TESTTMN", "vietride", true));
         using var body = JsonDocument.Parse(handler.LastBody!);
-        body.RootElement.GetProperty("dueAt").GetDateTimeOffset().Should().Be(dueAt);
+        body.RootElement.GetProperty("dueAt").GetString()
+            .Should().Be("2026-07-31T10:07:00Z");
         body.RootElement.GetProperty("paymentReturnMode").GetString().Should().Be("MOBILE_SDK");
+        handler.LastBody.Should().NotContain("+00:00");
     }
 
     [Fact]

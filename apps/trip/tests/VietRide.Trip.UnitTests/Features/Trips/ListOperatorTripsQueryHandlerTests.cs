@@ -10,7 +10,7 @@ namespace VietRide.Trip.UnitTests.Features.Trips;
 public sealed class ListOperatorTripsQueryHandlerTests
 {
     [Fact]
-    public async Task Handle_NormalizesFiltersUsesInclusiveIctRangeAndEnrichesCrewInOneBatch()
+    public async Task Handle_NormalizesFiltersUsesInclusiveVietnamRangeAndEnrichesCrewInOneBatch()
     {
         var operatorId = Guid.NewGuid();
         var driverId = Guid.NewGuid();

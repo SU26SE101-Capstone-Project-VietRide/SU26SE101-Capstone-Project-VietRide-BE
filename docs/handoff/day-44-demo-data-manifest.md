@@ -14,7 +14,7 @@ uuidNamespace: 44000000-0000-5000-8000-000000000001
 startDate: runtime-required
 ```
 
-- `startDate` is an ICT calendar date and must be at least one day after the current ICT date.
+- `startDate` is an Asia/Ho_Chi_Minh calendar date and must be at least one day after the current Asia/Ho_Chi_Minh date.
   Invalid or missing input fails before any write; the seed never shifts the date silently.
 - Day 44-owned UUID primary keys are the UUIDv5/SHA-1 result of
   `uuidNamespace + canonicalFixtureKey`. Runtime code may use built-in Node crypto only to verify
@@ -26,9 +26,9 @@ startDate: runtime-required
   `44000000-0000-4000-8000-000000000001`. They are listed constants, not generated IDs.
 - The bootstrap System Admin is an external prerequisite selected only by role from the existing
   `SYSTEM_ADMIN_BOOTSTRAP_*` lifecycle. Day 44 neither assigns nor changes its UUID.
-- All timestamps below are formulas over `T0`, ICT midnight at `startDate`. Persisted
-  `TIMESTAMPTZ` values use the UTC instant represented by the ICT formula. `D+n` means
-  `startDate+n` calendar days in ICT; `M+1` means one ICT calendar month after `startDate`.
+- All timestamps below are formulas over `T0`, Asia/Ho_Chi_Minh midnight at `startDate`. Persisted
+  `TIMESTAMPTZ` values use the UTC instant represented by the Asia/Ho_Chi_Minh formula. `D+n` means
+  `startDate+n` calendar days in Asia/Ho_Chi_Minh; `M+1` means one Asia/Ho_Chi_Minh calendar month after `startDate`.
 - Unless a row below overrides it: `createdAt=T0-2d`, `updatedAt=createdAt`, nullable lifecycle
   fields are null, `deletedAt=null`, activation flags are true, monetary values are integer VND,
   and arrays are stored in the listed order.
@@ -51,18 +51,18 @@ money, inbox, Outbox, and ledger evidence are insert-once by their listed identi
 
 | Name | Exact formula |
 |---|---|
-| `T0` | ICT midnight on `startDate` |
-| `subscriptionEndStarter` | ICT midnight on `D+30` |
-| `subscriptionEndBusiness` | ICT midnight on `M+1` |
-| `topUpAt` | `D-1 09:00 ICT` |
-| `voucherValidFrom` | `D-7 00:00 ICT` |
-| `voucherValidUntil` | `D+60 23:59:59 ICT` |
+| `T0` | Asia/Ho_Chi_Minh midnight on `startDate` |
+| `subscriptionEndStarter` | Asia/Ho_Chi_Minh midnight on `D+30` |
+| `subscriptionEndBusiness` | Asia/Ho_Chi_Minh midnight on `M+1` |
+| `topUpAt` | `D-1 09:00 Asia/Ho_Chi_Minh` |
+| `voucherValidFrom` | `D-7 00:00 Asia/Ho_Chi_Minh` |
+| `voucherValidUntil` | `D+60 23:59:59 Asia/Ho_Chi_Minh` |
 | `approvedAt` | `T0-2d+10h` |
 | `ingestedAt` | `approvedAt+5m` |
 | `paidAt` | `T0-1d+10h` |
 | `invoiceIssuedAt` | `paidAt` |
 | `invoicePdfCompletedAt` | `paidAt+1m` |
-| `tripDeparture(op,r,d)` | `D+d` at R1 `08:00`, R2 `14:00`, or R3 `10:00` ICT |
+| `tripDeparture(op,r,d)` | `D+d` at R1 `08:00`, R2 `14:00`, or R3 `10:00` Asia/Ho_Chi_Minh |
 | `tripEta(op,r,d)` | departure plus route duration: R1/R2 `240m`, R3 `150m` |
 
 ## Identity fixture state
@@ -80,8 +80,8 @@ The persisted Business Demo description is exactly
 Operators A and B use Business Demo; C uses Starter. All three are active and `APPROVED`.
 Fixture business-registration/tax/phone values are test-only natural keys:
 `D44-BRN-{A|B|C}`, `D44-TAX-{A|B|C}`, and `+8490444000{1|2|3}`. Contact email equals the
-Operator Admin email. Address is `44 Demo Street`, ward `Demo Ward`, district `Demo District`,
-province `Hồ Chí Minh`; representative name is `Day44 Operator {A|B|C} Admin` and representative
+Operator Admin email. Address is street `44 Demo Street`, ward `Demo Ward`, province
+`Hồ Chí Minh`; representative name is `Day44 Operator {A|B|C} Admin` and representative
 phone equals the operator phone. Policy/bank fields are null.
 
 Every non-bootstrap account is login-ready with `status=ACTIVE`, no OAuth identity, and no
@@ -101,24 +101,26 @@ gender, and OAuth fields are null.
 Subscriptions are one-per-Operator. C is `ACTIVE`, starts `T0`, expires
 `subscriptionEndStarter`, and has null billing period/payment method. A/B are
 `ACTIVE/MONTHLY/VNPAY`, start `T0`, expire `subscriptionEndBusiness`, and have
-`currentTripsThisMonth=count(departures among that Operator's 42 generated Trips whose ICT
-year/month equals startDate's ICT year/month)`. Other usage counters equal the manifest row
+`currentTripsThisMonth=count(departures among that Operator's 42 generated Trips whose Asia/Ho_Chi_Minh
+year/month equals startDate's Asia/Ho_Chi_Minh year/month)`. Other usage counters equal the manifest row
 counts: A/B/C each have vehicles `3`, drivers `3`, assistants `1`, operator users `1`, routes `3`.
 
 ## Trip topology and state
 
 ### Stations
 
-| Key | Name | City | Ward | Latitude | Longitude | State |
-|---|---|---|---|---:|---:|---|
-| `station:mien-tay` | Bến xe Miền Tây | Hồ Chí Minh | An Lạc | `10.741037` | `106.618980` | slug `day44-ben-xe-mien-tay`, active |
-| `station:mien-dong-moi` | Bến xe Miền Đông mới | Hồ Chí Minh | Long Bình | `10.879550` | `106.816190` | slug `day44-ben-xe-mien-dong-moi`, active |
-| `station:can-tho` | Bến xe Trung tâm TP Cần Thơ | Cần Thơ | Cái Răng | `10.005200` | `105.772310` | slug `day44-ben-xe-trung-tam-can-tho`, active |
-| `station:long-chau` | Bến xe khách Phường Long Châu | Vĩnh Long | Long Châu | `10.238230` | `105.957730` | slug `day44-ben-xe-khach-phuong-long-chau`, active |
-| `station:ben-tre` | Bến xe Bến Tre | Vĩnh Long | Sơn Đông | `10.267025` | `106.359834` | slug `day44-ben-xe-ben-tre`, active |
+| Key | Name | Province snapshot | Ward snapshot | Official leaf code | Latitude | Longitude | State |
+|---|---|---|---|---|---:|---:|---|
+| `station:mien-tay` | Bến xe Miền Tây | Thành phố Hồ Chí Minh | Phường An Lạc | `27460` | `10.741037` | `106.618980` | slug `day44-ben-xe-mien-tay`, active |
+| `station:mien-dong-moi` | Bến xe Miền Đông mới | Thành phố Hồ Chí Minh | Phường Long Bình | `26833` | `10.879550` | `106.816190` | slug `day44-ben-xe-mien-dong-moi`, active |
+| `station:can-tho` | Bến xe Trung tâm TP Cần Thơ | Thành phố Cần Thơ | Phường Cái Răng | `31186` | `10.005200` | `105.772310` | slug `day44-ben-xe-trung-tam-can-tho`, active |
+| `station:long-chau` | Bến xe khách Phường Long Châu | Vĩnh Long | Phường Long Châu | `29551` | `10.238230` | `105.957730` | slug `day44-ben-xe-khach-phuong-long-chau`, active |
+| `station:ben-tre` | Bến xe Bến Tre | Vĩnh Long | Phường Bến Tre | `28789` | `10.267025` | `106.359834` | slug `day44-ben-xe-ben-tre`, active |
 
-Station address/contact/operating-hours/facilities are null, `supportsShuttle=false`, and no
-geocoding occurs. Every Operator has one active `OperatorStation` link to all five Stations;
+Every Station and copied Stop references the deterministic Location ID generated from its official
+leaf code; province/ward text is the hierarchy-derived compatibility snapshot. Station
+address/contact/operating-hours/facilities are null, `supportsShuttle=false`, and no geocoding
+occurs. Every Operator has one active `OperatorStation` link to all five Stations;
 optional override/counter/contact/instruction fields are null.
 
 ### Routes, stops, alternatives, vehicles, and schedules

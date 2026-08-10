@@ -6,7 +6,11 @@ import {
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
-import { ApiResponseExceptionFilter, ApiResponseInterceptor } from '@vietride/nest-common';
+import {
+  ApiResponseExceptionFilter,
+  ApiResponseInterceptor,
+  toVietnamIso,
+} from '@vietride/nest-common';
 import { exportSPKI, generateKeyPair, SignJWT, type KeyLike } from 'jose';
 import { ENV_TOKEN, TRACKING_JWT_VERIFIER } from '../app/tokens';
 import { JoseUserJwtVerifier } from '../auth/user-jwt.verifier';
@@ -133,7 +137,7 @@ describe('TripShareOwnerController (e2e)', () => {
     const data = response.body.data;
     expect(data).toBeDefined();
     if (!data) throw new Error('Expected trip share response data');
-    expect(data.expiresAt).toBe(EXPIRES_AT.toISOString());
+    expect(data.expiresAt).toBe(toVietnamIso(EXPIRES_AT));
     expect(new URL(data.shareUrl).hash).toMatch(/^#token=v1\./);
     expect(booking.requireBookingOwner).toHaveBeenCalledWith(USER_ID, TRIP_ID);
     expect(trips.getTrip).toHaveBeenCalledTimes(2);

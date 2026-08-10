@@ -2,13 +2,14 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Identity.Infrastructure.ExternalClients;
 
 public sealed class SubscriptionPaymentClient : ISubscriptionPaymentClient
 {
     private const string Path = "/internal/v1/payments/subscription";
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private readonly HttpClient _httpClient;
 

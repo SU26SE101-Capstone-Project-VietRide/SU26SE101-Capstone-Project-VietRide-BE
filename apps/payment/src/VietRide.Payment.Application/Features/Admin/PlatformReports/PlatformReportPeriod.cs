@@ -1,3 +1,3 @@
 namespace VietRide.Payment.Application.Features.Admin.PlatformReports;
 
-public sealed record PlatformReportPeriod(DateTime From, DateTime To, string Timezone);
+public sealed record PlatformReportPeriod(DateTimeOffset From, DateTimeOffset To, string Timezone);

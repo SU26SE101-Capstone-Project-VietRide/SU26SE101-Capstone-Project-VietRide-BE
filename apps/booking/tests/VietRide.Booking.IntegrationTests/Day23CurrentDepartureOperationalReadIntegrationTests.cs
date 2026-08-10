@@ -34,7 +34,7 @@ public sealed class Day23CurrentDepartureOperationalReadIntegrationTests
     }
 
     [Fact]
-    public async Task DateFilterUsesCurrentProjectionAcrossBothIctHalfOpenBoundaries()
+    public async Task DateFilterUsesCurrentProjectionAcrossBothVietnamHalfOpenBoundaries()
     {
         await _factory.InitializeAsync();
         var operatorId = Guid.NewGuid();

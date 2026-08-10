@@ -41,7 +41,6 @@ public sealed class CreateOperatorCommandHandlerTests
         capturedOperator.Should().NotBeNull();
         capturedOperator!.AddressStreet.Should().Be("1 Street");
         capturedOperator.AddressWard.Should().Be("Ward");
-        capturedOperator.AddressDistrict.Should().Be("District");
         capturedOperator.AddressProvince.Should().Be("Province");
         capturedOperator.RepresentativeName.Should().Be("Operator Admin");
         capturedOperator.RepresentativePhone.Should().Be("+84901234568");
@@ -128,7 +127,6 @@ public sealed class CreateOperatorCommandHandlerTests
             TaxCode: "TAX-001",
             AddressStreet: "1 Street",
             AddressWard: "Ward",
-            AddressDistrict: "District",
             AddressProvince: "Province",
             RepresentativeName: "Operator Admin",
             RepresentativePhone: "+84901234568",

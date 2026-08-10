@@ -1,17 +1,16 @@
 using System.Globalization;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Booking.Application.Features.Admin.PlatformReports;
 
-internal sealed record PlatformReportIctRange(
+internal sealed record PlatformReportBusinessDateRange(
     DateOnly From,
     DateOnly To,
     DateTimeOffset FromUtc,
     DateTimeOffset ToUtc)
 {
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
-
-    public static PlatformReportIctRange Parse(string? from, string? to)
+    public static PlatformReportBusinessDateRange Parse(string? from, string? to)
     {
         var fromDate = ParseRequiredDate(from, "from");
         var toDate = ParseRequiredDate(to, "to");
@@ -24,11 +23,11 @@ internal sealed record PlatformReportIctRange(
 
         try
         {
-            return new PlatformReportIctRange(
+            return new PlatformReportBusinessDateRange(
                 fromDate,
                 toDate,
-                ConvertToUtc(fromDate),
-                ConvertToUtc(toDate.AddDays(1)));
+                BusinessTime.ToUtc(fromDate, TimeOnly.MinValue),
+                BusinessTime.ToUtc(toDate.AddDays(1), TimeOnly.MinValue));
         }
         catch (ArgumentOutOfRangeException)
         {
@@ -51,9 +50,6 @@ internal sealed record PlatformReportIctRange(
 
         return parsed;
     }
-
-    private static DateTimeOffset ConvertToUtc(DateOnly date)
-        => new DateTimeOffset(date.Year, date.Month, date.Day, 0, 0, 0, IctOffset).ToUniversalTime();
 
     private static CodedValidationException Validation(string message)
         => new("VALIDATION_ERROR", message);

@@ -62,7 +62,6 @@ public sealed class OperatorProfileControllerMetadataTests
         Assert.Equal(request.LogoUrl, command.LogoUrl);
         Assert.Equal(request.AddressStreet, command.AddressStreet);
         Assert.Equal(request.AddressWard, command.AddressWard);
-        Assert.Equal(request.AddressDistrict, command.AddressDistrict);
         Assert.Equal(request.AddressProvince, command.AddressProvince);
         Assert.Equal(request.RepresentativeName, command.RepresentativeName);
         Assert.Equal(request.RepresentativePhone, command.RepresentativePhone);
@@ -113,7 +112,6 @@ public sealed class OperatorProfileControllerMetadataTests
             "https://cdn.vietride.app/operators/updated.png",
             "456 Nguyen Hue",
             "Ben Thanh",
-            "District 1",
             "Ho Chi Minh City",
             "Tran Van Admin",
             "+84901112222",
@@ -215,7 +213,7 @@ public sealed class OperatorProfileControllerMetadataTests
                 "ops@example.com",
                 "+84901234567",
                 null,
-                new OperatorProfileAddressResponse("123 Le Loi", "Ben Nghe", "District 1", "Ho Chi Minh City"),
+                new OperatorProfileAddressResponse("123 Le Loi", "Ben Nghe", "Ho Chi Minh City"),
                 "Nguyen Van Operator",
                 "+84907654321",
                 registrationStatus,

@@ -38,9 +38,9 @@ function toContractDayOfWeekUtc(date) {
   return day === 0 ? 7 : day;
 }
 
-const nowInIct = new Date(Date.now() + 7 * 60 * 60 * 1000);
+const nowInVietnam = new Date(Date.now() + 7 * 60 * 60 * 1000);
 const targetLocalDate = addDaysUtc(
-  new Date(Date.UTC(nowInIct.getUTCFullYear(), nowInIct.getUTCMonth(), nowInIct.getUTCDate())),
+  new Date(Date.UTC(nowInVietnam.getUTCFullYear(), nowInVietnam.getUTCMonth(), nowInVietnam.getUTCDate())),
   1,
 );
 const day11DepartureDate = formatDateOnlyUtc(targetLocalDate);

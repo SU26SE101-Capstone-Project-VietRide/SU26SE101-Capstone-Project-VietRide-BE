@@ -15,6 +15,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 
 | Entity | Purpose | Key business fields |
 |---|---|---|
+| `Location` | Danh mục hành chính hiện hành hai cấp. | root `PROVINCE\|MUNICIPALITY`; leaf `WARD\|COMMUNE\|SPECIAL_ZONE`; self-FK `parentLocationId` |
 | `Station` | Bến canonical platform-level (KHÔNG có operatorId). | `slug` UNIQUE, `supportsShuttle`, `operatingHours` JSONB, `facilities` JSONB |
 | `OperatorStation` | Mapping nhà xe ↔ bến. | UNIQUE `(operatorId, stationId)`, `counterLocation`, `instructions` |
 | `Stop` | Điểm dừng dọc tuyến (operator-owned). | `googlePlaceId`, `sharedSuggestion`, `replacedByStopId` self-FK |
@@ -22,7 +23,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `RouteStop` | Junction Route↔Stop intermediate. | composite PK, `orderIndex`, `allowPickup`+`allowDropoff` (CHECK ≥1 true), `distanceFromOriginKm` |
 | `RouteStopFareTemplate` | **Exception only** override `baseFare` per stop với half-open time window. | `effectiveFrom`/`effectiveUntil`; DB exclusion guard chống overlap |
 | `OperatorFareSurchargeSetting` | Global holiday-fare switch per logical operator. | `operatorId` PK, `isEnabled`; missing row = disabled |
-| `OperatorFareSurchargePeriod` | Named holiday surcharge window. | Inclusive ICT dates, percent `1..100`, active + soft-delete; DB exclusion guard chống active overlap |
+| `OperatorFareSurchargePeriod` | Named holiday surcharge window. | Inclusive Asia/Ho_Chi_Minh dates, percent `1..100`, active + soft-delete; DB exclusion guard chống active overlap |
 | `AlternativeRoute` | Tuyến thay thế của Route; không giới hạn số tuyến active. | Stop sequence riêng — KHÔNG reuse `RouteStop` |
 | `RouteChangeProposal` | Snapshot đổi tuyến do Driver/Assistant đề xuất. | `EXISTING` giữ source version; `CUSTOM` được promote khi Operator duyệt |
 | `AlternativeRouteStop` | Junction AlternativeRoute↔Stop. | composite PK, `orderIndex` |
@@ -46,6 +47,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 
 ## Design Decisions
 
+- **`Location` follows the current two-level official catalog** — root units have no parent; leaf units must reference a root through `parent_location_id`. Public codes remain strings so leading zeroes are preserved. New Station/Stop records reference active leaf Locations; Station `city`/`ward` remain compatibility snapshots derived from the hierarchy.
 - **`Station` canonical, không có `operatorId`** — operator tự tạo Station (autocomplete dedupe ở UI, xem 4.3). Multiple operators có thể link cùng Station qua OperatorStation.
 - **`OperatorStation.operator_id` là LOGICAL FK** (no `REFERENCES`) tới `vietride_identity.operators` — tránh cross-DB FK constraint. App-layer validate.
 - **`Stop.replaced_by_stop_id` self-FK** với `ON DELETE SET NULL` + CHECK `replaced_by_stop_id <> id` (no self-reference). Cycle detection enforced app-layer.
@@ -54,7 +56,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 - **`RouteStop` PRIMARY KEY `(route_id, stop_id)`** với UNIQUE phụ `(route_id, order_index)` — 1 stop xuất hiện 1 lần per route + order_index unique trên cùng route.
 - **`RouteStop` CHECK `allow_pickup OR allow_dropoff`** — enforce v6 rule "ít nhất 1 phải true".
 - **`RouteStopFareTemplate` KHÔNG composite key** trên `(route_id, stop_id)` mà dùng surrogate UUID + half-open `[effectiveFrom,effectiveUntil)` window — cho phép nhiều entry cùng stop với time windows khác nhau (future-dated pricing). PostgreSQL `btree_gist` + `ex_route_stop_fare_templates_no_overlap` enforce không overlap ngay cả khi concurrent; boundary liền kề được phép và `effectiveUntil = NULL` là open-ended.
-- **Holiday surcharge is Trip-owned** because matching depends on `Trip.departure_date_time`. `operator_id` remains a logical Identity reference with no DB FK. Inclusive ICT date windows are represented as half-open PostgreSQL `daterange(start_date,end_date+1,'[)')`; a partial GiST exclusion constraint applies only to active, non-deleted rows, so concurrent overlap is rejected while inactive drafts may coexist.
+- **Holiday surcharge is Trip-owned** because matching depends on `Trip.departure_date_time`. `operator_id` remains a logical Identity reference with no DB FK. Inclusive Asia/Ho_Chi_Minh date windows are represented as half-open PostgreSQL `daterange(start_date,end_date+1,'[)')`; a partial GiST exclusion constraint applies only to active, non-deleted rows, so concurrent overlap is rejected while inactive drafts may coexist.
 - **`Vehicle.licensePlate` partial unique** trên `deleted_at IS NULL` — cho phép tái dùng biển số sau khi xe RETIRED + soft delete.
 - **`Trip` 2 unique partial indexes** `(driver_user_id, departure_date_time)` và `(vehicle_id, departure_date_time)` với `status NOT IN ('CANCELLED')` — chống conflict assignment + idempotent generate (Hangfire chạy 2 lần không tạo duplicate, CANCELLED không block re-create).
 - **`Trip.source` enum** với value `VEHICLE_SUBSTITUTION` — Hangfire counter check skip cho value này (xem v6 Section 4.5 c.0).
@@ -65,7 +67,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 - **Planned ETA do Trip Service tính** — `TripStop.estimated_arrival_time` và destination ETA dùng Google Routes ordered waypoints/traffic khi có thể, cộng dwell mặc định 20 phút; fallback dùng cumulative Route metrics. Approved pre-departure Route edit và DriverSchedule `ALL_PENDING` được recompute. `Trip.planned_eta_source=GOOGLE_ROUTES|ROUTE_BASELINE` được map public thành `TRAFFIC_AWARE|FALLBACK`; GPS dynamic ETA chỉ ở Redis và không ghi đè baseline.
 - **`TripStopFare` composite PK `(trip_id, stop_id)`** — chỉ tồn tại cho stop có exception. `source` chỉ nhận `TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`; pre-Day-22 rows backfill `TEMPLATE_SNAPSHOT`, còn Day 22 không tạo snapshot mới và explicit per-Trip override dùng `MANUAL_OVERRIDE`.
 - **`DriverSchedule.day_of_week` JSONB** thay vì bit mask — đọc dễ, mở rộng nếu cần thêm flag per day.
-- **Day-23 schedule-change producer:** PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING` is the only contract that may cascade a generated Trip departure; only `ALL_PENDING` mutates Trips, and no dedicated Trip schedule endpoint/Gateway route exists. One captured clock requires `oldDeparture - now >= 2h` and computed `newDeparture - now >= 2h` for every affected Trip with a `CONFIRMED` Booking; equality is valid and either strict-less value rejects the whole batch. Absolute delta on ICT dates classifies same-date `<= 2h` as MINOR, same-date `> 2h && < 6h` as MEDIUM, and `>= 6h` or an ICT date change as MAJOR. Each committed change emits exact `trip.trip.schedule_changed {eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity}` atomically through Outbox with the same payload/row/MessageId identity.
+- **Day-23 schedule-change producer:** PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING` is the only contract that may cascade a generated Trip departure; only `ALL_PENDING` mutates Trips, and no dedicated Trip schedule endpoint/Gateway route exists. One captured clock requires `oldDeparture - now >= 2h` and computed `newDeparture - now >= 2h` for every affected Trip with a `CONFIRMED` Booking; equality is valid and either strict-less value rejects the whole batch. Absolute delta on Asia/Ho_Chi_Minh dates classifies same-date `<= 2h` as MINOR, same-date `> 2h && < 6h` as MEDIUM, and `>= 6h` or an Asia/Ho_Chi_Minh date change as MAJOR. Each committed change emits exact `trip.trip.schedule_changed {eventId,occurredAt,tripId,operatorId,oldDeparture,newDeparture,severity}` atomically through Outbox with the same payload/row/MessageId identity.
 - **`ShuttlePassenger.shuttle_trip_id` nullable** — passenger có thể đăng ký shuttle trước khi operator tạo ShuttleTrip (`PENDING_ASSIGNMENT` status).
 - **`Incident.photo_urls` JSONB** thay vì junction table — max 3 URLs, đơn giản, không có query cần JOIN.
 - **`RouteChangeProposalStop` composite PK `(proposal_id, stop_id)`** lưu snapshot stop bất biến ở dạng chuẩn hóa; UNIQUE `(proposal_id, order_index)` giữ thứ tự xác định. Proposal lưu `approved_alternative_route_id` và `resolution_code` để không phải suy diễn ngữ cảnh terminal về sau.
@@ -76,8 +78,10 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 
 | Index | Columns | Type | Purpose |
 |---|---|---|---|
+| `idx_locations_active_parent_sort` | `(parent_location_id, sort_order, name)` | partial B-tree | Cascade province/municipality → active ward/commune/special-zone lookup |
 | `uq_stations_slug` | `slug` | partial unique | Canonical slug lookup |
-| `idx_stations_city_province` | `(city, province)` | partial B-tree | Search station autocomplete |
+| `idx_stations_city_ward` | `(city, ward)` | partial B-tree | Compatibility snapshot lookup; hierarchy search uses `location_id` |
+| `idx_stations_location_id` | `(location_id)` | partial B-tree | Active Station lookup by leaf Location |
 | `idx_stations_supports_shuttle` | `supports_shuttle` | partial | Shuttle-enabled stations filter |
 | `uq_operator_stations_operator_station` | `(operator_id, station_id)` | unique | Avoid duplicate mapping |
 | `idx_stops_operator_id` | `operator_id` | partial | Operator's stops list |

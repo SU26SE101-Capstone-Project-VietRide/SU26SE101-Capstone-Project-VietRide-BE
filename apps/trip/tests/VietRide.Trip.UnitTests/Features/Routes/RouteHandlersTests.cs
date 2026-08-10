@@ -271,6 +271,7 @@ public sealed class RouteHandlersTests
         item.DepartureSchedules.Should().Contain(schedule => !schedule.IsActive);
         item.DepartureSchedules.Should().Contain(schedule => schedule.ValidUntil == new DateOnly(2025, 12, 31));
         item.DepartureSchedules.Should().Contain(schedule => schedule.ValidFrom == new DateOnly(2027, 1, 1));
+        item.DepartureSchedules.Should().OnlyContain(schedule => schedule.TimeZone == "Asia/Ho_Chi_Minh");
         item.DepartureSchedules.Should().NotContain(schedule => schedule.Id == otherOperatorSchedule.Id);
         item.DepartureSchedules.Should().NotContain(schedule => schedule.Id == scheduleOutsidePage.Id);
     }

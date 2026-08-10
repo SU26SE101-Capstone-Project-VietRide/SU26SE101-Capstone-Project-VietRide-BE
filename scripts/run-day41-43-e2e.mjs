@@ -388,7 +388,7 @@ function ictDate(value = new Date()) {
   }).format(value);
 }
 
-function assertIctPeriod(period, from, to, label) {
+function assertVietnamPeriod(period, from, to, label) {
   assert(period?.from === from, `${label} period.from mismatch: ${period?.from}`);
   assert(period?.to === to, `${label} period.to mismatch: ${period?.to}`);
   assert(period?.timezone === 'Asia/Ho_Chi_Minh', `${label} timezone mismatch: ${period?.timezone}`);
@@ -784,7 +784,7 @@ async function runRevenueScenario() {
   );
   assert(internalAdminResult.response.status === 200, `Internal admin revenue failed: ${internalAdminResult.text}`);
   const internalAdmin = responseData(internalAdminResult);
-  assertIctPeriod(internalAdmin.period, from, to, 'Internal admin revenue');
+  assertVietnamPeriod(internalAdmin.period, from, to, 'Internal admin revenue');
   assert(
     internalAdmin.netTransportRevenueVnd
       === internalAdmin.netTicketRevenueVnd + internalAdmin.netParcelRevenueVnd,
@@ -804,7 +804,7 @@ async function runRevenueScenario() {
   );
   assert(internalOperatorResult.response.status === 200, `Internal operator revenue failed: ${internalOperatorResult.text}`);
   const internalOperator = responseData(internalOperatorResult);
-  assertIctPeriod(internalOperator.period, from, to, 'Internal operator revenue');
+  assertVietnamPeriod(internalOperator.period, from, to, 'Internal operator revenue');
   assert(internalOperator.operatorId === operatorA, `Internal operator tenant drifted: ${internalOperatorResult.text}`);
   assert(
     internalOperator.netRevenueVnd
@@ -850,7 +850,7 @@ async function runRevenueScenario() {
   );
   assert(adminAnalyticsResult.response.status === 200, `Admin revenue analytics failed: ${adminAnalyticsResult.text}`);
   const adminAnalytics = responseData(adminAnalyticsResult);
-  assertIctPeriod(adminAnalytics.period, from, to, 'Admin revenue analytics');
+  assertVietnamPeriod(adminAnalytics.period, from, to, 'Admin revenue analytics');
   const adminRevenue = adminAnalytics.summary.revenue;
   const adminSettlement = adminAnalytics.summary.settlement;
   assert(adminRevenue.totalProjectRevenueVnd.currentValue === internalAdmin.totalProjectRevenueVnd, 'Admin total project revenue drifted from Payment summary');
@@ -905,7 +905,7 @@ async function runRevenueScenario() {
   );
   assert(dashboardResult.response.status === 200, `Admin dashboard failed: ${dashboardResult.text}`);
   const dashboard = responseData(dashboardResult);
-  assertIctPeriod(dashboard.period, from, to, 'Admin dashboard');
+  assertVietnamPeriod(dashboard.period, from, to, 'Admin dashboard');
   assert(dashboard.totalProjectRevenueVnd.currentValue === internalAdmin.totalProjectRevenueVnd, 'Dashboard total project revenue drifted');
   assert(dashboard.netTransportRevenueVnd.currentValue === internalAdmin.netTransportRevenueVnd, 'Dashboard transport revenue drifted');
   assert(dashboard.netTicketRevenueVnd.currentValue === internalAdmin.netTicketRevenueVnd, 'Dashboard ticket revenue drifted');
@@ -942,7 +942,7 @@ async function runRevenueScenario() {
   );
   assert(platformResult.response.status === 200, `Platform report failed: ${platformResult.text}`);
   const platform = responseData(platformResult);
-  assertIctPeriod(platform.period, from, to, 'Platform report');
+  assertVietnamPeriod(platform.period, from, to, 'Platform report');
   assert(platform.totals.netTransportRevenueVnd === platform.totals.netTicketRevenueVnd + platform.totals.netParcelRevenueVnd, 'Platform transport revenue did not reconcile');
   assert(platform.totals.netTicketRevenueVnd === internalAdmin.netTicketRevenueVnd, 'Platform ticket revenue drifted from Payment');
   assert(platform.totals.netParcelRevenueVnd === internalAdmin.netParcelRevenueVnd, 'Platform Parcel revenue drifted from Payment');

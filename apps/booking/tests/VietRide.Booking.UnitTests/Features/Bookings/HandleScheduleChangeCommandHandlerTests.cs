@@ -65,7 +65,7 @@ public sealed class HandleScheduleChangeCommandHandlerTests
     }
 
     [Fact]
-    public async Task CrossingIctDateRequiresMajor()
+    public async Task CrossingVietnamDateRequiresMajor()
     {
         var fixture = new Fixture();
         var oldDeparture = DateTimeOffset.Parse("2026-07-15T16:30:00Z");

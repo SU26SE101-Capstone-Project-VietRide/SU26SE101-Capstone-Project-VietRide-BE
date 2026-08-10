@@ -5,7 +5,7 @@ class ApiMetaDto {
   @ApiProperty({ example: 'req-a1b2c3d4' })
   traceId!: string;
 
-  @ApiProperty({ example: '2026-06-19T12:00:00.000Z' })
+  @ApiProperty({ example: '2026-06-19T19:00:00.000+07:00' })
   timestamp!: string;
 }
 
@@ -25,7 +25,7 @@ class TrackingLatestPointDto {
   @ApiProperty({ required: false, example: 90 })
   headingDeg?: number;
 
-  @ApiProperty({ example: '2026-06-19T10:00:00.000Z' })
+  @ApiProperty({ example: '2026-06-19T17:00:00.000+07:00' })
   recordedAt!: string;
 }
 
@@ -53,7 +53,7 @@ class TrackingTrailPointDto {
   @ApiProperty({ required: false, example: 90 })
   headingDeg?: number;
 
-  @ApiProperty({ example: '2026-06-19T10:00:00.000Z' })
+  @ApiProperty({ example: '2026-06-19T17:00:00.000+07:00' })
   recordedAt!: string;
 }
 

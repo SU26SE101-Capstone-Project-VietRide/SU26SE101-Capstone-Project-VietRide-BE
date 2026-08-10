@@ -9,7 +9,6 @@ public sealed record RegisterOperatorRequest(
     string TaxCode,
     string AddressStreet,
     string AddressWard,
-    string AddressDistrict,
     string AddressProvince,
     string RepresentativeName,
     string RepresentativePhone,

@@ -1,5 +1,6 @@
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.Services;
@@ -21,6 +22,7 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
     private readonly ITripRepository tripRepository;
     private readonly ITripSeatRepository tripSeatRepository;
     private readonly ITripStopRepository tripStopRepository;
+    private readonly IStopRepository? stopRepository;
     private readonly IFareSurchargeService? fareSurchargeService;
 
     public SearchTripsHandler(
@@ -31,7 +33,8 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         ITripStopRepository tripStopRepository,
         ILocationRepository locationRepository,
         IIdentityInternalClient identityInternalClient,
-        IFareSurchargeService? fareSurchargeService = null)
+        IFareSurchargeService? fareSurchargeService = null,
+        IStopRepository? stopRepository = null)
     {
         this.tripRepository = tripRepository;
         this.routeRepository = routeRepository;
@@ -41,6 +44,7 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         this.locationRepository = locationRepository;
         this.identityInternalClient = identityInternalClient;
         this.fareSurchargeService = fareSurchargeService;
+        this.stopRepository = stopRepository;
     }
 
     public SearchTripsHandler(
@@ -63,21 +67,18 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
 
     public async Task<SearchTripsResult> Handle(SearchTripsQuery request, CancellationToken cancellationToken)
     {
-        var localStart = new DateTimeOffset(request.DepartureDate.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7));
-        var start = localStart.ToUniversalTime();
-        var end = localStart.AddDays(1).ToUniversalTime();
-        var stationFilter = await ResolveStationFilterAsync(request, cancellationToken);
-        if (stationFilter.OriginStationIds.Count == 0 || stationFilter.DestinationStationIds.Count == 0)
+        var range = BusinessTime.GetUtcDayRange(request.DepartureDate);
+        var searchFilter = await ResolveSearchFilterAsync(request, cancellationToken);
+        var routeQuery = routeRepository.QueryNoTracking()
+            .Where(route => route.DeletedAt == null && route.IsActive);
+        if (!searchFilter.IsHierarchyMode)
         {
-            return SearchTripsResult.Create([], Page, PageSize, 0);
+            routeQuery = routeQuery.Where(route =>
+                route.OriginStationId == request.OriginStationId
+                && route.DestinationStationId == request.DestinationStationId);
         }
 
-        var routes = routeRepository.QueryNoTracking()
-            .Where(route => stationFilter.OriginStationIds.Contains(route.OriginStationId)
-                && stationFilter.DestinationStationIds.Contains(route.DestinationStationId)
-                && route.DeletedAt == null
-                && route.IsActive)
-            .ToDictionary(route => route.Id);
+        var routes = routeQuery.ToDictionary(route => route.Id);
 
         if (routes.Count == 0)
         {
@@ -92,7 +93,11 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
             .ToDictionary(station => station.Id);
         routes = routes.Values
             .Where(route => stationsById.ContainsKey(route.OriginStationId)
-                && stationsById.ContainsKey(route.DestinationStationId))
+                && stationsById.ContainsKey(route.DestinationStationId)
+                && stationsById[route.OriginStationId].IsActive
+                && stationsById[route.OriginStationId].DeletedAt is null
+                && stationsById[route.DestinationStationId].IsActive
+                && stationsById[route.DestinationStationId].DeletedAt is null)
             .ToDictionary(route => route.Id);
         if (routes.Count == 0)
         {
@@ -103,8 +108,8 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         var candidates = tripRepository.QueryNoTracking()
             .Where(trip => routeIds.Contains(trip.RouteId)
                 && trip.Status == TripStatus.SCHEDULED
-                && trip.DepartureDateTime >= start
-                && trip.DepartureDateTime < end)
+                && trip.DepartureDateTime >= range.FromUtc
+                && trip.DepartureDateTime < range.ToUtcExclusive)
             .OrderBy(trip => trip.DepartureDateTime)
             .ThenBy(trip => trip.Id)
             .ToList();
@@ -119,6 +124,12 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
             .ToArray()
             .GroupBy(stop => stop.TripId)
             .ToDictionary(group => group.Key, group => (IReadOnlyCollection<TripStop>)group.ToArray());
+        var stopIds = stopsByTrip.Values.SelectMany(stops => stops).Select(stop => stop.StopId).ToHashSet();
+        var canonicalStops = stopRepository is null
+            ? new Dictionary<Guid, Stop>()
+            : stopRepository.QueryNoTracking()
+                .Where(stop => stopIds.Contains(stop.Id) && stop.IsActive && stop.DeletedAt == null)
+                .ToDictionary(stop => stop.Id);
 
         var filtered = candidates
             .Select(trip => new
@@ -128,7 +139,20 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
                 Stops = stopsByTrip.TryGetValue(trip.Id, out var stops) ? stops : Array.Empty<TripStop>(),
             })
             .Where(item => item.Seats.Count(seat => seat.Status == TripSeatStatus.AVAILABLE) >= request.PassengerCount)
-            .Where(item => request.AllowAlongRoutePickup != true || item.Stops.Any(stop => stop.AllowPickup))
+            .Select(item => new
+            {
+                item.Trip,
+                item.Seats,
+                item.Stops,
+                Points = BuildEligiblePoints(
+                    item.Trip,
+                    routes[item.Trip.RouteId],
+                    stationsById,
+                    item.Stops,
+                    canonicalStops,
+                    searchFilter),
+            })
+            .Where(item => item.Points.PickupPoints.Count > 0 && item.Points.DropoffPoints.Count > 0)
             .ToList();
 
         var pageItems = filtered.Take(PageSize).ToList();
@@ -147,7 +171,9 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
                 stationsById[routes[item.Trip.RouteId].DestinationStationId],
                 item.Seats,
                 item.Stops,
-                adjustment));
+                adjustment,
+                item.Points.PickupPoints,
+                item.Points.DropoffPoints));
         }
 
         return SearchTripsResult.Create(projectedItems, Page, PageSize, filtered.Count);
@@ -193,51 +219,179 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         return names;
     }
 
-    private async Task<StationFilter> ResolveStationFilterAsync(
+    private static EligiblePoints BuildEligiblePoints(
+        Domain.Entities.Trip trip,
+        Route route,
+        IReadOnlyDictionary<Guid, Station> stationsById,
+        IReadOnlyCollection<TripStop> tripStops,
+        IReadOnlyDictionary<Guid, Stop> canonicalStops,
+        SearchFilter filter)
+    {
+        var originStation = stationsById[route.OriginStationId];
+        var destinationStation = stationsById[route.DestinationStationId];
+        var destinationOrderIndex = tripStops.Count == 0 ? 1 : tripStops.Max(stop => stop.OrderIndex) + 1;
+        var pickupCandidates = new List<SearchTripPointDto>();
+        var dropoffCandidates = new List<SearchTripPointDto>();
+
+        if (!filter.IsHierarchyMode || IsActiveLocationStation(originStation, filter.OriginLocationIds))
+        {
+            pickupCandidates.Add(ToStationPoint(originStation, 0, trip.DepartureDateTime, true, false));
+        }
+
+        if (!filter.IsHierarchyMode || IsActiveLocationStation(destinationStation, filter.DestinationLocationIds))
+        {
+            dropoffCandidates.Add(ToStationPoint(
+                destinationStation,
+                destinationOrderIndex,
+                trip.EstimatedArrivalTime,
+                false,
+                true));
+        }
+
+        if (filter.IsHierarchyMode)
+        {
+            foreach (var tripStop in tripStops.OrderBy(stop => stop.OrderIndex))
+            {
+                if (!canonicalStops.TryGetValue(tripStop.StopId, out var stop))
+                {
+                    continue;
+                }
+
+                if (tripStop.AllowPickup && IsInScope(stop.LocationId, filter.OriginLocationIds))
+                {
+                    pickupCandidates.Add(ToStopPoint(stop, tripStop));
+                }
+
+                if (tripStop.AllowDropoff && IsInScope(stop.LocationId, filter.DestinationLocationIds))
+                {
+                    dropoffCandidates.Add(ToStopPoint(stop, tripStop));
+                }
+            }
+        }
+
+        var pickupPoints = pickupCandidates
+            .Where(pickup => dropoffCandidates.Any(dropoff => pickup.OrderIndex < dropoff.OrderIndex))
+            .OrderBy(point => point.OrderIndex)
+            .ThenBy(point => point.StationId ?? point.StopId)
+            .ToArray();
+        var dropoffPoints = dropoffCandidates
+            .Where(dropoff => pickupCandidates.Any(pickup => pickup.OrderIndex < dropoff.OrderIndex))
+            .OrderBy(point => point.OrderIndex)
+            .ThenBy(point => point.StationId ?? point.StopId)
+            .ToArray();
+        return new EligiblePoints(pickupPoints, dropoffPoints);
+    }
+
+    private static bool IsActiveLocationStation(Station station, IReadOnlySet<Guid> locationIds)
+        => IsInScope(station.LocationId, locationIds) && station.IsActive && station.DeletedAt is null;
+
+    private static bool IsInScope(Guid? locationId, IReadOnlySet<Guid> locationIds)
+        => locationId.HasValue && locationIds.Contains(locationId.Value);
+
+    private static SearchTripPointDto ToStationPoint(
+        Station station,
+        int orderIndex,
+        DateTimeOffset estimatedTime,
+        bool allowPickup,
+        bool allowDropoff)
+        => new(
+            "STATION",
+            station.Id,
+            null,
+            station.Name,
+            station.AddressStreet,
+            orderIndex,
+            estimatedTime,
+            allowPickup,
+            allowDropoff);
+
+    private static SearchTripPointDto ToStopPoint(Stop stop, TripStop tripStop)
+        => new(
+            "STOP",
+            null,
+            stop.Id,
+            stop.Name,
+            stop.Address,
+            tripStop.OrderIndex,
+            tripStop.EstimatedArrivalTime,
+            tripStop.AllowPickup,
+            tripStop.AllowDropoff);
+
+    private async Task<SearchFilter> ResolveSearchFilterAsync(
         SearchTripsQuery request,
         CancellationToken cancellationToken)
     {
         if (request.OriginStationId.HasValue && request.DestinationStationId.HasValue)
         {
-            return new StationFilter(
-                new HashSet<Guid> { request.OriginStationId.Value },
-                new HashSet<Guid> { request.DestinationStationId.Value });
+            return new SearchFilter(false, new HashSet<Guid>(), new HashSet<Guid>());
         }
 
         if (locationRepository is null)
         {
-            throw new InvalidOperationException("Location repository is required when location codes are provided.");
+            throw new InvalidOperationException("Location repository is required when province codes are provided.");
         }
 
-        var originLocation = await locationRepository.GetActiveByCodeAsync(request.OriginLocationCode!, cancellationToken);
-        if (originLocation is null)
+        var originIds = await ResolveLocationScopeAsync(
+            request.OriginProvinceCode!,
+            request.OriginWardCode,
+            nameof(SearchTripsQuery.OriginProvinceCode),
+            nameof(SearchTripsQuery.OriginWardCode),
+            cancellationToken);
+        var destinationIds = await ResolveLocationScopeAsync(
+            request.DestinationProvinceCode!,
+            request.DestinationWardCode,
+            nameof(SearchTripsQuery.DestinationProvinceCode),
+            nameof(SearchTripsQuery.DestinationWardCode),
+            cancellationToken);
+
+        if (stopRepository is null)
         {
-            throw new ValidationException(
-                "Origin location was not found or inactive.",
-                [new ValidationError(nameof(SearchTripsQuery.OriginLocationCode), "Origin location was not found or inactive.")]);
+            throw new InvalidOperationException("Stop repository is required when province codes are provided.");
         }
 
-        var destinationLocation = await locationRepository.GetActiveByCodeAsync(request.DestinationLocationCode!, cancellationToken);
-        if (destinationLocation is null)
-        {
-            throw new ValidationException(
-                "Destination location was not found or inactive.",
-                [new ValidationError(nameof(SearchTripsQuery.DestinationLocationCode), "Destination location was not found or inactive.")]);
-        }
-
-        var originStationIds = stationRepository.QueryNoTracking()
-            .Where(station => station.LocationId == originLocation.Id && station.IsActive && station.DeletedAt == null)
-            .Select(station => station.Id)
-            .ToHashSet();
-        var destinationStationIds = stationRepository.QueryNoTracking()
-            .Where(station => station.LocationId == destinationLocation.Id && station.IsActive && station.DeletedAt == null)
-            .Select(station => station.Id)
-            .ToHashSet();
-
-        return new StationFilter(originStationIds, destinationStationIds);
+        return new SearchFilter(true, originIds, destinationIds);
     }
 
-    private sealed record StationFilter(
-        IReadOnlySet<Guid> OriginStationIds,
-        IReadOnlySet<Guid> DestinationStationIds);
+    private async Task<IReadOnlySet<Guid>> ResolveLocationScopeAsync(
+        string provinceCode,
+        string? wardCode,
+        string provinceField,
+        string wardField,
+        CancellationToken cancellationToken)
+    {
+        var province = await locationRepository!.GetActiveByCodeAsync(provinceCode, cancellationToken);
+        if (province is null || !Location.IsTopLevelType(province.Type) || province.ParentLocationId.HasValue)
+        {
+            throw new ValidationException(
+                "Province location was not found or inactive.",
+                [new ValidationError(provinceField, "Province location was not found, inactive, or not top-level.")]);
+        }
+
+        if (!string.IsNullOrWhiteSpace(wardCode))
+        {
+            var ward = await locationRepository.GetActiveByCodeAsync(wardCode, cancellationToken);
+            if (ward is null || !Location.IsLeafType(ward.Type) || ward.ParentLocationId != province.Id)
+            {
+                throw new ValidationException(
+                    "Ward location does not belong to the selected province.",
+                    [new ValidationError(wardField, "Ward location was not found, inactive, or does not belong to the selected province.")]);
+            }
+
+            return new HashSet<Guid> { ward.Id };
+        }
+
+        var children = await locationRepository.ListActiveChildrenAsync(province.Id, null, cancellationToken);
+        return children
+            .Where(location => Location.IsLeafType(location.Type))
+            .Select(location => location.Id)
+            .ToHashSet();
+    }
+
+    private sealed record SearchFilter(
+        bool IsHierarchyMode,
+        IReadOnlySet<Guid> OriginLocationIds,
+        IReadOnlySet<Guid> DestinationLocationIds);
+    private sealed record EligiblePoints(
+        IReadOnlyList<SearchTripPointDto> PickupPoints,
+        IReadOnlyList<SearchTripPointDto> DropoffPoints);
 }

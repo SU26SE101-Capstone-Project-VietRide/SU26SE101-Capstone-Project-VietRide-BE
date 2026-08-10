@@ -74,8 +74,7 @@ public sealed class ApiResponseTests
         var meta = ApiMeta.Create("trace-xyz");
 
         meta.TraceId.Should().Be("trace-xyz");
-        meta.Timestamp.Should().NotBeNullOrWhiteSpace();
-        DateTimeOffset.TryParse(meta.Timestamp, out _).Should().BeTrue();
+        meta.Timestamp.Offset.Should().Be(TimeSpan.Zero);
     }
 
     [Fact]

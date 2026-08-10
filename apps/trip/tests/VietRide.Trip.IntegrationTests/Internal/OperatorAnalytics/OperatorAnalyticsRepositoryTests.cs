@@ -18,7 +18,7 @@ namespace VietRide.Trip.IntegrationTests.Internal.OperatorAnalytics;
 public sealed class OperatorAnalyticsRepositoryTests
 {
     [Fact]
-    public async Task PostgreSqlQueriesHonorCurrentVehicleAndIctRouteSemanticsWithOneSqlEach()
+    public async Task PostgreSqlQueriesHonorCurrentVehicleAndVietnamRouteSemanticsWithOneSqlEach()
     {
         var databaseName = $"{Day29CargoNearFullOutboxIntegrationTests.ScratchDatabasePrefix}{Guid.NewGuid():N}";
         await using var setupDb = Day29CargoNearFullOutboxIntegrationTests.CreateDbContext(databaseName);

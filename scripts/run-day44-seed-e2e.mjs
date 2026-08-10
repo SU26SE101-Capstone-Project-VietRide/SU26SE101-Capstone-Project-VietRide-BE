@@ -327,8 +327,412 @@ function assertCount(database, query, expected, label) {
 
 async function api(path, options = {}) {
   const response = requestGateway(path, options);
-  if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+  if (!response.ok) {
+    const errorCode = response.body?.error?.code ?? 'UNKNOWN_ERROR';
+    const errorMessage = response.body?.error?.message ?? 'No error message returned';
+    throw new Error(`${path} returned ${response.status} ${errorCode}: ${errorMessage}`);
+  }
   return response.body?.data ?? response.body;
+}
+
+function seedCurrentFeatureSmokeData() {
+  sql(
+    `INSERT INTO vietride_trip.incidents
+      (id,trip_id,reported_by_user_id,category,description,photo_urls,latitude,longitude,reported_at,created_at,updated_at)
+    SELECT
+      'f44e0000-0000-4000-8000-000000000101',t.id,t.driver_user_id,'TRAFFIC_JAM',
+      'Day 44 current-feature incident smoke','["https://example.com/day44-incident.jpg"]'::jsonb,
+      10.7410370,106.6189800,now(),now(),now()
+    FROM vietride_trip.trips t
+    JOIN vietride_trip.routes r ON r.id=t.route_id
+    WHERE r.operator_id='6276b48c-3984-582b-9c35-0c2fbe20baa7'
+      AND r.name LIKE 'D44 A R3 %'
+      AND t.status='SCHEDULED'
+    ORDER BY t.departure_date_time,t.id
+    LIMIT 1;`,
+    'vietride_trip',
+  );
+
+  const [tripId, pickupStopId, dropoffStopId] = sql(
+    `SELECT t.id||'|'||pickup.stop_id||'|'||dropoff.stop_id
+     FROM vietride_trip.trips t
+     JOIN vietride_trip.routes r ON r.id=t.route_id
+     JOIN vietride_trip.trip_stops pickup ON pickup.trip_id=t.id AND pickup.order_index=2
+     JOIN vietride_trip.trip_stops dropoff ON dropoff.trip_id=t.id AND dropoff.order_index=3
+     WHERE r.operator_id='6276b48c-3984-582b-9c35-0c2fbe20baa7'
+       AND r.name LIKE 'D44 A R3 %'
+       AND t.status='SCHEDULED'
+     ORDER BY t.departure_date_time,t.id
+     LIMIT 1`,
+    'vietride_trip',
+  ).split('|');
+  if (!tripId || !pickupStopId || !dropoffStopId)
+    throw new Error('Current-feature smoke fixture did not resolve its Trip/Stops');
+  return { tripId, pickupStopId, dropoffStopId };
+}
+
+function assertApiFailure(response, expectedStatus, expectedCode, label) {
+  if (response.status !== expectedStatus || response.body?.error?.code !== expectedCode)
+    throw new Error(
+      `${label}: expected ${expectedStatus} ${expectedCode}, got ${response.status} ${response.body?.error?.code ?? 'NO_CODE'}`,
+    );
+}
+
+function addDateDays(value, offsetDays) {
+  const date = new Date(`${value}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  return date.toISOString().slice(0, 10);
+}
+
+async function currentFeatureSmoke() {
+  const registrationEmail = `operator.feature.${invocationId}@demo.vietride.local`;
+  const registration = await api('/v1/operators/register', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+    body: JSON.stringify({
+      name: 'Day 44 Districtless Operator',
+      contactEmail: registrationEmail,
+      contactPhone: '+84901112223',
+      businessRegistrationNumber: `D44-E2E-${invocationId}`,
+      taxCode: `D44TAX-${invocationId}`,
+      addressStreet: '1 Nguyễn Huệ',
+      addressWard: 'Phường Vũng Tàu',
+      addressProvince: 'Thành phố Hồ Chí Minh',
+      representativeName: 'Day 44 Representative',
+      representativePhone: '+84901112224',
+      password,
+    }),
+  });
+  if (!registration.operatorId) throw new Error('Districtless registration returned no operatorId');
+  assertCount(
+    'vietride_identity',
+    `SELECT count(*) FROM vietride_identity.operators WHERE id='${registration.operatorId}' AND contact_email='${registrationEmail}' AND address_street='1 Nguyễn Huệ' AND address_ward='Phường Vũng Tàu' AND address_province='Thành phố Hồ Chí Minh'`,
+    1,
+    'districtless Operator persistence',
+  );
+  assertCount(
+    'vietride_identity',
+    "SELECT count(*) FROM information_schema.columns WHERE table_schema='vietride_identity' AND table_name='operators' AND column_name='address_district'",
+    0,
+    'removed Operator district column',
+  );
+  console.log('OPERATOR_DISTRICT_REMOVAL_E2E=PASS');
+
+  const roots = await api('/v1/locations');
+  const hcm = roots.find((location) => location.code === '79');
+  if (
+    roots.length !== 34 ||
+    !hcm ||
+    hcm.type !== 'MUNICIPALITY' ||
+    hcm.parentId !== null ||
+    hcm.parentCode !== null
+  )
+    throw new Error('Location root catalog did not expose the 34 official top-level units');
+  const hcmSearch = await api(`/v1/locations?${new URLSearchParams({ search: 'Ho Chi Minh' })}`);
+  if (!hcmSearch.some((location) => location.code === '79'))
+    throw new Error('Accent-insensitive root Location search did not find Hồ Chí Minh');
+  const hcmChildrenQuery = new URLSearchParams({ parentCode: '79', search: 'Vung Tau' });
+  const hcmChildren = await api(`/v1/locations?${hcmChildrenQuery}`);
+  const vungTau = hcmChildren.find((location) => location.code === '26506');
+  if (
+    !vungTau ||
+    vungTau.name !== 'Phường Vũng Tàu' ||
+    vungTau.type !== 'WARD' ||
+    vungTau.parentCode !== '79' ||
+    vungTau.parentName !== 'Thành phố Hồ Chí Minh'
+  )
+    throw new Error('Location cascade did not expose Phường Vũng Tàu under Hồ Chí Minh');
+  console.log('LOCATION_HIERARCHY_CATALOG_E2E=PASS');
+
+  const fixture = seedCurrentFeatureSmokeData();
+  const search = async (
+    originProvince,
+    originWard,
+    destinationProvince,
+    destinationWard,
+    allowAlongRoutePickup,
+  ) => {
+    const query = new URLSearchParams({
+      originProvinceCode: originProvince,
+      destinationProvinceCode: destinationProvince,
+      departureDate: startDate,
+      passengerCount: '1',
+      allowAlongRoutePickup: String(allowAlongRoutePickup),
+    });
+    if (originWard) query.set('originWardCode', originWard);
+    if (destinationWard) query.set('destinationWardCode', destinationWard);
+    return api(`/v1/trips/search?${query}`);
+  };
+  const terminalResult = await search('79', '27460', '86', '28789', false);
+  const terminalTrip = terminalResult.items?.find((item) => item.tripId === fixture.tripId);
+  if (
+    !terminalTrip ||
+    !terminalTrip.pickupPoints?.some((point) => point.type === 'STATION') ||
+    !terminalTrip.dropoffPoints?.some((point) => point.type === 'STATION')
+  )
+    throw new Error('Terminal-to-terminal location search did not expose Station points');
+
+  const stopResult = await search('92', '31186', '86', '29551', false);
+  const stopTrip = stopResult.items?.find((item) => item.tripId === fixture.tripId);
+  if (
+    !stopTrip ||
+    !stopTrip.pickupPoints?.some(
+      (point) =>
+        point.type === 'STOP' && point.stopId === fixture.pickupStopId && point.allowPickup,
+    ) ||
+    !stopTrip.dropoffPoints?.some(
+      (point) =>
+        point.type === 'STOP' && point.stopId === fixture.dropoffStopId && point.allowDropoff,
+    )
+  )
+    throw new Error('Stop-to-stop location search did not expose eligible Stop points');
+  const reverseResult = await search('86', '29551', '92', '31186', true);
+  if (reverseResult.items?.some((item) => item.tripId === fixture.tripId))
+    throw new Error('Location search accepted a dropoff-before-pickup journey');
+  console.log('TRIP_LOCATION_STOP_SEARCH_E2E=PASS');
+
+  const login = async (email) =>
+    api('/v1/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+  const operatorA = await login('operator.a@demo.vietride.local');
+  const operatorB = await login('operator.b@demo.vietride.local');
+  const passenger = await login('passenger01@demo.vietride.local');
+  const operatorAuth = {
+    authorization: `Bearer ${operatorA.accessToken}`,
+    'content-type': 'application/json',
+  };
+  const createdStation = await api('/v1/operator/stations', {
+    method: 'POST',
+    headers: {
+      ...operatorAuth,
+      'idempotency-key': crypto.randomUUID(),
+    },
+    body: JSON.stringify({
+      name: 'Bến xe Vũng Tàu E2E',
+      latitude: 10.401234,
+      longitude: 107.121234,
+      addressStreet: '1 Đường Thùy Vân',
+      supportsShuttle: false,
+      locationCode: '26506',
+    }),
+  });
+  if (!createdStation.stationId)
+    throw new Error('Station creation with an official ward code returned no Station ID');
+  const stationDetail = await api(`/v1/stations/${createdStation.stationId}`);
+  if (
+    stationDetail.locationId !== vungTau.id ||
+    stationDetail.city !== 'Thành phố Hồ Chí Minh' ||
+    stationDetail.ward !== 'Phường Vũng Tàu'
+  )
+    throw new Error('Station did not derive City/Ward snapshots from the official leaf Location');
+  const createdStop = await api('/v1/operator/stops', {
+    method: 'POST',
+    headers: {
+      ...operatorAuth,
+      'idempotency-key': crypto.randomUUID(),
+    },
+    body: JSON.stringify({
+      name: 'Bến xe Vũng Tàu dọc tuyến E2E',
+      latitude: 10.411234,
+      longitude: 107.131234,
+      address: 'Phường Vũng Tàu, Thành phố Hồ Chí Minh',
+      locationCode: '26506',
+    }),
+  });
+  if (
+    !createdStop.id ||
+    createdStop.locationId !== vungTau.id ||
+    createdStop.city !== 'Thành phố Hồ Chí Minh' ||
+    createdStop.ward !== 'Phường Vũng Tàu'
+  )
+    throw new Error('Stop creation did not return its complete administrative hierarchy');
+  const invalidTopLevelStation = requestGateway('/v1/operator/stations', {
+    method: 'POST',
+    headers: {
+      ...operatorAuth,
+      'idempotency-key': crypto.randomUUID(),
+    },
+    body: JSON.stringify({
+      name: 'Invalid top-level Station',
+      latitude: 10.421234,
+      longitude: 107.141234,
+      supportsShuttle: false,
+      locationCode: '79',
+    }),
+  });
+  assertApiFailure(
+    invalidTopLevelStation,
+    422,
+    'VALIDATION_ERROR',
+    'top-level Station Location rejection',
+  );
+
+  const publicStations = await api(
+    `/v1/stations/search?${new URLSearchParams({ q: 'ben xe vung tau', locationId: vungTau.id })}`,
+  );
+  if (!publicStations.some((station) => station.id === createdStation.stationId))
+    throw new Error('Public Station search did not match an unaccented query');
+  const operatorStations = await api('/v1/operator/stations?search=ben%20xe%20vung%20tau', {
+    headers: operatorAuth,
+  });
+  if (!operatorStations.items?.some((mapping) => mapping.station?.id === createdStation.stationId))
+    throw new Error('Operator Station search did not match an unaccented query');
+  const operatorStops = await api('/v1/operator/stops?search=ben%20xe%20vung%20tau', {
+    headers: operatorAuth,
+  });
+  if (
+    !operatorStops.items?.some(
+      (stop) =>
+        stop.id === createdStop.id &&
+        stop.city === 'Thành phố Hồ Chí Minh' &&
+        stop.ward === 'Phường Vũng Tàu',
+    )
+  )
+    throw new Error('Operator Stop search did not match an unaccented query');
+
+  const systemAdmin = await api('/v1/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email: 'admin@vietride.app',
+      password: runtime.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD,
+    }),
+  });
+  const adminAuth = { authorization: `Bearer ${systemAdmin.accessToken}` };
+  const adminStations = await api('/v1/admin/stations?search=vung%20tau', {
+    headers: adminAuth,
+  });
+  if (!adminStations.items?.some((station) => station.id === createdStation.stationId))
+    throw new Error('Admin Station search did not match an unaccented location snapshot');
+  const adminStops = await api('/v1/admin/stops?search=ben%20xe%20vung%20tau', {
+    headers: adminAuth,
+  });
+  if (
+    !adminStops.items?.some(
+      (stop) =>
+        stop.id === createdStop.id &&
+        stop.city === 'Thành phố Hồ Chí Minh' &&
+        stop.ward === 'Phường Vũng Tàu',
+    )
+  )
+    throw new Error('Admin Stop search did not match an unaccented query');
+  console.log('LEAF_LOCATION_RESOURCE_CREATE_E2E=PASS');
+  console.log('ACCENT_INSENSITIVE_RESOURCE_SEARCH_E2E=PASS');
+
+  const [routeId, vehicleId, driverUserId] = sql(
+    `SELECT ds.route_id||'|'||ds.vehicle_id||'|'||ds.driver_user_id
+     FROM vietride_trip.driver_schedules ds
+     JOIN vietride_trip.routes r ON r.id=ds.route_id
+     WHERE ds.operator_id='6276b48c-3984-582b-9c35-0c2fbe20baa7'
+       AND r.name LIKE 'D44 A R3 %'
+     LIMIT 1`,
+    'vietride_trip',
+  ).split('|');
+  const localToday = sql("SELECT (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date", 'vietride_trip');
+  const generatedSchedule = await api('/v1/operator/driver-schedules', {
+    method: 'POST',
+    headers: {
+      ...operatorAuth,
+      'idempotency-key': crypto.randomUUID(),
+    },
+    body: JSON.stringify({
+      routeId,
+      vehicleId,
+      driverUserId,
+      assistantUserId: null,
+      dayOfWeek: [1, 2, 3, 4, 5, 6, 7],
+      departureTime: '23:59:00',
+      validFrom: localToday,
+      validUntil: addDateDays(localToday, 31),
+      baseFare: 120000,
+      isActive: true,
+    }),
+  });
+  if (!generatedSchedule.id) throw new Error('DriverSchedule creation returned no id');
+  let generatedCount = 0;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    generatedCount = Number(
+      sql(
+        `SELECT count(*) FROM vietride_trip.trips WHERE driver_schedule_id='${generatedSchedule.id}'`,
+        'vietride_trip',
+      ),
+    );
+    if (generatedCount >= 31) break;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+  }
+  const [count, minimumDate, maximumDate, plus30Count, plus31Count] = sql(
+    `SELECT count(*)||'|'||coalesce(min((departure_date_time AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)::text,'')||'|'||coalesce(max((departure_date_time AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)::text,'')||'|'||count(*) FILTER (WHERE (departure_date_time AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=DATE '${localToday}'+30)||'|'||count(*) FILTER (WHERE (departure_date_time AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=DATE '${localToday}'+31)
+     FROM vietride_trip.trips
+     WHERE driver_schedule_id='${generatedSchedule.id}'`,
+    'vietride_trip',
+  ).split('|');
+  if (
+    Number(count) !== 31 ||
+    generatedCount !== 31 ||
+    minimumDate !== localToday ||
+    maximumDate !== addDateDays(localToday, 30) ||
+    Number(plus30Count) !== 1 ||
+    Number(plus31Count) !== 0
+  ) {
+    const jobState = sql(
+      `SELECT coalesce(string_agg(j.id||':'||j.statename||':'||coalesce(s.reason,'')||':'||left(coalesce(s.data,''),1000), E'\\n'),'NO_JOB')
+       FROM hangfire.job j
+       LEFT JOIN LATERAL (
+         SELECT reason,data FROM hangfire.state WHERE jobid=j.id ORDER BY id DESC LIMIT 1
+       ) s ON true
+       WHERE j.arguments ILIKE '%${generatedSchedule.id}%'`,
+      'vietride_trip',
+    );
+    const skipState = sql(
+      `SELECT coalesce(string_agg(skipped_date||':'||reason||':'||message, E'\\n'),'NO_SKIP_LOG')
+       FROM vietride_trip.trip_generation_skip_logs
+       WHERE driver_schedule_id='${generatedSchedule.id}'`,
+      'vietride_trip',
+    );
+    throw new Error(
+      `30-day Trip generation mismatch: ${count}|${minimumDate}|${maximumDate}|${plus30Count}|${plus31Count}; Hangfire=${jobState}; Skips=${skipState}`,
+    );
+  }
+  console.log('TRIP_30_DAY_GENERATION_E2E=PASS');
+
+  const incidentList = await api(
+    '/v1/operator/incidents?category=TRAFFIC_JAM&status=OPEN&page=1&pageSize=20',
+    { headers: operatorAuth },
+  );
+  const incident = incidentList.items?.find(
+    (item) => item.incidentId === 'f44e0000-0000-4000-8000-000000000101',
+  );
+  if (
+    !incident ||
+    incident.status !== 'OPEN' ||
+    incident.trip?.tripId !== fixture.tripId ||
+    !incident.reporter?.userId ||
+    !incident.reporter?.displayName ||
+    incident.reporter?.role !== 'DRIVER'
+  )
+    throw new Error('Operator Incident list did not return enriched same-tenant data');
+  const incidentDetail = await api('/v1/operator/incidents/f44e0000-0000-4000-8000-000000000101', {
+    headers: operatorAuth,
+  });
+  if (incidentDetail.incidentId !== incident.incidentId || !incidentDetail.trip?.route?.routeId)
+    throw new Error('Operator Incident detail did not return full Trip/Route context');
+  const foreignDetail = requestGateway(
+    '/v1/operator/incidents/f44e0000-0000-4000-8000-000000000101',
+    { headers: { authorization: `Bearer ${operatorB.accessToken}` } },
+  );
+  assertApiFailure(foreignDetail, 404, 'INCIDENT_NOT_FOUND', 'cross-tenant Incident detail');
+  const passengerList = requestGateway('/v1/operator/incidents', {
+    headers: { authorization: `Bearer ${passenger.accessToken}` },
+  });
+  assertApiFailure(passengerList, 403, 'FORBIDDEN', 'Passenger Incident role gate');
+  const invalidFilter = requestGateway('/v1/operator/incidents?category=0', {
+    headers: operatorAuth,
+  });
+  assertApiFailure(invalidFilter, 422, 'VALIDATION_ERROR', 'numeric Incident category');
+  console.log('OPERATOR_INCIDENT_READ_E2E=PASS');
 }
 
 async function smoke() {
@@ -340,10 +744,26 @@ async function smoke() {
   const token = login.accessToken;
   if (!token) throw new Error('Passenger login did not return accessToken');
   const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
-  const [tripId, originStationId, destinationStationId, seatNumber] = sql(
-    "SELECT t.id||'|'||r.origin_station_id||'|'||r.destination_station_id||'|'||ts.seat_number FROM vietride_trip.trips t JOIN vietride_trip.routes r ON r.id=t.route_id JOIN vietride_trip.trip_seats ts ON ts.trip_id=t.id WHERE t.operator_id='6276b48c-3984-582b-9c35-0c2fbe20baa7' AND t.status='SCHEDULED' ORDER BY t.departure_date_time,ts.seat_number LIMIT 1",
+  const tripSearchQuery = new URLSearchParams({
+    originProvinceCode: '79',
+    originWardCode: '27460',
+    destinationProvinceCode: '92',
+    destinationWardCode: '31186',
+    departureDate: startDate,
+    passengerCount: '1',
+  });
+  const searchedTrips = await api(`/v1/trips/search?${tripSearchQuery}`);
+  const searchedTrip = searchedTrips.items?.find(
+    (trip) => trip.operatorId === '6276b48c-3984-582b-9c35-0c2fbe20baa7',
+  );
+  if (!searchedTrip) throw new Error('Hierarchy Trip search returned no bookable Operator A Trip');
+  const tripId = searchedTrip.tripId;
+  const originStationId = searchedTrip.originStation.id;
+  const destinationStationId = searchedTrip.destinationStation.id;
+  const seatNumber = sql(
+    `SELECT seat_number FROM vietride_trip.trip_seats WHERE trip_id='${tripId}' AND status='AVAILABLE' ORDER BY seat_number LIMIT 1`,
     'vietride_trip',
-  ).split('|');
+  );
   const bookingKey = crypto.randomUUID();
   const bookingBody = JSON.stringify({
     tripId,
@@ -364,6 +784,13 @@ async function smoke() {
   });
   if (booking.bookingId !== bookingReplay.bookingId)
     throw new Error('Booking idempotency replay changed the resource');
+  assertCount(
+    'vietride_booking',
+    `SELECT count(*) FROM vietride_booking.bookings WHERE id='${booking.bookingId}' AND trip_id='${tripId}'`,
+    1,
+    'hierarchy-searched Trip booking',
+  );
+  console.log('TRIP_SEARCH_TO_BOOKING_E2E=PASS');
   console.log('BOOKING_READY=PASS');
   const parcelKey = crypto.randomUUID();
   const parcelBody = JSON.stringify({
@@ -589,7 +1016,7 @@ function assertAcceptanceMatrix() {
       'vietride_identity',
       `SELECT count(*) FROM vietride_identity.operator_subscriptions WHERE operator_id='${operatorId}' AND current_trips_this_month=${expectedCounter}`,
       1,
-      `ICT trip counter ${operatorId}`,
+      `Asia/Ho_Chi_Minh trip counter ${operatorId}`,
     );
   }
 
@@ -753,6 +1180,7 @@ async function main() {
       throw new Error(`RAG provider trap observed ${providerRequests} requests`);
     console.log('RAG_READY=PASS');
     await withGatewayDiagnostics(() => smoke());
+    await withGatewayDiagnostics(() => currentFeatureSmoke());
     console.log('DAY44_RUN=PASS');
   } finally {
     run('docker', [...compose, 'down', '-v', '--remove-orphans']);

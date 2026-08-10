@@ -58,11 +58,6 @@ internal sealed class OperatorConfiguration : IEntityTypeConfiguration<Operator>
             .HasMaxLength(100)
             .IsRequired(false);
 
-        builder.Property(o => o.AddressDistrict)
-            .HasColumnName("address_district")
-            .HasMaxLength(100)
-            .IsRequired(false);
-
         builder.Property(o => o.AddressProvince)
             .HasColumnName("address_province")
             .HasMaxLength(100)

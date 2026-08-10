@@ -234,7 +234,6 @@ public sealed class SubscriptionInvoiceInboxAtomicityTests
                 "0900000000",
                 "1 Nguyen Hue",
                 null,
-                "Quan 1",
                 "TP.HCM"));
     }
 

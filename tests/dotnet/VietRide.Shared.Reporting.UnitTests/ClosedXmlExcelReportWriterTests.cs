@@ -36,7 +36,7 @@ public sealed class ClosedXmlExcelReportWriterTests
     public async Task WriteAsync_TypedUnicodeRow_PreservesCellTypesAndFormats()
     {
         var writer = new ClosedXmlExcelReportWriter();
-        var when = new DateTime(2026, 7, 18, 8, 30, 0, DateTimeKind.Utc);
+        var when = new DateTimeOffset(2026, 7, 18, 8, 30, 0, TimeSpan.Zero);
         var spec = new ExcelReportSpec(
             "Revenue",
             ["note", "amount_vnd", "ratio", "date", "occurred_at", "active"],
@@ -60,7 +60,7 @@ public sealed class ClosedXmlExcelReportWriterTests
         sheet.Cell(2, 2).Style.NumberFormat.Format.Should().Be("#,##0");
         sheet.Cell(2, 3).GetValue<decimal>().Should().Be(62.5m);
         sheet.Cell(2, 4).DataType.Should().Be(XLDataType.DateTime);
-        sheet.Cell(2, 5).GetDateTime().Should().Be(when);
+        sheet.Cell(2, 5).GetDateTime().Should().Be(new DateTime(2026, 7, 18, 15, 30, 0));
         sheet.Cell(2, 6).GetBoolean().Should().BeTrue();
     }
 

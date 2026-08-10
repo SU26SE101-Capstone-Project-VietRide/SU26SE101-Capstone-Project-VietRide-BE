@@ -25,7 +25,6 @@ public sealed class UpdateOperatorProfileValidator : AbstractValidator<UpdateOpe
             .WithMessage("LogoUrl must be an owned Firebase operator logo URL.");
         RuleFor(command => command.AddressStreet).NotEmpty().MaximumLength(255);
         RuleFor(command => command.AddressWard).NotEmpty().MaximumLength(100);
-        RuleFor(command => command.AddressDistrict).NotEmpty().MaximumLength(100);
         RuleFor(command => command.AddressProvince).NotEmpty().MaximumLength(100);
         RuleFor(command => command.RepresentativeName).NotEmpty().MaximumLength(255);
         RuleFor(command => command.RepresentativePhone)

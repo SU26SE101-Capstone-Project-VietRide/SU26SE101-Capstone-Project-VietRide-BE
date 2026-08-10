@@ -540,7 +540,6 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
                 $"+8490{phoneSuffix}",
                 "1 Street",
                 "Ward",
-                "District",
                 "Province",
                 "Operator Admin",
                 "+84901234568");
@@ -642,7 +641,6 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
                 "+84901234567",
                 "1 Street",
                 "Ward",
-                "District",
                 "Province",
                 "Operator Admin",
                 "+84901234568");

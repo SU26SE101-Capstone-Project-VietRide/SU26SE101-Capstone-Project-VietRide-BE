@@ -67,6 +67,32 @@ public sealed class Day23ExplicitOutboxIdentityTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Enqueue_NormalizesNestedInstantStringsToCanonicalUtcZ()
+    {
+        var eventId = Guid.NewGuid();
+        var payload = JsonSerializer.Serialize(new
+        {
+            eventId,
+            occurredAt = "2026-08-10T12:00:00+07:00",
+            nested = new { expiresAt = "2026-08-10T13:00:00+07:00" },
+            message = "2026-08-10T12:00:00+07:00",
+        });
+
+        await using var context = _fixture.CreateContext();
+        var outbox = new IntegrationEventOutbox(_fixture.CreateStore(context));
+        await outbox.EnqueueAsync(eventId, "trip.trip.schedule_changed", payload);
+        await context.SaveChangesAsync();
+
+        var row = await context.OutboxEvents.SingleAsync();
+        using var persisted = JsonDocument.Parse(row.Payload);
+        persisted.RootElement.GetProperty("occurredAt").GetString().Should().EndWith("Z");
+        persisted.RootElement.GetProperty("nested").GetProperty("expiresAt").GetString()
+            .Should().EndWith("Z");
+        persisted.RootElement.GetProperty("message").GetString()
+            .Should().Be("2026-08-10T12:00:00+07:00");
+    }
+
+    [Fact]
     public async Task LegacyOverload_RemainsCompatibleAndAllocatesANewIdentity()
     {
         await using (var writeContext = _fixture.CreateContext())

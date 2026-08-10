@@ -68,7 +68,10 @@ describe('createProxyHandler auth enforcement', () => {
         code: 'ROUTE_NOT_FOUND',
         message: 'No upstream registered for /v1/unknown',
       },
-      meta: { traceId: 'req-missing-route' },
+      meta: {
+        traceId: 'req-missing-route',
+        timestamp: expect.stringMatching(/\+07:00$/),
+      },
     });
     expect(signer.sign).not.toHaveBeenCalled();
     expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
@@ -155,6 +158,7 @@ describe('createProxyHandler auth enforcement', () => {
       success: false,
       statusCode: 401,
       error: { code: 'AUTH_TOKEN_INVALID' },
+      meta: { timestamp: expect.stringMatching(/\+07:00$/) },
     });
     expect(signer.sign).not.toHaveBeenCalled();
     expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
@@ -281,7 +285,10 @@ describe('createProxyHandler auth enforcement', () => {
         code: 'UPSTREAM_UNAVAILABLE',
         message: 'Upstream service unavailable',
       },
-      meta: { traceId: 'req-upstream' },
+      meta: {
+        traceId: 'req-upstream',
+        timestamp: expect.stringMatching(/\+07:00$/),
+      },
     });
     expect(next).not.toHaveBeenCalled();
   });
@@ -359,10 +366,7 @@ describe('createProxyHandler auth enforcement', () => {
       'OPERATOR_STAFF',
     ],
     ['/v1/operator/shuttle-trips', 'OPERATOR_STAFF'],
-    [
-      '/v1/operator/trips/11111111-1111-4111-8111-111111111111/seats/A1/disable',
-      'OPERATOR_STAFF',
-    ],
+    ['/v1/operator/trips/11111111-1111-4111-8111-111111111111/seats/A1/disable', 'OPERATOR_STAFF'],
   ])('rejects UI-gap route %s for role %s at Gateway', async (path, role) => {
     const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);

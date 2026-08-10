@@ -25,6 +25,9 @@ public sealed class DeactivateLocationHandler : IRequestHandler<DeactivateLocati
         locationRepository.Update(location);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return LocationMapper.ToDto(location);
+        var parent = location.ParentLocationId.HasValue
+            ? await locationRepository.GetByIdAsync(location.ParentLocationId.Value, cancellationToken)
+            : null;
+        return LocationMapper.ToDto(location, parent);
     }
 }

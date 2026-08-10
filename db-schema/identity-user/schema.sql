@@ -102,7 +102,6 @@ CREATE TABLE operators (
     logo_url TEXT NULL,
     address_street VARCHAR(255) NULL,
     address_ward VARCHAR(100) NULL,
-    address_district VARCHAR(100) NULL,
     address_province VARCHAR(100) NULL,
     representative_name VARCHAR(255) NULL,
     representative_phone VARCHAR(20) NULL,

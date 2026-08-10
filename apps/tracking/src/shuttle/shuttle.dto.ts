@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { toUtcIso } from '@vietride/nest-common';
 
 export const JoinShuttleTrackingSchema = z.object({
   shuttleTripId: z.string().uuid(),
@@ -13,7 +14,7 @@ export const ShuttleGpsUpdateSchema = z.object({
   longitude: z.number().min(-180).max(180),
   speedKmh: z.number().min(0).optional(),
   heading: z.number().min(0).max(360).optional(),
-  recordedAt: z.string().datetime(),
+  recordedAt: z.string().datetime({ offset: true }).transform(toUtcIso),
 });
 
 export type ShuttleGpsUpdateDto = z.infer<typeof ShuttleGpsUpdateSchema>;

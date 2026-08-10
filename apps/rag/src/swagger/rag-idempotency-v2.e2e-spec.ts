@@ -37,7 +37,7 @@ class IdempotencyV2TestController {
     if (body.fail) {
       throw new BadRequestException({ errorCode: 'TEST_REJECTED', detail: 'Rejected once' });
     }
-    return { value: body.value };
+    return { value: body.value, occurredAt: '2026-08-10T05:00:00Z' };
   }
 }
 
@@ -113,6 +113,33 @@ describe('RAG idempotency v2 HTTP behavior (e2e)', () => {
     expect(first.status).toBe(200);
     expect(replay.status).toBe(200);
     expect(replay.body).toBe(first.body);
+    expect(JSON.parse(first.body).data.occurredAt).toBe('2026-08-10T12:00:00.000+07:00');
+    const cached = [...values.values()].find((value) => value.includes('occurredAt'));
+    expect(cached).toContain('2026-08-10T05:00:00.000Z');
+    expect(cached).not.toContain('+07:00');
+    expect(controller.calls).toBe(1);
+  });
+
+  it('converts a legacy cached UTC response at the public replay boundary', async () => {
+    const operationId = '44444444-4444-4444-8444-444444444444';
+    await postJson(operationId, '{"value":"legacy"}');
+    const cacheEntry = [...values.entries()].find(([, value]) => value.includes('occurredAt'));
+    expect(cacheEntry).toBeDefined();
+    if (!cacheEntry) throw new Error('Expected seeded idempotency response');
+    const [key, value] = cacheEntry;
+    const replay = JSON.parse(value) as { body: string };
+    replay.body = JSON.stringify({
+      success: true,
+      statusCode: 200,
+      data: { occurredAt: '2026-08-10T05:00:00Z' },
+      meta: { timestamp: '2026-08-10T05:00:00Z' },
+    });
+    values.set(key, JSON.stringify(replay));
+
+    const response = await postJson(operationId, '{"value":"legacy"}');
+    const body = JSON.parse(response.body);
+    expect(body.data.occurredAt).toBe('2026-08-10T12:00:00.000+07:00');
+    expect(body.meta.timestamp).toBe('2026-08-10T12:00:00.000+07:00');
     expect(controller.calls).toBe(1);
   });
 

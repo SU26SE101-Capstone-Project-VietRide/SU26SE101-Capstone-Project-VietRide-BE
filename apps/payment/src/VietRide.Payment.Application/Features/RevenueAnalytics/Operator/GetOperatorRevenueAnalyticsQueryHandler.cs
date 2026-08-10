@@ -99,7 +99,7 @@ public sealed class GetOperatorRevenueAnalyticsQueryHandler
                     currentRows,
                     summaryByTrip,
                     cancellationToken),
-            clock.UtcNow.UtcDateTime);
+            clock.UtcNow);
         await cache.SetAsync(cacheKey, result, RevenueReportCacheKeys.Expiration, cancellationToken);
         return result;
     }

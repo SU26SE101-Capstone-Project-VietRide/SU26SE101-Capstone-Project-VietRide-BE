@@ -44,7 +44,6 @@ public sealed class UpdateOperatorProfileHandler : IRequestHandler<UpdateOperato
             request.LogoUrl,
             request.AddressStreet,
             request.AddressWard,
-            request.AddressDistrict,
             request.AddressProvince,
             request.RepresentativeName,
             PhoneNumber.Normalize(request.RepresentativePhone).ToString(),

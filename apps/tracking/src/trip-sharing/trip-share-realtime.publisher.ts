@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Namespace } from 'socket.io';
+import { transformFrontendTimestamps } from '@vietride/nest-common';
 import {
   SHARED_ACCESS_REVOKED_EVENT,
   SHARED_ETA_UPDATE_EVENT,
@@ -46,35 +47,44 @@ export class TripShareRealtimePublisher {
   }
 
   publishGps(source: TripShareGpsSource): void {
-    this.namespace?.to(sharedTripRoom(source.tripId)).emit(SHARED_GPS_UPDATE_EVENT, {
-      location: {
-        latitude: source.latitude,
-        longitude: source.longitude,
-        heading: source.headingDeg ?? null,
-        speedKph: source.speedKmh ?? null,
-        recordedAt: source.recordedAt,
-      },
-    });
+    this.namespace?.to(sharedTripRoom(source.tripId)).emit(
+      SHARED_GPS_UPDATE_EVENT,
+      transformFrontendTimestamps({
+        location: {
+          latitude: source.latitude,
+          longitude: source.longitude,
+          heading: source.headingDeg ?? null,
+          speedKph: source.speedKmh ?? null,
+          recordedAt: source.recordedAt,
+        },
+      }),
+    );
   }
 
   publishEta(source: TripShareEtaSource): void {
-    this.namespace?.to(sharedTripRoom(source.tripId)).emit(SHARED_ETA_UPDATE_EVENT, {
-      eta: {
-        estimatedArrivalAt: source.estimatedArrivalTime,
-        remainingSeconds: source.etaMinutes * SECONDS_PER_MINUTE,
-        delayMinutes: source.delayMinutes ?? null,
-        delayStatus: source.delayStatus ?? 'UNKNOWN',
-        updatedAt: source.updatedAt,
-      },
-    });
+    this.namespace?.to(sharedTripRoom(source.tripId)).emit(
+      SHARED_ETA_UPDATE_EVENT,
+      transformFrontendTimestamps({
+        eta: {
+          estimatedArrivalAt: source.estimatedArrivalTime,
+          remainingSeconds: source.etaMinutes * SECONDS_PER_MINUTE,
+          delayMinutes: source.delayMinutes ?? null,
+          delayStatus: source.delayStatus ?? 'UNKNOWN',
+          updatedAt: source.updatedAt,
+        },
+      }),
+    );
   }
 
   publishStatus(source: TripShareStatusSource): void {
-    this.namespace?.to(sharedTripRoom(source.tripId)).emit(SHARED_TRIP_STATUS_CHANGED_EVENT, {
-      status: source.status,
-      delayMinutes: source.delayMinutes ?? null,
-      updatedAt: source.updatedAt,
-    });
+    this.namespace?.to(sharedTripRoom(source.tripId)).emit(
+      SHARED_TRIP_STATUS_CHANGED_EVENT,
+      transformFrontendTimestamps({
+        status: source.status,
+        delayMinutes: source.delayMinutes ?? null,
+        updatedAt: source.updatedAt,
+      }),
+    );
   }
 
   async revokeGrant(grantId: string, reason: TripShareAccessRevocationReason): Promise<void> {

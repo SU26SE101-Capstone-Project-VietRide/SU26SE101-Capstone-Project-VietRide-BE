@@ -8,7 +8,7 @@ public sealed class SearchTripsValidator : AbstractValidator<SearchTripsQuery>
     {
         RuleFor(query => query)
             .Must(HaveStationPairOrLocationPair)
-            .WithMessage("Provide origin/destination station ids or origin/destination location codes.");
+            .WithMessage("Provide both station ids or both province codes.");
         RuleFor(query => query.OriginStationId)
             .Must(stationId => stationId != Guid.Empty)
             .WithMessage("OriginStationId must be valid.")
@@ -22,22 +22,41 @@ public sealed class SearchTripsValidator : AbstractValidator<SearchTripsQuery>
                 || !query.DestinationStationId.HasValue
                 || query.OriginStationId.Value != query.DestinationStationId.Value)
             .WithMessage("DestinationStationId must differ from OriginStationId.");
-        RuleFor(query => query.OriginLocationCode)
+        RuleFor(query => query.OriginProvinceCode)
+            .Length(2)
             .MaximumLength(20)
-            .When(query => !string.IsNullOrWhiteSpace(query.OriginLocationCode));
-        RuleFor(query => query.DestinationLocationCode)
+            .Matches("^[0-9]+$")
+            .When(query => !HasStationPair(query) && !string.IsNullOrWhiteSpace(query.OriginProvinceCode));
+        RuleFor(query => query.OriginWardCode)
+            .Length(5)
             .MaximumLength(20)
-            .When(query => !string.IsNullOrWhiteSpace(query.DestinationLocationCode));
+            .Matches("^[0-9]+$")
+            .When(query => !HasStationPair(query) && !string.IsNullOrWhiteSpace(query.OriginWardCode));
+        RuleFor(query => query.DestinationProvinceCode)
+            .Length(2)
+            .MaximumLength(20)
+            .Matches("^[0-9]+$")
+            .When(query => !HasStationPair(query) && !string.IsNullOrWhiteSpace(query.DestinationProvinceCode));
+        RuleFor(query => query.DestinationWardCode)
+            .Length(5)
+            .MaximumLength(20)
+            .Matches("^[0-9]+$")
+            .When(query => !HasStationPair(query) && !string.IsNullOrWhiteSpace(query.DestinationWardCode));
         RuleFor(query => query.DepartureDate).NotEmpty();
         RuleFor(query => query.PassengerCount).GreaterThan(0);
     }
 
     private static bool HaveStationPairOrLocationPair(SearchTripsQuery query)
     {
-        var hasStationPair = query.OriginStationId.HasValue && query.DestinationStationId.HasValue;
-        var hasLocationPair = !string.IsNullOrWhiteSpace(query.OriginLocationCode)
-            && !string.IsNullOrWhiteSpace(query.DestinationLocationCode);
+        var hasStationPair = HasStationPair(query);
+        var hasLocationPair = !query.OriginStationId.HasValue
+            && !query.DestinationStationId.HasValue
+            && !string.IsNullOrWhiteSpace(query.OriginProvinceCode)
+            && !string.IsNullOrWhiteSpace(query.DestinationProvinceCode);
 
         return hasStationPair || hasLocationPair;
     }
+
+    private static bool HasStationPair(SearchTripsQuery query)
+        => query.OriginStationId.HasValue && query.DestinationStationId.HasValue;
 }

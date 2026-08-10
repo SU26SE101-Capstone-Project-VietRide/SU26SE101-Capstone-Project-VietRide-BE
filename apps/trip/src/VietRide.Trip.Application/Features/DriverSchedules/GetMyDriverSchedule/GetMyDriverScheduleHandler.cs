@@ -1,5 +1,6 @@
 using MediatR;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.Repositories;
 
 namespace VietRide.Trip.Application.Features.DriverSchedules.GetMyDriverSchedule;
@@ -7,7 +8,6 @@ namespace VietRide.Trip.Application.Features.DriverSchedules.GetMyDriverSchedule
 public sealed class GetMyDriverScheduleHandler
     : IRequestHandler<GetMyDriverScheduleQuery, GetMyDriverScheduleResult>
 {
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
     private const int DefaultWindowDays = 14;
 
     private readonly IClock clock;
@@ -23,17 +23,16 @@ public sealed class GetMyDriverScheduleHandler
         GetMyDriverScheduleQuery request,
         CancellationToken cancellationToken)
     {
-        var today = DateOnly.FromDateTime(clock.UtcNow.ToOffset(IctOffset).DateTime);
+        var today = BusinessTime.ToLocalDate(clock.UtcNow);
         var from = request.From ?? today;
         var to = request.To ?? today.AddDays(DefaultWindowDays);
-        var startUtc = ToUtcBoundary(from);
-        var endExclusiveUtc = ToUtcBoundary(to.AddDays(1));
+        var range = BusinessTime.GetUtcRange(from, to);
 
         var trips = tripRepository.QueryNoTracking()
             .Where(trip =>
                 (trip.DriverUserId == request.UserId || trip.AssistantUserId == request.UserId)
-                && trip.DepartureDateTime >= startUtc
-                && trip.DepartureDateTime < endExclusiveUtc)
+                && trip.DepartureDateTime >= range.FromUtc
+                && trip.DepartureDateTime < range.ToUtcExclusive)
             .OrderBy(trip => trip.DepartureDateTime)
             .ThenBy(trip => trip.Id)
             .Select(trip => new GetMyDriverScheduleDto(
@@ -50,6 +49,4 @@ public sealed class GetMyDriverScheduleHandler
         return Task.FromResult(new GetMyDriverScheduleResult(from, to, trips));
     }
 
-    private static DateTimeOffset ToUtcBoundary(DateOnly date) =>
-        new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), IctOffset).ToUniversalTime();
 }

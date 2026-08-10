@@ -164,7 +164,6 @@ public sealed class RetrySubscriptionPaymentCommandHandler
                 operatorTenant.ContactPhone,
                 operatorTenant.AddressStreet,
                 operatorTenant.AddressWard,
-                operatorTenant.AddressDistrict,
                 operatorTenant.AddressProvince));
     }
 }

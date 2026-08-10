@@ -27,7 +27,6 @@ public sealed class CreateOperatorCommandValidator : AbstractValidator<CreateOpe
         RuleFor(x => x.TaxCode).NotEmpty().MaximumLength(50);
         RuleFor(x => x.AddressStreet).NotEmpty().MaximumLength(255);
         RuleFor(x => x.AddressWard).NotEmpty().MaximumLength(100);
-        RuleFor(x => x.AddressDistrict).NotEmpty().MaximumLength(100);
         RuleFor(x => x.AddressProvince).NotEmpty().MaximumLength(100);
         RuleFor(x => x.RepresentativeName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.RepresentativePhone)

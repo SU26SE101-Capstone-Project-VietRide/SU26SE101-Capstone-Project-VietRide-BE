@@ -18,7 +18,6 @@ public sealed class Operator : BaseEntity<Guid>, ISoftDeletable, IActivatable
     public string? LogoUrl { get; private set; }
     public string? AddressStreet { get; private set; }
     public string? AddressWard { get; private set; }
-    public string? AddressDistrict { get; private set; }
     public string? AddressProvince { get; private set; }
     public string? RepresentativeName { get; private set; }
     public string? RepresentativePhone { get; private set; }
@@ -58,7 +57,6 @@ public sealed class Operator : BaseEntity<Guid>, ISoftDeletable, IActivatable
         string contactPhone,
         string? addressStreet = null,
         string? addressWard = null,
-        string? addressDistrict = null,
         string? addressProvince = null,
         string? representativeName = null,
         string? representativePhone = null)
@@ -79,7 +77,6 @@ public sealed class Operator : BaseEntity<Guid>, ISoftDeletable, IActivatable
             ContactPhone = contactPhone.Trim(),
             AddressStreet = NormalizeOptional(addressStreet),
             AddressWard = NormalizeOptional(addressWard),
-            AddressDistrict = NormalizeOptional(addressDistrict),
             AddressProvince = NormalizeOptional(addressProvince),
             RepresentativeName = NormalizeOptional(representativeName),
             RepresentativePhone = NormalizeOptional(representativePhone),
@@ -169,7 +166,6 @@ public sealed class Operator : BaseEntity<Guid>, ISoftDeletable, IActivatable
         string? logoUrl,
         string? addressStreet,
         string? addressWard,
-        string? addressDistrict,
         string? addressProvince,
         string? representativeName,
         string? representativePhone,
@@ -187,7 +183,6 @@ public sealed class Operator : BaseEntity<Guid>, ISoftDeletable, IActivatable
         LogoUrl = NormalizeOptional(logoUrl);
         AddressStreet = NormalizeOptional(addressStreet);
         AddressWard = NormalizeOptional(addressWard);
-        AddressDistrict = NormalizeOptional(addressDistrict);
         AddressProvince = NormalizeOptional(addressProvince);
         RepresentativeName = NormalizeOptional(representativeName);
         RepresentativePhone = NormalizeOptional(representativePhone);

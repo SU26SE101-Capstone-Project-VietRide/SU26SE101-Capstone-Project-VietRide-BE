@@ -57,7 +57,6 @@ public sealed class OperatorProfileController : ControllerBase
             request.LogoUrl,
             request.AddressStreet,
             request.AddressWard,
-            request.AddressDistrict,
             request.AddressProvince,
             request.RepresentativeName,
             request.RepresentativePhone,

@@ -91,7 +91,6 @@ public sealed class RegisterOperatorCommandHandler : IRequestHandler<RegisterOpe
             contactPhone.ToString(),
             request.AddressStreet.Trim(),
             request.AddressWard.Trim(),
-            request.AddressDistrict.Trim(),
             request.AddressProvince.Trim(),
             request.RepresentativeName.Trim(),
             representativePhone.ToString());

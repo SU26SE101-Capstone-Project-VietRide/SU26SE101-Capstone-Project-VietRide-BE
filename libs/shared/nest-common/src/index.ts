@@ -6,3 +6,4 @@ export * from './filters/problem-details-exception.filter';
 export * from './pipes/zod-validation.pipe';
 export * from './interceptors/logging.interceptor';
 export * from './interceptors/api-response.interceptor';
+export * from './time/business-time';

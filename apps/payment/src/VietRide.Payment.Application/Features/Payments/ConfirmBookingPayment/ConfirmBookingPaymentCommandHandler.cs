@@ -10,6 +10,7 @@ using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Payment.Application.Features.Payments.ConfirmBookingPayment;
 
@@ -341,10 +342,9 @@ public sealed class ConfirmBookingPaymentCommandHandler
 
         responseCode = signedResponseCode;
         transactionStatus = signedTransactionStatus;
-        paidAt = new DateTimeOffset(
-                DateTime.SpecifyKind(localPaidAt, DateTimeKind.Unspecified),
-                TimeSpan.FromHours(7))
-            .ToUniversalTime();
+        paidAt = BusinessTime.ToUtc(
+            DateOnly.FromDateTime(localPaidAt),
+            TimeOnly.FromDateTime(localPaidAt));
         return true;
     }
 

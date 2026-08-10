@@ -69,19 +69,31 @@ CREATE TABLE locations (
     code VARCHAR(20) NOT NULL,
     name VARCHAR(100) NOT NULL,
     type VARCHAR(20) NOT NULL,
+    parent_location_id UUID NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     sort_order INT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT chk_locations_type CHECK (type IN ('PROVINCE', 'MUNICIPALITY')),
+    CONSTRAINT chk_locations_type CHECK (
+        type IN ('PROVINCE', 'MUNICIPALITY', 'WARD', 'COMMUNE', 'SPECIAL_ZONE')
+    ),
+    CONSTRAINT chk_locations_parent_level CHECK (
+        (type IN ('PROVINCE', 'MUNICIPALITY') AND parent_location_id IS NULL)
+        OR (type IN ('WARD', 'COMMUNE', 'SPECIAL_ZONE') AND parent_location_id IS NOT NULL)
+    ),
+    CONSTRAINT fk_locations_parent_location_id
+        FOREIGN KEY (parent_location_id) REFERENCES locations (id) ON DELETE RESTRICT,
     CONSTRAINT chk_locations_sort_order_non_negative CHECK (sort_order >= 0)
 );
 
 CREATE UNIQUE INDEX uq_locations_code ON locations (code);
 CREATE INDEX idx_locations_active_sort ON locations (is_active, sort_order, name);
+CREATE INDEX idx_locations_active_parent_sort
+    ON locations (parent_location_id, sort_order, name)
+    WHERE parent_location_id IS NOT NULL AND is_active = TRUE;
 
 COMMENT ON TABLE locations IS
-    'Admin-managed location catalog for FE trip search/cache. Stations and Stops point here via nullable location_id.';
+    'Current two-level administrative catalog. Province/municipality rows are roots; ward/commune/special-zone rows are leaves.';
 
 -- -----------------------------------------------------------------------------
 -- stations (canonical platform-level)
@@ -98,7 +110,7 @@ CREATE TABLE stations (
     longitude DECIMAL(10,7) NULL,
     contact_phone VARCHAR(20) NULL,
     contact_email VARCHAR(255) NULL,
-    -- {"mon":"06:00-22:00",...} local ICT
+    -- {"mon":"06:00-22:00",...} local Asia/Ho_Chi_Minh
     operating_hours JSONB NULL,
     -- e.g. ["waiting_room","parking","ticket_counter"]
     facilities JSONB NULL,
@@ -125,9 +137,9 @@ CREATE INDEX idx_stations_name_trgm ON stations USING gin (name gin_trgm_ops)
 COMMENT ON TABLE stations IS
     'Canonical platform-level bến xe. KHÔNG có operatorId. OperatorStation maps which operators serve a Station.';
 COMMENT ON COLUMN stations.city IS
-    'Province or centrally governed municipality in the current two-tier address model.';
+    'Compatibility snapshot derived from the parent of stations.location_id.';
 COMMENT ON COLUMN stations.ward IS
-    'Commune, ward or special zone. Nullable only for legacy rows awaiting manual normalization.';
+    'Compatibility snapshot derived from the leaf referenced by stations.location_id.';
 COMMENT ON COLUMN stations.supports_shuttle IS
     'Per-Station flag toggled by Operator or SYSTEM_ADMIN. Only true Stations support shuttle service. Stops never have shuttle.';
 
@@ -226,7 +238,7 @@ CREATE TABLE operator_fare_surcharge_settings (
 );
 
 -- -----------------------------------------------------------------------------
--- operator_fare_surcharge_periods (inclusive ICT holiday dates)
+-- operator_fare_surcharge_periods (inclusive Asia/Ho_Chi_Minh holiday dates)
 -- -----------------------------------------------------------------------------
 CREATE TABLE operator_fare_surcharge_periods (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -259,7 +271,7 @@ CREATE INDEX idx_operator_fare_surcharge_periods_operator_start
 COMMENT ON TABLE operator_fare_surcharge_settings IS
     'Trip-owned operator holiday-fare switch. operator_id is a logical FK to Identity; missing row means disabled.';
 COMMENT ON TABLE operator_fare_surcharge_periods IS
-    'Named holiday surcharge windows using inclusive ICT calendar dates. Active windows cannot overlap per operator.';
+    'Named holiday surcharge windows using inclusive Asia/Ho_Chi_Minh calendar dates. Active windows cannot overlap per operator.';
 
 -- -----------------------------------------------------------------------------
 -- route_stops (junction: only intermediate stops; not origin/destination Station)
@@ -421,7 +433,7 @@ CREATE TABLE driver_schedules (
     driver_user_id UUID NOT NULL,    -- logical FK → identity.users (role=DRIVER)
     assistant_user_id UUID NULL,     -- logical FK → identity.users (role=ASSISTANT)
     day_of_week JSONB NOT NULL,      -- e.g. [1,3,5] (1=Mon, 7=Sun)
-    departure_time TIME NOT NULL,    -- local ICT
+    departure_time TIME NOT NULL,    -- local Asia/Ho_Chi_Minh
     valid_from DATE NOT NULL,
     valid_until DATE NULL,
     base_fare BIGINT NULL,
@@ -447,7 +459,7 @@ CREATE INDEX idx_driver_schedules_route_active
 COMMENT ON COLUMN driver_schedules.day_of_week IS
     'JSONB array of ints 1-7 (1=Mon). Hangfire weekly job iterates dayOfWeek to generate Trip.';
 COMMENT ON COLUMN driver_schedules.departure_time IS
-    'TIME (no timezone). Stored as local ICT semantic.';
+    'TIME (no timezone). Stored as local Asia/Ho_Chi_Minh semantic.';
 COMMENT ON COLUMN driver_schedules.base_fare IS
     'Optional recurring fare override. Generated Trips fall back to routes.base_fare when NULL.';
 

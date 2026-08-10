@@ -94,10 +94,10 @@ public sealed class GetPlatformReportQueryHandler
             }
 
             return new PlatformReportResult(
-                new PlatformReportPeriod(range.From.UtcDateTime, range.To.UtcDateTime, "UTC"),
+                new PlatformReportPeriod(range.From, range.To, "UTC"),
                 totals,
                 byOperator,
-                _clock.UtcNow.UtcDateTime);
+                _clock.UtcNow);
         }
         catch (PlatformReportValueOverflowException)
         {

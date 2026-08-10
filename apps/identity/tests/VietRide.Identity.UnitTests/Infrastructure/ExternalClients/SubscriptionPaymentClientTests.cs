@@ -44,6 +44,42 @@ public sealed class SubscriptionPaymentClientTests
     }
 
     [Fact]
+    public async Task CreateAsync_SerializesEveryInternalInstantAsUtcZ()
+    {
+        var paymentId = Guid.NewGuid();
+        string? requestBody = null;
+        var client = CreateClient(async (request, cancellationToken) =>
+        {
+            requestBody = await request.Content!.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = JsonContent.Create(new
+                {
+                    success = true,
+                    statusCode = 201,
+                    data = new
+                    {
+                        paymentId,
+                        status = "PENDING_REDIRECT",
+                        paymentRedirectUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+                        invoiceStatus = (string?)null,
+                    },
+                }),
+            };
+        });
+        var request = CreateRequest() with
+        {
+            DueAt = new DateTimeOffset(2026, 8, 10, 5, 15, 0, TimeSpan.Zero),
+        };
+
+        var result = await client.CreateAsync(request);
+
+        result.PaymentId.Should().Be(paymentId);
+        requestBody.Should().Contain("2026-08-10T05:15:00Z");
+        requestBody.Should().NotContain("+00:00");
+    }
+
+    [Fact]
     public async Task CreateAsync_WhenPaymentTransportFails_ReturnsServiceUnavailableError()
     {
         var client = CreateClient((_, _) => throw new HttpRequestException("Connection refused."));
@@ -198,7 +234,6 @@ public sealed class SubscriptionPaymentClientTests
                     "TAX-001",
                     "operator@example.com",
                     "0900000000",
-                    null,
                     null,
                     null,
                     null)),

@@ -3,16 +3,15 @@ using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Parcel.Application.Features.Parcels.Reports;
 
 internal static class ParcelReportQuerySupport
 {
-    private static readonly TimeZoneInfo IctTimeZone = ResolveIctTimeZone();
-
     public static (DateOnly From, DateOnly To) NormalizeRange(DateOnly? from, DateOnly? to, IClock clock)
     {
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(clock.UtcNow, IctTimeZone).DateTime);
+        var today = BusinessTime.ToLocalDate(clock.UtcNow);
         var normalizedTo = to ?? today;
         var normalizedFrom = from ?? normalizedTo.AddDays(-30);
 
@@ -93,27 +92,6 @@ internal static class ParcelReportQuerySupport
 
     private static DateTimeOffset ToUtc(DateOnly date)
     {
-        var local = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, IctTimeZone), TimeSpan.Zero);
-    }
-
-    private static TimeZoneInfo ResolveIctTimeZone()
-    {
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            try
-            {
-                return TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
-            }
-            catch (TimeZoneNotFoundException)
-            {
-                return TimeZoneInfo.CreateCustomTimeZone(
-                    "Asia/Ho_Chi_Minh", TimeSpan.FromHours(7), "ICT", "ICT");
-            }
-        }
+        return BusinessTime.ToUtc(date, TimeOnly.MinValue);
     }
 }

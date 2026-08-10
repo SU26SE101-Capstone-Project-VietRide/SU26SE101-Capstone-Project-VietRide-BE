@@ -6,6 +6,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Features.Locations;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Features.Stations;
@@ -106,18 +107,29 @@ public sealed class CreateOrLinkOperatorStationHandler : IRequestHandler<CreateO
         CreateOrLinkOperatorStationCommand request,
         CancellationToken cancellationToken)
     {
+        if (locationRepository is null)
+        {
+            throw new InvalidOperationException("Location repository is required when creating a station.");
+        }
+
+        var location = await LocationHierarchyGuard.ResolveActiveLeafAsync(
+            locationRepository,
+            request.LocationId,
+            request.LocationCode,
+            nameof(request.LocationId),
+            nameof(request.LocationCode),
+            cancellationToken);
         var duplicateNearby = FindNearbyStations(request.Latitude!.Value, request.Longitude!.Value);
         if (duplicateNearby.Count > 0)
         {
             return CreateOrLinkOperatorStationResponse.DuplicateNearby(duplicateNearby);
         }
 
-        var locationId = await ResolveLocationIdAsync(request.LocationId, request.LocationCode, cancellationToken);
         var station = Station.Create(
             request.Name!,
-            CreateCollisionSafeSlug(request),
-            request.City!,
-            request.Ward!,
+            CreateCollisionSafeSlug(request, location.Parent.Name, location.Leaf.Name),
+            location.Parent.Name,
+            location.Leaf.Name,
             request.AddressStreet,
             request.Latitude,
             request.Longitude,
@@ -126,7 +138,7 @@ public sealed class CreateOrLinkOperatorStationHandler : IRequestHandler<CreateO
             request.OperatingHours,
             request.Facilities,
             request.SupportsShuttle,
-            locationId);
+            location.Leaf.Id);
 
         await stationRepository.AddAsync(station, cancellationToken);
 
@@ -161,47 +173,6 @@ public sealed class CreateOrLinkOperatorStationHandler : IRequestHandler<CreateO
             [new ValidationError("operatorId", eligibility.Message ?? "Operator logical FK validation failed.")]);
     }
 
-    private async Task<Guid?> ResolveLocationIdAsync(Guid? locationId, string? locationCode, CancellationToken cancellationToken)
-    {
-        if (locationId.HasValue)
-        {
-            if (locationRepository is null)
-            {
-                throw new InvalidOperationException("Location repository is required when locationId is provided.");
-            }
-
-            var location = await locationRepository.GetActiveByIdAsync(locationId.Value, cancellationToken);
-            if (location is null)
-            {
-                throw new ValidationException(
-                    "Location logical FK validation failed.",
-                    [new ValidationError("locationId", "Location was not found or inactive.")]);
-            }
-
-            return location.Id;
-        }
-
-        if (string.IsNullOrWhiteSpace(locationCode))
-        {
-            return null;
-        }
-
-        if (locationRepository is null)
-        {
-            throw new InvalidOperationException("Location repository is required when locationCode is provided.");
-        }
-
-        var locationByCode = await locationRepository.GetActiveByCodeAsync(locationCode, cancellationToken);
-        if (locationByCode is null)
-        {
-            throw new ValidationException(
-                "Location logical FK validation failed.",
-                [new ValidationError("locationCode", "Location was not found or inactive.")]);
-        }
-
-        return locationByCode.Id;
-    }
-
     private IReadOnlyList<StationSearchResult> FindNearbyStations(decimal latitude, decimal longitude)
     {
         return stationRepository.QueryNoTracking()
@@ -212,15 +183,18 @@ public sealed class CreateOrLinkOperatorStationHandler : IRequestHandler<CreateO
             .ToList();
     }
 
-    private string CreateCollisionSafeSlug(CreateOrLinkOperatorStationCommand request)
+    private string CreateCollisionSafeSlug(
+        CreateOrLinkOperatorStationCommand request,
+        string city,
+        string ward)
     {
-        var baseSlug = Slugify($"{request.Name} {request.City} {request.Ward}");
+        var baseSlug = Slugify($"{request.Name} {city} {ward}");
         if (!SlugExists(baseSlug))
         {
             return baseSlug;
         }
 
-        var suffix = StableSuffix($"{request.Name}|{request.AddressStreet}|{request.City}|{request.Ward}|{request.Latitude}|{request.Longitude}");
+        var suffix = StableSuffix($"{request.Name}|{request.AddressStreet}|{city}|{ward}|{request.Latitude}|{request.Longitude}");
         var maxBaseLength = Math.Min(baseSlug.Length, 100 - suffix.Length - 1);
         return $"{baseSlug[..maxBaseLength]}-{suffix}";
     }

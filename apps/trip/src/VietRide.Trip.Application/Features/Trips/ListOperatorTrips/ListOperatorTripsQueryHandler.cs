@@ -1,5 +1,6 @@
 using MediatR;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Domain.Entities;
@@ -12,7 +13,6 @@ public sealed class ListOperatorTripsQueryHandler
     private const int DefaultPage = 1;
     private const int DefaultPageSize = 20;
     private const int MaximumPageSize = 100;
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
 
     private readonly ITripRepository trips;
     private readonly IIdentityInternalClient identity;
@@ -33,8 +33,12 @@ public sealed class ListOperatorTripsQueryHandler
         var pageSize = Math.Clamp(request.PageSize ?? DefaultPageSize, 1, MaximumPageSize);
         var routeSearch = NormalizeSearch(request.Search);
         var plateSearch = NormalizePlateSearch(routeSearch);
-        DateTimeOffset? fromUtc = request.From.HasValue ? ToUtcBoundary(request.From.Value) : null;
-        DateTimeOffset? toUtc = request.To.HasValue ? ToUtcBoundary(request.To.Value.AddDays(1)) : null;
+        DateTimeOffset? fromUtc = request.From.HasValue
+            ? BusinessTime.ToUtc(request.From.Value, TimeOnly.MinValue)
+            : null;
+        DateTimeOffset? toUtc = request.To.HasValue
+            ? BusinessTime.ToUtc(request.To.Value.AddDays(1), TimeOnly.MinValue)
+            : null;
         var sortDescending = !string.Equals(request.SortDir, "asc", StringComparison.OrdinalIgnoreCase);
 
         var rows = await trips.ListOperatorTripsAsync(
@@ -113,12 +117,6 @@ public sealed class ListOperatorTripsQueryHandler
             .Select(char.ToUpperInvariant)
             .ToArray());
         return normalized.Length == 0 ? null : normalized;
-    }
-
-    private static DateTimeOffset ToUtcBoundary(DateOnly date)
-    {
-        var local = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        return new DateTimeOffset(local, IctOffset).ToUniversalTime();
     }
 
     private static TripStatus? ToDomainStatus(OperatorTripStatusFilter? status)

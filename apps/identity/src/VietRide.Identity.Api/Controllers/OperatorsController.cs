@@ -37,7 +37,6 @@ public sealed class OperatorsController : ControllerBase
                 request.TaxCode,
                 request.AddressStreet,
                 request.AddressWard,
-                request.AddressDistrict,
                 request.AddressProvince,
                 request.RepresentativeName,
                 request.RepresentativePhone,

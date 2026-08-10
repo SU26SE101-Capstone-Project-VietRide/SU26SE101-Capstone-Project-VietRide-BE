@@ -6,11 +6,13 @@ namespace VietRide.Trip.Application.Features.Stops;
 
 public sealed class GetStopHandler : IRequestHandler<GetStopQuery, StopDto>
 {
+    private readonly ILocationRepository? locationRepository;
     private readonly IStopRepository stopRepository;
 
-    public GetStopHandler(IStopRepository stopRepository)
+    public GetStopHandler(IStopRepository stopRepository, ILocationRepository? locationRepository = null)
     {
         this.stopRepository = stopRepository;
+        this.locationRepository = locationRepository;
     }
 
     public Task<StopDto> Handle(GetStopQuery request, CancellationToken cancellationToken)
@@ -26,6 +28,7 @@ public sealed class GetStopHandler : IRequestHandler<GetStopQuery, StopDto>
             throw new CodedNotFoundException("STOP_NOT_FOUND", "Stop was not found.");
         }
 
-        return Task.FromResult(StopMapper.ToDto(stop));
+        var locations = StopLocationContextResolver.Resolve(locationRepository, [stop]);
+        return Task.FromResult(StopMapper.ToDto(stop, locations));
     }
 }

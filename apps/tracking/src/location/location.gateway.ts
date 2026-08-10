@@ -8,6 +8,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
+import { transformFrontendTimestamps } from '@vietride/nest-common';
 import { TRACKING_AUTHORIZATION_ADAPTER, TRACKING_JWT_VERIFIER } from '../app/tokens';
 import { ApproachingAlertService } from '../approaching-alert/approaching-alert.service';
 import type { TrackingUser } from '../auth/tracking-user.types';
@@ -26,7 +27,12 @@ import { shuttleRoom } from '../shuttle/shuttle.constants';
 import { JoinShuttleTrackingSchema, ShuttleGpsUpdateSchema } from '../shuttle/shuttle.dto';
 import { ShuttleService } from '../shuttle/shuttle.service';
 import { ShuttleEtaService } from '../shuttle/shuttle-eta.service';
-import { TRACKING_SOCKET_PATH, trackingOperatorFleetRoom, trackingTripCrewRoom, trackingTripRoom } from './location.constants';
+import {
+  TRACKING_SOCKET_PATH,
+  trackingOperatorFleetRoom,
+  trackingTripCrewRoom,
+  trackingTripRoom,
+} from './location.constants';
 import { JoinTripTrackingSchema } from './dto/join-trip-tracking.dto';
 import { UpdateLocationSchema } from './dto/update-location.dto';
 import { LocationService, type GpsUpdateEvent } from './location.service';
@@ -149,11 +155,12 @@ export class LocationGateway implements OnGatewayInit {
       const result = await this.shuttleService.recordLocation(parsed.data);
       if (result.duplicate) return { success: true };
       const room = shuttleRoom(parsed.data.shuttleTripId);
-      this.server.to(room).emit('shuttle:gps:update', result.gps);
+      this.server.to(room).emit('shuttle:gps:update', transformFrontendTimestamps(result.gps));
       void this.shuttleEtaService
         .handleGpsUpdate(parsed.data, context)
         .then((eta) => {
-          if (eta) this.server.to(room).emit('shuttle:eta:update', eta);
+          if (eta)
+            this.server.to(room).emit('shuttle:eta:update', transformFrontendTimestamps(eta));
         })
         .catch((error) => {
           this.logger.error(
@@ -207,71 +214,87 @@ export class LocationGateway implements OnGatewayInit {
   }
 
   emitBookingCreated(event: OperationalBookingCreatedEvent): void {
-    this.server.to(trackingTripCrewRoom(event.tripId)).emit('booking:created', event);
-    this.server.to(trackingTripCrewRoom(event.tripId)).emit('booking:updated', {
-      eventId: event.eventId,
-      occurredAt: event.occurredAt,
-      tripId: event.tripId,
-      bookingId: event.bookingId,
-      bookingCode: event.bookingCode,
-      seatNumbers: event.seatNumbers,
-      reason: 'BOOKING_CREATED',
-    });
+    this.server
+      .to(trackingTripCrewRoom(event.tripId))
+      .emit('booking:created', transformFrontendTimestamps(event));
+    this.server.to(trackingTripCrewRoom(event.tripId)).emit(
+      'booking:updated',
+      transformFrontendTimestamps({
+        eventId: event.eventId,
+        occurredAt: event.occurredAt,
+        tripId: event.tripId,
+        bookingId: event.bookingId,
+        bookingCode: event.bookingCode,
+        seatNumbers: event.seatNumbers,
+        reason: 'BOOKING_CREATED',
+      }),
+    );
   }
 
   emitBookingCancelled(event: OperationalBookingCancelledEvent): void {
-    this.server.to(trackingTripCrewRoom(event.tripId)).emit('booking:updated', {
-      eventId: event.eventId,
-      occurredAt: event.occurredAt,
-      tripId: event.tripId,
-      bookingId: event.bookingId,
-      bookingCode: event.bookingCode,
-      seatNumbers: event.seatNumbers,
-      reason: 'BOOKING_CANCELLED',
-      cancellationReason: event.cancellationReason,
-    });
+    this.server.to(trackingTripCrewRoom(event.tripId)).emit(
+      'booking:updated',
+      transformFrontendTimestamps({
+        eventId: event.eventId,
+        occurredAt: event.occurredAt,
+        tripId: event.tripId,
+        bookingId: event.bookingId,
+        bookingCode: event.bookingCode,
+        seatNumbers: event.seatNumbers,
+        reason: 'BOOKING_CANCELLED',
+        cancellationReason: event.cancellationReason,
+      }),
+    );
   }
 
   emitPassengerBoarded(event: PassengerBoardedEvent): void {
-    this.server.to(trackingTripCrewRoom(event.tripId)).emit('booking:updated', {
-      eventId: event.eventId,
-      occurredAt: event.occurredAt,
-      tripId: event.tripId,
-      bookingId: event.bookingId,
-      bookingCode: event.bookingCode,
-      seatNumbers: [event.seatNumber],
-      reason: 'PASSENGER_BOARDED',
-      passengerRecordId: event.passengerRecordId,
-      ticketCode: event.ticketCode,
-      boardedAt: event.boardedAt,
-    });
+    this.server.to(trackingTripCrewRoom(event.tripId)).emit(
+      'booking:updated',
+      transformFrontendTimestamps({
+        eventId: event.eventId,
+        occurredAt: event.occurredAt,
+        tripId: event.tripId,
+        bookingId: event.bookingId,
+        bookingCode: event.bookingCode,
+        seatNumbers: [event.seatNumber],
+        reason: 'PASSENGER_BOARDED',
+        passengerRecordId: event.passengerRecordId,
+        ticketCode: event.ticketCode,
+        boardedAt: event.boardedAt,
+      }),
+    );
   }
 
   emitBookingTransferred(event: BookingTransferredEvent): void {
     for (const tripId of new Set([event.oldTripId, event.newTripId])) {
-      this.server.to(trackingTripCrewRoom(tripId)).emit('booking:updated', {
-        eventId: event.eventId,
-        occurredAt: event.occurredAt,
-        tripId,
-        bookingId: event.bookingId,
-        reason: 'BOOKING_TRANSFERRED',
-        oldTripId: event.oldTripId,
-        newTripId: event.newTripId,
-        transfers: event.transfers,
-      });
+      this.server.to(trackingTripCrewRoom(tripId)).emit(
+        'booking:updated',
+        transformFrontendTimestamps({
+          eventId: event.eventId,
+          occurredAt: event.occurredAt,
+          tripId,
+          bookingId: event.bookingId,
+          reason: 'BOOKING_TRANSFERRED',
+          oldTripId: event.oldTripId,
+          newTripId: event.newTripId,
+          transfers: event.transfers,
+        }),
+      );
     }
   }
 
   emitRouteProposal(event: RouteChangeProposalEvent): void {
-    const eventName = event.status === 'PENDING'
-      ? 'routeProposal:created'
-      : 'routeProposal:resolved';
-    this.server.to(trackingOperatorFleetRoom(event.operatorId)).emit(eventName, {
-      proposalId: event.proposalId,
-      tripId: event.tripId,
-      status: event.status,
-      createdAt: event.occurredAt,
-    });
+    const eventName =
+      event.status === 'PENDING' ? 'routeProposal:created' : 'routeProposal:resolved';
+    this.server.to(trackingOperatorFleetRoom(event.operatorId)).emit(
+      eventName,
+      transformFrontendTimestamps({
+        proposalId: event.proposalId,
+        tripId: event.tripId,
+        status: event.status,
+        createdAt: event.occurredAt,
+      }),
+    );
   }
 
   @SubscribeMessage('gps:update')
@@ -320,7 +343,9 @@ export class LocationGateway implements OnGatewayInit {
     if (result.duplicate) return { success: true };
     const event = result.event;
 
-    this.server.to(trackingTripRoom(parsed.data.tripId)).emit('gps:update', event);
+    this.server
+      .to(trackingTripRoom(parsed.data.tripId))
+      .emit('gps:update', transformFrontendTimestamps(event));
     void this.publishFleetGps(user, event);
     this.publishSharedGps(event);
     void this.runDetection(event, result.rawEvent).catch((error) => {
@@ -335,15 +360,21 @@ export class LocationGateway implements OnGatewayInit {
   private async publishFleetGps(user: TrackingUser, event: GpsUpdateEvent): Promise<void> {
     if (!user.operatorId || !this.operatorTrips) return;
     try {
-      const projection = (await this.operatorTrips.list(user.operatorId))
-        .find((trip) => trip.tripId === event.tripId);
+      const projection = (await this.operatorTrips.list(user.operatorId)).find(
+        (trip) => trip.tripId === event.tripId,
+      );
       if (!projection) return;
-      this.server.to(trackingOperatorFleetRoom(user.operatorId)).emit('fleet:gps:update', {
-        ...event,
-        status: projection.status,
-      });
+      this.server.to(trackingOperatorFleetRoom(user.operatorId)).emit(
+        'fleet:gps:update',
+        transformFrontendTimestamps({
+          ...event,
+          status: projection.status,
+        }),
+      );
     } catch (error) {
-      this.logger.warn(`Fleet GPS projection failed for ${event.tripId}: ${(error as Error).message}`);
+      this.logger.warn(
+        `Fleet GPS projection failed for ${event.tripId}: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -354,23 +385,31 @@ export class LocationGateway implements OnGatewayInit {
       const { etas, ...nextEtaUpdate } = etaUpdate;
       const tripDelayEtaUpdate = await this.tripDelayService.handleEtaUpdate(nextEtaUpdate);
       const { statusTransition, ...etaPayload } = tripDelayEtaUpdate;
-      this.server.to(trackingTripRoom(event.tripId)).emit('eta:update', etaPayload);
+      this.server
+        .to(trackingTripRoom(event.tripId))
+        .emit('eta:update', transformFrontendTimestamps(etaPayload));
       if (etas) {
-        this.server.to(trackingTripRoom(event.tripId)).emit('eta:batch:update', {
-          tripId: event.tripId,
-          etas,
-          updatedAt: etaPayload.updatedAt,
-        });
+        this.server.to(trackingTripRoom(event.tripId)).emit(
+          'eta:batch:update',
+          transformFrontendTimestamps({
+            tripId: event.tripId,
+            etas,
+            updatedAt: etaPayload.updatedAt,
+          }),
+        );
       }
       this.publishSharedEta(etaPayload);
       if (statusTransition) {
-        this.server.to(trackingTripRoom(event.tripId)).emit('trip:statusChanged', {
-          tripId: tripDelayEtaUpdate.tripId,
-          stopId: tripDelayEtaUpdate.stopId,
-          status: statusTransition,
-          delayMinutes: tripDelayEtaUpdate.delayMinutes,
-          updatedAt: tripDelayEtaUpdate.updatedAt,
-        });
+        this.server.to(trackingTripRoom(event.tripId)).emit(
+          'trip:statusChanged',
+          transformFrontendTimestamps({
+            tripId: tripDelayEtaUpdate.tripId,
+            stopId: tripDelayEtaUpdate.stopId,
+            status: statusTransition,
+            delayMinutes: tripDelayEtaUpdate.delayMinutes,
+            updatedAt: tripDelayEtaUpdate.updatedAt,
+          }),
+        );
         this.publishSharedStatus(etaPayload, statusTransition);
       }
       await this.approachingAlertService.handleEtaUpdate(tripDelayEtaUpdate);
@@ -381,7 +420,9 @@ export class LocationGateway implements OnGatewayInit {
     try {
       this.tripShareRealtime.publishGps(event);
     } catch (error) {
-      this.logger.warn(`Shared GPS broadcast failed for trip ${event.tripId}: ${(error as Error).message}`);
+      this.logger.warn(
+        `Shared GPS broadcast failed for trip ${event.tripId}: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -389,7 +430,9 @@ export class LocationGateway implements OnGatewayInit {
     try {
       this.tripShareRealtime.publishEta(event);
     } catch (error) {
-      this.logger.warn(`Shared ETA broadcast failed for trip ${event.tripId}: ${(error as Error).message}`);
+      this.logger.warn(
+        `Shared ETA broadcast failed for trip ${event.tripId}: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -405,7 +448,9 @@ export class LocationGateway implements OnGatewayInit {
         updatedAt: event.updatedAt,
       });
     } catch (error) {
-      this.logger.warn(`Shared status broadcast failed for trip ${event.tripId}: ${(error as Error).message}`);
+      this.logger.warn(
+        `Shared status broadcast failed for trip ${event.tripId}: ${(error as Error).message}`,
+      );
     }
   }
 

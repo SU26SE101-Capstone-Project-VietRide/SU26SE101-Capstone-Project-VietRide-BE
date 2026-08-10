@@ -14,7 +14,7 @@ const { Buffer } = require('node:buffer') as {
   Buffer: { from(value: string, encoding: 'base64'): Uint8Array };
 };
 
-const ICT_OFFSET_MILLISECONDS = 7 * 60 * 60 * 1000;
+const VIETNAM_OFFSET_MILLISECONDS = 7 * 60 * 60 * 1000;
 const UUID_NAMESPACE = '44000000-0000-5000-8000-000000000001';
 const LETTERS = ['A', 'B', 'C'] as const;
 const ROUTES = ['r1', 'r2', 'r3'] as const;
@@ -190,7 +190,7 @@ function parseDate(value: string): { year: number; month: number; day: number } 
     check.getUTCMonth() + 1 !== result.month ||
     check.getUTCDate() !== result.day
   ) {
-    throw new Error('startDate is not a valid ICT calendar date');
+    throw new Error('startDate is not a valid Asia/Ho_Chi_Minh calendar date');
   }
   return result;
 }
@@ -199,7 +199,7 @@ function ictInstant(date: string, hour = 0, minute = 0, offsetDays = 0): Date {
   const value = parseDate(date);
   return new Date(
     Date.UTC(value.year, value.month - 1, value.day + offsetDays, hour, minute) -
-      ICT_OFFSET_MILLISECONDS,
+      VIETNAM_OFFSET_MILLISECONDS,
   );
 }
 
@@ -211,7 +211,7 @@ function dateOnly(date: string, offsetDays: number): string {
 }
 
 function ictParts(instant: Date): { year: number; month: number; day: number } {
-  const shifted = new Date(instant.getTime() + ICT_OFFSET_MILLISECONDS);
+  const shifted = new Date(instant.getTime() + VIETNAM_OFFSET_MILLISECONDS);
   return {
     year: shifted.getUTCFullYear(),
     month: shifted.getUTCMonth() + 1,
@@ -228,7 +228,7 @@ function assertInputs(input: Day44TripPlannerInput): void {
   const startValue = start.year * 10_000 + start.month * 100 + start.day;
   const currentValue = current.year * 10_000 + current.month * 100 + current.day;
   if (startValue <= currentValue)
-    throw new Error('startDate must be at least one day after the current ICT date');
+    throw new Error('startDate must be at least one day after the current Asia/Ho_Chi_Minh date');
 }
 
 const stationDefinitions = [
@@ -236,46 +236,51 @@ const stationDefinitions = [
     'mien-tay',
     'Bến xe Miền Tây',
     'day44-ben-xe-mien-tay',
-    'Hồ Chí Minh',
-    'An Lạc',
+    'Thành phố Hồ Chí Minh',
+    'Phường An Lạc',
     10.741037,
     106.61898,
+    'fc57f7d4-0a54-5a64-bc15-5fe733230187',
   ],
   [
     'mien-dong-moi',
     'Bến xe Miền Đông mới',
     'day44-ben-xe-mien-dong-moi',
-    'Hồ Chí Minh',
-    'Long Bình',
+    'Thành phố Hồ Chí Minh',
+    'Phường Long Bình',
     10.87955,
     106.81619,
+    '35d39c7c-d0df-544f-adb1-0a3afd83ebf0',
   ],
   [
     'can-tho',
     'Bến xe Trung tâm TP Cần Thơ',
     'day44-ben-xe-trung-tam-can-tho',
-    'Cần Thơ',
-    'Cái Răng',
+    'Thành phố Cần Thơ',
+    'Phường Cái Răng',
     10.0052,
     105.77231,
+    '0f1e42d8-25dd-5ef2-8a55-7122622a7301',
   ],
   [
     'long-chau',
     'Bến xe khách Phường Long Châu',
     'day44-ben-xe-khach-phuong-long-chau',
     'Vĩnh Long',
-    'Long Châu',
+    'Phường Long Châu',
     10.23823,
     105.95773,
+    'c2bcf64d-af68-5fcb-a3b8-168e202b48b7',
   ],
   [
     'ben-tre',
     'Bến xe Bến Tre',
     'day44-ben-xe-ben-tre',
     'Vĩnh Long',
-    'Sơn Đông',
+    'Phường Bến Tre',
     10.267025,
     106.359834,
+    '69b7c548-70f9-5d30-8eaa-b831f441f243',
   ],
 ] as const;
 
@@ -387,14 +392,14 @@ export function planDay44TripFixture(input: Day44TripPlannerInput): Day44TripFix
     },
   ];
   const stations: FixtureRow[] = stationDefinitions.map(
-    ([key, name, slug, city, ward, latitude, longitude]) => ({
+    ([key, name, slug, city, ward, latitude, longitude, locationId]) => ({
       id: fixtureId(`trip:station:${key}`),
       name,
       slug,
       addressStreet: null,
       city,
       ward,
-      locationId: null,
+      locationId,
       latitude,
       longitude,
       contactPhone: null,
@@ -455,7 +460,7 @@ export function planDay44TripFixture(input: Day44TripPlannerInput): Day44TripFix
         description: null,
         latitude: station[5],
         longitude: station[6],
-        locationId: null,
+        locationId: station[7],
         address: `${station[4]}, ${station[3]}`,
         googlePlaceId: null,
         sharedSuggestion: false,

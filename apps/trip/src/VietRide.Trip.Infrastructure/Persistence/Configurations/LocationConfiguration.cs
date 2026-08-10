@@ -12,7 +12,11 @@ internal sealed class LocationConfiguration : IEntityTypeConfiguration<Location>
         {
             table.HasCheckConstraint(
                 "chk_locations_type",
-                "type IN ('PROVINCE', 'MUNICIPALITY')");
+                "type IN ('PROVINCE', 'MUNICIPALITY', 'WARD', 'COMMUNE', 'SPECIAL_ZONE')");
+            table.HasCheckConstraint(
+                "chk_locations_parent_level",
+                "((type IN ('PROVINCE', 'MUNICIPALITY') AND parent_location_id IS NULL) OR "
+                + "(type IN ('WARD', 'COMMUNE', 'SPECIAL_ZONE') AND parent_location_id IS NOT NULL))");
             table.HasCheckConstraint(
                 "chk_locations_sort_order_non_negative",
                 "sort_order >= 0");
@@ -40,6 +44,16 @@ internal sealed class LocationConfiguration : IEntityTypeConfiguration<Location>
             .HasColumnName("type")
             .HasMaxLength(20)
             .IsRequired();
+
+        builder.Property(location => location.ParentLocationId)
+            .HasColumnName("parent_location_id")
+            .HasColumnType("uuid");
+
+        builder.HasOne<Location>()
+            .WithMany()
+            .HasForeignKey(location => location.ParentLocationId)
+            .OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_locations_parent_location_id");
 
         builder.Property(location => location.IsActive)
             .HasColumnName("is_active")
@@ -69,6 +83,10 @@ internal sealed class LocationConfiguration : IEntityTypeConfiguration<Location>
 
         builder.HasIndex(location => new { location.IsActive, location.SortOrder, location.Name })
             .HasDatabaseName("idx_locations_active_sort");
+
+        builder.HasIndex(location => new { location.ParentLocationId, location.SortOrder, location.Name })
+            .HasDatabaseName("idx_locations_active_parent_sort")
+            .HasFilter("parent_location_id IS NOT NULL AND is_active = TRUE");
 
     }
 }

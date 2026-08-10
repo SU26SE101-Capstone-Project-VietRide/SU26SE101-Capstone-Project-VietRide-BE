@@ -7,6 +7,7 @@ import { createUserJwtVerifier } from '../auth/user-jwt.verifier';
 import type { Env } from '../config/env.schema';
 import { buildRouteTable, matchRoute, type ProxyRoute } from '../config/routes';
 import type { RequestWithUser } from '../auth/user-jwt.middleware';
+import { toVietnamIso } from '@vietride/nest-common';
 
 type ApiErrorEnvelope = {
   success: false;
@@ -56,7 +57,7 @@ function buildErrorEnvelope(
     success: false,
     statusCode,
     error: { code, message },
-    meta: { traceId, timestamp: new Date().toISOString() },
+    meta: { traceId, timestamp: toVietnamIso(new Date()) },
   };
 }
 

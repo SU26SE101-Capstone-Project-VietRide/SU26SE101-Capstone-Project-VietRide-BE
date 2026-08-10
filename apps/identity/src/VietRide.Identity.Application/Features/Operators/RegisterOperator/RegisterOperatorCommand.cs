@@ -10,7 +10,6 @@ public sealed record RegisterOperatorCommand(
     string TaxCode,
     string AddressStreet,
     string AddressWard,
-    string AddressDistrict,
     string AddressProvince,
     string RepresentativeName,
     string RepresentativePhone,

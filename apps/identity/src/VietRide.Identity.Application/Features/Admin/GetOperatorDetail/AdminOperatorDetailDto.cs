@@ -43,7 +43,6 @@ public sealed record AdminOperatorDetailDto(
             new OperatorProfileAddressResponse(
                 operatorEntity.AddressStreet,
                 operatorEntity.AddressWard,
-                operatorEntity.AddressDistrict,
                 operatorEntity.AddressProvince),
             operatorEntity.RepresentativeName,
             operatorEntity.RepresentativePhone,

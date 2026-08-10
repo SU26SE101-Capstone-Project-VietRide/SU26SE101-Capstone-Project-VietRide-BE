@@ -39,6 +39,14 @@ public sealed class SubscriptionPaymentSucceededInvoiceHandlerTests
         processed.Items.Should().HaveCount(2);
     }
 
+    [Fact]
+    public void InvoiceNumberPeriod_AtVietnamMonthBoundary_UsesVietnamCalendarMonth()
+    {
+        var instant = new DateTimeOffset(2026, 7, 31, 17, 30, 0, TimeSpan.Zero);
+
+        InvoiceNumberPeriod.FromInstant(instant).Should().Be("202608");
+    }
+
     private static SubscriptionPaymentSucceededInvoiceEvent CreateEvent(Guid eventId, Guid paymentId)
         => new(
             eventId,
@@ -61,7 +69,6 @@ public sealed class SubscriptionPaymentSucceededInvoiceHandlerTests
                 "0900000000",
                 "1 Nguyễn Huệ",
                 null,
-                "Quận 1",
                 "TP.HCM"));
 
     private sealed class FakeInvoiceRepository : IInvoiceRepository

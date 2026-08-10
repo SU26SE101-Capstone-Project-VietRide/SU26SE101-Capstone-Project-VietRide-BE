@@ -9,17 +9,20 @@ namespace VietRide.Trip.Application.Features.Stops;
 public sealed class UpdateStopHandler : IRequestHandler<UpdateStopCommand, StopDto>
 {
     private readonly IIdentityInternalClient identityInternalClient;
+    private readonly ILocationRepository? locationRepository;
     private readonly IStopRepository stopRepository;
     private readonly IUnitOfWork unitOfWork;
 
     public UpdateStopHandler(
         IIdentityInternalClient identityInternalClient,
         IStopRepository stopRepository,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        ILocationRepository? locationRepository = null)
     {
         this.identityInternalClient = identityInternalClient;
         this.stopRepository = stopRepository;
         this.unitOfWork = unitOfWork;
+        this.locationRepository = locationRepository;
     }
 
     public async Task<StopDto> Handle(UpdateStopCommand request, CancellationToken cancellationToken)
@@ -52,6 +55,7 @@ public sealed class UpdateStopHandler : IRequestHandler<UpdateStopCommand, StopD
         stopRepository.Update(stop);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return StopMapper.ToDto(stop);
+        var locations = StopLocationContextResolver.Resolve(locationRepository, [stop]);
+        return StopMapper.ToDto(stop, locations);
     }
 }

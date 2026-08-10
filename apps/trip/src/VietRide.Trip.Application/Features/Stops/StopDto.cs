@@ -12,4 +12,6 @@ public sealed record StopDto(
     bool IsActive,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    Guid? LocationId = null);
+    Guid? LocationId = null,
+    string? City = null,
+    string? Ward = null);

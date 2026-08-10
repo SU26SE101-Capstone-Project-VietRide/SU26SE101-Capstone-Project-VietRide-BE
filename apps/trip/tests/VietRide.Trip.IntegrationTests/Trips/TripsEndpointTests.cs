@@ -83,6 +83,30 @@ public sealed class TripsEndpointTests
     }
 
     [Fact]
+    public async Task Search_HierarchyMode_BindsProvinceAndOptionalWardCodes()
+    {
+        var mediator = new StubMediator(_ => SearchTripsResult.Create([], 1, 20, 0));
+        using var factory = new TripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            "/v1/trips/search?originProvinceCode=79&originWardCode=26506&destinationProvinceCode=01&departureDate=2026-08-20&passengerCount=1");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        mediator.LastRequest.Should().BeOfType<SearchTripsQuery>()
+            .Which.Should().BeEquivalentTo(new SearchTripsQuery(
+                null,
+                null,
+                new DateOnly(2026, 8, 20),
+                1,
+                null,
+                "79",
+                "26506",
+                "01",
+                null));
+    }
+
+    [Fact]
     public async Task Search_InvalidRequest_Returns422Envelope()
     {
         var mediator = new StubMediator(_ => throw new ValidationException(

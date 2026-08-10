@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { toUtcIso, toVietnamIso, transformFrontendTimestamps } from '../time/business-time';
 
 /**
  * Global exception filter that converts every thrown error into the unified
@@ -39,6 +40,8 @@ export class ApiResponseExceptionFilter implements ExceptionFilter {
       (req.headers['x-request-id'] as string | undefined) ??
       (req as { requestId?: string }).requestId;
 
+    const requestPath = req.path ?? (req.originalUrl ?? req.url ?? '').split('?')[0];
+    const internal = requestPath === '/internal' || requestPath.startsWith('/internal/');
     const envelope = {
       success: false as const,
       statusCode: status,
@@ -49,9 +52,10 @@ export class ApiResponseExceptionFilter implements ExceptionFilter {
       },
       meta: {
         traceId,
-        timestamp: new Date().toISOString(),
+        timestamp: internal ? toUtcIso(new Date()) : toVietnamIso(new Date()),
       },
     };
+    const responseBody = internal ? envelope : transformFrontendTimestamps(envelope);
 
     if (status >= 500) {
       this.logger.error(
@@ -63,7 +67,7 @@ export class ApiResponseExceptionFilter implements ExceptionFilter {
     }
 
     if (!res.headersSent) {
-      res.status(status).json(envelope);
+      res.status(status).json(responseBody);
     }
   }
 }

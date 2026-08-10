@@ -100,7 +100,7 @@ export class TrackingDataController {
   @ApiQuery({ name: 'sortBy', enum: ['recordedAt'], required: false, description: 'Sort field (default recordedAt)' })
   @ApiQuery({ name: 'sortDir', enum: ['asc', 'desc'], required: false, description: 'Sort direction (default asc)' })
   @ApiResponse({ status: 200, description: 'Location trail items.', type: TrackingTrailEnvelopeDto })
-  @ApiResponse({ status: 400, description: 'Validation error.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 422, description: 'Timestamp validation error.', type: ApiErrorEnvelopeDto })
   @ApiResponse({ status: 401, description: 'Unauthorized.', type: ApiErrorEnvelopeDto })
   @ApiResponse({ status: 403, description: 'Forbidden.', type: ApiErrorEnvelopeDto })
   @ApiResponse({ status: 404, description: 'Trip not found.', type: ApiErrorEnvelopeDto })
@@ -108,7 +108,10 @@ export class TrackingDataController {
   @ApiResponse({ status: 503, description: 'Authorization provider unavailable.', type: ApiErrorEnvelopeDto })
   async getTrail(
     @Param(new ZodValidationPipe(TripIdParamSchema)) params: TripIdParamDto,
-    @Query(new ZodValidationPipe(TrailQuerySchema)) query: TrailQueryDto,
+    @Query(new ZodValidationPipe(TrailQuerySchema, {
+      statusCode: 422,
+      errorCode: 'VALIDATION_ERROR',
+    })) query: TrailQueryDto,
   ): Promise<TrailTrackingResponseDto> {
     return this.trackingDataService.getTrail(params.tripId, query);
   }
