@@ -4949,7 +4949,7 @@
       "name": "Driver - Day 18 schedule + manifest + boarding flow",
       "item": [
         {
-          "name": "1. Get my driver schedule (default ICT window)",
+          "name": "1. Get my driver schedule (default Asia/Ho_Chi_Minh window)",
           "event": [
             {
               "listen": "test",
@@ -4985,7 +4985,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["v1", "driver", "me", "schedule"]
             },
-            "description": "Driver schedule through Gateway. Omitting both from/to exercises the inclusive ICT today..today+14 default."
+            "description": "Driver schedule through Gateway. Omitting both from/to exercises the inclusive Asia/Ho_Chi_Minh today..today+14 default."
           }
         },
         {

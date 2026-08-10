@@ -231,18 +231,18 @@ function assertOwnedClean(state) {
 }
 
 function runtimeDepartureWindow() {
-  const ict = new Date(Date.now() + 7 * 3_600_000);
-  const hour = ict.getUTCHours();
+  const vietnamTime = new Date(Date.now() + 7 * 3_600_000);
+  const hour = vietnamTime.getUTCHours();
   let baseHour;
   let dayOffset = 0;
   if (hour < 5) baseHour = 8;
   else if (hour < 13) baseHour = 16;
   else if (hour < 21) { baseHour = 8; dayOffset = 1; }
   else { baseHour = 16; dayOffset = 1; }
-  ict.setUTCDate(ict.getUTCDate() + dayOffset);
+  vietnamTime.setUTCDate(vietnamTime.getUTCDate() + dayOffset);
   const time = (delta) => `${String(baseHour + delta).padStart(2, '0')}:00:00`;
   return {
-    serviceDate: ict.toISOString().slice(0, 10), oldTime: time(0), minorTime: time(2),
+    serviceDate: vietnamTime.toISOString().slice(0, 10), oldTime: time(0), minorTime: time(2),
     mediumAcceptTime: time(3), mediumRejectTime: time(4), majorRejectTime: time(6), pendingTime: time(3),
   };
 }

@@ -250,8 +250,8 @@ function ictDateParts(date = new Date()) {
 }
 
 export function ui25TimeWindow(now = new Date()) {
-  const ict = ictDateParts(now);
-  const currentDate = `${ict.year}-${ict.month}-${ict.day}`;
+  const vietnamTime = ictDateParts(now);
+  const currentDate = `${vietnamTime.year}-${vietnamTime.month}-${vietnamTime.day}`;
   const dayStart = new Date(`${currentDate}T00:00:00+07:00`);
   const nextDayStart = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
   const tomorrow = ictDateParts(nextDayStart);
@@ -260,7 +260,7 @@ export function ui25TimeWindow(now = new Date()) {
   return {
     currentDate,
     tomorrowDate,
-    month: `${ict.year}-${ict.month}`,
+    month: `${vietnamTime.year}-${vietnamTime.month}`,
     fixtureInstantUtc: new Date(dayStart.getTime() + 12 * 60 * 60 * 1000).toISOString(),
     reportFromUtc: dayStart.toISOString(),
     reportToUtc: nextDayStart.toISOString(),
