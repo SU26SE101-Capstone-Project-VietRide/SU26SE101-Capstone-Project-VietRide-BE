@@ -1,5 +1,5 @@
-using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Payment.Domain.Enums;
+using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Payment.Application.Abstractions.ExternalClients;
 
