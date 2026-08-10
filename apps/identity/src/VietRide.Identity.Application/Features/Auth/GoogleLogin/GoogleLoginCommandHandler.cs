@@ -1,10 +1,13 @@
+using System.Text.Json;
 using MediatR;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Application.Features.Auth.Login;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.Application.Features.Auth.GoogleLogin;
@@ -20,6 +23,7 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
     private readonly IAccessTokenService _accessTokenService;
     private readonly IRefreshTokenFactory _refreshTokenFactory;
     private readonly ILoginLockoutCounter _loginLockoutCounter;
+    private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
 
     public GoogleLoginCommandHandler(
@@ -30,6 +34,7 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
         IAccessTokenService accessTokenService,
         IRefreshTokenFactory refreshTokenFactory,
         ILoginLockoutCounter loginLockoutCounter,
+        IIntegrationEventOutbox outbox,
         IClock clock)
     {
         _googleIdTokenVerifier = googleIdTokenVerifier;
@@ -39,6 +44,7 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
         _accessTokenService = accessTokenService;
         _refreshTokenFactory = refreshTokenFactory;
         _loginLockoutCounter = loginLockoutCounter;
+        _outbox = outbox;
         _clock = clock;
     }
 
@@ -94,6 +100,19 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
                 _clock.UtcNow);
 
             await _oauthIdentities.AddAsync(oauthIdentity, cancellationToken);
+        }
+
+        if (isNewUser)
+        {
+            var integrationEvent = new UserCreatedIntegrationEvent(
+                user.Id,
+                user.Role.ToString(),
+                user.Email,
+                _clock.UtcNow);
+            await _outbox.EnqueueAsync(
+                UserCreatedIntegrationEvent.EventType,
+                JsonSerializer.Serialize(integrationEvent),
+                cancellationToken);
         }
 
         user.RecordSuccessfulLogin(_clock);

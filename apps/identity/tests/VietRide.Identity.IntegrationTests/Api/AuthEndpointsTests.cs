@@ -607,6 +607,131 @@ public sealed class AuthEndpointsTests :
     }
 
     [Fact]
+    public async Task PostGoogle_NewEmail_PersistsUserOAuthRefreshTokenAndUserCreatedOutboxInSameTransaction()
+    {
+        await _dbFactory.ResetAsync();
+        using var client = _dbFactory.CreateIdempotentClient();
+
+        var response = await client.PostAsJsonAsync("/v1/auth/google", new
+        {
+            idToken = DbGoogleIdTokenVerifier.IdToken,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var responseDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(responseDoc, 200);
+        var userId = responseDoc.RootElement
+            .GetProperty("data")
+            .GetProperty("user")
+            .GetProperty("id")
+            .GetGuid();
+
+        await using var scope = _dbFactory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var user = await db.Users.SingleAsync(item => item.Id == userId);
+        var oauthIdentity = await db.OAuthIdentities.SingleAsync(item => item.UserId == userId);
+        var refreshToken = await db.RefreshTokens.SingleAsync(item => item.UserId == userId);
+        var outboxEvent = await db.Set<OutboxEvent>()
+            .SingleAsync(item => item.EventType == "identity.user.created");
+
+        user.Email.Should().Be(DbGoogleIdTokenVerifier.Email);
+        user.Role.Should().Be(UserRole.PASSENGER);
+        oauthIdentity.Provider.Should().Be(OAuthProvider.GOOGLE);
+        oauthIdentity.ProviderSubject.Should().Be(DbGoogleIdTokenVerifier.Subject);
+        refreshToken.UserId.Should().Be(userId);
+        outboxEvent.Status.Should().Be(OutboxEventStatus.PENDING);
+
+        using var payload = JsonDocument.Parse(outboxEvent.Payload);
+        var root = payload.RootElement;
+        root.GetProperty("eventId").GetGuid().Should().Be(outboxEvent.Id);
+        root.GetProperty("userId").GetGuid().Should().Be(userId);
+        root.GetProperty("role").GetString().Should().Be(UserRole.PASSENGER.ToString());
+        root.GetProperty("email").GetString().Should().Be(DbGoogleIdTokenVerifier.Email);
+        root.TryGetProperty("createdAt", out _).Should().BeTrue();
+        root.EnumerateObject().Select(property => property.Name)
+            .Should().BeEquivalentTo(["eventId", "userId", "role", "email", "createdAt"]);
+    }
+
+    [Fact]
+    public async Task GoogleWalletBackfillSql_EnqueuesOnlyLiveGooglePassengersAndIsRerunnable()
+    {
+        await _dbFactory.ResetAsync();
+        var now = new DateTimeOffset(2026, 8, 10, 0, 0, 0, TimeSpan.Zero);
+        var liveGoogleUser = User.CreateGoogleAccount(
+            "backfill-live@example.com",
+            "Backfill Live",
+            avatarUrl: null);
+        var deletedGoogleUser = User.CreateGoogleAccount(
+            "backfill-deleted@example.com",
+            "Backfill Deleted",
+            avatarUrl: null);
+        deletedGoogleUser.SoftDelete(now);
+        var localPassenger = User.CreatePassenger(
+            "backfill-local@example.com",
+            VietRide.Shared.Kernel.ValueObjects.PhoneNumber.Parse("+84901234567"),
+            "$2a$12$hashedpassword",
+            "Backfill Local");
+        var liveGoogleIdentity = OAuthIdentity.Create(
+            liveGoogleUser.Id,
+            OAuthProvider.GOOGLE,
+            "backfill-live-subject",
+            liveGoogleUser.Email,
+            now);
+        var deletedGoogleIdentity = OAuthIdentity.Create(
+            deletedGoogleUser.Id,
+            OAuthProvider.GOOGLE,
+            "backfill-deleted-subject",
+            deletedGoogleUser.Email,
+            now);
+
+        await using (var seedScope = _dbFactory.Services.CreateAsyncScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            await db.Users.AddRangeAsync(liveGoogleUser, deletedGoogleUser, localPassenger);
+            await db.OAuthIdentities.AddRangeAsync(liveGoogleIdentity, deletedGoogleIdentity);
+            await db.SaveChangesAsync();
+        }
+
+        var scriptPath = FindWorkspaceFile(
+            "scripts",
+            "maintenance",
+            "backfill-google-user-wallet-events.sql");
+        var script = await File.ReadAllTextAsync(scriptPath);
+
+        await using (var firstRunScope = _dbFactory.Services.CreateAsyncScope())
+        {
+            var db = firstRunScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            await db.Database.ExecuteSqlRawAsync(script);
+        }
+
+        await using (var secondRunScope = _dbFactory.Services.CreateAsyncScope())
+        {
+            var db = secondRunScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            await db.Database.ExecuteSqlRawAsync(script);
+        }
+
+        await using var assertScope = _dbFactory.Services.CreateAsyncScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+        var recoveryEvents = await assertDb.Set<OutboxEvent>()
+            .Where(item => item.EventType == "identity.user.created")
+            .ToListAsync();
+
+        recoveryEvents.Should().ContainSingle();
+        var recoveryEvent = recoveryEvents[0];
+        recoveryEvent.Status.Should().Be(OutboxEventStatus.PENDING);
+        using var recoveryPayload = JsonDocument.Parse(recoveryEvent.Payload);
+        var recoveryRoot = recoveryPayload.RootElement;
+        recoveryRoot.GetProperty("eventId").GetGuid().Should().Be(recoveryEvent.Id);
+        recoveryRoot.GetProperty("userId").GetGuid().Should().Be(liveGoogleUser.Id);
+        recoveryRoot.GetProperty("role").GetString().Should().Be(UserRole.PASSENGER.ToString());
+        recoveryRoot.GetProperty("email").GetString().Should().Be(liveGoogleUser.Email);
+        recoveryRoot.GetProperty("createdAt").GetDateTimeOffset()
+            .Should().BeCloseTo(liveGoogleUser.CreatedAt, TimeSpan.FromMilliseconds(1));
+        recoveryRoot.EnumerateObject().Select(property => property.Name)
+            .Should().BeEquivalentTo(["eventId", "userId", "role", "email", "createdAt"]);
+    }
+
+    [Fact]
     public async Task PostGoogle_HappyPath_Returns200EnvelopeWithTokens()
     {
         using var client = CreateClientWithSender(new HappyPathAuthSender());
@@ -963,6 +1088,20 @@ public sealed class AuthEndpointsTests :
     private static string UniqueEmail(string prefix)
         => $"{prefix}-{Guid.NewGuid():N}@example.com";
 
+    private static string FindWorkspaceFile(params string[] relativeSegments)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "AGENTS.md")))
+        {
+            directory = directory.Parent;
+        }
+
+        if (directory is null)
+            throw new InvalidOperationException("Could not locate the VietRide workspace root.");
+
+        return Path.Combine([directory.FullName, .. relativeSegments]);
+    }
+
     private static void AssertOperatorAdminLogin(JsonDocument doc, string email, Guid operatorId)
     {
         var data = doc.RootElement.GetProperty("data");
@@ -1060,6 +1199,7 @@ public sealed class AuthEndpointsTests :
                 services.RemoveAll<IEmailService>();
                 services.RemoveAll<ILoginLockoutCounter>();
                 services.RemoveAll<IPasswordResetRateLimiter>();
+                services.RemoveAll<IGoogleIdTokenVerifier>();
 
                 services.AddSingleton(_ =>
                 {
@@ -1083,6 +1223,7 @@ public sealed class AuthEndpointsTests :
                 services.AddSingleton<IEmailService>(EmailService);
                 services.AddSingleton<ILoginLockoutCounter, NoOpLoginLockoutCounter>();
                 services.AddSingleton<IPasswordResetRateLimiter, NoOpPasswordResetRateLimiter>();
+                services.AddSingleton<IGoogleIdTokenVerifier, DbGoogleIdTokenVerifier>();
             });
         }
 
@@ -1332,6 +1473,30 @@ public sealed class AuthEndpointsTests :
     {
         public Task<bool> TryIncrementAsync(string email, CancellationToken ct = default)
             => Task.FromResult(true);
+    }
+
+    private sealed class DbGoogleIdTokenVerifier : IGoogleIdTokenVerifier
+    {
+        public const string IdToken = "db-google-id-token";
+        public const string Subject = "db-google-subject";
+        public const string Email = "db.google.user@example.com";
+
+        public Task<GoogleIdTokenVerificationResult> VerifyAsync(
+            string idToken,
+            CancellationToken cancellationToken)
+        {
+            if (!string.Equals(idToken, IdToken, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Unexpected Google ID token '{idToken}' for the DB-backed auth test verifier.");
+            }
+
+            return Task.FromResult(new GoogleIdTokenVerificationResult(
+                Subject,
+                Email,
+                "DB Google User",
+                AvatarUrl: null));
+        }
     }
 
     public sealed class CapturingEmailService : IEmailService
