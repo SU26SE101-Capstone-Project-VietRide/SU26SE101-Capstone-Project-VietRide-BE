@@ -477,7 +477,7 @@ GET /v1/operator/reports/refunds/export?from=2026-07-01&to=2026-07-31
 
 Hai API trên:
 
-- nhận `from`, `to` là ngày ICT inclusive;
+- nhận `from`, `to` là ngày Việt Nam (`Asia/Ho_Chi_Minh`) inclusive;
 - mặc định khoảng gần nhất nếu FE không truyền;
 - tối đa 92 ngày inclusive;
 - thành công trả XLSX raw binary;
@@ -521,7 +521,7 @@ GET /v1/operator/booking-stats?from=2026-07-01&to=2026-07-31&groupBy=date
 
 Role: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
 
-`groupBy` hỗ trợ `date|month`. Với `month`, `from` và `to` bắt buộc; `date` trong mỗi bucket là ngày đầu tiên của tháng ICT và các tháng không có dữ liệu vẫn được zero-fill.
+`groupBy` hỗ trợ `date|month`. Với `month`, `from` và `to` bắt buộc; `date` trong mỗi bucket là ngày đầu tiên của tháng Việt Nam (`Asia/Ho_Chi_Minh`) và các tháng không có dữ liệu vẫn được zero-fill.
 
 Chỉ dùng cho count booking:
 
@@ -550,7 +550,7 @@ GET /v1/admin/booking-stats/aggregate?from=2026-07-01&to=2026-07-31&groupBy=oper
 
 Role: `SYSTEM_ADMIN`.
 
-`groupBy` hỗ trợ `operator|date|month`. Với `month`, `from` và `to` bắt buộc, bucket dùng ngày đầu tiên của tháng ICT và được zero-fill.
+`groupBy` hỗ trợ `operator|date|month`. Với `month`, `from` và `to` bắt buộc, bucket dùng ngày đầu tiên của tháng Việt Nam (`Asia/Ho_Chi_Minh`) và được zero-fill.
 
 Field tiền `totalRevenue` trong item hoặc totals đã bị bỏ hoàn toàn.
 

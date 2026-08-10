@@ -201,7 +201,7 @@ Quyền đọc: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
 |---|---|
 | `page` | Mặc định `1` |
 | `pageSize` | Mặc định `20`, giới hạn `1..100` |
-| `from`/`to` | `YYYY-MM-DD`, diễn giải theo ngày ICT; `to` bao gồm cả ngày |
+| `from`/`to` | `YYYY-MM-DD`, diễn giải theo ngày Việt Nam (`Asia/Ho_Chi_Minh`); `to` bao gồm cả ngày |
 | `status` | Danh sách `SCHEDULED,IN_PROGRESS,COMPLETED,CANCELLED`, phân tách bằng dấu phẩy |
 
 Không truyền status lấy toàn bộ status, bao gồm `CANCELLED`. Sort mặc định là `scheduledDepartureTime DESC`, sau đó `shuttleTripId DESC`. Status sai trả `422 VALIDATION_ERROR`.
@@ -418,7 +418,7 @@ Build succeeded, 0 warnings, 0 errors
 | Flow | Kết quả |
 |---|---|
 | Vehicle trả `totalSeats=3`, `usablePassengerCapacity=2` với 1 `DRIVER_AREA` | Pass |
-| Shuttle history staff read, filter ngày ICT/status, gồm `COMPLETED` và `CANCELLED` | Pass |
+| Shuttle history staff read, filter ngày Việt Nam (`Asia/Ho_Chi_Minh`)/status, gồm `COMPLETED` và `CANCELLED` | Pass |
 | `passengerCount`, `stopCount`, driver profile | Pass |
 | Status history không hợp lệ trả `422` | Pass |
 | Pending group và nested `bookingGroups[].passengers[]` | Pass |
