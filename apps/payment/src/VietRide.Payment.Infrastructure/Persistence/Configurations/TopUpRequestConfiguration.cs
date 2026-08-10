@@ -39,6 +39,11 @@ internal sealed class TopUpRequestConfiguration : IEntityTypeConfiguration<TopUp
             .HasDefaultValueSql($"'PENDING'::{PaymentDbContext.SchemaName}.top_up_request_status")
             .IsRequired();
 
+        builder.Property(x => x.ReturnMode)
+            .HasColumnName("vnpay_return_mode")
+            .HasColumnType($"{PaymentDbContext.SchemaName}.vnpay_return_mode")
+            .IsRequired(false);
+
         builder.Property(x => x.VnPayTxnRef)
             .HasColumnName("vnpay_txn_ref")
             .HasMaxLength(100)

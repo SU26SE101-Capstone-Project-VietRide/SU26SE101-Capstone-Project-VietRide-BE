@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Payment.Application.Features.Payments.DispatchVnPayIpn;
+using VietRide.Payment.Application.Features.Payments.GetVnPayMobileSdkReturn;
 using VietRide.Payment.Application.Features.Payments.GetVnPayReturnStatus;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Idempotency;
@@ -36,7 +37,7 @@ public sealed class VnPayBookingIpnController : ControllerBase
     }
 
     /// <summary>
-    /// Read-only status used by the HTTPS VNPay return bridge. Signed VNPay query parameters
+    /// Read-only status used by the Manager Web return page. Signed VNPay query parameters
     /// authenticate the lookup; this endpoint never changes Payment state.
     /// </summary>
     [HttpGet("vnpay-return-status")]
@@ -49,6 +50,21 @@ public sealed class VnPayBookingIpnController : ControllerBase
         var parameters = await ReadVnPayParametersAsync(ct);
         var result = await _sender.Send(new GetVnPayReturnStatusQuery(parameters), ct);
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Technical return endpoint for the VNPay Mobile SDK. It verifies the signed provider
+    /// parameters and redirects to the SDK's fixed success, cancel, or failure URI.
+    /// This endpoint never changes payment state; VNPay IPN remains the mutation source of truth.
+    /// </summary>
+    [HttpGet("vnpay-mobile-sdk-return")]
+    [ProducesResponseType(StatusCodes.Status302Found)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetMobileSdkReturn(CancellationToken ct)
+    {
+        var parameters = await ReadVnPayParametersAsync(ct);
+        var result = await _sender.Send(new GetVnPayMobileSdkReturnQuery(parameters), ct);
+        return Redirect(result.RedirectUri);
     }
 
     private async Task<IReadOnlyDictionary<string, string>> ReadVnPayParametersAsync(CancellationToken ct)

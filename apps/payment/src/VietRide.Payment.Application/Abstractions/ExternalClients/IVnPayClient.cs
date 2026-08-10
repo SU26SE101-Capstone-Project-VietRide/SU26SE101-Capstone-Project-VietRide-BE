@@ -1,3 +1,4 @@
+using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Payment.Application.Abstractions.ExternalClients;
@@ -10,6 +11,15 @@ public interface IVnPayClient
         string vnPayTxnRef,
         string clientIpAddress,
         DateTimeOffset createdAt);
+
+    string CreateTopUpRedirectUrl(
+        Guid userId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt,
+        VnPayReturnMode returnMode)
+        => CreateTopUpRedirectUrl(userId, amount, vnPayTxnRef, clientIpAddress, createdAt);
 
     string CreateBookingPaymentRedirectUrl(
         Guid bookingId,
@@ -36,6 +46,24 @@ public interface IVnPayClient
             clientIpAddress,
             createdAt);
 
+    string CreateBookingPaymentRedirectUrl(
+        Guid bookingId,
+        Guid userId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt,
+        DateTimeOffset? expiresAt,
+        VnPayReturnMode returnMode)
+        => CreateBookingPaymentRedirectUrl(
+            bookingId,
+            userId,
+            amount,
+            vnPayTxnRef,
+            clientIpAddress,
+            createdAt,
+            expiresAt);
+
     string CreateSubscriptionPaymentRedirectUrl(
         Guid upgradeAttemptId,
         Guid operatorId,
@@ -60,6 +88,27 @@ public interface IVnPayClient
             vnPayTxnRef,
             clientIpAddress,
             createdAt);
+
+    string CreateSubscriptionPaymentRedirectUrl(
+        Guid upgradeAttemptId,
+        Guid operatorId,
+        Money amount,
+        string vnPayTxnRef,
+        string clientIpAddress,
+        DateTimeOffset createdAt,
+        DateTimeOffset? expiresAt,
+        VnPayReturnMode returnMode)
+        => CreateSubscriptionPaymentRedirectUrl(
+            upgradeAttemptId,
+            operatorId,
+            amount,
+            vnPayTxnRef,
+            clientIpAddress,
+            createdAt,
+            expiresAt);
+
+    VnPaySdkConfiguration GetMobileSdkConfiguration()
+        => throw new NotSupportedException("This VNPay client does not expose mobile SDK configuration.");
 
     bool VerifySignature(IReadOnlyDictionary<string, string> parameters)
         => throw new NotSupportedException("This VNPay client does not support signature verification.");

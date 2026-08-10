@@ -10,4 +10,5 @@ public sealed record CreateTopUpCommand(
     Guid UserId,
     long Amount,
     string Method,
-    string ClientIpAddress) : IRequest<CreateTopUpResult>;
+    string ClientIpAddress,
+    string? PaymentReturnMode = null) : IRequest<CreateTopUpResult>;

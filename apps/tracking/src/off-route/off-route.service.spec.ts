@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { RedisService } from '@vietride/nest-redis';
 import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
+import { RouteStateGenerationRegistry } from '../route-state/route-state-generation.registry';
 import {
   OFF_ROUTE_EVENT_TYPE,
   OFF_ROUTE_STATE_TTL_SECONDS,
@@ -23,6 +24,7 @@ describe('OffRouteService', () => {
   let redisDel: jest.MockedFunction<(key: string) => Promise<number>>;
   let outboxCreate: jest.MockedFunction<(args: unknown) => Promise<unknown>>;
   let routeGeometryProvider: jest.Mocked<RouteGeometryProvider>;
+  let routeStateGeneration: RouteStateGenerationRegistry;
 
   beforeEach(async () => {
     redisGet = jest.fn(async (key: string) => {
@@ -58,6 +60,7 @@ describe('OffRouteService', () => {
           { latitude: 10.8, longitude: 106.6 },
         ],
       })),
+      invalidateRouteGeometry: jest.fn(),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -85,10 +88,12 @@ describe('OffRouteService', () => {
           provide: ROUTE_GEOMETRY_PROVIDER,
           useValue: routeGeometryProvider,
         },
+        RouteStateGenerationRegistry,
       ],
     }).compile();
 
     service = moduleRef.get(OffRouteService);
+    routeStateGeneration = moduleRef.get(RouteStateGenerationRegistry);
   });
 
   it('does not alert for short GPS drift', async () => {
@@ -143,6 +148,23 @@ describe('OffRouteService', () => {
     await expect(service.handleGpsUpdate(createOnRouteGps())).resolves.toBeNull();
 
     expect(redisDel).toHaveBeenCalledWith(trackingOffRouteSinceKey(TEST_TRIP_ID));
+    expect(redisSet).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not write state or Outbox after its route generation is invalidated', async () => {
+    let resolveState: ((value: string | null) => void) | undefined;
+    redisGet.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveState = resolve;
+    }));
+
+    const evaluation = service.handleGpsUpdate(createOffRouteGps(ALERT_RECORDED_AT));
+    await Promise.resolve();
+    routeStateGeneration.invalidate(TEST_TRIP_ID);
+    if (!resolveState) throw new Error('Off-route state read did not start');
+    resolveState(JSON.stringify({ firstDetectedAt: FIRST_RECORDED_AT }));
+
+    await expect(evaluation).resolves.toBeNull();
     expect(redisSet).not.toHaveBeenCalled();
     expect(outboxCreate).not.toHaveBeenCalled();
   });

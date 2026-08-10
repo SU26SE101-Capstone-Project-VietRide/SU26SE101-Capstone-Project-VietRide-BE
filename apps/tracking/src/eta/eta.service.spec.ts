@@ -6,6 +6,7 @@ import { trackingEtaKey } from '../location/location.constants';
 import type { GpsUpdateEvent } from '../location/location.service';
 import { ROUTE_GEOMETRY_PROVIDER } from '../off-route/off-route.constants';
 import type { RouteGeometryProvider } from '../off-route/route-geometry.provider';
+import { RouteStateGenerationRegistry } from '../route-state/route-state-generation.registry';
 import {
   ETA_CACHE_TTL_SECONDS,
   ETA_STATE_TTL_SECONDS,
@@ -77,6 +78,7 @@ describe('EtaService', () => {
         void tripId;
         return [createStop()];
       }),
+      invalidateRouteStops: jest.fn(),
     };
     routePeek = jest.fn(() => ({
         tripId: TEST_TRIP_ID,
@@ -88,6 +90,7 @@ describe('EtaService', () => {
     const routeProvider: RouteGeometryProvider = {
       peekCachedRouteGeometry: routePeek,
       getRouteGeometry: async () => null,
+      invalidateRouteGeometry: jest.fn(),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -109,6 +112,7 @@ describe('EtaService', () => {
         { provide: LOCAL_ETA_PROVIDER, useValue: localProvider },
         { provide: GOOGLE_ETA_PROVIDER, useValue: googleProvider },
         { provide: ENV_TOKEN, useValue: env },
+        RouteStateGenerationRegistry,
       ],
     }).compile();
 

@@ -4,12 +4,14 @@ using Google.Apis.Auth;
 using NSubstitute;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Application.Features.Auth.GoogleLogin;
 using VietRide.Identity.Application.Features.Auth.Login;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure.Security;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 
@@ -28,6 +30,7 @@ public sealed class GoogleLoginCommandHandlerTests
     private readonly IRefreshTokenRepository _refreshTokens = Substitute.For<IRefreshTokenRepository>();
     private readonly IAccessTokenService _accessTokenService = Substitute.For<IAccessTokenService>();
     private readonly ILoginLockoutCounter _loginLockoutCounter = Substitute.For<ILoginLockoutCounter>();
+    private readonly IIntegrationEventOutbox _outbox = Substitute.For<IIntegrationEventOutbox>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
     public GoogleLoginCommandHandlerTests()
@@ -40,6 +43,8 @@ public sealed class GoogleLoginCommandHandlerTests
             .Returns(call => Task.FromResult(call.Arg<User>()));
         _refreshTokens.AddAsync(Arg.Any<RefreshToken>(), Arg.Any<CancellationToken>())
             .Returns(call => Task.FromResult(call.Arg<RefreshToken>()));
+        _outbox.EnqueueAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
     }
 
     [Fact]
@@ -79,6 +84,10 @@ public sealed class GoogleLoginCommandHandlerTests
         _accessTokenService.Received(1).IssueToken(user);
         await _users.DidNotReceiveWithAnyArgs().GetByEmailAsync(default!, default);
         await _oauthIdentities.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
+        await _outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -113,6 +122,10 @@ public sealed class GoogleLoginCommandHandlerTests
                 && identity.ProviderEmail == "existing@example.com"),
             Arg.Any<CancellationToken>());
         await _users.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
+        await _outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -120,6 +133,16 @@ public sealed class GoogleLoginCommandHandlerTests
     {
         var googleUser = MakeGoogleUser("google-sub-3", "new@example.com");
         var handler = CreateHandler();
+        string? capturedEventType = null;
+        string? capturedPayload = null;
+
+        _outbox.EnqueueAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                capturedEventType = call.ArgAt<string>(0);
+                capturedPayload = call.ArgAt<string>(1);
+                return Task.CompletedTask;
+            });
 
         _googleIdTokenVerifier.VerifyAsync("id-token", Arg.Any<CancellationToken>())
             .Returns(googleUser);
@@ -148,6 +171,21 @@ public sealed class GoogleLoginCommandHandlerTests
                 && identity.ProviderEmail == "new@example.com"),
             Arg.Any<CancellationToken>());
         _accessTokenService.Received(1).IssueToken(Arg.Is<User>(user => user.Email == "new@example.com"));
+
+        await _outbox.Received(1).EnqueueAsync(
+            UserCreatedIntegrationEvent.EventType,
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+        capturedEventType.Should().Be(UserCreatedIntegrationEvent.EventType);
+        capturedPayload.Should().NotBeNull();
+        using var payload = JsonDocument.Parse(capturedPayload!);
+        var root = payload.RootElement;
+        root.GetProperty("userId").GetGuid().Should().Be(result.User.Id);
+        root.GetProperty("role").GetString().Should().Be(UserRole.PASSENGER.ToString());
+        root.GetProperty("email").GetString().Should().Be("new@example.com");
+        root.GetProperty("createdAt").GetDateTimeOffset().Should().Be(FrozenNow);
+        root.EnumerateObject().Select(property => property.Name)
+            .Should().BeEquivalentTo(["userId", "role", "email", "createdAt"]);
     }
 
     [Fact]
@@ -211,6 +249,10 @@ public sealed class GoogleLoginCommandHandlerTests
         assertion.Which.ErrorCode.Should().Be("AUTH_GOOGLE_TOKEN_INVALID");
         await _oauthIdentities.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
         await _refreshTokens.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
+        await _outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -238,6 +280,7 @@ public sealed class GoogleLoginCommandHandlerTests
             _accessTokenService,
             new RefreshTokenFactory(_clock),
             _loginLockoutCounter,
+            _outbox,
             _clock);
     }
 

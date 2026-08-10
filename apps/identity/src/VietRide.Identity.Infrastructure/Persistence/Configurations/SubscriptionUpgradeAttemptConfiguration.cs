@@ -18,6 +18,7 @@ internal sealed class SubscriptionUpgradeAttemptConfiguration : IEntityTypeConfi
         builder.Property(attempt => attempt.TargetPlanId).HasColumnName("target_plan_id").HasColumnType("uuid").IsRequired();
         builder.Property(attempt => attempt.BillingPeriod).HasColumnName("billing_period").HasColumnType("subscription_billing_period").IsRequired();
         builder.Property(attempt => attempt.Amount).HasColumnName("amount").HasColumnType("bigint").HasConversion(money => money.Amount, amount => Money.FromRaw(amount)).IsRequired();
+        builder.Property(attempt => attempt.PaymentMethod).HasColumnName("payment_method").HasColumnType("subscription_payment_method").IsRequired();
         builder.Property(attempt => attempt.Status).HasColumnName("status").HasColumnType("subscription_upgrade_attempt_status").IsRequired();
         builder.Property(attempt => attempt.PaymentId).HasColumnName("latest_payment_id").HasColumnType("uuid");
         builder.Property(attempt => attempt.LatestPaymentStatus).HasColumnName("latest_payment_status").HasConversion<string>().HasMaxLength(16).IsRequired();

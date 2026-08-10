@@ -32,6 +32,7 @@ describe('TrackingDataService ETA selection', () => {
         sequence: 2,
         status: 'PENDING',
       }]),
+      invalidateRouteStops: jest.fn(),
     } as TripDataProvider;
     const service = new TrackingDataService(repository, trips);
 
@@ -65,6 +66,7 @@ describe('TrackingDataService ETA selection', () => {
           status: 'PENDING',
         },
       ]),
+      invalidateRouteStops: jest.fn(),
     } as TripDataProvider;
     const service = new TrackingDataService(repository, trips);
 
@@ -79,7 +81,10 @@ describe('TrackingDataService ETA selection', () => {
       findLatest: jest.fn(async () => null),
       findEta: jest.fn(),
     } as unknown as TrackingDataRepository;
-    const trips = { getRouteStops: jest.fn(async () => []) } as TripDataProvider;
+    const trips = {
+      getRouteStops: jest.fn(async () => []),
+      invalidateRouteStops: jest.fn(),
+    } as TripDataProvider;
     const service = new TrackingDataService(repository, trips);
 
     await expect(service.getEta(ETA.tripId, {})).resolves.toEqual({ eta: null });
@@ -100,7 +105,10 @@ describe('TrackingDataService ETA selection', () => {
     const repository = {
       findEta: jest.fn(async () => stationEta),
     } as unknown as TrackingDataRepository;
-    const trips = { getRouteStops: jest.fn(async () => []) } as TripDataProvider;
+    const trips = {
+      getRouteStops: jest.fn(async () => []),
+      invalidateRouteStops: jest.fn(),
+    } as TripDataProvider;
     const routes = {
       getDetailedRouteGeometry: jest.fn(async () => ({
         kind: 'ok' as const,
@@ -147,6 +155,7 @@ describe('TrackingDataService ETA selection', () => {
         { stopId: firstStopId, stopName: 'First', latitude: 10.8, longitude: 106.8, sequence: 1, status: 'PENDING' },
         { stopId: '55555555-5555-4555-8555-555555555555', stopName: 'Past', latitude: 10, longitude: 106, sequence: 0, status: 'SKIPPED' },
       ]),
+      invalidateRouteStops: jest.fn(),
     } as TripDataProvider;
     const routes = {
       getDetailedRouteGeometry: jest.fn(async () => ({
@@ -173,7 +182,10 @@ describe('TrackingDataService ETA selection', () => {
 
   it('returns an empty batch for a cold cache without triggering calculation', async () => {
     const repository = { findEta: jest.fn(async () => null) } as unknown as TrackingDataRepository;
-    const trips = { getRouteStops: jest.fn(async () => []) } as TripDataProvider;
+    const trips = {
+      getRouteStops: jest.fn(async () => []),
+      invalidateRouteStops: jest.fn(),
+    } as TripDataProvider;
 
     await expect(new TrackingDataService(repository, trips).getEtas(ETA.tripId))
       .resolves.toEqual({ etas: [] });

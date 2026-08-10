@@ -39,6 +39,8 @@ public sealed class StartParcelDepositPaymentCommandHandler
         StartParcelDepositPaymentCommand command,
         CancellationToken cancellationToken)
     {
+        GuardMobileReturnMode(command.PaymentMethod, command.PaymentReturnMode);
+
         var parcel = await _parcels.GetByIdAsync(command.ParcelId, cancellationToken);
         if (parcel is null)
             throw new CodedNotFoundException("PARCEL_NOT_FOUND", $"Parcel '{command.ParcelId}' not found.");
@@ -122,7 +124,8 @@ public sealed class StartParcelDepositPaymentCommandHandler
             command.IdempotencyKey,
             cancellationToken,
             CreatePaymentContext(parcel),
-            dueAt);
+            dueAt,
+            command.PaymentReturnMode);
 
         if (outcome.Kind == ChargeOutcomeKind.InsufficientFunds)
         {
@@ -139,9 +142,20 @@ public sealed class StartParcelDepositPaymentCommandHandler
         }
 
         if (outcome.Kind != ChargeOutcomeKind.Success || outcome.Result is null)
+        {
+            if (outcome.ErrorStatusCode == 503
+                && string.Equals(outcome.ErrorCode, "VNPAY_MOBILE_SDK_DISABLED", StringComparison.Ordinal))
+            {
+                throw new ParcelPaymentReturnModeException(
+                    503,
+                    "VNPAY_MOBILE_SDK_DISABLED",
+                    outcome.ErrorMessage ?? "VNPay Mobile SDK is disabled.");
+            }
+
             throw new ParcelDependencyUnavailableException(
                 "PAYMENT_SERVICE_ERROR",
                 outcome.ErrorMessage ?? "Payment service unavailable.");
+        }
 
         var assigned = await _parcels.TryAssignDepositPaymentIdAsync(
             parcel.Id,
@@ -158,7 +172,9 @@ public sealed class StartParcelDepositPaymentCommandHandler
             parcel.DepositRequiredVnd.Amount,
             0,
             outcome.Result.DueAt ?? dueAt,
-            outcome.Result.PaymentRedirectUrl);
+            outcome.Result.PaymentRedirectUrl,
+            outcome.Result.PaymentReturnMode,
+            outcome.Result.VnPaySdk);
     }
 
     private async Task<Guid?> ValidateVoucherAsync(
@@ -225,4 +241,26 @@ public sealed class StartParcelDepositPaymentCommandHandler
 
     private static DateTimeOffset Min(DateTimeOffset left, DateTimeOffset right)
         => left <= right ? left : right;
+
+    private static void GuardMobileReturnMode(string paymentMethod, string? paymentReturnMode)
+    {
+        if (!string.Equals(paymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (string.IsNullOrWhiteSpace(paymentReturnMode))
+        {
+            throw new ParcelPaymentReturnModeException(
+                426,
+                "MOBILE_APP_UPDATE_REQUIRED",
+                "Update the mobile app to continue with VNPay.");
+        }
+
+        if (!string.Equals(paymentReturnMode, "MOBILE_SDK", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ParcelPaymentReturnModeException(
+                422,
+                "PAYMENT_RETURN_MODE_INVALID",
+                "paymentReturnMode must be MOBILE_SDK.");
+        }
+    }
 }

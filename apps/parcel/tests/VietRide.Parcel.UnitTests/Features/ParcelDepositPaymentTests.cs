@@ -39,7 +39,8 @@ public sealed class ParcelDepositPaymentTests
                 Arg.Any<string>(),
                 Arg.Any<CancellationToken>(),
                 Arg.Any<PaymentContextSnapshot?>(),
-                Arg.Any<DateTimeOffset?>())
+                Arg.Any<DateTimeOffset?>(),
+                "MOBILE_SDK")
             .Returns(call => new ChargeOutcome(
                 ChargeOutcomeKind.Success,
                 new ChargeResult(paymentId, "PENDING_REDIRECT", "https://pay", call.ArgAt<DateTimeOffset?>(8)),
@@ -50,7 +51,8 @@ public sealed class ParcelDepositPaymentTests
                 parcel.Id,
                 SenderId,
                 "VNPAY",
-                Guid.NewGuid().ToString("D")),
+                Guid.NewGuid().ToString("D"),
+                "MOBILE_SDK"),
             default);
 
         result.Status.Should().Be(ParcelStatus.PENDING_PAYMENT.ToString());
@@ -67,7 +69,8 @@ public sealed class ParcelDepositPaymentTests
             Arg.Is<PaymentContextSnapshot>(context =>
                 context.Allocations.Count == 1
                 && context.Allocations[0].ReferenceCode == parcel.ParcelCode),
-            Arg.Any<DateTimeOffset?>());
+            Arg.Any<DateTimeOffset?>(),
+            "MOBILE_SDK");
         await trip.Received(1).ReserveCargoAsync(
             TripId,
             parcel.Id,

@@ -636,6 +636,7 @@ public sealed class TripHandlerProjectionTests
         var handler = new GetTripDetailHandler(
             new InMemoryTripRepository([trip]),
             new InMemoryRouteRepository([route]),
+            new InMemoryAlternativeRouteRepository([], []),
             new InMemoryStationRepository([origin, destination]),
             new InMemoryStopRepository([pendingStop, arrivedStop, skippedStop]),
             new InMemoryTripSeatRepository([]),
@@ -669,6 +670,7 @@ public sealed class TripHandlerProjectionTests
         var handler = new GetTripDetailHandler(
             new InMemoryTripRepository([trip]),
             new InMemoryRouteRepository([route]),
+            new InMemoryAlternativeRouteRepository([], []),
             new InMemoryStationRepository([origin, destination]),
             new InMemoryStopRepository([stop]),
             new InMemoryTripSeatRepository([]),
@@ -720,6 +722,7 @@ public sealed class TripHandlerProjectionTests
         var handler = new GetTripDetailHandler(
             new InMemoryTripRepository([trip]),
             new InMemoryRouteRepository([route]),
+            new InMemoryAlternativeRouteRepository([], []),
             new InMemoryStationRepository([origin, destination]),
             new InMemoryStopRepository([manualStop, templateStop, baseStop]),
             new InMemoryTripSeatRepository([]),
@@ -733,6 +736,55 @@ public sealed class TripHandlerProjectionTests
 
         result.Stops.Select(stop => stop.EffectiveFare).Should().Equal(350_000, 280_000, 400_000);
         result.Stops.Select(stop => stop.FareFromThisStop).Should().Equal(350_000, 280_000, null);
+    }
+
+    [Fact]
+    public async Task GetDetail_AssignedAlternative_ProjectsAlternativeIdAndDestination()
+    {
+        var operatorId = Guid.NewGuid();
+        var origin = Station.Create("Origin", "origin-alternative-detail", "HCM", "HCM");
+        var mainDestination = Station.Create(
+            "Main destination",
+            "main-destination-alternative-detail",
+            "Da Lat",
+            "Lam Dong");
+        var alternativeDestination = Station.Create(
+            "Alternative destination",
+            "alternative-destination-detail",
+            "Nha Trang",
+            "Khanh Hoa");
+        var route = Route.Create(
+            operatorId,
+            "Main route",
+            origin.Id,
+            mainDestination.Id,
+            Money.FromRaw(400_000),
+            310m,
+            420);
+        var alternative = AlternativeRoute.Create(
+            route.Id,
+            "Incident bypass",
+            alternativeDestination.Id,
+            290m,
+            390);
+        var trip = CreateTrip(operatorId, route.Id, DateTimeOffset.Parse("2026-07-21T01:00:00Z"));
+        trip.ChangeAlternativeRoute(alternative.Id);
+        var handler = new GetTripDetailHandler(
+            new InMemoryTripRepository([trip]),
+            new InMemoryRouteRepository([route]),
+            new InMemoryAlternativeRouteRepository([alternative], []),
+            new InMemoryStationRepository([origin, mainDestination, alternativeDestination]),
+            new InMemoryStopRepository([]),
+            new InMemoryTripSeatRepository([]),
+            new InMemoryTripStopRepository([]),
+            new InMemoryTripStopFareRepository([]));
+
+        var result = await handler.Handle(new GetTripDetailQuery(trip.Id), CancellationToken.None);
+
+        result.AlternativeRouteId.Should().Be(alternative.Id);
+        result.DestinationStation.Should().Be(new TripStationDto(
+            alternativeDestination.Id,
+            alternativeDestination.Name));
     }
 
     private static DomainTrip CreateTrip(

@@ -24,7 +24,8 @@ public sealed record CreateBookingCommand(
     string PaymentMethod,
     ShuttlePickupCommand? ShuttlePickup = null,
     ShuttleDropoffCommand? ShuttleDropoff = null,
-    string? IdempotencyKey = null) : IRequest<CreateBookingResult>;
+    string? IdempotencyKey = null,
+    string? PaymentReturnMode = null) : IRequest<CreateBookingResult>;
 
 public sealed record ShuttlePickupCommand(string Address, decimal Latitude, decimal Longitude);
 

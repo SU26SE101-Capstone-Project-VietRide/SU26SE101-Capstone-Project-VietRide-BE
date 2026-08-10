@@ -88,6 +88,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         CancellationToken cancellationToken)
     {
         var now = _clock.UtcNow;
+        GuardMobileReturnMode(request.PaymentMethod, request.PaymentReturnMode);
 
         EnsureSeatCount(request.Outbound);
         EnsureSeatCount(request.Return);
@@ -435,7 +436,11 @@ public sealed class CreateRoundTripBookingCommandHandler
         if (string.Equals(request.PaymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase))
         {
             return BuildResult(bookingGroupId, outboundBooking, returnBooking, grandTotal.Amount,
-                payment.PaymentId, "PENDING_PAYMENT", payment.RedirectUrl);
+                payment.PaymentId,
+                "PENDING_PAYMENT",
+                payment.RedirectUrl,
+                payment.PaymentReturnMode,
+                payment.VnPaySdk);
         }
 
         await BookConfirmAndPublishAsync(
@@ -805,19 +810,27 @@ public sealed class CreateRoundTripBookingCommandHandler
                     outboundVoucherFundingType,
                     returnVoucherFundingType),
                 dueAt: paymentDueAt,
+                paymentReturnMode: request.PaymentReturnMode,
                 cancellationToken: cancellationToken);
 
             switch (chargeOutcome)
             {
                 case ChargeOutcome.Success success:
-                    return new PaymentChargeInfo(success.Data.PaymentId, success.Data.PaymentRedirectUrl);
+                    return new PaymentChargeInfo(
+                        success.Data.PaymentId,
+                        success.Data.PaymentRedirectUrl,
+                        success.Data.PaymentReturnMode,
+                        success.Data.VnPaySdk);
                 case ChargeOutcome.InsufficientFunds insufficientFunds:
                     // S1 fix: compensate voucher usages before re-throwing (mirrors WALLET path).
                     throw new BookingPaymentException(402, "PAYMENT_INSUFFICIENT_WALLET", insufficientFunds.Message);
                 case ChargeOutcome.DeadlinePassed deadlinePassed:
                     throw new BookingPaymentException(422, "PAYMENT_DEADLINE_PASSED", deadlinePassed.Message);
                 case ChargeOutcome.TransportError transportError:
-                    throw new BookingPaymentException(502, "PAYMENT_VNPAY_ERROR", transportError.Message);
+                    throw new BookingPaymentException(
+                        transportError.StatusCode,
+                        transportError.ErrorCode,
+                        transportError.Message);
                 default:
                     throw new InvalidOperationException("Payment charge failed: Unknown payment error.");
             }
@@ -1080,7 +1093,9 @@ public sealed class CreateRoundTripBookingCommandHandler
         long grandTotal,
         Guid? paymentId,
         string status,
-        string? paymentRedirectUrl)
+        string? paymentRedirectUrl,
+        string? paymentReturnMode = null,
+        VnPaySdkMetadata? vnPaySdk = null)
         => new(
             bookingGroupId,
             new CreateRoundTripBookingResult.RoundTripBookingResult(
@@ -1098,9 +1113,37 @@ public sealed class CreateRoundTripBookingCommandHandler
             grandTotal,
             paymentId,
             status,
-            paymentRedirectUrl);
+            paymentRedirectUrl,
+            paymentReturnMode,
+            vnPaySdk);
 
-    private sealed record PaymentChargeInfo(Guid? PaymentId, string? RedirectUrl);
+    private sealed record PaymentChargeInfo(
+        Guid? PaymentId,
+        string? RedirectUrl,
+        string? PaymentReturnMode = null,
+        VnPaySdkMetadata? VnPaySdk = null);
+
+    private static void GuardMobileReturnMode(string paymentMethod, string? paymentReturnMode)
+    {
+        if (!string.Equals(paymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (string.IsNullOrWhiteSpace(paymentReturnMode))
+        {
+            throw new BookingPaymentException(
+                426,
+                "MOBILE_APP_UPDATE_REQUIRED",
+                "Update the mobile app to continue with VNPay.");
+        }
+
+        if (!string.Equals(paymentReturnMode, "MOBILE_SDK", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new BookingPaymentException(
+                422,
+                "PAYMENT_RETURN_MODE_INVALID",
+                "paymentReturnMode must be MOBILE_SDK.");
+        }
+    }
 
     private static IReadOnlyList<TicketAllocation> BuildTicketAllocations(
         IReadOnlyList<CreateRoundTripBookingCommand.RoundTripSeatRequest> seats,

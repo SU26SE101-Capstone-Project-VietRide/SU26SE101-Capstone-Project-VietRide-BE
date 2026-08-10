@@ -12,6 +12,7 @@ public sealed class TopUpRequest : BaseEntity<Guid>
     public Guid UserId { get; private set; }
     public Money Amount { get; private set; }
     public TopUpRequestStatus Status { get; private set; }
+    public VnPayReturnMode? ReturnMode { get; private set; }
     public string VnPayTxnRef { get; private set; } = string.Empty;
     public string? VnPayResponseCode { get; private set; }
     public string? PaymentRedirectUrl { get; private set; }
@@ -24,7 +25,8 @@ public sealed class TopUpRequest : BaseEntity<Guid>
         Guid userId,
         Money amount,
         string vnPayTxnRef,
-        string? paymentRedirectUrl = null)
+        string? paymentRedirectUrl = null,
+        VnPayReturnMode vnPayReturnMode = VnPayReturnMode.MOBILE_SDK)
     {
         if (userId == Guid.Empty)
             throw new ArgumentException("User id cannot be empty.", nameof(userId));
@@ -41,6 +43,7 @@ public sealed class TopUpRequest : BaseEntity<Guid>
             UserId = userId,
             Amount = amount,
             Status = TopUpRequestStatus.PENDING,
+            ReturnMode = vnPayReturnMode,
             VnPayTxnRef = vnPayTxnRef.Trim(),
             PaymentRedirectUrl = paymentRedirectUrl,
         };

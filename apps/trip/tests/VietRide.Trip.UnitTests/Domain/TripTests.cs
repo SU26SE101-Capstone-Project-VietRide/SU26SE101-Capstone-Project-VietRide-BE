@@ -71,6 +71,37 @@ public sealed class TripTests
         trip.Status.Should().Be(TripStatus.COMPLETED);
     }
 
+    [Fact]
+    public void ChangeRoute_WhenParentRouteChanges_ClearsAlternativeRoute()
+    {
+        var trip = CreateTrip();
+        var newRouteId = Guid.NewGuid();
+        trip.ChangeAlternativeRoute(Guid.NewGuid());
+
+        var changed = trip.ChangeRoute(
+            newRouteId,
+            trip.EstimatedArrivalTime.AddMinutes(15));
+
+        changed.Should().BeTrue();
+        trip.RouteId.Should().Be(newRouteId);
+        trip.AlternativeRouteId.Should().BeNull();
+    }
+
+    [Fact]
+    public void ChangeRoute_WhenParentRouteIsUnchanged_PreservesAlternativeRoute()
+    {
+        var trip = CreateTrip();
+        var alternativeRouteId = Guid.NewGuid();
+        trip.ChangeAlternativeRoute(alternativeRouteId);
+
+        var changed = trip.ChangeRoute(
+            trip.RouteId,
+            trip.EstimatedArrivalTime.AddMinutes(15));
+
+        changed.Should().BeFalse();
+        trip.AlternativeRouteId.Should().Be(alternativeRouteId);
+    }
+
     private static VietRide.Trip.Domain.Entities.Trip CreateTrip()
     {
         var departure = DateTimeOffset.UtcNow.AddHours(1);

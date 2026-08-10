@@ -23,10 +23,14 @@ describeSystem('Tracking destination ETA (real Redis)', () => {
       new RedisService(client),
       {} as TrackingPrismaService,
     );
-    const tripData: TripDataProvider = { getRouteStops: async () => [] };
+    const tripData: TripDataProvider = {
+      getRouteStops: async () => [],
+      invalidateRouteStops: () => undefined,
+    };
     const routeGeometry: DetailedRouteGeometryProvider = {
       peekCachedRouteGeometry: () => null,
       getRouteGeometry: async () => null,
+      invalidateRouteGeometry: () => undefined,
       getDetailedRouteGeometry: async () => ({
         kind: 'ok',
         snapshot: {

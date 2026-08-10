@@ -11,7 +11,14 @@ namespace VietRide.Booking.Application.Abstractions.ServiceClients;
 public sealed record ChargeResult(
     Guid PaymentId,
     string Status,
-    string? PaymentRedirectUrl);
+    string? PaymentRedirectUrl,
+    string? PaymentReturnMode = null,
+    VnPaySdkMetadata? VnPaySdk = null);
+
+public sealed record VnPaySdkMetadata(
+    string TmnCode,
+    string Scheme,
+    bool IsSandbox);
 
 public sealed record BatchChargeItem(
     string ReferenceType,
@@ -61,7 +68,10 @@ public abstract record ChargeOutcome
     public sealed record DeadlinePassed(string Message) : ChargeOutcome;
 
     /// <summary>Unexpected HTTP / transport error.</summary>
-    public sealed record TransportError(string Message) : ChargeOutcome;
+    public sealed record TransportError(
+        string Message,
+        int StatusCode = 502,
+        string ErrorCode = "PAYMENT_VNPAY_ERROR") : ChargeOutcome;
 }
 
 public abstract record BatchChargeOutcome
@@ -102,7 +112,8 @@ public interface IPaymentServiceClient
         string idempotencyKey,
         CancellationToken cancellationToken = default,
         PaymentContextSnapshot? context = null,
-        DateTimeOffset? dueAt = null);
+        DateTimeOffset? dueAt = null,
+        string? paymentReturnMode = null);
 
     Task<BatchChargeOutcome> BatchChargeAsync(
         Guid userId,

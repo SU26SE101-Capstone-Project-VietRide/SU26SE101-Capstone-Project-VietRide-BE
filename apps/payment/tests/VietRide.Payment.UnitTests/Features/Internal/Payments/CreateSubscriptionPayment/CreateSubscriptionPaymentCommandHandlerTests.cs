@@ -242,7 +242,10 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
                     null,
                     "Ho Chi Minh City")),
             idempotencyKey,
-            "203.0.113.10");
+            "203.0.113.10",
+            ReturnMode: string.Equals(method, "VNPAY", StringComparison.Ordinal)
+                ? "OPERATOR_WEB"
+                : null);
     }
 
     private sealed class FakePaymentRepository : IPaymentRepository

@@ -22,6 +22,9 @@ public sealed class CreateBookingRequest
 
     /// <summary>WALLET or VNPAY.</summary>
     public string PaymentMethod { get; init; } = string.Empty;
+
+    /// <summary>Required as MOBILE_SDK when paymentMethod is VNPAY.</summary>
+    public string? PaymentReturnMode { get; init; }
 }
 
 public sealed class ShuttlePickupRequest

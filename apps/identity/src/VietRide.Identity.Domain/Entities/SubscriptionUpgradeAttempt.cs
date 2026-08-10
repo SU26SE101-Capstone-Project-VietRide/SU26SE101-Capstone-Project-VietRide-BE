@@ -11,6 +11,7 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
     public Guid TargetPlanId { get; private set; }
     public SubscriptionBillingPeriod BillingPeriod { get; private set; }
     public Money Amount { get; private set; } = Money.Zero;
+    public SubscriptionPaymentMethod PaymentMethod { get; private set; }
     public SubscriptionUpgradeAttemptStatus Status { get; private set; }
     public Guid? PaymentId { get; private set; }
     public SubscriptionPaymentSessionStatus LatestPaymentStatus { get; private set; }
@@ -27,6 +28,7 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
         Guid targetPlanId,
         SubscriptionBillingPeriod billingPeriod,
         Money amount,
+        SubscriptionPaymentMethod paymentMethod,
         string idempotencyKey,
         SubscriptionFallbackPolicy fallbackPolicy,
         DateTimeOffset createdAt,
@@ -44,6 +46,7 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
             TargetPlanId = targetPlanId,
             BillingPeriod = billingPeriod,
             Amount = amount,
+            PaymentMethod = paymentMethod,
             Status = SubscriptionUpgradeAttemptStatus.INITIATED,
             LatestPaymentStatus = SubscriptionPaymentSessionStatus.NONE,
             FallbackPolicy = fallbackPolicy,
@@ -58,6 +61,7 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
         Guid targetPlanId,
         SubscriptionBillingPeriod billingPeriod,
         Money amount,
+        SubscriptionPaymentMethod paymentMethod,
         string idempotencyKey,
         DateTimeOffset createdAt,
         DateTimeOffset dueAt)
@@ -67,6 +71,7 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
             targetPlanId,
             billingPeriod,
             amount,
+            paymentMethod,
             idempotencyKey,
             SubscriptionFallbackPolicy.RESTORE_CURRENT,
             createdAt,

@@ -33,6 +33,7 @@ import {
 } from './eta.constants';
 import type { EtaBatchTargetResult, EtaProvider } from './eta-provider';
 import type { TripDataProvider, TripStopSnapshot } from './trip-data.provider';
+import { RouteStateGenerationRegistry } from '../route-state/route-state-generation.registry';
 
 export type EstimateQuality = 'TRAFFIC_AWARE' | 'FALLBACK';
 
@@ -102,6 +103,7 @@ export class EtaService {
     @Inject(GOOGLE_ETA_PROVIDER) private readonly googleProvider: EtaProvider,
     @Inject(LOCAL_ETA_PROVIDER) private readonly localProvider: EtaProvider,
     @Inject(ENV_TOKEN) private readonly env: Env,
+    private readonly routeStateGeneration: RouteStateGenerationRegistry,
   ) {}
 
   async handleGpsUpdate(gps: GpsUpdateEvent): Promise<EtaUpdateEvent | null> {
@@ -117,7 +119,9 @@ export class EtaService {
   }
 
   private async calculateEta(gps: GpsUpdateEvent): Promise<EtaUpdateEvent | null> {
+    const routeGeneration = this.routeStateGeneration.capture(gps.tripId);
     const stops = await this.tripDataProvider.getRouteStops(gps.tripId);
+    if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
     const state = await this.readState(gps.tripId);
     const remainingStops = this.findRemainingStops(stops, gps, state);
     const nextStop = remainingStops[0];
@@ -139,6 +143,7 @@ export class EtaService {
     try {
       const route = this.routeGeometryProvider.peekCachedRouteGeometry(gps.tripId)
         ?? await this.routeGeometryProvider.getRouteGeometry(gps.tripId);
+      if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
       const destination = route?.destinationStation;
       const targets: TripStopSnapshot[] = [
         ...remainingStops,
@@ -153,8 +158,9 @@ export class EtaService {
           : []),
       ];
       const calculation = await this.calculateBatchWithProviders(gps, targets, state);
+      if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
       if (!calculation.results) {
-        await this.writeFailureState(gps, nextStop, state, calculation);
+        await this.writeFailureState(gps, nextStop, state, calculation, routeGeneration);
         return null;
       }
 
@@ -207,6 +213,7 @@ export class EtaService {
         ...(calculation.cooldownUntil ? { cooldownUntil: calculation.cooldownUntil } : {}),
       };
       const etaCacheTtl = this.env.TRACKING_ETA_CACHE_TTL_SECONDS ?? ETA_CACHE_TTL_SECONDS;
+      if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
       const transaction = this.redis.getClient().multi();
       for (const event of events) {
         const targetId = event.targetKind === 'STOP' ? event.stopId : event.stationId;
@@ -226,6 +233,7 @@ export class EtaService {
         ETA_STATE_TTL_SECONDS,
       );
       await transaction.exec();
+      if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
 
       return { ...nextEvent, etas: events };
     } finally {
@@ -368,7 +376,9 @@ export class EtaService {
     nextStop: TripStopSnapshot,
     state: EtaState | null,
     calculation: BatchProviderCalculation,
+    routeGeneration: number,
   ): Promise<void> {
+    if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return;
     await this.redis.getClient().set(
       trackingEtaStateKey(gps.tripId),
       JSON.stringify({

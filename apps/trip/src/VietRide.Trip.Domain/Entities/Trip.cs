@@ -168,6 +168,7 @@ public sealed class Trip : BaseEntity<Guid>
         }
 
         RouteId = routeId;
+        AlternativeRouteId = null;
         EstimatedArrivalTime = estimatedArrivalTime;
         PlannedEtaSource = plannedEtaSource;
         return true;
@@ -184,6 +185,15 @@ public sealed class Trip : BaseEntity<Guid>
 
         AlternativeRouteId = alternativeRouteId;
         return true;
+    }
+
+    public void RecomputeAlternativeRoutePlannedArrival(DateTimeOffset estimatedArrivalTime)
+    {
+        ValidateArrivalAfterDeparture(
+            ActualDepartureTime ?? DepartureDateTime,
+            estimatedArrivalTime);
+        EstimatedArrivalTime = estimatedArrivalTime;
+        PlannedEtaSource = PlannedEtaSource.ROUTE_BASELINE;
     }
 
     public void EnsureAlternativeRouteChangeAllowed()

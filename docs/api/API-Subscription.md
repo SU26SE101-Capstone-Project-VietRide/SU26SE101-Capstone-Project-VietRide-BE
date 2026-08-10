@@ -133,12 +133,13 @@ Request:
 {
   "planId": "b143713b-3810-4657-b9ca-92db51d7ae9e",
   "billingPeriod": "YEARLY",
-  "paymentMethod": "VNPAY",
-  "returnUrl": "https://app.vietride.vn/operator/subscription/result"
+  "paymentMethod": "VNPAY"
 }
 ```
 
 `billingPeriod` chỉ nhận `MONTHLY` hoặc `YEARLY`.
+FE không gửi `returnUrl`; backend luôn chọn mode nội bộ `OPERATOR_WEB` và dùng
+`VNPAY_WEB_RETURN_URL` do server cấu hình.
 
 Response thành công: `202 Accepted`.
 
@@ -167,8 +168,14 @@ Response thành công: `202 Accepted`.
 1. Người dùng chọn plan và kỳ thanh toán.
 2. FE gọi API upgrade với một `Idempotency-Key` mới.
 3. Khi nhận `202`, lưu `paymentId` và chuyển trình duyệt tới `paymentRedirectUrl` bằng `window.location.assign(...)`.
-4. VNPay xử lý thanh toán và backend nhận IPN. FE không gọi IPN.
-5. Khi người dùng quay lại ứng dụng hoặc mở lại màn subscription, FE gọi lại `GET /v1/operator/subscription` cho đến khi `status` là `ACTIVE` và plan đã cập nhật. Return URL không xác nhận hay mutate payment.
+4. VNPay xử lý thanh toán, gọi IPN cho backend và đưa browser về route SPA
+   `/payments/return`. FE không gọi IPN; Gateway không còn payment bridge cho route này.
+5. Tại `/payments/return`, FE chuyển nguyên query VNPay sang
+   `GET /v1/payments/vnpay-return-status?...` để đọc trạng thái đã lưu. Return URL và
+   endpoint status không xác nhận hay mutate payment.
+6. Nếu status còn pending do IPN chưa đến, FE poll có giới hạn
+   `GET /v1/operator/subscription` cho đến khi `status` là `ACTIVE` hoặc payment ở trạng thái
+   kết thúc.
 
 Khi network retry, FE gửi lại request body và cùng `Idempotency-Key`; backend trả lại cùng payment thay vì tạo payment mới.
 
@@ -185,10 +192,11 @@ Header `Idempotency-Key` bắt buộc và phải là key mới cho retry mới. 
 | 403 | `FORBIDDEN` | Không có quyền operator admin hoặc token không có operator scope. |
 | 404 | `RESOURCE_NOT_FOUND` | Plan/subscription không tồn tại. Refresh danh sách gói. |
 | 409 | `SUBSCRIPTION_PAYMENT_PENDING` | Đang có payment khác chờ xử lý; mở trạng thái hiện tại. |
-| 409 | `IDEMPOTENCY_KEY_MISMATCH` | Key bị dùng với payload khác; tạo key mới sau khi người dùng xác nhận thao tác mới. |
+| 422 | `IDEMPOTENCY_KEY_MISMATCH` | Key bị dùng với payload khác; tạo key mới sau khi người dùng xác nhận thao tác mới. |
 | 422 | `SUBSCRIPTION_PLAN_INACTIVE` | Plan vừa bị tắt; refresh danh sách gói. |
 | 422 | `SUBSCRIPTION_PLAN_NOT_PAYABLE` | Plan không có giá VNPay hợp lệ. |
 | 422 | `VALIDATION_ERROR` | Kiểm tra `planId`, `billingPeriod` hoặc header idempotency. |
+| 503 | `VNPAY_WEB_DISABLED` | Kênh Web chưa được bật; giữ màn hiện tại và thử lại sau. |
 
 ## 4. Quản trị plan
 

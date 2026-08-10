@@ -7,4 +7,8 @@ export class NoopTripDataProvider implements TripDataProvider {
     void tripId;
     return [];
   }
+
+  invalidateRouteStops(tripId: string): void {
+    void tripId;
+  }
 }

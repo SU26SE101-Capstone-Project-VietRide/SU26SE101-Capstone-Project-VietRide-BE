@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Infrastructure.ExternalClients;
@@ -9,6 +10,39 @@ namespace VietRide.Identity.UnitTests.Infrastructure.ExternalClients;
 
 public sealed class SubscriptionPaymentClientTests
 {
+    [Fact]
+    public async Task CreateAsync_SendsServerControlledOperatorWebReturnMode()
+    {
+        var paymentId = Guid.NewGuid();
+        var client = CreateClient(async (request, cancellationToken) =>
+        {
+            var payload = await request.Content!.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(payload);
+            document.RootElement.GetProperty("returnMode").GetString().Should().Be("OPERATOR_WEB");
+            document.RootElement.TryGetProperty("returnUrl", out _).Should().BeFalse();
+
+            return new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = JsonContent.Create(new
+                {
+                    success = true,
+                    statusCode = 201,
+                    data = new
+                    {
+                        paymentId,
+                        status = "PENDING_REDIRECT",
+                        paymentRedirectUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+                        invoiceStatus = (string?)null,
+                    },
+                }),
+            };
+        });
+
+        var result = await client.CreateAsync(CreateRequest());
+
+        result.PaymentId.Should().Be(paymentId);
+    }
+
     [Fact]
     public async Task CreateAsync_SerializesEveryInternalInstantAsUtcZ()
     {
@@ -27,7 +61,7 @@ public sealed class SubscriptionPaymentClientTests
                     {
                         paymentId,
                         status = "PENDING_REDIRECT",
-                        paymentRedirectUrl = "https://sandbox.vnpayment.vn/payment",
+                        paymentRedirectUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
                         invoiceStatus = (string?)null,
                     },
                 }),
@@ -203,6 +237,7 @@ public sealed class SubscriptionPaymentClientTests
                     null,
                     null,
                     null)),
+            "OPERATOR_WEB",
             "subscription-upgrade-test",
             "127.0.0.1");
 

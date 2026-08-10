@@ -85,6 +85,7 @@ public sealed class CreateSubscriptionPaymentCommandHandler
         }
 
         var method = Enum.Parse<PaymentMethod>(request.PaymentMethod, ignoreCase: false);
+        var returnMode = ParseReturnMode(request, method);
         var amount = Money.FromRaw(request.Amount);
         var now = _clock.UtcNow;
         var dueAt = request.DueAt ?? now.AddMinutes(15);
@@ -139,7 +140,8 @@ public sealed class CreateSubscriptionPaymentCommandHandler
             txnRef,
             request.ClientIpAddress,
             now,
-            dueAt);
+            dueAt,
+            returnMode!.Value);
         var payment = PaymentEntity.CreatePendingRedirectVnPaySubscription(
             request.UpgradeAttemptId,
             request.OperatorId,
@@ -147,7 +149,8 @@ public sealed class CreateSubscriptionPaymentCommandHandler
             txnRef,
             request.IdempotencyKey,
             redirectUrl,
-            dueAt);
+            dueAt,
+            returnMode.Value);
         payment.AttachContext(contextJson);
 
         await _payments.AddAsync(payment, cancellationToken).ConfigureAwait(false);
@@ -172,7 +175,8 @@ public sealed class CreateSubscriptionPaymentCommandHandler
             || payment.ReferenceId != request.UpgradeAttemptId
             || payment.OperatorId != request.OperatorId
             || payment.Amount.Amount != request.Amount
-            || !string.Equals(payment.Method.ToString(), request.PaymentMethod, StringComparison.Ordinal))
+            || !string.Equals(payment.Method.ToString(), request.PaymentMethod, StringComparison.Ordinal)
+            || payment.ReturnMode != ParseReturnMode(request, payment.Method))
         {
             throw new CodedValidationException(
                 "IDEMPOTENCY_KEY_MISMATCH",
@@ -188,6 +192,24 @@ public sealed class CreateSubscriptionPaymentCommandHandler
                 "IDEMPOTENCY_KEY_MISMATCH",
                 "Idempotency-Key was already used with a different subscription payment snapshot.");
         }
+    }
+
+    private static VnPayReturnMode? ParseReturnMode(
+        CreateSubscriptionPaymentCommand request,
+        PaymentMethod method)
+    {
+        if (method != PaymentMethod.VNPAY)
+            return null;
+
+        if (!Enum.TryParse<VnPayReturnMode>(request.ReturnMode, ignoreCase: true, out var returnMode)
+            || returnMode != VnPayReturnMode.OPERATOR_WEB)
+        {
+            throw new CodedValidationException(
+                "PAYMENT_RETURN_MODE_INVALID",
+                "returnMode must be OPERATOR_WEB for VNPay subscription payments.");
+        }
+
+        return returnMode;
     }
 
     private Task EnqueueSucceededAsync(

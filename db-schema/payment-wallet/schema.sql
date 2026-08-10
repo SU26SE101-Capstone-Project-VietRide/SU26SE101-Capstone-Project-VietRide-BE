@@ -26,6 +26,8 @@ CREATE TYPE payment_status AS ENUM (
     'PENDING_REDIRECT', 'SUCCEEDED', 'FAILED', 'EXPIRED', 'REFUNDED'
 );
 
+CREATE TYPE vnpay_return_mode AS ENUM ('OPERATOR_WEB', 'MOBILE_SDK');
+
 CREATE TYPE top_up_request_status AS ENUM (
     'PENDING', 'SUCCEEDED', 'FAILED', 'EXPIRED'
 );
@@ -112,6 +114,7 @@ CREATE TABLE payments (
     operator_id UUID NULL,         -- logical FK identity.operators (operator paying for subscription)
     amount BIGINT NOT NULL,
     method payment_method NOT NULL,
+    vnpay_return_mode vnpay_return_mode NULL,
     status payment_status NOT NULL,
     vnpay_txn_ref VARCHAR(100) NULL,
     vnpay_response_code VARCHAR(10) NULL,
@@ -149,6 +152,8 @@ CREATE INDEX idx_payments_subscription_succeeded_at ON payments (succeeded_at)
 
 COMMENT ON COLUMN payments.vnpay_txn_ref IS
     'VNPay vnp_TxnRef — unique per VNPay transaction. NULL for WALLET method.';
+COMMENT ON COLUMN payments.vnpay_return_mode IS
+    'Server-selected VNPay return flow. NULL for WALLET and historical rows.';
 COMMENT ON COLUMN payments.idempotency_key IS
     'From Idempotency-Key header. UNIQUE prevents double-charge on retry.';
 COMMENT ON COLUMN payments.due_at IS
@@ -162,6 +167,7 @@ CREATE TABLE top_up_requests (
     user_id UUID NOT NULL,    -- logical FK
     amount BIGINT NOT NULL,
     status top_up_request_status NOT NULL DEFAULT 'PENDING',
+    vnpay_return_mode vnpay_return_mode NULL,
     vnpay_txn_ref VARCHAR(100) NOT NULL,
     vnpay_response_code VARCHAR(10) NULL,
     payment_redirect_url TEXT NULL,
@@ -173,6 +179,8 @@ CREATE TABLE top_up_requests (
 );
 
 CREATE UNIQUE INDEX uq_top_up_requests_vnpay_txn_ref ON top_up_requests (vnpay_txn_ref);
+COMMENT ON COLUMN top_up_requests.vnpay_return_mode IS
+    'Server-validated VNPay return flow. NULL only for historical rows.';
 CREATE INDEX idx_top_up_requests_user_id_created_at ON top_up_requests (user_id, created_at DESC);
 CREATE INDEX idx_top_up_requests_status_created_at ON top_up_requests (status, created_at)
     WHERE status = 'PENDING';

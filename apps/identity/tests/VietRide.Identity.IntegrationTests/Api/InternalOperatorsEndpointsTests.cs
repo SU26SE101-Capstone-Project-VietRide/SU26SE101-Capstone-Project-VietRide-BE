@@ -563,6 +563,7 @@ public sealed class InternalOperatorsEndpointsTests
                     targetPlan.Id,
                     SubscriptionBillingPeriod.MONTHLY,
                     Money.FromRaw(500_000),
+                    SubscriptionPaymentMethod.VNPAY,
                     $"pending-entitlement-{Guid.NewGuid():N}",
                     Now,
                     Now.AddMinutes(15));

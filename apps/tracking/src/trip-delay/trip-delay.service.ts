@@ -7,6 +7,7 @@ import type { EtaUpdateEvent } from '../eta/eta.service';
 import type { TripDataProvider, TripStopSnapshot } from '../eta/trip-data.provider';
 import { TRACKING_ACTIVE_TRIPS_KEY, trackingEtaKey } from '../location/location.constants';
 import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
+import { RouteStateGenerationRegistry } from '../route-state/route-state-generation.registry';
 import {
   MILLISECONDS_PER_MINUTE,
   TRIP_DELAY_DEDUPE_TTL_SECONDS,
@@ -77,6 +78,7 @@ export class TripDelayService {
     private readonly redis: RedisService,
     private readonly prisma: TrackingPrismaService,
     @Inject(TRIP_DATA_PROVIDER) private readonly tripDataProvider: TripDataProvider,
+    private readonly routeStateGeneration: RouteStateGenerationRegistry,
   ) {}
 
   async detectDelayedTrips(): Promise<number> {
@@ -91,8 +93,9 @@ export class TripDelayService {
   }
 
   async detectTripDelay(tripId: string): Promise<number> {
+    const routeGeneration = this.routeStateGeneration.capture(tripId);
     try {
-      return await this.evaluateTrip(tripId);
+      return await this.evaluateTrip(tripId, routeGeneration);
     } catch (error) {
       this.logger.warn({ err: error, tripId }, 'Skipping trip delayed detection');
       return 0;
@@ -100,8 +103,12 @@ export class TripDelayService {
   }
 
   async handleEtaUpdate(eta: EtaUpdateEvent): Promise<TripDelayEtaUpdate> {
+    const routeGeneration = this.routeStateGeneration.capture(eta.tripId);
     try {
       const stops = await this.tripDataProvider.getRouteStops(eta.tripId);
+      if (!this.routeStateGeneration.isCurrent(eta.tripId, routeGeneration)) {
+        return await this.buildUnknownUpdate(eta, false);
+      }
       const stop = stops.find((candidate) => candidate.stopId === eta.stopId);
       if (!stop || TERMINAL_STOP_STATUSES.has(stop.status ?? '')) {
         return await this.buildUnknownUpdate(eta);
@@ -114,9 +121,15 @@ export class TripDelayService {
       };
       const evaluation = await this.withDelayStateLock(
         eta.tripId,
-        () => this.evaluateStopEta(stop, cachedEta, 'realtime'),
+        () => this.evaluateStopEta(stop, cachedEta, 'realtime', routeGeneration),
       );
-      if (!evaluation) return await this.buildUnknownUpdate(eta);
+      if (!evaluation) {
+        const includePrevious = this.routeStateGeneration.isCurrent(
+          eta.tripId,
+          routeGeneration,
+        );
+        return await this.buildUnknownUpdate(eta, includePrevious);
+      }
 
       return {
         ...eta,
@@ -134,19 +147,22 @@ export class TripDelayService {
     }
   }
 
-  private async evaluateTrip(tripId: string): Promise<number> {
+  private async evaluateTrip(tripId: string, routeGeneration: number): Promise<number> {
     const stops = await this.tripDataProvider.getRouteStops(tripId);
+    if (!this.routeStateGeneration.isCurrent(tripId, routeGeneration)) return 0;
     let created = 0;
 
     for (const stop of stops) {
+      if (!this.routeStateGeneration.isCurrent(tripId, routeGeneration)) return 0;
       if (TERMINAL_STOP_STATUSES.has(stop.status ?? '') || !stop.estimatedArrivalTime) continue;
 
       const eta = await this.readCachedEta(tripId, stop.stopId);
+      if (!this.routeStateGeneration.isCurrent(tripId, routeGeneration)) return 0;
       if (!eta) continue;
 
       const evaluation = await this.withDelayStateLock(
         tripId,
-        () => this.evaluateStopEta(stop, eta, 'background'),
+        () => this.evaluateStopEta(stop, eta, 'background', routeGeneration),
       );
       if (evaluation?.eventCreated) created += 1;
     }
@@ -224,6 +240,7 @@ export class TripDelayService {
     stop: TripStopSnapshot,
     eta: CachedEta,
     mode: DelayEvaluationMode,
+    routeGeneration: number,
   ): Promise<DelayEvaluation | null> {
     if (!stop.estimatedArrivalTime) return null;
 
@@ -241,6 +258,7 @@ export class TripDelayService {
     const previous = mode === 'realtime'
       ? await this.readRealtimeDelayState(eta.tripId, eta.stopId)
       : null;
+    if (!this.routeStateGeneration.isCurrent(eta.tripId, routeGeneration)) return null;
     const state: TripDelayState = {
       tripId: eta.tripId,
       stopId: eta.stopId,
@@ -258,6 +276,7 @@ export class TripDelayService {
         'EX',
         TRIP_DELAY_STATE_TTL_SECONDS,
       );
+    if (!this.routeStateGeneration.isCurrent(eta.tripId, routeGeneration)) return null;
 
     const staleRealtimeState = mode === 'realtime' && previous?.stopSequence !== undefined
       && stop.sequence < previous.stopSequence;
@@ -270,6 +289,7 @@ export class TripDelayService {
           'EX',
           TRIP_DELAY_STATE_TTL_SECONDS,
         );
+      if (!this.routeStateGeneration.isCurrent(eta.tripId, routeGeneration)) return null;
     }
 
     const statusTransition = mode === 'realtime' && !staleRealtimeState
@@ -300,6 +320,7 @@ export class TripDelayService {
 
     let eventCreated = false;
     let markerExists = false;
+    if (!this.routeStateGeneration.isCurrent(eta.tripId, routeGeneration)) return null;
     try {
       markerExists = (await this.redis.getClient().get(
         trackingTripDelayedDedupeKey(eta.tripId, eta.stopId, windowId),
@@ -311,6 +332,7 @@ export class TripDelayService {
       );
     }
     if (!markerExists) {
+      if (!this.routeStateGeneration.isCurrent(eta.tripId, routeGeneration)) return null;
       try {
         eventCreated = await this.createOutboxEvent(payload);
       } catch (error) {
@@ -320,6 +342,7 @@ export class TripDelayService {
         );
       }
     }
+    if (!this.routeStateGeneration.isCurrent(eta.tripId, routeGeneration)) return null;
     if (eventCreated) {
       await this.redis
         .getClient()
@@ -410,8 +433,13 @@ export class TripDelayService {
     }
   }
 
-  private async buildUnknownUpdate(eta: EtaUpdateEvent): Promise<TripDelayEtaUpdate> {
-    const previous = await this.readRealtimeDelayState(eta.tripId, eta.stopId).catch(() => null);
+  private async buildUnknownUpdate(
+    eta: EtaUpdateEvent,
+    includePrevious = true,
+  ): Promise<TripDelayEtaUpdate> {
+    const previous = includePrevious
+      ? await this.readRealtimeDelayState(eta.tripId, eta.stopId).catch(() => null)
+      : null;
     return {
       ...eta,
       delayed: previous?.delayStatus === 'DELAYED',

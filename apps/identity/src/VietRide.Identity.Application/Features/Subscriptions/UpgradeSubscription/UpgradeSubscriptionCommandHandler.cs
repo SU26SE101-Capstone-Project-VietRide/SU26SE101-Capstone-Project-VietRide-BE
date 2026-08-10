@@ -13,6 +13,7 @@ public sealed class UpgradeSubscriptionCommandHandler
     : IRequestHandler<UpgradeSubscriptionCommand, SubscriptionUpgradeResponseDto>
 {
     private static readonly TimeSpan PaymentWindow = TimeSpan.FromMinutes(15);
+    private const string OperatorWebReturnMode = "OPERATOR_WEB";
 
     private readonly IOperatorSubscriptionRepository _subscriptions;
     private readonly ISubscriptionPlanRepository _plans;
@@ -62,6 +63,7 @@ public sealed class UpgradeSubscriptionCommandHandler
             request,
             billingPeriod,
             amount,
+            paymentMethod,
             cancellationToken);
         var snapshot = CreateSnapshot(
             attempt.SubscriptionId,
@@ -83,6 +85,7 @@ public sealed class UpgradeSubscriptionCommandHandler
                     request.PaymentMethod,
                     amount.Amount,
                     snapshot,
+                    OperatorWebReturnMode,
                     request.IdempotencyKey,
                     request.ClientIpAddress,
                     attempt.DueAt),
@@ -126,6 +129,7 @@ public sealed class UpgradeSubscriptionCommandHandler
         UpgradeSubscriptionCommand request,
         SubscriptionBillingPeriod billingPeriod,
         VietRide.Shared.Kernel.ValueObjects.Money amount,
+        SubscriptionPaymentMethod paymentMethod,
         CancellationToken cancellationToken)
     {
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
@@ -166,6 +170,7 @@ public sealed class UpgradeSubscriptionCommandHandler
                 request.PlanId,
                 billingPeriod,
                 amount,
+                paymentMethod,
                 request.IdempotencyKey,
                 SubscriptionFallbackPolicy.RESTORE_CURRENT,
                 now,
@@ -251,7 +256,8 @@ public sealed class UpgradeSubscriptionCommandHandler
     {
         if (attempt.OperatorId != request.OperatorId
             || attempt.TargetPlanId != request.PlanId
-            || !string.Equals(attempt.BillingPeriod.ToString(), request.BillingPeriod, StringComparison.Ordinal))
+            || !string.Equals(attempt.BillingPeriod.ToString(), request.BillingPeriod, StringComparison.Ordinal)
+            || !string.Equals(attempt.PaymentMethod.ToString(), request.PaymentMethod, StringComparison.Ordinal))
         {
             throw new CodedValidationException(
                 "IDEMPOTENCY_KEY_MISMATCH",

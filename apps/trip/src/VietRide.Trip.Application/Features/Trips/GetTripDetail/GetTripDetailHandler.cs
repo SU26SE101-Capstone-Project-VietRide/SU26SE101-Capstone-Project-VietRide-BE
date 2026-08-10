@@ -12,6 +12,7 @@ namespace VietRide.Trip.Application.Features.Trips.GetTripDetail;
 public sealed class GetTripDetailHandler : IRequestHandler<GetTripDetailQuery, TripDetailDto>
 {
     private readonly IRouteRepository routeRepository;
+    private readonly IAlternativeRouteRepository alternativeRouteRepository;
     private readonly IStationRepository stationRepository;
     private readonly IStopRepository stopRepository;
     private readonly ITripRepository tripRepository;
@@ -25,6 +26,7 @@ public sealed class GetTripDetailHandler : IRequestHandler<GetTripDetailQuery, T
     public GetTripDetailHandler(
         ITripRepository tripRepository,
         IRouteRepository routeRepository,
+        IAlternativeRouteRepository alternativeRouteRepository,
         IStationRepository stationRepository,
         IStopRepository stopRepository,
         ITripSeatRepository tripSeatRepository,
@@ -36,6 +38,7 @@ public sealed class GetTripDetailHandler : IRequestHandler<GetTripDetailQuery, T
     {
         this.tripRepository = tripRepository;
         this.routeRepository = routeRepository;
+        this.alternativeRouteRepository = alternativeRouteRepository;
         this.stationRepository = stationRepository;
         this.stopRepository = stopRepository;
         this.tripSeatRepository = tripSeatRepository;
@@ -52,8 +55,15 @@ public sealed class GetTripDetailHandler : IRequestHandler<GetTripDetailQuery, T
             ?? throw TripNotFound();
         var route = routeRepository.QueryNoTracking().FirstOrDefault(route => route.Id == trip.RouteId)
             ?? throw TripNotFound();
+        var alternativeRoute = trip.AlternativeRouteId.HasValue
+            ? alternativeRouteRepository.QueryNoTracking().FirstOrDefault(alternativeRoute =>
+                alternativeRoute.Id == trip.AlternativeRouteId.Value
+                && alternativeRoute.RouteId == route.Id)
+                ?? throw TripNotFound()
+            : null;
         var originStation = GetStation(route.OriginStationId);
-        var destinationStation = GetStation(route.DestinationStationId);
+        var destinationStation = GetStation(
+            alternativeRoute?.DestinationStationId ?? route.DestinationStationId);
         var seats = tripSeatRepository.QueryNoTracking()
             .Where(seat => seat.TripId == trip.Id)
             .ToArray();

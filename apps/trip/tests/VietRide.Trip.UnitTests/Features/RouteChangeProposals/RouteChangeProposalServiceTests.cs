@@ -281,7 +281,7 @@ public sealed class RouteChangeProposalServiceTests
             new IncidentRepositoryStub(),
             auditLogs,
             new BookingImpactClientStub(trip.Id),
-            new TripRouteChangeService(alternativeRoutes, outbox),
+            new TripRouteChangeService(alternativeRoutes, new TripStopRepositoryStub(), outbox),
             outbox,
             unitOfWork,
             new ClockStub(Now));
@@ -389,6 +389,33 @@ public sealed class RouteChangeProposalServiceTests
             lockCalls.Add("trip");
             return GetByIdAsync(tripId, cancellationToken);
         }
+    }
+
+    private sealed class TripStopRepositoryStub : RepositoryStub<TripStop>, ITripStopRepository
+    {
+        public Task<IReadOnlyList<TripStop>> AcquireByTripAsync(
+            Guid tripId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<TripStop>>(Entities
+                .Where(stop => stop.TripId == tripId)
+                .OrderBy(stop => stop.OrderIndex)
+                .ThenBy(stop => stop.StopId)
+                .ToArray());
+
+        public Task DeleteNonArrivedByTripAsync(
+            Guid tripId,
+            CancellationToken cancellationToken)
+        {
+            Entities.RemoveAll(stop =>
+                stop.TripId == tripId && stop.Status != TripStopStatus.ARRIVED);
+            return Task.CompletedTask;
+        }
+
+        public Task<TripStop?> GetByIdAsync(
+            (Guid TripId, Guid StopId) id,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(Entities.SingleOrDefault(stop =>
+                stop.TripId == id.TripId && stop.StopId == id.StopId));
     }
 
     private sealed class AlternativeRouteRepositoryStub(AlternativeRoute route) : RepositoryStub<AlternativeRoute>, IAlternativeRouteRepository

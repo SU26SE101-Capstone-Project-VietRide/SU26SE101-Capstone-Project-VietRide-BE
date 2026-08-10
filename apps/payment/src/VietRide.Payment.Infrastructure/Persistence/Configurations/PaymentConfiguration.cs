@@ -52,6 +52,11 @@ internal sealed class PaymentConfiguration : IEntityTypeConfiguration<PaymentEnt
             .HasColumnType($"{PaymentDbContext.SchemaName}.payment_method")
             .IsRequired();
 
+        builder.Property(x => x.ReturnMode)
+            .HasColumnName("vnpay_return_mode")
+            .HasColumnType($"{PaymentDbContext.SchemaName}.vnpay_return_mode")
+            .IsRequired(false);
+
         builder.Property(x => x.Status)
             .HasColumnName("status")
             .HasColumnType($"{PaymentDbContext.SchemaName}.payment_status")

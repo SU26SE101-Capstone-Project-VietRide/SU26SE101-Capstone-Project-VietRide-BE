@@ -93,6 +93,7 @@ public sealed class SubscriptionPaymentInboxTests
             targetPlan.Id,
             SubscriptionBillingPeriod.MONTHLY,
             targetPlan.PricePerMonth,
+            SubscriptionPaymentMethod.VNPAY,
             $"inbox-{suffix}-{Guid.NewGuid():N}",
             now,
             now.AddMinutes(15));
@@ -191,6 +192,7 @@ public sealed class SubscriptionPaymentInboxTests
         subscription.Status.Should().Be(SubscriptionStatus.ACTIVE);
         subscription.PlanId.Should().Be(seed.TargetPlanId);
         attempt.Status.Should().Be(SubscriptionUpgradeAttemptStatus.SUCCEEDED);
+        attempt.PaymentMethod.Should().Be(SubscriptionPaymentMethod.VNPAY);
         attempt.LatestPaymentStatus.Should().Be(SubscriptionPaymentSessionStatus.SUCCEEDED);
         inboxRecord.MessageId.Should().NotBeEmpty();
     }

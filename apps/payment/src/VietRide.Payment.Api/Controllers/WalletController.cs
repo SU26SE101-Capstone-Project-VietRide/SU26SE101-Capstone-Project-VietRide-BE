@@ -74,6 +74,8 @@ public sealed class WalletController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<CreateTopUpResult>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status426UpgradeRequired)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> CreateTopUp(
         [FromBody] CreateTopUpRequest request,
         CancellationToken ct)
@@ -85,7 +87,8 @@ public sealed class WalletController : ControllerBase
             userId,
             request.Amount,
             request.Method,
-            ResolveClientIpAddress());
+            ResolveClientIpAddress(),
+            request.PaymentReturnMode);
 
         var result = await _sender.Send(command, ct);
 

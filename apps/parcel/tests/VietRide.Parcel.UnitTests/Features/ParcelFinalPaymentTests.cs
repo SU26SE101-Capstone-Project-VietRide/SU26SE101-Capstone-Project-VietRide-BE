@@ -49,7 +49,8 @@ public sealed class ParcelFinalPaymentTests
                 "request-key",
                 Arg.Any<CancellationToken>(),
                 Arg.Any<PaymentContextSnapshot?>(),
-                Deadline)
+                Deadline,
+                "MOBILE_SDK")
             .Returns(new ChargeOutcome(
                 ChargeOutcomeKind.Success,
                 new ChargeResult(PaymentId, "PENDING_REDIRECT", "https://pay", Deadline),
@@ -63,7 +64,8 @@ public sealed class ParcelFinalPaymentTests
                     ParcelId,
                     SenderUserId,
                     "VNPAY",
-                    "request-key"),
+                    "request-key",
+                    "MOBILE_SDK"),
                 CancellationToken.None);
 
         result.BalancePaymentId.Should().Be(PaymentId);
@@ -80,7 +82,8 @@ public sealed class ParcelFinalPaymentTests
             Arg.Is<PaymentContextSnapshot>(context =>
                 context.Allocations.Count == 1
                 && context.Allocations[0].ReferenceCode == parcel.ParcelCode),
-            Deadline);
+            Deadline,
+            "MOBILE_SDK");
     }
 
     [Fact]

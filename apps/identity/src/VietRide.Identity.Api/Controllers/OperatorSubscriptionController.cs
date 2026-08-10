@@ -48,6 +48,7 @@ public sealed class OperatorSubscriptionController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status402PaymentRequired)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<SubscriptionUpgradeResponseDto>> UpgradeAsync(
         [FromBody] SubscriptionUpgradeRequest request,
         CancellationToken cancellationToken)
@@ -62,7 +63,6 @@ public sealed class OperatorSubscriptionController : ControllerBase
                 request.PlanId,
                 request.BillingPeriod,
                 request.PaymentMethod,
-                request.ReturnUrl,
                 key,
                 clientIpAddress),
             cancellationToken);
@@ -79,6 +79,7 @@ public sealed class OperatorSubscriptionController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse<SubscriptionUpgradeResponseDto>), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<SubscriptionUpgradeResponseDto>> RetryPaymentAsync(
         Guid upgradeAttemptId,
         CancellationToken cancellationToken)

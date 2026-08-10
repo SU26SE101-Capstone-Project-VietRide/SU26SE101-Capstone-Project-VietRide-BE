@@ -7,8 +7,10 @@ using VietRide.Payment.Api.Controllers;
 using VietRide.Payment.Api.Controllers.Requests;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Exceptions;
 using VietRide.Payment.Application.Features.TopUps.CreateTopUp;
 using VietRide.Payment.Domain.Entities;
+using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
@@ -31,7 +33,7 @@ public sealed class CreateTopUpCommandHandlerTests
         var userId = Guid.NewGuid();
 
         var result = await handler.Handle(
-            new CreateTopUpCommand(userId, 100_000, "VNPAY", "203.0.113.10"),
+            new CreateTopUpCommand(userId, 100_000, "VNPAY", "203.0.113.10", "MOBILE_SDK"),
             CancellationToken.None);
 
         repository.TopUpRequests.Should().ContainSingle();
@@ -45,6 +47,9 @@ public sealed class CreateTopUpCommandHandlerTests
         topUpRequest.PaymentRedirectUrl.Should().Be(vnPayClient.RedirectUrl);
         result.Status.Should().Be("PENDING");
         result.PaymentRedirectUrl.Should().Be(vnPayClient.RedirectUrl);
+        result.PaymentReturnMode.Should().Be("MOBILE_SDK");
+        result.VnPaySdk.Scheme.Should().Be("vietride");
+        topUpRequest.ReturnMode.Should().Be(VnPayReturnMode.MOBILE_SDK);
         vnPayClient.LastAmount.Should().Be(Money.FromRaw(100_000));
         vnPayClient.LastUserId.Should().Be(userId);
         vnPayClient.LastClientIpAddress.Should().Be("203.0.113.10");
@@ -91,6 +96,26 @@ public sealed class CreateTopUpCommandHandlerTests
         repository.TopUpRequests.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Handle_WhenVnPayReturnModeIsMissing_RequiresMobileAppUpdate()
+    {
+        var repository = new FakeTopUpRequestRepository();
+        var handler = new CreateTopUpCommandHandler(
+            repository,
+            new FakeVnPayClient("https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"),
+            new FrozenClock(DateTimeOffset.UtcNow),
+            NullLogger<CreateTopUpCommandHandler>.Instance);
+
+        var act = () => handler.Handle(
+            new CreateTopUpCommand(Guid.NewGuid(), 100_000, "VNPAY", "203.0.113.10"),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<MobileAppUpdateRequiredException>()
+            .Where(exception => exception.ErrorCode == "MOBILE_APP_UPDATE_REQUIRED"
+                && exception.StatusCode == 426);
+        repository.TopUpRequests.Should().BeEmpty();
+    }
+
     private sealed class RecordingSender : ISender
     {
         public bool WasCalled { get; private set; }
@@ -98,13 +123,23 @@ public sealed class CreateTopUpCommandHandlerTests
         public Task<TResponse> Send<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
         {
             WasCalled = true;
-            return Task.FromResult((TResponse)(object)new CreateTopUpResult(Guid.NewGuid(), "PENDING", "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"));
+            return Task.FromResult((TResponse)(object)new CreateTopUpResult(
+                Guid.NewGuid(),
+                "PENDING",
+                "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+                "MOBILE_SDK",
+                new VnPaySdkConfiguration("TESTTMN", "vietride", true)));
         }
 
         public Task<object?> Send(object request, CancellationToken cancellationToken = default)
         {
             WasCalled = true;
-            return Task.FromResult<object?>(new CreateTopUpResult(Guid.NewGuid(), "PENDING", "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"));
+            return Task.FromResult<object?>(new CreateTopUpResult(
+                Guid.NewGuid(),
+                "PENDING",
+                "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html",
+                "MOBILE_SDK",
+                new VnPaySdkConfiguration("TESTTMN", "vietride", true)));
         }
 
         public IAsyncEnumerable<TResponse> CreateStream<TResponse>(
@@ -143,6 +178,9 @@ public sealed class CreateTopUpCommandHandlerTests
             LastCreatedAt = createdAt;
             return RedirectUrl;
         }
+
+        public VnPaySdkConfiguration GetMobileSdkConfiguration()
+            => new("TESTTMN", "vietride", true);
     }
 
     private sealed class FakeTopUpRequestRepository : ITopUpRequestRepository

@@ -410,6 +410,7 @@ CREATE TABLE subscription_upgrade_attempts (
     target_plan_id UUID NOT NULL REFERENCES subscription_plans (id) ON DELETE RESTRICT,
     billing_period subscription_billing_period NOT NULL,
     amount BIGINT NOT NULL CHECK (amount >= 0),
+    payment_method subscription_payment_method NOT NULL,
     status subscription_upgrade_attempt_status NOT NULL,
     latest_payment_id UUID NULL,
     latest_payment_status VARCHAR(16) NOT NULL DEFAULT 'NONE',

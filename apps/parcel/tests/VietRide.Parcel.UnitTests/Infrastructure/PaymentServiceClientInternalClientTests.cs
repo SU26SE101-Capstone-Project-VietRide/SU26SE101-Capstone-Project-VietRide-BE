@@ -174,6 +174,36 @@ public class PaymentServiceClientInternalClientTests
     }
 
     [Fact]
+    public async Task ChargeParcelPaymentAsync_WhenMobileSdkDisabled_PreservesUpstreamStatusAndCode()
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            success = false,
+            statusCode = 503,
+            error = new
+            {
+                code = "VNPAY_MOBILE_SDK_DISABLED",
+                message = "VNPay Mobile SDK is disabled.",
+            },
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.ServiceUnavailable, body);
+
+        var result = await client.ChargeParcelPaymentAsync(
+            "PARCEL",
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            100_000,
+            "VNPAY",
+            "idem-mobile-disabled",
+            paymentReturnMode: "MOBILE_SDK");
+
+        result.Kind.Should().Be(ChargeOutcomeKind.TransportError);
+        result.ErrorStatusCode.Should().Be(503);
+        result.ErrorCode.Should().Be("VNPAY_MOBILE_SDK_DISABLED");
+        result.ErrorMessage.Should().Be("VNPay Mobile SDK is disabled.");
+    }
+
+    [Fact]
     public async Task RefundParcelPaymentAsync_Returns_Success_On_200()
     {
         var txId = Guid.NewGuid();

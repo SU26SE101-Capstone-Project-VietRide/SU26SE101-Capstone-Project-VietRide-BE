@@ -221,7 +221,6 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
       fullPath === '/ready' ||
       fullPath.startsWith('/docs') ||
       fullPath === '/auth/set-password' ||
-      fullPath === '/payments/return' ||
       fullPath.startsWith('/.well-known/')
     ) {
       return next();

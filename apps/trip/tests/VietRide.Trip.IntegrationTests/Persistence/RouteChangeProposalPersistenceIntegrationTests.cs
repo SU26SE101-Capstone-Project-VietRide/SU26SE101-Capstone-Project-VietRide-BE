@@ -450,6 +450,7 @@ public sealed class RouteChangeProposalPersistenceIntegrationTests
     {
         var outbox = overriddenOutbox ?? new IntegrationEventOutbox(new OutboxStore(db, new SystemClock()));
         var alternativeRoutes = (IAlternativeRouteRepository)CreateRepository(db, "AlternativeRouteRepository");
+        var tripStops = (ITripStopRepository)CreateRepository(db, "TripStopRepository");
         return new RouteChangeProposalService(
             (IRouteChangeProposalRepository)CreateRepository(db, "RouteChangeProposalRepository"),
             (ITripRepository)CreateRepository(db, "TripRepository"),
@@ -461,7 +462,7 @@ public sealed class RouteChangeProposalPersistenceIntegrationTests
             (IIncidentRepository)CreateRepository(db, "IncidentRepository"),
             (ITripAuditLogRepository)CreateRepository(db, "TripAuditLogRepository"),
             new EmptyBookingImpactClient(),
-            new TripRouteChangeService(alternativeRoutes, outbox),
+            new TripRouteChangeService(alternativeRoutes, tripStops, outbox),
             outbox,
             new EfUnitOfWork(db),
             new SystemClock());

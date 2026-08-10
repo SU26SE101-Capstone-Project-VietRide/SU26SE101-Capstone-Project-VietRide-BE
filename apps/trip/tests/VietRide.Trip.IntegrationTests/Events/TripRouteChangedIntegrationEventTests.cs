@@ -52,13 +52,14 @@ public sealed class TripRouteChangedIntegrationEventTests
 
             var affectedBookingIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
             var alternativeRoutes = CreateRepository<IAlternativeRouteRepository>(db, "AlternativeRouteRepository");
+            var tripStops = CreateRepository<ITripStopRepository>(db, "TripStopRepository");
             var outbox = new IntegrationEventOutbox(
                 new OutboxStore(db, new Day29CargoNearFullOutboxIntegrationTests.FixedClock()));
             var handler = new ChangeTripRouteCommandHandler(
                 CreateRepository<ITripRepository>(db, "TripRepository"),
                 alternativeRoutes,
                 new BookingImpactStub(seed.TripId, affectedBookingIds),
-                new TripRouteChangeService(alternativeRoutes, outbox),
+                new TripRouteChangeService(alternativeRoutes, tripStops, outbox),
                 new EfUnitOfWork(db),
                 new Day29CargoNearFullOutboxIntegrationTests.FixedClock());
 
@@ -69,10 +70,30 @@ public sealed class TripRouteChangedIntegrationEventTests
             await using var assertionDb = Day29CargoNearFullOutboxIntegrationTests.CreateDbContext(databaseName);
             var persistedTrip = await assertionDb.Trips.AsNoTracking()
                 .SingleAsync(item => item.Id == seed.TripId);
+            var persistedStops = await assertionDb.TripStops.AsNoTracking()
+                .Where(item => item.TripId == seed.TripId)
+                .OrderBy(item => item.OrderIndex)
+                .ToArrayAsync();
             var row = await assertionDb.OutboxEvents.AsNoTracking()
                 .SingleAsync(item => item.EventType == TripRouteChangedIntegrationEvent.EventTypeValue);
 
             persistedTrip.AlternativeRouteId.Should().Be(alternative.Id);
+            persistedTrip.EstimatedArrivalTime.Should().Be(routeChangeBase.AddMinutes(230));
+            persistedStops.Should().SatisfyRespectively(
+                stop => stop.Should().Match<TripStop>(item =>
+                    item.StopId == firstStop.Id
+                    && item.OrderIndex == 1
+                    && item.Status == TripStopStatus.PENDING
+                    && item.EstimatedArrivalTime == routeChangeBase.AddMinutes(45)
+                    && item.AllowPickup
+                    && item.AllowDropoff),
+                stop => stop.Should().Match<TripStop>(item =>
+                    item.StopId == secondStop.Id
+                    && item.OrderIndex == 2
+                    && item.Status == TripStopStatus.PENDING
+                    && item.EstimatedArrivalTime == routeChangeBase.AddMinutes(90)
+                    && item.AllowPickup
+                    && item.AllowDropoff));
             row.Status.Should().Be(OutboxEventStatus.PENDING);
             row.PublishedAt.Should().BeNull();
             row.RetryCount.Should().Be(0);
@@ -222,13 +243,14 @@ public sealed class TripRouteChangedIntegrationEventTests
         IBookingImpactClient bookingImpact)
     {
         var alternativeRoutes = CreateRepository<IAlternativeRouteRepository>(db, "AlternativeRouteRepository");
+        var tripStops = CreateRepository<ITripStopRepository>(db, "TripStopRepository");
         var outbox = new IntegrationEventOutbox(
             new OutboxStore(db, new Day29CargoNearFullOutboxIntegrationTests.FixedClock()));
         return new ChangeTripRouteCommandHandler(
             CreateRepository<ITripRepository>(db, "TripRepository"),
             alternativeRoutes,
             bookingImpact,
-            new TripRouteChangeService(alternativeRoutes, outbox),
+            new TripRouteChangeService(alternativeRoutes, tripStops, outbox),
             new EfUnitOfWork(db),
             new Day29CargoNearFullOutboxIntegrationTests.FixedClock());
     }

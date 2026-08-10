@@ -2,7 +2,9 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Abstractions.Repositories;
+using VietRide.Payment.Application.Exceptions;
 using VietRide.Payment.Domain.Entities;
+using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
@@ -50,6 +52,18 @@ public sealed class CreateTopUpCommandHandler : IRequestHandler<CreateTopUpComma
                 [new ValidationError(nameof(request.Method), "method must be VNPAY.")]);
         }
 
+        if (string.IsNullOrWhiteSpace(request.PaymentReturnMode))
+            throw new MobileAppUpdateRequiredException();
+
+        if (!Enum.TryParse<VnPayReturnMode>(request.PaymentReturnMode, ignoreCase: true, out var returnMode)
+            || returnMode != VnPayReturnMode.MOBILE_SDK)
+        {
+            throw new CodedValidationException(
+                "PAYMENT_RETURN_MODE_INVALID",
+                "paymentReturnMode must be MOBILE_SDK.",
+                [new ValidationError(nameof(request.PaymentReturnMode), "paymentReturnMode must be MOBILE_SDK.")]);
+        }
+
         var amount = Money.FromRaw(request.Amount);
         var vnPayTxnRef = Guid.NewGuid().ToString("D");
         var now = _clock.UtcNow;
@@ -59,13 +73,15 @@ public sealed class CreateTopUpCommandHandler : IRequestHandler<CreateTopUpComma
             amount,
             vnPayTxnRef,
             request.ClientIpAddress,
-            now);
+            now,
+            returnMode);
 
         var topUpRequest = TopUpRequest.Create(
             request.UserId,
             amount,
             vnPayTxnRef,
-            redirectUrl);
+            redirectUrl,
+            returnMode);
 
         await _topUpRequests.AddAsync(topUpRequest, cancellationToken);
 
@@ -78,6 +94,8 @@ public sealed class CreateTopUpCommandHandler : IRequestHandler<CreateTopUpComma
         return new CreateTopUpResult(
             topUpRequest.Id,
             topUpRequest.Status.ToString(),
-            redirectUrl);
+            redirectUrl,
+            returnMode.ToString(),
+            _vnPayClient.GetMobileSdkConfiguration());
     }
 }
