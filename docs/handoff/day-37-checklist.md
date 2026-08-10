@@ -6,7 +6,7 @@
 - [x] `ACTIVE | PENDING_PAYMENT` quota and operator-user creation use `activePlan` atomically.
 - [x] Parcel keeps the active plan during `PENDING_PAYMENT` and enforces `enableParcel`.
 - [x] RAG verifies operator subscription through Internal JWT and enforces `enableRag`; global admin behavior is unaffected.
-- [x] Pre-expiry warning is scheduled daily at 09:00 ICT; expiry/reset and event-driven 80% warning remain separate.
+- [x] Pre-expiry warning is scheduled daily at 09:00 Asia/Ho_Chi_Minh; expiry/reset and event-driven 80% warning remain separate.
 - [x] Public `POST /v1/operator/trips` is deferred consistently in SOT/API inventory.
 
 ## Verification run

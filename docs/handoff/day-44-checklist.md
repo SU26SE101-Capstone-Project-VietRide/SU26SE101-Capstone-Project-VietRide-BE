@@ -9,7 +9,7 @@
 
 ## DoD result
 
-- [x] ✅ Runtime guard and deterministic manifest — `npm run seed:demo -- --start-date=<YYYY-MM-DD>` rejects Production, a missing runtime `DEMO_SEED_ACCOUNT_PASSWORD`, and a non-future ICT date before planning any write (`scripts/seed-dev-data.ts:144-157`); the manifest uses `schemaVersion: 1`, namespace `day44-v1`, timezone `Asia/Ho_Chi_Minh`, and fixed UUIDs only. The manifest artifact check and 53 focused tests passed.
+- [x] ✅ Runtime guard and deterministic manifest — `npm run seed:demo -- --start-date=<YYYY-MM-DD>` rejects Production, a missing runtime `DEMO_SEED_ACCOUNT_PASSWORD`, and a non-future Asia/Ho_Chi_Minh date before planning any write (`scripts/seed-dev-data.ts:144-157`); the manifest uses `schemaVersion: 1`, namespace `day44-v1`, timezone `Asia/Ho_Chi_Minh`, and fixed UUIDs only. The manifest artifact check and 53 focused tests passed.
 - [x] ✅ Exact cross-service demo state — the isolated real-store gate verified 1 System Admin, 3 Operators, 3 Operator Admins, 9 Drivers, 3 Assistants, 10 Passengers, 2 plans, 3 subscriptions, 5 Stations, 9 Routes, 3 AlternativeRoutes, 9 Vehicles, 9 schedules, 126 Trips, 3,948 seats, 10 funded wallets, the exact 5-Voucher/2-consent matrix, 2 ParcelRouteFares, and 3 searchable RAG documents/chunks. The acceptance matrix is executable in `scripts/run-day44-seed-e2e.mjs:419-662`.
 - [x] ✅ Reproducible and idempotent in under two minutes — two isolated runs took `62,531 ms` and `63,294 ms`; both emitted checksum `154307f1127c8b1452fcfa4cb097a3510c195257425371056f069abffcfddc17`, followed by `IDEMPOTENT_RERUN=PASS`.
 - [x] ✅ Provider-independent RAG seed — offline attestation emitted `RAG_FIXTURE_PROVENANCE=PASS`; the committed fixture is model `nvidia/llama-nemotron-embed-vl-1b-v2:free`, dimension 2,048, with exactly 3 finite one-chunk vectors. The isolated provider trap observed zero `/embeddings` requests and the gate emitted `RAG_READY=PASS`.
@@ -34,7 +34,7 @@
 
 - `.env.example` — blank runtime placeholders for demo password and OpenRouter key.
 - `package.json` — registers `seed:demo` and `e2e:day44`; dependency sections are unchanged.
-- `infra/docker/docker-compose.yml` — pins PostgreSQL timezone to `Asia/Ho_Chi_Minh` for deterministic ICT fixtures.
+- `infra/docker/docker-compose.yml` — pins PostgreSQL timezone to `Asia/Ho_Chi_Minh` for deterministic Asia/Ho_Chi_Minh fixtures.
 - `infra/docker/docker-compose.day44-e2e.yml` — isolated ports/containers, RAG provider trap, and cleanup-safe topology.
 - `scripts/seed-dev-data.ts`, `scripts/seed-dev-data.test.ts` — cross-database preflight, deterministic batches, exact-state validation, and checksum tests.
 - `scripts/run-day44-seed-e2e.mjs`, `scripts/run-day44-seed-e2e.test.mjs` — unique Compose project, two bounded seed runs, acceptance matrix, provider isolation, Gateway Booking/Parcel smoke, and unconditional cleanup.
@@ -99,7 +99,7 @@ The ETA branch subsequently fixed PostgreSQL `42804` by changing the `planned_et
 - REST endpoints, Gateway routes, public DTOs, error codes, routing keys, and integration events: **none**.
 - EF/Prisma migrations and physical DDL: **none**.
 - Demo-only assets: deterministic seed modules, isolated Docker E2E topology, attested RAG fixture, and runbook.
-- Infrastructure: local PostgreSQL timezone is explicitly `Asia/Ho_Chi_Minh` for deterministic ICT seed formulas.
+- Infrastructure: local PostgreSQL timezone is explicitly `Asia/Ho_Chi_Minh` for deterministic Asia/Ho_Chi_Minh seed formulas.
 - RAG convention reconciliation: Cloudinary raw document storage, OpenRouter chat/embedding, model `nvidia/llama-nemotron-embed-vl-1b-v2:free`, `halfvec(2048)`, and HNSW cosine indexing. BSOT was bumped to `1.60.0` and the §13 changelog row is present.
 
 ## Known gaps & carry-over for Day 45
@@ -110,6 +110,6 @@ The ETA branch subsequently fixed PostgreSQL `42804` by changing the `planned_et
 
 ## Notes for Day 45 planning
 
-- Reuse `npm run e2e:day44 -- --start-date=<future-ICT-date>` as the reproducible prerequisite for passenger/parcel rehearsal; provide `DEMO_SEED_ACCOUNT_PASSWORD` only at process runtime.
+- Reuse `npm run e2e:day44 -- --start-date=<future-vietnam-date>` as the reproducible prerequisite for passenger/parcel rehearsal; provide `DEMO_SEED_ACCOUNT_PASSWORD` only at process runtime.
 - Do not regenerate RAG embeddings during normal seed/E2E. A fixture refresh requires explicit approval, a real runtime OpenRouter key, and review of both fixture and provenance diffs.
 - Preserve namespace `day44-v1`, fixed IDs, and fail-closed ownership checks so Day 45 scenarios can rely on stable seeded references.

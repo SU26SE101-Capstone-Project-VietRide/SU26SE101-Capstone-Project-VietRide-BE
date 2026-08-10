@@ -15,7 +15,7 @@ business rule, endpoint, event, Hangfire horizon, or canonical system seed is ch
 
 ## Success criteria (DoD — binary, verifiable)
 
-- [ ] `npm run seed:demo -- --start-date=<YYYY-MM-DD>` requires a future ICT date and runtime
+- [ ] `npm run seed:demo -- --start-date=<YYYY-MM-DD>` requires a future Asia/Ho_Chi_Minh date and runtime
       `DEMO_SEED_ACCOUNT_PASSWORD`, rejects Production, and validates all inputs before writes.
 - [ ] The manifest is `schemaVersion: 1`, namespace `day44-v1`, timezone
       `Asia/Ho_Chi_Minh`, contains only fixed UUIDs, and never generates a random fixture ID.
@@ -40,7 +40,7 @@ Task 44.1 records these values verbatim in the durable manifest; downstream task
 them.
 
 - Root: `schemaVersion=1`, `namespace=day44-v1`, `timezone=Asia/Ho_Chi_Minh`, required
-  `startDate`; valid only when `startDate >= current ICT date + 1 day`. No silent date shift.
+  `startDate`; valid only when `startDate >= current Asia/Ho_Chi_Minh date + 1 day`. No silent date shift.
   UUID namespace is `44000000-0000-5000-8000-000000000001`; every root and child ID is listed
   in the manifest, derived offline with UUIDv5/SHA-1 from that namespace and a canonical fixture
   key. Runtime uses built-in Node crypto only to verify the listed ID, never to generate a new ID.
@@ -58,9 +58,9 @@ them.
   `assistant.{a,b,c}@demo.vietride.local`, and `passenger{01..10}@demo.vietride.local`.
   System Admin comes only from `SYSTEM_ADMIN_BOOTSTRAP_*`; all other passwords come only from
   runtime `DEMO_SEED_ACCOUNT_PASSWORD`.
-- Starter subscription is `ACTIVE`, starts at ICT midnight on `startDate`, expires after 30 days
-  at ICT midnight on `startDate+30`, and has null billing period/payment method. Each Business
-  subscription is `ACTIVE/MONTHLY/VNPAY`, starts at ICT midnight on `startDate`, and expires one
+- Starter subscription is `ACTIVE`, starts at Asia/Ho_Chi_Minh midnight on `startDate`, expires after 30 days
+  at Asia/Ho_Chi_Minh midnight on `startDate+30`, and has null billing period/payment method. Each Business
+  subscription is `ACTIVE/MONTHLY/VNPAY`, starts at Asia/Ho_Chi_Minh midnight on `startDate`, and expires one
   calendar month later. A/B each have one deterministic SUCCEEDED subscription Payment, one
   SUCCEEDED upgrade attempt, processed payment-event/inbox evidence, one `ISSUED` Invoice with
   completed PDF metadata, and the corresponding platform subscription-credit ledger entry.
@@ -72,9 +72,9 @@ them.
   `10.267025,106.359834`. No geocoding occurs.
 - Each Operator has the same three templates, named `D44 {A|B|C} R1 Miền Tây - Cần Thơ`,
   `D44 {A|B|C} R2 Cần Thơ - Miền Tây`, and `D44 {A|B|C} R3 Miền Tây - Bến Tre`:
-  R1 Miền Tây → Cần Thơ (primary; 08:00 ICT,
-  240 minutes, 170 km, base fare 180,000 VND), R2 Cần Thơ → Miền Tây (return pair; 14:00 ICT,
-  240 minutes, 170 km, base fare 180,000 VND), and R3 Miền Tây → Bến Tre (10:00 ICT,
+  R1 Miền Tây → Cần Thơ (primary; 08:00 Asia/Ho_Chi_Minh,
+  240 minutes, 170 km, base fare 180,000 VND), R2 Cần Thơ → Miền Tây (return pair; 14:00 Asia/Ho_Chi_Minh,
+  240 minutes, 170 km, base fare 180,000 VND), and R3 Miền Tây → Bến Tre (10:00 Asia/Ho_Chi_Minh,
   150 minutes, 90 km, base fare 120,000 VND). Stations 2 and 4 remain available but are not
   Day 44 endpoints. Per Operator, R3 uses three operator-owned waypoint copies at the exact
   coordinates of Stations 2/3/4, primary order `[2,3,4]`, and polyline
@@ -89,11 +89,11 @@ them.
   rolling 14-day horizon: exactly `9 * 14 = 126` Trips are materialized, never 30 days.
   Plates are `51B-440.01/.02/.03` for A, `51B-441.01/.02/.03` for B, and
   `51B-442.01/.02/.03` for C. `currentTripsThisMonth` equals the count of that Operator's 42 materialized departures whose
-  ICT year/month equals the ICT year/month of `startDate`; it is calculated, not fixed at 42.
-- Each Passenger has exactly one SUCCEEDED TopUpRequest at `startDate-1 day 09:00 ICT`, one
+  Asia/Ho_Chi_Minh year/month equals the Asia/Ho_Chi_Minh year/month of `startDate`; it is calculated, not fixed at 42.
+- Each Passenger has exactly one SUCCEEDED TopUpRequest at `startDate-1 day 09:00 Asia/Ho_Chi_Minh`, one
   immutable `CREDIT/TOP_UP` WalletTransaction for 2,000,000 VND with before/after `0/2,000,000`
   and `referenceId=TopUpRequest.id`, and wallet balance 2,000,000. No MANUAL_ADJUSTMENT.
-- Voucher validity is `[startDate-7 days 00:00 ICT, startDate+60 days 23:59:59 ICT]`; all are
+- Voucher validity is `[startDate-7 days 00:00 Asia/Ho_Chi_Minh, startDate+60 days 23:59:59 Asia/Ho_Chi_Minh]`; all are
   active, `totalUsageLimit=10000`, `perUserLimit=100`, and `newUserOnly=false`:
   - `D44RIDE10`: platform/VIETRIDE_FUNDED, PERCENT_OFF 10, min 100,000, max 50,000,
     BOOKING+PARCEL, all Operators/Routes, WALLET+VNPAY, no consent.
@@ -195,7 +195,7 @@ only demo seed/test assets, isolated Compose config, `seed:demo`/`e2e:day44` scr
 | verification commands | `$previousTsNodeCompilerOptions=$env:TS_NODE_COMPILER_OPTIONS; $env:TS_NODE_COMPILER_OPTIONS='{"module":"commonjs","moduleResolution":"node","ignoreDeprecations":"6.0"}'; try { node --test --require ts-node/register/transpile-only --test-name-pattern="Day 44 identity fixture planner" scripts/day44/seed-identity.test.ts; $testExit=$LASTEXITCODE } finally { $env:TS_NODE_COMPILER_OPTIONS=$previousTsNodeCompilerOptions }; exit $testExit` (human-approved command-ledger correction on 2026-08-08; at least 1 test must execute and pass)<br>`npx tsc --noEmit --target ES2022 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck --ignoreDeprecations 6.0 scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts`<br>`npx eslint scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts`<br>`npx prettier --check scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts`<br>`git diff --check -- scripts/day44/seed-identity.ts scripts/day44/seed-identity.test.ts` |
 | full regression owner | `audit-day` |
 | invariant flags | LF `.ts`; CRLF `.cs` untouched; CPM no `Version=`; MediatR v11; BCrypt cost 12 through existing Identity lifecycle; no banned/new dependency; no plaintext password/token/OTP/hash; exact role/operator scoping; no cross-DB FK/query/transaction. |
-| acceptance | Focused tests prove the module plans the exact manifest state: existing bootstrap System Admin; Operators A/B/C; 3 Operator Admins; 9 Drivers; 3 Assistants; 10 Passengers; unchanged Starter plus fixed Business Demo; A/B Business and C Starter subscription shapes; calculated per-plan counters including ICT-month Trip counter input. It rejects Production, missing password, non-future start date, random/unlisted IDs, foreign natural-key collisions, and any full-state mismatch. Tests prove it never logs credential material. Real migrated-store counts/state are owned by Task 44.8, not claimed here. |
+| acceptance | Focused tests prove the module plans the exact manifest state: existing bootstrap System Admin; Operators A/B/C; 3 Operator Admins; 9 Drivers; 3 Assistants; 10 Passengers; unchanged Starter plus fixed Business Demo; A/B Business and C Starter subscription shapes; calculated per-plan counters including Asia/Ho_Chi_Minh-month Trip counter input. It rejects Production, missing password, non-future start date, random/unlisted IDs, foreign natural-key collisions, and any full-state mismatch. Tests prove it never logs credential material. Real migrated-store counts/state are owned by Task 44.8, not claimed here. |
 | source citations | Frozen manifest above; `SU26SE101_VIETRIDE_technical_context_v7.md` §4.4, §4.5 (`maxOperatorUsers` counts staff/admin only), §5; `VietRide_API_Contract_v1.md` Auth/Admin Operators/Operator Users; `db-schema/identity-user/schema.sql` `users`, `operators`, `subscription_plans`, `operator_subscriptions`, `subscription_upgrade_attempts`, `integration_inbox`; `db-schema/identity-user/seed.sql` Starter fixed row. |
 
 ### Task 44.4 — Build the deterministic Trip fixture module
@@ -215,7 +215,7 @@ only demo seed/test assets, isolated Compose config, `seed:demo`/`e2e:day44` scr
 | verification commands | `$previousTsNodeCompilerOptions=$env:TS_NODE_COMPILER_OPTIONS; $env:TS_NODE_COMPILER_OPTIONS='{"module":"commonjs","moduleResolution":"node","ignoreDeprecations":"6.0"}'; try { node --test --require ts-node/register/transpile-only --test-name-pattern="Day 44 trip fixture planner" scripts/day44/seed-trip.test.ts; $testExit=$LASTEXITCODE } finally { $env:TS_NODE_COMPILER_OPTIONS=$previousTsNodeCompilerOptions }; exit $testExit` (human-approved command-ledger correction on 2026-08-08; at least 1 test must execute and pass)<br>`npx tsc --noEmit --target ES2022 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck --ignoreDeprecations 6.0 scripts/day44/seed-trip.ts scripts/day44/seed-trip.test.ts`<br>`npx eslint scripts/day44/seed-trip.ts scripts/day44/seed-trip.test.ts`<br>`npx prettier --check scripts/day44/seed-trip.ts scripts/day44/seed-trip.test.ts`<br>`git diff --check -- scripts/day44/seed-trip.ts scripts/day44/seed-trip.test.ts` |
 | full regression owner | `audit-day` |
 | invariant flags | LF `.ts`; production 14-day job unchanged; fixed six-decimal coordinates/no geocode; platform Station/global VehicleType vs tenant-owned rows; same-tenant crew/route/vehicle; immutable snapshots; no banned/new dependency/event/cross-DB FK. |
-| acceptance | Focused tests expand the frozen manifest to exactly 5 Stations, 15 OperatorStation links, 9 Stops, 9 RouteStops, 9 AlternativeRouteStops, 9 Vehicles, 9 Routes with 3 return-pair links, 3 AlternativeRoutes, 9 schedules, and 126 future Trips. They prove all-day schedules, 30-day validity but 14-day-only materialization, R1-only Assistant assignment, distinct Driver per schedule, canonical seat-layout/fare/stop snapshots, 3,948 available seats, 126 TripStops, and calculated ICT `currentTripsThisMonth` across a month-boundary case. They prove exact IDs/full-state comparison and fail-closed collision behavior. Real migrated-store assertions are Task 44.8. |
+| acceptance | Focused tests expand the frozen manifest to exactly 5 Stations, 15 OperatorStation links, 9 Stops, 9 RouteStops, 9 AlternativeRouteStops, 9 Vehicles, 9 Routes with 3 return-pair links, 3 AlternativeRoutes, 9 schedules, and 126 future Trips. They prove all-day schedules, 30-day validity but 14-day-only materialization, R1-only Assistant assignment, distinct Driver per schedule, canonical seat-layout/fare/stop snapshots, 3,948 available seats, 126 TripStops, and calculated Asia/Ho_Chi_Minh `currentTripsThisMonth` across a month-boundary case. They prove exact IDs/full-state comparison and fail-closed collision behavior. Real migrated-store assertions are Task 44.8. |
 | source citations | Frozen manifest above; `SU26SE101_VIETRIDE_technical_context_v7.md` §4.3, §6.10, §6.11 Auto-generate Trip; `VietRide_API_Contract_v1.md` Route/AlternativeRoute/Vehicle/DriverSchedule and Trip search; `db-schema/trip-route-vehicle/schema.sql` Station through Trip child tables; `db-schema/trip-route-vehicle/seed.sql` three VehicleTypes; `BACKEND_SOURCE_OF_TRUTH.md` §10.1. |
 
 ### Task 44.5 — Build the deterministic commerce fixture module
@@ -300,7 +300,7 @@ only demo seed/test assets, isolated Compose config, `seed:demo`/`e2e:day44` scr
 | full regression owner | `audit-day` |
 | human-approved command corrections | The combined PROJECT tests and offline RAG verification run with temporary `TS_NODE_COMPILER_OPTIONS={"module":"commonjs","moduleResolution":"node10","target":"ES2022","ignoreDeprecations":"6.0"}` and restore prior state; offline verification removes any process `OPENROUTER_API_KEY`. Its 2026-08-08 approved retry captures native Node exit before cleanup, restores absent variables through `[Environment]::SetEnvironmentVariable(...,$null,'Process')`, then exits with the captured code so cleanup cannot overwrite evidence. Root config remains untouched. The real-store gate uses only a runtime `DEMO_SEED_ACCOUNT_PASSWORD` without logging or persisting it and deletes any OpenRouter key from the child environment. The human approved a later retry using a cryptographically random process-only password generated immediately before the gate and cleared in `finally`, with no User-environment or `.env` write. The approved Windows launcher adds only `shell: process.platform === 'win32'` to execute `npm.cmd`; all args remain fixed/generated and the password stays environment-only. |
 | invariant flags | LF JS/TS/JSON/YAML/env example; CRLF `.cs` untouched; Production rejection; secrets redacted; default seed/E2E has no usable OpenRouter key and no provider egress; BCrypt 12; BIGINT VND/immutable ledger; existing event/Outbox; no cross-DB FK/distributed transaction; tenant isolation and mutation Idempotency-Key. |
-| acceptance | The command validates Production/password/date/manifest/full-state and offline RAG provenance before writes, then applies fixed owned IDs in dependency order. The isolated Compose override supplies only a non-secret disabled-provider sentinel required for RAG config, and the harness fails if any `/embeddings` request occurs. E2E asserts: 1 System Admin, 3 Operators, 3 Operator Admins, 0 Operator Staff, 9 Drivers, 3 Assistants, 10 Passengers, 2 plans, 3 subscriptions, 2 upgrade attempts/inbox events; 2 SUCCEEDED subscription Payments, 2 ISSUED/COMPLETED-PDF Invoices, 2 processed events, 2 published Outbox events, and 2 platform credits totaling 4,000,000; 5 Stations, 15 OperatorStation links, 9 Stops/RouteStops/AlternativeRouteStops, 9 Routes, 3 return pairs, 3 AlternativeRoutes, 9 Vehicles, 9 schedules, 126 Trips, 126 TripStops, 3,948 TripSeats, and calculated ICT counters; 10 exact wallets/top-ups/transactions; exact five Vouchers/two consents; 2 SMALL Parcel fares and entitlements; exactly 3 RAG documents/3 searchable chunks with access denials, attested 2,048 dimensions/model, and `RAG_READY=PASS`. Two runs each `<120000 ms` preserve checksum and emit `IDEMPOTENT_RERUN=PASS`; Gateway Booking/Parcel smoke emits `BOOKING_READY=PASS`, `PARCEL_READY=PASS`, and `DAY44_RUN=PASS`; no secret/header is logged. |
+| acceptance | The command validates Production/password/date/manifest/full-state and offline RAG provenance before writes, then applies fixed owned IDs in dependency order. The isolated Compose override supplies only a non-secret disabled-provider sentinel required for RAG config, and the harness fails if any `/embeddings` request occurs. E2E asserts: 1 System Admin, 3 Operators, 3 Operator Admins, 0 Operator Staff, 9 Drivers, 3 Assistants, 10 Passengers, 2 plans, 3 subscriptions, 2 upgrade attempts/inbox events; 2 SUCCEEDED subscription Payments, 2 ISSUED/COMPLETED-PDF Invoices, 2 processed events, 2 published Outbox events, and 2 platform credits totaling 4,000,000; 5 Stations, 15 OperatorStation links, 9 Stops/RouteStops/AlternativeRouteStops, 9 Routes, 3 return pairs, 3 AlternativeRoutes, 9 Vehicles, 9 schedules, 126 Trips, 126 TripStops, 3,948 TripSeats, and calculated Asia/Ho_Chi_Minh counters; 10 exact wallets/top-ups/transactions; exact five Vouchers/two consents; 2 SMALL Parcel fares and entitlements; exactly 3 RAG documents/3 searchable chunks with access denials, attested 2,048 dimensions/model, and `RAG_READY=PASS`. Two runs each `<120000 ms` preserve checksum and emit `IDEMPOTENT_RERUN=PASS`; Gateway Booking/Parcel smoke emits `BOOKING_READY=PASS`, `PARCEL_READY=PASS`, and `DAY44_RUN=PASS`; no secret/header is logged. |
 | source citations | `BE_TIMELINE_VU.md` §Day 44 DoD/Review; frozen manifest; schema citations in Tasks 44.3–44.7; `BACKEND_SOURCE_OF_TRUTH.md` §3.1, §5.6, §11, §12.1/§12.4; `VietRide_API_Contract_v1.md` Login, Trip search, Booking create, Parcel available/create, Wallet; `infra/docker/docker-compose.yml`; existing Day37 isolated E2E pattern. |
 
 ### Task 44.9 — Document the verified demo handoff

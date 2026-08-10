@@ -1,7 +1,7 @@
 # Day 22 Trip edit and pricing verification evidence
 
 > Evidence state: close-out complete. The reviewed runtime, regression, cleanup, and consolidated
-> build/test matrix passed from the same checkout on 2026-07-16 (Asia/Bangkok).
+> build/test matrix passed from the same checkout on 2026-07-16 (host offset `+07:00`).
 
 ## Reproducible entry points
 
@@ -120,7 +120,7 @@ is clean.
 | Item | Value |
 |---|---|
 | Checkout/commit | `feat/day22-trip-edit-pricing` at pre-artifact HEAD `6d87aa1`; this file is delivered by the following Task-22.13 commit |
-| Runtime date/timezone | 2026-07-16; Asia/Bangkok |
+| Runtime date/timezone | 2026-07-16; host offset `+07:00` |
 | Application image ids | Recorded below |
 | `--full-matrix` exit | 0; 734.6 s |
 | Day-21 regression exit | 0; fixture cleanup PASS |

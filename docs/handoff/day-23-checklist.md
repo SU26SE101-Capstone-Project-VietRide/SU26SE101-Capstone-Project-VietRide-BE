@@ -14,7 +14,7 @@
 ## DoD result
 
 - [x] ✅ No dedicated Trip schedule endpoint, Gateway route, passenger `/accept`, or passenger `/reject` alias exists. The rebuilt-stack journey used only `PATCH /v1/operator/driver-schedules/{scheduleId}?applyTo=ALL_PENDING` and the canonical passenger `/resolve` endpoint.
-- [x] ✅ Severity is based on absolute delta and ICT calendar date: same-date `<=2h` MINOR, `>2h && <6h` MEDIUM, and `>=6h` or date-change MAJOR. The relevant tests executed inside the full Trip/Booking runs and the Day-23 TAP/E2E boundary checks passed.
+- [x] ✅ Severity is based on absolute delta and Asia/Ho_Chi_Minh calendar date: same-date `<=2h` MINOR, `>2h && <6h` MEDIUM, and `>=6h` or date-change MAJOR. The relevant tests executed inside the full Trip/Booking runs and the Day-23 TAP/E2E boundary checks passed.
 - [x] ✅ `ALL_PENDING` captures one clock and permits exact two-hour equality for both old and computed new departures while rejecting either value below two hours. Dedicated producer coverage passed inside Trip unit `486/486` and integration `183/183`.
 - [x] ✅ `trip_snapshot_departure` remains immutable. Migration `20260717000000_AddBookingTripCurrentDeparture` backfills/indexes `trip_current_departure`; rollback produced column/index `0/0`, re-apply produced `1/1`, and `divergent=0`. Existing `date` and `sortBy=departureAt` semantics and nested `trip.currentDepartureAt` passed real PostgreSQL and Gateway checks.
 - [x] ✅ Booking applies schedule events only to `PENDING_PAYMENT|CONFIRMED`, uses causal CAS (`old→new`, duplicate no-op, third value fails), and creates facts/actions only for `CONFIRMED`. The focused E2E observed exact projection/action/event cardinality for MINOR, MEDIUM, MAJOR, pending-payment, and long-range cases.

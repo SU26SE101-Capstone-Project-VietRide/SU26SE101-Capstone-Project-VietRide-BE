@@ -1,5 +1,5 @@
 Task 23.9 targeted verification transcript
-Date: 2026-07-17 (Asia/Bangkok)
+Date: 2026-07-17 (host offset +07:00)
 Tier: FOCUSED
 Stack: current-checkout d607d13 Booking image; Gateway/Identity/Trip/Booking/Payment/Notification,
 PostgreSQL, Redis, RabbitMQ, and PgBouncer healthy.
@@ -15,8 +15,8 @@ TAP version 13
 # PASS | Postman Day-23 Gateway-only matrix (17 requests)
 # PASS | isolated Day-23 fixture cleanup verified
 # PASS | isolated Day-23 fixture cleanup verified
-# Subtest: severity boundaries use absolute delta and ICT calendar dates
-ok 1 - severity boundaries use absolute delta and ICT calendar dates
+# Subtest: severity boundaries use absolute delta and Asia/Ho_Chi_Minh calendar dates
+ok 1 - severity boundaries use absolute delta and Asia/Ho_Chi_Minh calendar dates
   ---
   duration_ms: 16.35
   type: 'test'

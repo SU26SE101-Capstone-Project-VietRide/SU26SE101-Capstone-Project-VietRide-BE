@@ -25,7 +25,7 @@ totalProjectRevenueVnd = netTransportRevenueVnd + subscriptionRevenueVnd
 
 Input public là ngày theo lịch `Asia/Ho_Chi_Minh`, nhưng mọi DB filter và internal range phải là
 UTC half-open `[fromUtc,toUtcExclusive)`. Ví dụ `2026-07-01..2026-07-31` được chuẩn hóa thành
-`[2026-06-30T17:00:00Z, 2026-07-31T17:00:00Z)`. Không query persistence bằng timestamp ICT.
+`[2026-06-30T17:00:00Z, 2026-07-31T17:00:00Z)`. Không query persistence bằng timestamp Asia/Ho_Chi_Minh.
 
 Canonical ledger chỉ nhận:
 
@@ -226,8 +226,8 @@ Kiểm tra thêm:
 | Trường hợp | Bằng chứng chính |
 |---|---|
 | Một tháng, nhiều tháng, tháng trống, previous year trống | Payment Admin/Operator Revenue handler tests |
-| Refund-only, VietRide/operator voucher, Booking/Parcel reversal, manual/generic/legacy | `RevenueAnalyticsRepositoryTests.PostgreSqlCoreUsesCanonicalSourcesClassificationIctBoundariesAndOneSqlPerRead` |
-| ICT calendar → UTC half-open | `RevenueAnalyticsCoreTests.AdminRange_UsesInclusiveIctBoundariesAndEqualPreviousPeriod`; Booking Platform Report range tests; Parcel Payment client query test |
+| Refund-only, VietRide/operator voucher, Booking/Parcel reversal, manual/generic/legacy | `RevenueAnalyticsRepositoryTests.PostgreSqlCoreUsesCanonicalSourcesClassificationVietnamBoundariesAndOneSqlPerRead` |
+| Asia/Ho_Chi_Minh calendar → UTC half-open | `RevenueAnalyticsCoreTests.AdminRange_UsesInclusiveVietnamBoundariesAndEqualPreviousPeriod`; Booking Platform Report range tests; Parcel Payment client query test |
 | Cache TTL/expiry | `RevenueAnalyticsCacheTests`; internal summary cache test; Booking Platform Report cache tests |
 | Overflow | Payment repository + Booking Platform Report overflow tests |
 | Dashboard dùng Payment, BookingStats không money | Booking Admin Dashboard/BookingStats unit và endpoint integration tests |

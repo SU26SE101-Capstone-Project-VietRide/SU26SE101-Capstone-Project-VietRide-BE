@@ -51,7 +51,7 @@ Tất cả schema tuân thủ v6 Section 8 conventions:
 ### Data types
 - **Money (VND):** `BIGINT`. **KHÔNG** dùng DECIMAL/FLOAT/REAL/DOUBLE PRECISION.
 - **Timestamps:** `TIMESTAMPTZ` (timezone-aware UTC). KHÔNG `TIMESTAMP` (naive).
-- **`departureTime`:** `TIME` (no timezone) — semantic local ICT.
+- **`departureTime`:** `TIME` (no timezone) — semantic local Asia/Ho_Chi_Minh.
 - **UUID:** `UUID` type với `gen_random_uuid()` default.
 - **JSON config:** `JSONB`.
 - **pgvector embedding:** RAG dùng `halfvec(2048)` với HNSW `halfvec_cosine_ops`; model OpenRouter `nvidia/llama-nemotron-embed-vl-1b-v2:free`.

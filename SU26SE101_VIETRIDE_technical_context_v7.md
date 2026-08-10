@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-08 (RAG provider, storage, and vector contract reconciliation)
+> **Cập nhật:** 2026-08-10 (date/time policy reconciliation)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -20,6 +20,23 @@
 >
 > **Nếu phát hiện gap, contradiction, hoặc business rule không rõ ràng — flag lại để cập nhật doc trước khi proceed. Không tự suy diễn business logic.**
 >
+
+---
+
+## 0. Date/Time policy
+
+- Mọi instant được lưu và xử lý nội bộ bằng UTC. PostgreSQL `TIMESTAMPTZ`, internal HTTP,
+  Redis, Outbox và RabbitMQ serialize UTC theo RFC 3339 kết thúc bằng `Z`.
+- Mọi instant trong JSON response `/v1/*` gửi FE và Tracking WebSocket được chuyển qua IANA
+  `Asia/Ho_Chi_Minh`, serialize với offset `+07:00`. Đây là cùng một instant, không phải cộng
+  cứng bảy giờ và không làm thay đổi dữ liệu đã lưu.
+- Request datetime bắt buộc có `Z` hoặc offset rõ ràng (`+07:00` được khuyến nghị cho FE Việt Nam),
+  sau đó Backend normalize UTC; timestamp thiếu offset bị từ chối.
+- `DateOnly`, `TimeOnly`, `dayOfWeek`, ngày search/report và schedule dùng business calendar
+  `Asia/Ho_Chi_Minh`; đây là IANA timezone identifier duy nhất của nghiệp vụ. Không dùng fixed offset,
+  timezone alias, Windows timezone ID hoặc timezone của OS/DB làm identifier nghiệp vụ.
+- Search theo ngày Việt Nam phải đổi sang UTC half-open range. Ví dụ `2026-08-10` là
+  `[2026-08-09T17:00:00Z, 2026-08-10T17:00:00Z)`.
 
 ---
 
@@ -867,8 +884,8 @@ Payment là nguồn sự thật duy nhất về trạng thái tiền. Return URL
 - Read actions (xem booking, xem báo cáo) vẫn cho phép — không block toàn diện để operator có data view khi đàm phán upgrade.
 - EXPIRED operator có doanh thu đã earned trước EXPIRED → `OperatorTripSettlement` cho các trip terminal trước EXPIRED vẫn được tạo và auto-settle bằng cách debit `PlatformWallet` + credit `OperatorWallet` theo cycle Monday weekly (Hangfire không filter theo subscription status). Operator nhận đủ tiền đã earned vào ví nội bộ. **Lý do:** earned revenue là tài sản của operator, không thể hold lại vì subscription expired (legal risk + bad faith). Xem 4.6.
 
-**Pre-expiry warning (thêm):** Hangfire `subscription-trial-expiring-warn` job chạy daily 09:00 ICT
-(`SE Asia Standard Time`):
+**Pre-expiry warning (thêm):** Hangfire `subscription-trial-expiring-warn` job chạy daily 09:00
+`Asia/Ho_Chi_Minh` bằng UTC cron explicit:
 ```
 SELECT OperatorSubscription WHERE status=ACTIVE
   AND expiresAt BETWEEN now + 2 days AND now + 4 days
@@ -1608,7 +1625,7 @@ Hành khách tìm kiếm chuyến theo điểm đi, điểm đến và ngày. H�
 QR encode: plain string = bookingCode
   → `bookingCode` format: VR-yyyyMMdd-XXXXXXXX
      - VR = VietRide Booking prefix (phân biệt với VRP của Parcel)
-     - yyyyMMdd = ngày tạo booking theo Asia/Bangkok (ICT)
+     - yyyyMMdd = ngày tạo booking theo `Asia/Ho_Chi_Minh`
      - XXXXXXXX = 8 ký tự uppercase base32 (A-Z, 2-7) random, unique trong DB
      - Ví dụ: "VR-20260518-ABCDEF34"
   → KHÔNG encode JSON, token, hay encrypted payload
@@ -1965,7 +1982,7 @@ Booking giữ immutable `baseFare`, `discountAmount`, `totalAmount`; cancel/refu
 `totalAmount`.
 
 **Operator holiday fare surcharge:** Trip Service owns one operator-scoped enable flag and named
-holiday periods. Each period uses inclusive ICT calendar dates (`startDate <= departureDateICT <=
+holiday periods. Each period uses inclusive Asia/Ho_Chi_Minh calendar dates (`startDate <= departureDateVietnam <=
 endDate`), an integer `surchargePercent` in `1..100`, and a separate `isActive` toggle. Active,
 non-deleted periods for the same operator cannot overlap. There is no default percentage: disabled
 settings or no matching period means `0%`. Resolve the ordinary fare first using the precedence
@@ -3015,7 +3032,7 @@ Parcel QR encode: plain string = parcelCode (ví dụ "VR-PCL-20260728-P7K3D9Q2"
   → KHÔNG encode parcelId UUID, JSON, token, hay encrypted payload
   → `parcelCode` format hiện tại: VR-PCL-yyyyMMdd-XXXXXXXX
      - VR-PCL = VietRide Parcel prefix, tách biệt với bookingCode/ticketCode
-     - yyyyMMdd = ngày tạo parcel theo Asia/Bangkok
+     - yyyyMMdd = ngày tạo parcel theo `Asia/Ho_Chi_Minh`
      - XXXXXXXX = 8 ký tự uppercase random/base32, unique trong DB
   → Backend vẫn nhận legacy VRP-yyyyMMdd-XXXXXXXX khi resolve QR cho dữ liệu cũ
   → Parcel Service lưu `parcelCode` string unique + indexed
@@ -3760,7 +3777,7 @@ VietRide tách Station/Stop riêng biệt và thêm mapping OperatorStation:
 **Station (Bến xe lớn — đầu/cuối tuyến, canonical cấp platform) — requirements:**
 - Tên canonical, slug/code unique, KHÔNG có `operatorId` (một bến vật lý có thể được nhiều nhà xe khai thác)
 - Địa chỉ chi tiết (address, city, ward) + tọa độ (latitude, longitude)
-- `operatingHours` JSON theo định dạng `{"mon": "06:00-22:00", "tue": "...", ...}` — thời gian **local ICT**
+- `operatingHours` JSON theo định dạng `{"mon": "06:00-22:00", "tue": "...", ...}` — thời gian **local Asia/Ho_Chi_Minh**
 - Liên hệ: contactPhone, contactEmail
 - `facilities` JSON array nullable — vd `["waiting_room", "parking", "ticket_counter"]`
 - `supportsShuttle boolean default false` — Station có hỗ trợ shuttle service hay không (chỉ bến chính lớn). Set per Station bởi Operator hoặc System Admin. Xem section 6.14.
@@ -3817,7 +3834,7 @@ VietRide tách Station/Stop riêng biệt và thêm mapping OperatorStation:
 
 Requirements:
 - Thuộc 1 operator, link đến driver (User role=DRIVER), assistant (User role=ASSISTANT, nullable), route, vehicle (nullable). Vì `Trip.vehicleId` bắt buộc, schedule active chưa có vehicle không generate Trip; mỗi attempted date ghi `TripGenerationSkipLog` reason `OTHER` với message no-vehicle cho đến khi được assign.
-- **Recurring pattern:** `dayOfWeek` JSON array `[1,3,5]` (1=T2, 2=T3, ..., 7=CN), `departureTime` TIME **local ICT** (operator nhập "08:00" → store "08:00:00")
+- **Recurring pattern:** `dayOfWeek` JSON array `[1,3,5]` (1=T2, 2=T3, ..., 7=CN), `departureTime` TIME **local Asia/Ho_Chi_Minh** (operator nhập "08:00" → store "08:00:00")
 - **Valid window:** `validFrom` DATE, `validUntil` DATE nullable
 - `isActive` boolean — toggle off để dừng generate Trip mới mà không xóa schedule
 
@@ -4409,13 +4426,13 @@ mới. Handler capture clock đúng một lần. Với mỗi Trip có Booking `C
 `oldDeparture - now` và computed `newDeparture - now` phải `>= 2h`; equality được phép, còn bất kỳ
 giá trị nào `< 2h` trả `409 DRIVER_SCHEDULE_EDIT_TOO_LATE` trước transaction.
 
-**Phân loại theo `delta = |newDeparture - oldDeparture|` và ngày lịch ICT:**
+**Phân loại theo `delta = |newDeparture - oldDeparture|` và ngày lịch Asia/Ho_Chi_Minh:**
 
 | Severity | Điều kiện | Refund khi passenger reject | Xử lý Booking `CONFIRMED` |
 |---|---|---|---|
-| **MINOR** | cùng ngày ICT và `delta <= 2h` | 0% | Không tạo `BookingPendingAction`; publish informational fact. |
-| **MEDIUM** | cùng ngày ICT và `delta > 2h && delta < 6h` | 50% | Tạo `SCHEDULE_CHANGE` severity MEDIUM. |
-| **MAJOR** | `delta >= 6h` hoặc đổi ngày ICT | 100% | Tạo `SCHEDULE_CHANGE` severity MAJOR. |
+| **MINOR** | cùng ngày Asia/Ho_Chi_Minh và `delta <= 2h` | 0% | Không tạo `BookingPendingAction`; publish informational fact. |
+| **MEDIUM** | cùng ngày Asia/Ho_Chi_Minh và `delta > 2h && delta < 6h` | 50% | Tạo `SCHEDULE_CHANGE` severity MEDIUM. |
+| **MAJOR** | `delta >= 6h` hoặc đổi ngày Asia/Ho_Chi_Minh | 100% | Tạo `SCHEDULE_CHANGE` severity MAJOR. |
 
 **Projection và causal sequencing trong Booking:**
 
@@ -4428,7 +4445,7 @@ giá trị nào `< 2h` trả `409 DRIVER_SCHEDULE_EDIT_TOO_LATE` trước transa
   `booking.booking.schedule_change_informational`; MEDIUM/MAJOR supersede action active cũ rồi tạo
   đúng một active `SCHEDULE_CHANGE` và phát `booking.booking.schedule_change_required`.
   `PENDING_PAYMENT` chỉ cập nhật projection. Notification không consume Trip fact trực tiếp.
-- Query operator giữ key cũ: `date` lọc half-open ICT day trên `trip_current_departure`, còn
+- Query operator giữ key cũ: `date` lọc half-open Asia/Ho_Chi_Minh day trên `trip_current_departure`, còn
   `sortBy=departureAt` sort projection này rồi `id` cùng chiều `sortDir`. Response list/detail đặt
   `trip.currentDepartureAt` cạnh immutable `trip.departureAt`; không có top-level duplicate hoặc
   sort key `currentDepartureAt`.
@@ -4709,7 +4726,7 @@ geo/fuzzy matching vẫn v2; Day 40 chỉ System Admin merge thủ công.
 | Data durability | Không mất dữ liệu booking/trip khi network lỗi (Outbox pattern cho critical events) |
 | Multi-tenancy | Operator chỉ thấy dữ liệu `operatorId` của mình, enforce ở service layer (Internal JWT carry `operatorId`) |
 | Soft delete | Dùng `isActive`/`deletedAt` thay hard delete cho: Operator, User, Station, Stop, Route, Vehicle |
-| Timezone | Storage = UTC. Display = ICT (UTC+7). Tất cả API trả ISO 8601 với offset |
+| Timezone | Storage = UTC. Display = Asia/Ho_Chi_Minh (`+07:00`). Tất cả API trả ISO 8601 với offset |
 | Idempotency | Booking + Payment endpoints accept header `Idempotency-Key` (UUID) — Redis store key→response, TTL 24h |
 
 ---
@@ -4875,7 +4892,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **Không dùng** | Elasticsearch (→ pgvector), MongoDB (→ PostgreSQL JSONB), SMS (→ email link), Branch entity |
 | **Frontend** | NextJS (App Router) cho Operator Web + Admin Web. Passenger App và Driver App là 2 app riêng |
 | **File storage** | Cloudinary cho tài liệu RAG; Firebase Storage cho client media (avatar, vehicle, parcel, incident) |
-| **Timezone** | Storage UTC · Display ICT (UTC+7) · API ISO 8601 với offset · `departureTime TIME` lưu local ICT |
+| **Timezone** | Storage UTC · Display Asia/Ho_Chi_Minh (`+07:00`) · API ISO 8601 với offset · `departureTime TIME` lưu local Asia/Ho_Chi_Minh |
 | **MediatR** | Pin v11.x (v12+ commercial license) |
 | **LLM** | OpenRouter: chat `nvidia/nemotron-3-ultra-550b-a55b:free`; embedding `nvidia/llama-nemotron-embed-vl-1b-v2:free` |
 | **BỎ** | Walk-in booking, CSV import, walk-in parcel — mọi booking/parcel chỉ qua Passenger App |
@@ -4884,7 +4901,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 
 **Data types:**
 - **Tiền (VND):** lưu `BIGINT`, đơn vị đồng. Giữ nguyên đến đồng — KHÔNG floor 1,000 (BSOT v1.11.0); phép tính ra số lẻ làm tròn đến đồng gần nhất (287,341.6 → 287,342). Áp dụng cho fare, discount, refund. Không dùng DECIMAL/FLOAT.
-- **Timestamps:** lưu UTC, trả về ISO 8601 với offset. `departureTime TIME` lưu local ICT.
+- **Timestamps:** lưu UTC, trả về ISO 8601 với offset. `departureTime TIME` lưu local Asia/Ho_Chi_Minh.
 - **Soft delete:** dùng `isActive`/`deletedAt` thay hard delete cho Operator, User, Station, Stop, Route, Vehicle.
 
 **Entity design rules:**
@@ -4936,7 +4953,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | Trip-Route-Vehicle | Auto-BOARDING 30 phút trước departure · COMPLETED fallback +30 phút sau ETA · Generate Trip từ DriverSchedule (CN 23:00) |
 | Parcel | Undo-reject 15 phút · cancel EXTRA_LARGE review timeout 24h · reject/forfeit RESERVED quá `latestCheckInAt` · reject/forfeit PENDING_FINAL_PAYMENT quá `finalPaymentDeadline` (interval 5 phút) · PENDING_TRANSFER_CONFIRM escalation 30 phút · stale Day-32 cargo-recovery operation replay 5 phút · PENDING_OPERATOR_ACTION re-alert 2h |
 | Payment | PENDING_REDIRECT expired khi `dueAt ?? createdAt + 15 phút <= now` · TopUpRequest expired 15 phút · **Trip settlement eligibility flag (daily 02:00)** — set `OperatorTripSettlement.status=ELIGIBLE` khi `eligibleAt <= now` · **Trip settlement weekly auto-settle (Monday 09:00 weekly)** — debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE · Subscription paid invoice generation post-payment-success (event-driven, không phải scheduled — nhưng retry via Hangfire nếu PDF gen fail) |
-| Identity | OTP expired cleanup (optional) · FCM token stale cleanup (weekly) · Subscription trial expire check (daily 00:30 ICT) · Trial expiring T-3 days warn (daily 09:00 ICT, `SE Asia Standard Time`) · Subscription upgrade attempt hết hạn/reconciliation mỗi phút |
+| Identity | OTP expired cleanup (optional) · FCM token stale cleanup (weekly) · Subscription trial expire check (daily 00:30 `Asia/Ho_Chi_Minh`) · Trial expiring T-3 days warn (daily 09:00 `Asia/Ho_Chi_Minh`, registered with explicit UTC cron) · Subscription upgrade attempt hết hạn/reconciliation mỗi phút |
 
 **Redis namespace conventions (canonical — tránh conflict cross-service):**
 
@@ -5107,7 +5124,7 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **`RouteStop`** — Junction Route ↔ Stop dọc tuyến. Có `orderIndex`, `distanceFromOriginKm` nullable, `allowPickup` + `allowDropoff` flags (CHECK ít nhất 1 = true).
 - **`RouteStopFareTemplate`** — Exception override `baseFare` per stop với effective time window (effectiveFrom/Until).
 - **`OperatorFareSurchargeSetting`** — One Trip-local row per logical Identity operator; global `isEnabled` switch, with a missing row treated as disabled.
-- **`OperatorFareSurchargePeriod`** — Named holiday window with inclusive ICT `startDate`/`endDate`, integer percent, activation flag and soft delete; active windows cannot overlap per operator.
+- **`OperatorFareSurchargePeriod`** — Named holiday window with inclusive Asia/Ho_Chi_Minh `startDate`/`endDate`, integer percent, activation flag and soft delete; active windows cannot overlap per operator.
 - **`AlternativeRoute`** + **`AlternativeRouteStop`** — Tuyến thay thế khi route change. Không có hard-cap toàn cục về số active AlternativeRoute per Route chính. Stop sequence riêng.
 - **`RouteChangeProposal`** + **`RouteChangeProposalStop`** — Snapshot EXISTING/CUSTOM do assigned Driver/Assistant đề xuất; Operator Admin approve/reject, CUSTOM được promote thành AlternativeRoute khi approve.
 - **`VehicleType`** — Loại xe: code unique, displayName, `estimatedPassengerLuggageKgPerSeat` override (optional), `isSystemDefined` block delete. Seed STANDARD_BUS / LIMOUSINE / SLEEPER_BUS.

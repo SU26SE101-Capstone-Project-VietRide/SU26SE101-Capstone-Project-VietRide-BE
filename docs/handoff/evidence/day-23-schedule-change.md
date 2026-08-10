@@ -1,6 +1,6 @@
 # Day 23 schedule-change focused evidence
 
-> Evidence state: Task 23.9 focused runtime gate complete on 2026-07-17 (Asia/Bangkok). Full
+> Evidence state: Task 23.9 focused runtime gate complete on 2026-07-17 (host offset `+07:00`). Full
 > solution/workspace regression is intentionally deferred to `/audit-day 23`.
 
 ## Reproducible entry points
@@ -27,7 +27,7 @@ trigger.
 
 | Acceptance area | Deterministic evidence owner |
 |---|---|
-| Same-ICT MINOR `<=2h`, MEDIUM `>2h && <6h`, MAJOR `>=6h`/date change; old/new two-hour equality and strict-too-late preflight | `Day23AllPendingScheduleChangeProducerTests` and real-PostgreSQL `Day23AllPendingScheduleChangeProducerIntegrationTests` |
+| Same `Asia/Ho_Chi_Minh` date: MINOR `<=2h`, MEDIUM `>2h && <6h`, MAJOR `>=6h`/date change; old/new two-hour equality and strict-too-late preflight | `Day23AllPendingScheduleChangeProducerTests` and real-PostgreSQL `Day23AllPendingScheduleChangeProducerIntegrationTests` |
 | PENDING_PAYMENT projection-only; CONFIRMED facts/action; immutable snapshot, current reads, causal CAS apply/duplicate/quarantine | `Day23ScheduleProjectionRulesTests`, `Day23ScheduleProjectionCasIntegrationTests`, and `Day23CurrentDepartureOperationalReadIntegrationTests` |
 | Owner/role masking and all 12 exact resolver errors | `Day23ResolveScheduleActionAuthorizationTests`, controller tests, Gateway access-gate spec, plus the Day-23 Postman folder |
 | UUID-v4 key, byte-identical replay, mismatch/pending, and new-key terminal conflicts | `Day23ResolveScheduleActionIdempotencyTests` |
