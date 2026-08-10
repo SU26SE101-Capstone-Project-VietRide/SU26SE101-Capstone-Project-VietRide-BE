@@ -1,5 +1,6 @@
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.Services;
@@ -63,9 +64,7 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
 
     public async Task<SearchTripsResult> Handle(SearchTripsQuery request, CancellationToken cancellationToken)
     {
-        var localStart = new DateTimeOffset(request.DepartureDate.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(7));
-        var start = localStart.ToUniversalTime();
-        var end = localStart.AddDays(1).ToUniversalTime();
+        var range = BusinessTime.GetUtcDayRange(request.DepartureDate);
         var stationFilter = await ResolveStationFilterAsync(request, cancellationToken);
         if (stationFilter.OriginStationIds.Count == 0 || stationFilter.DestinationStationIds.Count == 0)
         {
@@ -103,8 +102,8 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         var candidates = tripRepository.QueryNoTracking()
             .Where(trip => routeIds.Contains(trip.RouteId)
                 && trip.Status == TripStatus.SCHEDULED
-                && trip.DepartureDateTime >= start
-                && trip.DepartureDateTime < end)
+                && trip.DepartureDateTime >= range.FromUtc
+                && trip.DepartureDateTime < range.ToUtcExclusive)
             .OrderBy(trip => trip.DepartureDateTime)
             .ThenBy(trip => trip.Id)
             .ToList();

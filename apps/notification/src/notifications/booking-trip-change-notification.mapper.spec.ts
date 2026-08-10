@@ -291,7 +291,7 @@ describe('mapBookingTripChangeToNotification vehicle substitution', () => {
       }),
     );
     expect(notification.body).toContain('51B-123.45');
-    expect(notification.body).toContain(NEW_DEPARTURE);
+    expect(notification.body).toContain('09:00 ngày 16/07/2026');
     expect(notification.body).toContain('chưa xác định -> B02');
     expect(notification.body).toContain('A02 -> đang chờ xếp ghế');
     expect(notification.data).toMatchObject({

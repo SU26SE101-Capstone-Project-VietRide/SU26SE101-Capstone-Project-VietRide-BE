@@ -11,7 +11,7 @@ import {
   settleInFlightBeforeCleanup,
 } from './run-day23-schedule-change-local.mjs';
 
-test('severity boundaries use absolute delta and ICT calendar dates', () => {
+test('severity boundaries use absolute delta and Asia/Ho_Chi_Minh calendar dates', () => {
   const base = '2026-07-20T01:00:00.000Z';
   assert.equal(classifyScheduleChange(base, '2026-07-20T03:00:00.000Z'), 'MINOR');
   assert.equal(classifyScheduleChange(base, '2026-07-20T03:00:00.001Z'), 'MEDIUM');

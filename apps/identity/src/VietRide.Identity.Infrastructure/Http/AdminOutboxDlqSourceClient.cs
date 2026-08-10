@@ -2,13 +2,14 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Features.Admin.OutboxDlq;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Identity.Infrastructure.Http;
 
 public sealed class AdminOutboxDlqSourceClient : IAdminOutboxDlqSourceClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
     private static readonly IReadOnlySet<string> SupportedServices = new HashSet<string>(StringComparer.Ordinal)
     {
         "trip",
@@ -48,7 +49,7 @@ public sealed class AdminOutboxDlqSourceClient : IAdminOutboxDlqSourceClient
         if (!string.IsNullOrWhiteSpace(eventType))
             query.Add($"eventType={Uri.EscapeDataString(eventType.Trim())}");
         if (afterTerminalAt.HasValue)
-            query.Add($"afterTerminalAt={Uri.EscapeDataString(afterTerminalAt.Value.ToString("O"))}");
+            query.Add($"afterTerminalAt={Uri.EscapeDataString(UtcJson.Format(afterTerminalAt.Value))}");
         if (afterId.HasValue)
             query.Add($"afterId={afterId.Value:D}");
 

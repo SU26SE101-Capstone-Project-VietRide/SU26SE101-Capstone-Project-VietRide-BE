@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.62.0
+> **Phiên bản:** 1.63.2
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-08-10
 > **Capstone:** SU26SE101 — SU26
@@ -1119,8 +1119,8 @@ Tham chiếu `db-schema/_global/cross-service-references.md` cho danh sách đ�
 ### 4.4 DB conventions canonical (extract — full ở `db-schema/_global/README.md`)
 
 - **Money:** `BIGINT` (VND, đơn vị đồng). Giữ đến đơn vị đồng — KHÔNG floor về 1,000 (v1.11.0); kết quả tính lẻ làm tròn đến đồng gần nhất. KHÔNG dùng DECIMAL/FLOAT.
-- **Timestamps:** `TIMESTAMPTZ` (UTC). KHÔNG `TIMESTAMP` naive.
-- **`departureTime`:** `TIME` (no TZ), semantic local ICT.
+- **Timestamps:** `TIMESTAMPTZ` (UTC instant). Persistence, internal HTTP, Redis/Outbox/RabbitMQ event chuẩn hóa UTC ISO-8601 kết thúc bằng `Z`; FE-facing JSON HTTP/WebSocket serialize cùng instant qua `Asia/Ho_Chi_Minh` với offset `+07:00`; KHÔNG `TIMESTAMP` naive.
+- **`departureTime`:** `TIME` (no TZ), semantic calendar `Asia/Ho_Chi_Minh`; KHÔNG lưu `Asia/Ho_Chi_Minh` hoặc `+07:00` vào DB.
 - **UUID:** `UUID DEFAULT gen_random_uuid()`.
 - **JSON config:** `JSONB`.
 - **pgvector embedding:** `halfvec(2048)` — chỉ trong `vietride_rag`; HNSW index dùng `halfvec_cosine_ops`.
@@ -1199,7 +1199,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
   "statusCode": 200,                          // mirrors HTTP status line — xem §5.5 Rule 2
   "message": "Đăng ký thành công",            // optional — FE toast/UX; bỏ khi không cần
   "data": { /* DTO camelCase */ },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -1226,9 +1226,10 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 - **No content:** HTTP 204 — **empty body** (không envelope, xem ADR 0004 Rule 2).
 - **Internal success:** `/internal/v1/*` / `/internal/*` trả raw DTO/list để giữ contract service-to-service đơn giản; không bọc `ApiResponse<T>` trên success.
 - **Money:** number trong JSON (BIGINT VND — JS safe < 2^53). Server-side luôn lưu BIGINT.
-- **Datetime:** ISO 8601 string với offset, ví dụ `"2026-05-25T14:30:00+07:00"`.
+- **Datetime instant:** FE-facing `/v1/*` JSON HTTP response và Tracking WebSocket dùng RFC 3339 qua IANA `Asia/Ho_Chi_Minh`, ví dụ `"2026-05-25T14:30:00+07:00"`. Internal HTTP/event/persistence dùng instant tương ứng `"2026-05-25T07:30:00Z"`. Request datetime bắt buộc có `Z` hoặc offset rõ ràng và được normalize UTC; thiếu offset trả `422 VALIDATION_ERROR`.
+- **Calendar field:** `date`/`from`/`to` dạng `YYYY-MM-DD`, `TimeOnly`, `dayOfWeek` và recurring schedule dùng `Asia/Ho_Chi_Minh`.
 - **UUID:** string lowercase với dấu gạch ngang chuẩn.
-- **`meta.traceId`:** lấy từ header `X-Request-Id` do Gateway stamp (ADR 0002). `meta.timestamp` = UTC ISO-8601 response time.
+- **`meta.traceId`:** lấy từ header `X-Request-Id` do Gateway stamp (ADR 0002). `meta.timestamp` dùng `Asia/Ho_Chi_Minh +07:00` trên public `/v1/*`; internal error envelope giữ UTC `Z`.
 
 ### 5.5 Response shape — error (ADR 0004 — ApiResponse error envelope)
 
@@ -1448,7 +1449,7 @@ reason and only permits `AVAILABLE -> UNAVAILABLE`; enable only permits `UNAVAIL
 and clears the reason. `HELD`/`BOOKED` disable returns `409 TRIP_SEAT_IN_USE`.
 
 `GET /v1/operator/shuttle-trips` is tenant-scoped for `OPERATOR_ADMIN`/`OPERATOR_STAFF`.
-ICT `from/to` filters are inclusive, absent status filter means all statuses including
+Asia/Ho_Chi_Minh `from/to` filters are inclusive, absent status filter means all statuses including
 `CANCELLED`, and ordering is scheduled departure descending then ShuttleTrip UUID descending.
 Passenger/stop counts are SQL projections and driver profiles are fetched in one batched Identity
 call. Pending shuttle groups keep `mainTripId + direction` grouping and add nested passenger
@@ -1719,7 +1720,7 @@ cumulative Route metrics without failing Trip creation. `trips.planned_eta_sourc
 | | `RATE_LIMITED` | 429 | Vượt rate limit |
 | | `RATE_LIMIT_EXCEEDED` | 429 | Per-user/per-resource Day-38 invoice download limit |
 | | `REPORT_VALUE_OVERFLOW` | 500 | Report source/orchestrator gặp count hoặc BIGINT/NUMERIC aggregate ngoài phạm vi Int64; không wrap, saturate hoặc trả partial |
-| | `REPORT_RANGE_INVALID` | 422 | Operator report range không phải ngày ICT hợp lệ, đảo chiều hoặc vượt 92 ngày inclusive |
+| | `REPORT_RANGE_INVALID` | 422 | Operator report range không phải ngày Asia/Ho_Chi_Minh hợp lệ, đảo chiều hoặc vượt 92 ngày inclusive |
 | | `UPSTREAM_UNAVAILABLE` | 502 or 503 by boundary | `502` only for Gateway/proxy and legacy pass-through endpoints; `503` for an in-service fail-closed orchestration explicitly documented by its endpoint, including Parcel email issuance, Platform Report sources, Admin Dashboard and Revenue facades. An endpoint MUST list the applicable status and never choose dynamically for the same failure class. |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
 
@@ -2103,7 +2104,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `POST /internal/v1/operators/{operatorId}/quota-allocations` | Trip | Claim durable idempotent quota allocation by `{ resource, resourceId, periodKey? }`; no distributed transaction |
 | `POST /internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release` | Trip | Idempotently release an allocation after local persistence fails or its resource is soft-deleted |
 | `POST /internal/v1/operators/summaries/batch` | Booking, Payment | Read-only batch lookup `{ operatorIds }`, tối đa 500 distinct non-empty UUID; raw additive `{ operatorId, operatorName, logoUrl, contactPhone }`, gồm cả operator soft-deleted, sort ID tăng dần; empty input trả empty list; không yêu cầu Idempotency-Key |
-| `GET /internal/v1/admin/dashboard/identity-metrics?from=&to=` | Booking | Raw latest-login count for the ICT range plus current user-role counts, approved/active operator IDs and operator-status distribution; no historical status inference |
+| `GET /internal/v1/admin/dashboard/identity-metrics?from=&to=` | Booking | Raw latest-login count for the Asia/Ho_Chi_Minh range plus current user-role counts, approved/active operator IDs and operator-status distribution; no historical status inference |
 | `POST /internal/v1/payments/subscription` | Identity | Create/replay a VNPay subscription payment from a server-side upgrade snapshot |
 | `POST /internal/v1/payments/{paymentId}/expire-subscription` | Identity | Idempotently expire a pending subscription payment during the Identity-owned auto-revert job |
 
@@ -2111,11 +2112,11 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves ordinary Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`, then applies the matching active operator holiday surcharge by the Trip departure ICT date. Omitted preserves persisted legacy snapshot semantics and applies no new surcharge. No event/projection is added. |
+| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves ordinary Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`, then applies the matching active operator holiday surcharge by the Trip departure Asia/Ho_Chi_Minh date. Omitted preserves persisted legacy snapshot semantics and applies no new surcharge. No event/projection is added. |
 | `GET /internal/v1/trips/{tripId}/shuttle-road-distance?direction=&latitude=&longitude=` | Booking | Internal-JWT-only road distance to origin Station (`INBOUND_TO_STATION`) or destination Station (`OUTBOUND_FROM_STATION`). Trip validates Station active/supportsShuttle/coordinates and calls Google Routes `travelMode=DRIVE`; raw success is `{ distanceMeters }`. Google/configuration/timeout/invalid response maps to `503 SHUTTLE_DISTANCE_UNAVAILABLE`; direction/coordinates/station eligibility maps to `422`. |
 | `POST /internal/v1/trips/summaries/batch` | Parcel | Read-only `{ tripIds }`, 1..100 distinct UUIDs; one Trip query returns route/station/vehicle/crew/timing summaries; missing IDs are omitted |
 | `POST /internal/v1/operators/vehicle-counts/batch` | Payment | Read-only `{ operatorIds }`, 1..100 distinct UUIDs; raw current vehicle counts by operator |
-| `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Payment | Raw ICT-month trip/completed-trip aggregates grouped by route for the explicit operator tenant |
+| `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Payment | Raw Asia/Ho_Chi_Minh-month trip/completed-trip aggregates grouped by route for the explicit operator tenant |
 | `POST /internal/v1/trips/{tripId}/lock-seats` | Booking | Lock seats trong checkout (TTL 10 phút Redis) |
 | `POST /internal/v1/trips/round-trip/lock-seats` | Booking | Lock outbound + return seats atomically in one Trip-owned Redis Lua script; if either leg fails, no seat is held |
 | `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Release seat khi payment fail/timeout |
@@ -2151,8 +2152,8 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `POST /internal/v1/payments/batch-charge` | Booking | WALLET batch charge for round-trip: per-item Payment `referenceType=BOOKING`, per-item wallet ledger `referenceType=BOOKING_PAYMENT`, all-or-nothing in one Payment DB transaction |
 | `POST /internal/v1/payments/vnpay-init` | Booking, Parcel | Tạo VNPay redirect URL |
 | `POST /internal/v1/payments/redirect-sessions/lookup` | Booking, Parcel | Read-only raw redirect lookup; Internal JWT, `[SkipIdempotency]`, `Cache-Control: no-store`, 1–100 unique references, one `AsNoTracking` query; latest attempt first then strict owner/context/VNPAY/PENDING_REDIRECT/future persisted dueAt/trusted-authority eligibility |
-| `GET /internal/v1/revenue/admin-summary?from=&to=` | Booking | Raw canonical project revenue và independent settlement summary; input calendar ICT, persistence range UTC half-open |
-| `GET /internal/v1/revenue/operators/{operatorId}/summary?from=&to=` | Parcel | Raw canonical operator ticket/parcel revenue, gồm gross Parcel và signed refund; input calendar ICT, persistence range UTC half-open |
+| `GET /internal/v1/revenue/admin-summary?from=&to=` | Booking | Raw canonical project revenue và independent settlement summary; input calendar Asia/Ho_Chi_Minh, persistence range UTC half-open |
+| `GET /internal/v1/revenue/operators/{operatorId}/summary?from=&to=` | Parcel | Raw canonical operator ticket/parcel revenue, gồm gross Parcel và signed refund; input calendar Asia/Ho_Chi_Minh, persistence range UTC half-open |
 | `POST /internal/v1/revenue/backfills/parcel-voucher-reversals?dryRun=` | Vận hành nội bộ | Dry-run/apply append-only idempotent Parcel voucher reversal backfill; không qua Gateway |
 | `GET /internal/v1/wallets/{userId}/balance` | Booking (preview) | Check balance UI trước checkout |
 | `POST /internal/v1/refunds` | Booking, Parcel | Trigger refund (event-driven preferred — HTTP fallback) |
@@ -2574,7 +2575,7 @@ vận hành không in full payload, contact, IP hoặc user-agent.
 #### Earned platform report
 
 Booking sở hữu public facade `GET /v1/admin/reports/platform?from=&to=` từ Day 42; Payment không
-đọc foreign DB và vẫn là authoritative ledger source. Public `from/to` là ngày ICT inclusive theo
+đọc foreign DB và vẫn là authoritative ledger source. Public `from/to` là ngày Asia/Ho_Chi_Minh inclusive theo
 `YYYY-MM-DD`, `from <= to`, tối đa 366 ngày. Booking chuẩn hóa chúng thành UTC half-open
 `[fromUtc,toUtcExclusive)` trước khi query/call ba source vận hành cung cấp metrics count:
 
@@ -3065,7 +3066,7 @@ PENDING_HOLD ─→ ELIGIBLE ─→ SETTLED
 - `PENDING_HOLD` set khi Trip terminal (COMPLETED/DISRUPTED).
 - `ELIGIBLE` set bởi Hangfire daily 02:00 khi `eligibleAt <= now` (= `tripTerminalAt + 7 days`).
 - `SETTLED` set bởi Hangfire Monday weekly 09:00 (auto) hoặc Admin manual (`POST /v1/admin/trip-settlements/{id}/settle`).
-- Cron canonical chạy UTC: eligibility `0 19 * * *` (=02:00 ICT), weekly `0 2 * * 1` (=09:00 ICT thứ Hai). Mỗi settlement dùng một local transaction, bounded batch và failure isolation; không gộp toàn batch vào một transaction.
+- Cron canonical chạy UTC: eligibility `0 19 * * *` (=02:00 Asia/Ho_Chi_Minh), weekly `0 2 * * 1` (=09:00 Asia/Ho_Chi_Minh thứ Hai). Mỗi settlement dùng một local transaction, bounded batch và failure isolation; không gộp toàn batch vào một transaction.
 - Marker và settlement là cùng một row. Mọi transition dùng expected status + `row_version`; manual/weekly race chỉ có một winner. Weekly loser no-op, manual loser trả `TRIP_SETTLEMENT_ALREADY_SETTLED`.
 - `netAmount` luôn recompute từ immutable operator ledger tại settle time. Nếu `netAmount <= 0`, row chuyển `CANCELLED` và không tạo wallet movement/event.
 - Thiếu PlatformWallet balance rollback toàn bộ movement, giữ `ELIGIBLE`, tăng `settlement_failure_count`, set `last_settlement_failure_at`/`active_failure_code`, và retry mỗi tuần không giới hạn. HIGH khi count `>=3` **hoặc** stuck `>21 ngày`; Redis key `payment:settlement_insufficient:{settlementId}` throttle alert 24h.
@@ -3107,8 +3108,8 @@ existing JSONB; no column is added.
 Day-23 schedule changes are produced only by PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING`, specifically the
 `ALL_PENDING` branch. One captured clock preflights every affected Trip with a `CONFIRMED`
 Booking: both `oldDeparture - now` and computed `newDeparture - now` must be `>= 2h`; equality is
-allowed. Severity uses absolute delta and ICT calendar dates: MINOR is same-date `delta <= 2h`;
-MEDIUM is same-date `delta > 2h && delta < 6h`; MAJOR is `delta >= 6h` or an ICT date change.
+allowed. Severity uses absolute delta and Asia/Ho_Chi_Minh calendar dates: MINOR is same-date `delta <= 2h`;
+MEDIUM is same-date `delta > 2h && delta < 6h`; MAJOR is `delta >= 6h` or an Asia/Ho_Chi_Minh date change.
 
 Booking preserves immutable `trip_snapshot_departure` and maintains nullable
 `trip_current_departure` (`TripCurrentDeparture`) as the mutable projection. Existing rows are
@@ -3116,7 +3117,7 @@ backfilled from the snapshot. On `trip.trip.schedule_changed`, both `PENDING_PAY
 `CONFIRMED` Bookings apply causal CAS: `current==old` advances to new, `current==new` is a duplicate
 no-op, and any other value retries then quarantines instead of overwriting. Only `CONFIRMED`
 Bookings emit passenger facts: MINOR emits informational only; MEDIUM/MAJOR supersede the old
-active action, create one `SCHEDULE_CHANGE`, and emit required. `date` queries use the ICT
+active action, create one `SCHEDULE_CHANGE`, and emit required. `date` queries use the Asia/Ho_Chi_Minh
 half-open day of the current projection; existing `sortBy=departureAt` orders that projection and
 then `id` in `sortDir`. List/detail add nested `trip.currentDepartureAt` beside immutable
 `trip.departureAt`; the `currentDepartureAt` field exists only under `trip`, with no top-level
@@ -3273,10 +3274,14 @@ const CreateBookingSchema = z.object({
 
 ### 9.4 Timezone
 
-- **Storage:** `TIMESTAMPTZ` UTC luôn.
-- **API response:** ISO 8601 with offset, ví dụ `"2026-05-25T14:30:00+07:00"` (Backend convert UTC → ICT trước khi serialize, hoặc serialize UTC `+00:00` để client convert — choose **UTC `+00:00` cho consistency**, FE convert hiển thị).
-- **`departureTime TIME`:** lưu local ICT (không có TZ component) — combine với `date` để derive `departureDateTime` UTC khi cần.
-- **Hangfire schedule cron:** dùng UTC timezone explicitly (`RecurringJob.AddOrUpdate(..., "0 16 * * *", TimeZoneInfo.Utc)` để chạy 23:00 ICT).
+- **Canonical ADR:** [ADR 0005](docs/adr/0005-utc-instants-vietnam-business-calendar.md).
+- **Instant:** PostgreSQL `TIMESTAMPTZ`, internal HTTP, Redis, Outbox và RabbitMQ event dùng UTC, serialize kết thúc bằng `Z`. FE-facing `/v1/*` JSON HTTP và Tracking WebSocket serialize cùng instant qua IANA `Asia/Ho_Chi_Minh`, kết thúc bằng `+07:00`. Input timestamp bắt buộc có `Z`/offset và normalize UTC.
+- **Business calendar:** chỉ một IANA timezone `Asia/Ho_Chi_Minh`. `DateOnly`, `TimeOnly`, `dayOfWeek`, search/report date và schedule dùng calendar này. Identifier được khai báo bằng system constant trong code, không thành cột theo từng record; không dùng fixed offset làm timezone identifier.
+- **Date range:** ngày Việt Nam inclusive phải đổi thành UTC half-open `[fromUtc, toUtcExclusive)` và query `>= fromUtc && < toUtcExclusive`. Ví dụ `2026-08-10` → `[2026-08-09T17:00:00Z, 2026-08-10T17:00:00Z)`. Không cast `TIMESTAMPTZ` sang `date` theo session timezone.
+- **`departureTime TIME`:** lưu local `Asia/Ho_Chi_Minh` (không có TZ component), combine với service date + named timezone để derive UTC instant. Schedule response trả additive `timeZone: "Asia/Ho_Chi_Minh"`; không thêm DB column.
+- **Human text:** Notification/email format UTC instant sang `Asia/Ho_Chi_Minh`; persisted/event data giữ UTC `Z`, còn Notification public HTTP response vẫn theo boundary `+07:00`.
+- **Runtime/jobs:** PostgreSQL và container chạy UTC. Hangfire cron dùng `TimeZoneInfo.Utc` explicitly; comment ghi giờ Việt Nam tương ứng. SQL bucket calendar dùng `AT TIME ZONE 'Asia/Ho_Chi_Minh'` rõ ràng.
+- **Provider exception:** adapter như VNPay parse local provider format bằng `Asia/Ho_Chi_Minh`, rồi normalize UTC ngay tại boundary.
 
 ### 9.5 Money type & rounding
 
@@ -3448,20 +3453,17 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
-| `OtpCleanupJob` | Recurring | Daily 03:00 ICT | DELETE EmailVerificationToken expired > 7 ngày (optional cleanup) |
-| `StaleFcmTokenCleanupJob` | Recurring | Weekly Sun 04:00 ICT | UPDATE UserDevice SET isActive=false WHERE lastActiveAt < now - 90 days |
-| `SubscriptionTrialExpireCheckJob` | Recurring | Daily 00:30 ICT | Identity sets overdue ACTIVE subscriptions to EXPIRED; read access remains available |
-| `SubscriptionTrialExpiringWarnJob` | Recurring | Daily 09:00 ICT (`SE Asia Standard Time`) | Identity sends one T-3 expiry warning per subscription |
-| `SubscriptionPaymentPendingWarnJob` | Recurring | Hourly | Identity warns when a subscription upgrade attempt has been pending for 24 hours |
-| `SubscriptionAutoRevertJob` | Recurring | Daily 02:00 ICT | Identity expires the pending Payment via internal API, then restores previous plan or Starter after seven days |
-| `SubscriptionTripUsageProjectionJob` | Recurring | Day 1, 00:01 ICT | Refreshes current-month trip usage projection; source of truth is departure-month allocation |
-| `SubscriptionQuotaAllocationReconciliationJob` | Recurring | Daily 03:30 ICT | Releases only verified orphan durable quota allocations; never uses a distributed transaction |
+| `identity.subscription-expire-active` (`SubscriptionLifecycleJob.ExpireActiveAsync`) | Recurring | Daily 00:30 `Asia/Ho_Chi_Minh`; UTC cron `30 17 * * *` | Sets overdue ACTIVE subscriptions to EXPIRED; read access remains available |
+| `identity.subscription-trial-expiring-warn` (`SubscriptionLifecycleJob.SendWarningsAsync`) | Recurring | Daily 09:00 `Asia/Ho_Chi_Minh`; UTC cron `0 2 * * *` | Sends one T-3 expiry warning per subscription |
+| `identity.subscription-auto-revert` (`SubscriptionLifecycleJob.AutoRevertAsync`) | Recurring | Every minute; UTC cron `* * * * *` | Reconciles pending upgrade attempts, late success, expiry and durable quota allocations |
+| `identity.subscription-monthly-trip-reset` (`SubscriptionLifecycleJob.ResetMonthlyTripUsageAsync`) | Recurring | Daily 00:01 `Asia/Ho_Chi_Minh`; UTC cron `1 17 * * *` | Month-boundary guard makes non-boundary daily invocations no-op |
+| `identity.operator-wallet-backfill` (`OperatorWalletBackfillJob`) | Recurring | Every minute; UTC cron `* * * * *` | Backfills missing operator wallets idempotently |
 
 #### Trip-Route-Vehicle
 
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
-| `GenerateTripsFromScheduleJob` | Recurring | Weekly Sun 23:00 ICT + immediate on DriverSchedule create/activate | Generate Trip 14 ngày kế tiếp. Idempotent (driverId + departureDateTime) |
+| `GenerateTripsFromScheduleJob` | Recurring | Weekly Sun 23:00 Asia/Ho_Chi_Minh + immediate on DriverSchedule create/activate | Generate Trip 14 ngày kế tiếp. Idempotent (driverId + departureDateTime) |
 | `AutoBoardingJob` | Recurring | Every 15 phút | Set SCHEDULED Trips to BOARDING only when `departureDateTime <= now + 30 phút`; publish `trip.trip.boarding_started` |
 | `AutoStartFallbackJob` | Recurring | Every 5 phút | Set BOARDING Trips to IN_PROGRESS only when `departureDateTime < now - 30 phút`; capture `actualDepartureTime`; publish `trip.trip.started` |
 | `AutoCompletedFallbackJob` | Recurring | Every 15 phút | Set IN_PROGRESS Trips to COMPLETED only when `estimatedArrivalTime < now - 30 phút`; publish `trip.trip.completed` |
@@ -3523,8 +3525,8 @@ permitted.
 |---|---|---|---|
 | `PaymentExpiredJob` | Recurring scan | `PENDING_REDIRECT AND (due_at ?? created_at + 15m) <= now` | Atomic CAS to EXPIRED + Outbox; persisted future deadlines are not expired by age |
 | `TopUpExpiredJob` | Recurring scan | PENDING + 15 phút | UPDATE status = EXPIRED |
-| `TripSettlementEligibilityFlagJob` | Recurring | Daily 02:00 ICT | Set OperatorTripSettlement.status = ELIGIBLE WHERE eligibleAt <= now |
-| `TripSettlementWeeklyAutoSettleJob` | Recurring | Weekly Mon 09:00 ICT | Debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE |
+| `TripSettlementEligibilityFlagJob` | Recurring | Daily 02:00 Asia/Ho_Chi_Minh | Set OperatorTripSettlement.status = ELIGIBLE WHERE eligibleAt <= now |
+| `TripSettlementWeeklyAutoSettleJob` | Recurring | Weekly Mon 09:00 Asia/Ho_Chi_Minh | Debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE |
 | `InvoicePdfRetryJob` | Triggered (retry) | Post-payment-success event | Generate PDF, retry max 5 nếu fail |
 | `RefundFailureRetryJob` | Recurring | Every 10 phút | Retry refund từ RefundFailureLog, max 5 lần |
 
@@ -3977,7 +3979,7 @@ PR fail nếu bất kỳ step nào fail.
 |---|---|---|---|
 | **1.62.0** | 2026-08-10 | Codex | **MINOR** — Mở rộng additive bốn operator financial read để tách rõ tiền chờ Trip, hold, eligible, settled và wallet balance; thêm canonical per-trip financial projection, reconciliation metadata/search/date semantics, UTC schedule projection, safe settlement delay, fail-soft Trip enrichment và reversible nullable ledger metadata migration. Booking/Parcel truyền reference code qua payment-context hiện có; không thêm route, dependency, error code hoặc bank withdrawal. |
 | **1.61.0** | 2026-08-09 | Codex | **MINOR** — Add backend-owned intercity ETA for every stop and destination. Trip persists Google Routes versus Route-baseline planned source while exposing only `plannedEtaQuality`; Tracking calculates one ordered batch for all remaining targets, writes 60-second Redis entries atomically, exposes `GET /v1/tracking/trips/{tripId}/etas`, and emits additive `eta:batch:update` while preserving legacy `/eta` and `eta:update`. Adds reversible `planned_eta_source` migration and default 20-minute dwell configuration; no dependency or integration event added. |
-| **1.60.0** | 2026-08-08 | Codex | **MINOR** — Reconcile the current RAG contract with runtime and physical DDL (Cloudinary raw document storage, OpenRouter chat/embedding, canonical `nvidia/llama-nemotron-embed-vl-1b-v2:free`, `halfvec(2048)`, HNSW cosine indexing) and standardize Payment as the financial source of truth for Dashboard/Analytics/Platform Report/export with canonical revenue predicates, typed adjustment taxonomy, separated settlement, ICT half-open ranges, 60-second cache, and fail-closed 503 financial consumers. No physical DDL, migration, dependency, provider secret, or integration-event change. |
+| **1.60.0** | 2026-08-08 | Codex | **MINOR** — Reconcile the current RAG contract with runtime and physical DDL (Cloudinary raw document storage, OpenRouter chat/embedding, canonical `nvidia/llama-nemotron-embed-vl-1b-v2:free`, `halfvec(2048)`, HNSW cosine indexing) and standardize Payment as the financial source of truth for Dashboard/Analytics/Platform Report/export with canonical revenue predicates, typed adjustment taxonomy, separated settlement, Asia/Ho_Chi_Minh half-open ranges, 60-second cache, and fail-closed 503 financial consumers. No physical DDL, migration, dependency, provider secret, or integration-event change. |
 | **1.59.0** | 2026-08-07 | Codex | **MINOR** — Freeze Mobile gap contracts: passenger Trip search exposes only `SCHEDULED`; round-trip route identity and leg-scoped seat conflicts; effective-route geometry/ETag; STOP/STATION ETA and passenger-history tracking targets; atomic notification read-all plus snapshot cursor pagination; System Admin `SUSPENDED -> APPROVED` operator reactivation with ActivityLog and unchanged subscription; RAG 429 documents `RAG_RATE_LIMIT_EXCEEDED`. Adds two UUID-v4-required mutations, raising the executable inventory to 190/173/17. No new dependency or integration event. |
 | **1.58.0** | 2026-08-06 | Codex | **MINOR** — Hoàn thiện Manager Web Trip gaps: immutable Trip seat-layout snapshot, canonical usable passenger capacity, case-insensitive seat validation, operator-admin TripSeat disable/enable with row locking/audit/idempotency, operator shuttle history, batched pending-shuttle passenger enrichment, and method-aware Gateway routing. |
 | **1.57.0** | 2026-08-05 | Codex | **MINOR** — Hoàn thiện Tracking Phase 12: giữ fallback `STOPS_ONLY` cho Route thiếu polyline, làm rõ Google/Local ETA fallback và UNKNOWN, khóa quy tắc chọn stop/recalculate, bổ sung delay state 24h, Outbox `dedupeKey` unique, transition `DELAYED`/`DELAY_CLEARED` và contract ETA additive tương thích ngược. |
@@ -3986,11 +3988,11 @@ PR fail nếu bất kỳ step nào fail.
 | **1.55.1** | 2026-08-04 | Codex | **PATCH** — Freeze the route-change proposal transaction lock protocol as source advisory lock → Trip → pending proposal UUIDs → dependency rows, and require proposal creation, audit, and Outbox persistence in that transaction. |
 | **1.56.0** | 2026-08-05 | Codex | **MINOR** — Add Station two-level `city`/`ward` addressing, map-ready Route detail/composite writes and server polyline metrics, duplicate Route serialization, operator fleet REST/realtime tracking, optional next-stop ETA, DriverSchedule deactivate/delete, source schedule projection, and crew-aware route-proposal push/realtime delivery. |
 | **1.55.0** | 2026-08-04 | Codex | **MINOR** — Add assigned Driver/Assistant EXISTING/CUSTOM route-change proposal snapshots, tenant-scoped Operator Admin decision flow, approval promotion/supersession/expiry semantics, five Trip lifecycle facts, four canonical errors and five audit actions. Notification consumes all five facts with active-admin fan-out for create, proposer delivery for terminal outcomes, five dedicated types and EventId/MessageId dedupe. Preserve direct admin route change and existing passenger impact, retire the global AlternativeRoute active-count cap and `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`, and add three UUID-v4-required mutations (188/171/17). |
-| **1.54.0** | 2026-08-03 | Codex | **MINOR** — Add System-Admin operator detail projection and Trip-owned operator holiday fare surcharge settings/periods. Inclusive ICT departure dates, active-window overlap protection, pre-voucher nearest-VND adjustment, additive search/detail breakdown and Booking-time snapshot semantics are canonical. Adds four UUID-v4-required mutation surfaces, raising the inventory to 185/168/17; no dependency, integration event or background job. |
+| **1.54.0** | 2026-08-03 | Codex | **MINOR** — Add System-Admin operator detail projection and Trip-owned operator holiday fare surcharge settings/periods. Inclusive Asia/Ho_Chi_Minh departure dates, active-window overlap protection, pre-voucher nearest-VND adjustment, additive search/detail breakdown and Booking-time snapshot semantics are canonical. Adds four UUID-v4-required mutation surfaces, raising the inventory to 185/168/17; no dependency, integration event or background job. |
 | **1.53.0** | 2026-08-02 | Codex | **MINOR** — Freeze public Tracking map context: authorized Trip route geometry with safe marker fallback, deterministic 1.000-point cap/ETag, passenger-only Shuttle context without foreign pickup leakage, post-pickup access continuity, and additive TripStop status for terminal-stop ETA selection. No migration, dependency, integration event, Gateway family, or Google configuration change. |
 | **1.52.1** | 2026-08-02 | BE lead (Vũ) | **PATCH** — Reconciles the v1.54 Shuttle pickup merge with the system-wide idempotency inventory: `POST /v1/driver/shuttle-trips/{shuttleTripId}/stops/{pickupOrder}/pickup` is UUID-v4-required, raising the executable baseline to 181 HTTP mutation surfaces / 164 required / exactly 17 exemptions. Runtime metadata and API Contract were already required; no dependency, schema, migration or additional endpoint change. |
 | **1.52.0** | 2026-08-02 | BE lead (Vũ) | **MINOR** — Freezes the Day-43 system-wide idempotency convention at 180 HTTP mutation surfaces: 163 UUID-v4-required actions and exactly 17 named exemptions. Reconciles the two post-merge read-only Trip batch POSTs and the higher-contract no-key DriverSchedule create/activate actions with auditable runtime metadata; preserves v2 replay/mismatch/pending/5xx semantics and does not rewrite historical Git metadata. No dependency, schema, migration or public endpoint change. |
-| **1.51.0** | 2026-08-01 | BE lead (Vũ) | **MINOR** — Reconciles the Days 30–43 repair boundary: defers the unregistered manual Trip-create API; keeps `activePlanId` entitlements during `PENDING_PAYMENT`; fixes the trial warning at daily 09:00 ICT; preserves one zero-net settlement marker that terminates `CANCELLED` without wallet/event side effects; and makes Day-39 Parcel unload depend on a synchronous Trip snapshot with no Parcel arrival consumer/projection. No endpoint implementation, event payload, schema or migration change. |
+| **1.51.0** | 2026-08-01 | BE lead (Vũ) | **MINOR** — Reconciles the Days 30–43 repair boundary: defers the unregistered manual Trip-create API; keeps `activePlanId` entitlements during `PENDING_PAYMENT`; fixes the trial warning at daily 09:00 Asia/Ho_Chi_Minh; preserves one zero-net settlement marker that terminates `CANCELLED` without wallet/event side effects; and makes Day-39 Parcel unload depend on a synchronous Trip snapshot with no Parcel arrival consumer/projection. No endpoint implementation, event payload, schema or migration change. |
 | **1.50.0** | 2026-07-31 | BE lead (Vũ) | **MINOR** — Ratifies exact Booking refund correlation and zero-net group reconciliation: `payment.wallet.credited.paymentId?` is Booking-refund-only and backward-compatible, captured-payment retry rows use `BOOKING_REFUND_PAYMENT` with `referenceId=paymentId` and may carry amount zero, and Shared.Messaging transient retries are explicit, durable, TTL/header bounded, mandatory, and publisher-confirmed. No physical schema migration or index. |
 | **1.49.0** | 2026-07-31 | BE lead (Vũ) | **MINOR** — Reopens Day 36/43 and ratifies the payment/history/auth repair contract: Booking VNPay deadlines follow Trip seat-lock expiry, legacy null `DueAt` falls back to 15 minutes, late capture never resurrects an expired Booking and uses idempotent allocation refund, `booking.payment_refund.requested` and `PAYMENT_DEADLINE_PASSED` are registered, internal latest-attempt redirect lookup is strict/no-store, Booking and Passenger history gain fail-open `paymentRedirectUrl`, and Google login returns stored avatar without provider overwrite. No schema migration or index. |
 | **1.48.0** | 2026-07-31 | Codex | **MINOR** — Freeze the backend UI-gap ownership, compatibility, projection/backfill, Policy audit, Parcel history, Dashboard and Revenue semantics; remove stale Admin Operator, Trip code/index and fare-history scope; correct Platform Report ownership to Booking. |
@@ -4041,7 +4043,7 @@ PR fail nếu bất kỳ step nào fail.
 | **1.11.1** | 2026-06-12 | BE lead (Vũ) | **PATCH** — Identity operator-user list gap fill: add `GET /v1/operator/users` for `OPERATOR_ADMIN` only, scoped by caller `operatorId`, and `GET /v1/admin/operator-users` for `SYSTEM_ADMIN` across all operators. Both return ADR 0004 `ApiResponse<PagedResult<OperatorUserListItemDto>>` with items `{userId,email,phone,displayName,role,status,operatorId,createdAt,avatarUrl}`, only roles `DRIVER`/`ASSISTANT`/`OPERATOR_STAFF`, standard page/search/sort filters, no Idempotency-Key, no new error codes, no schema/migration change. Gateway adds `/v1/admin/operator-users` → Identity with `SYSTEM_ADMIN`; existing `/v1/operator/users` route remains `OPERATOR_ADMIN`. |
 | **1.11.0** | 2026-06-12 | BE lead (Vũ) | **MINOR** — (1) **Money rounding rule change (human decision 2026-06-12):** bỏ floor về 1,000 VND — số tiền giữ đến đơn vị ĐỒNG; kết quả phép tính lẻ (giảm giá %, hoa hồng) làm tròn đến đồng gần nhất (`Money.FromDecimal`, MidpointRounding.AwayFromZero); `Money.FromRaw` pass-through. Sửa §9.5, §4.4 Money row, §3.1 tree comment, `libs/dotnet/VietRide.Shared.Kernel/ValueObjects/Money.cs` + tests. technical_context_v7 đã được patch in-place cùng đợt (10 chỗ floor-1000: dòng ~1944/2015/2991/3418/4080/4126-4153/4367/4539) + API Contract 2 chỗ (~2394/2561) — SOT hết mâu thuẫn. Không cần DB migration (BIGINT giữ nguyên). (2) **Edit-pickup policy change (Day-13 OQ2, human decision 2026-06-12):** v1 KHÔNG cho đổi điểm đón làm thay đổi giá — edit-pickup chỉ hợp lệ khi giá mới = giá cũ (fareDelta=0); mọi chênh lệch (tăng HOẶC giảm) → 409; muốn đổi giá thì hủy vé + đặt lại (loại bỏ hoàn toàn nhánh refund-on-downgrade của technical_context_v7 lines 1639-1656 — erratum, business owner override). §5.9: rename `BOOKING_EDIT_PICKUP_PRICE_INCREASE` → `BOOKING_EDIT_PICKUP_PRICE_CHANGED` (chưa có code/FE nào dùng code cũ). |
 | **1.10.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — SOT reconciliation patches (Day-11 Q2 / Day-12 C1,C2,CO2 / Day-13 C5): (1) §9.9 Redis key `booking:seat_lock:{tripId}:{seatNumber}` owner Booking → key `seat_lock:{tripId}:{seatNumber}` owner Trip (source: BSOT 1.8.0 + API Contract §`lock-seats`). (2) §5.6 idempotency table: split combined row `POST /v1/bookings/{id}/edit-pickup-dropoff` into two separate rows `POST /v1/bookings/{id}/edit-pickup` and `POST /v1/bookings/{id}/edit-dropoff` (source: API Contract lines ~830-885 defines two separate endpoints, higher precedence). (3) §7.2 Payment seam: `POST /internal/v1/payments/wallet-charge` → `POST /internal/v1/payments/charge` (source: API Contract line ~1565). (4) §9.10 + §9.1 logging example: BookingCode short-form `VR-<4 char base32>` → `VR-yyyyMMdd-XXXXXXXX` (date + 8-char base32 uppercase) (source: db-schema/booking/schema.sql COMMENT + API Contract line ~713). No code/DDL change. |
-| **1.9.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — Day-9 Trip vehicle/schedule contract + registry sync: add the VehicleType catalog read, operator-scoped Vehicle CRUD, exact `seatLayoutJson` BE/FE shape and v1 validation scope, and DriverSchedule create contract with local-ICT weekly recurrence, validity window, conflict handling via existing `TRIP_DRIVER_CONFLICT`, no Trip generation, and Day-11 deferred driver/assistant role validation. Add exactly two new §5.9 tenant/reference codes: `VEHICLE_NOT_FOUND` and `VEHICLE_TYPE_NOT_FOUND`. No code/DDL change. |
+| **1.9.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — Day-9 Trip vehicle/schedule contract + registry sync: add the VehicleType catalog read, operator-scoped Vehicle CRUD, exact `seatLayoutJson` BE/FE shape and v1 validation scope, and DriverSchedule create contract with an `Asia/Ho_Chi_Minh` local-time weekly recurrence, validity window, conflict handling via existing `TRIP_DRIVER_CONFLICT`, no Trip generation, and Day-11 deferred driver/assistant role validation. Add exactly two new §5.9 tenant/reference codes: `VEHICLE_NOT_FOUND` and `VEHICLE_TYPE_NOT_FOUND`. No code/DDL change. |
 | **1.8.0** | 2026-06-11 | BE lead (Vũ) | **MINOR** — Trip↔Booking seam freeze (unblocks parallel Day-12 Booking work). Document the seat lifecycle as **synchronous internal HTTP** owned by Trip-Route-Vehicle: `TripSeat` lives in the `trip-route-vehicle` schema (NOT Booking — corrects the BE_TIMELINE Day-12 "TripSeat tables" note, which loses to technical_context §6.1/§6.10 + db-schema), generated by the Trip Hangfire job from `Vehicle.seatLayoutJson`; Booking drives `lock-seats` (AVAILABLE→HELD, Redis `seat_lock:{tripId}:{seatNumber}` TTL 10 min, all-or-nothing) → `book-seats` (HELD→BOOKED) → `release-seats` (HELD→AVAILABLE, idempotent compensation); no event on the seat path. Reconcile §7.2 endpoint name `confirm-seats` → **`book-seats`** to match API Contract (#2 > #3). Flesh out the API contract: add the missing `GET /internal/v1/trips/{tripId}` raw-DTO shape (operatorId/routeId/baseFare/stops[allowPickup,allowDropoff,orderIndex,fareFromThisStop]/seatSummary) already registered in §7.2, and add error responses to the three seat endpoints. **No new error codes** (`BOOKING_SEAT_UNAVAILABLE` 409, `BOOKING_TRIP_NOT_BOOKABLE` 409, `TRIP_NOT_FOUND` 404 already §5.9). No code/DDL change. |
 | **1.7.0** | 2026-06-10 | BE lead (Vũ) | **MINOR** — Day-8 Trip route contract + registry sync: add the Route/RouteStop/FareTemplate/AlternativeRoute section to the API contract with ADR 0004 envelopes, method-level role matrix (WRITE = `OPERATOR_ADMIN` only; READ = `OPERATOR_ADMIN` + `OPERATOR_STAFF`), tenant-isolation `404 ROUTE_NOT_FOUND`, RouteStop hard-delete, AlternativeRoute soft-deactivate, fare-template `fareFromThisStop` and effective-window rules, and the app-layer preconditions for Route create. Historically added `ROUTE_STOP_ORDER_CONFLICT`, `ROUTE_STOP_FLAGS_INVALID`, and `ALTERNATIVE_ROUTE_LIMIT_EXCEEDED`; the last code was retired in 1.55.0. No code/DDL change. |
 | **1.6.5** | 2026-06-10 | BE lead (Vũ) | **PATCH** — Day-10 Outbox + passenger-stub contract sync. Add two stub endpoints to the API contract + Postman: `GET /v1/passenger/me` (reuses the `/v1/users/me` `GetMeResponseDto` projection verbatim — `id,email,displayName,phone,role,operatorId,status,avatarUrl`; no passenger-specific fields) and `GET /v1/passenger/bookings` (empty `PagedResult` envelope `{items:[],page:1,pageSize:20,total:0}` — booking ITEM schema deferred to Sprint 3 / [SCV-76](https://hoangvutran088.atlassian.net/browse/SCV-76)), both marked `stub -- item schema finalized in Sprint 3 (SCV-76 / Booking)`; both require a user JWT (401 without). Add Gateway route `/v1/passenger/*` → identity (authRequired `user`). Implement the three already-registered §7.3 events transactionally from Identity handlers (`identity.user.created {userId,role,email,createdAt}`, `identity.operator.approved {operatorId,approvedAt}`, `identity.operator.suspended {operatorId,suspendedAt}`) via the string-based `IIntegrationEventOutbox` seam; wire `AddVietRideMessaging` into Identity + set the identity container's `RabbitMq__HostName=rabbitmq` so the Outbox publishes to `vietride.events`. Add the placeholder Redis `IdempotencyMiddleware` to Shared.Web (not wired). **No new event keys, no new error codes** (`IDEMPOTENCY_KEY_MISMATCH` already §5.9; events already §7.3). `staff.password_set` intentionally NOT emitted (Q2: no registry row, no consumer — registry §7.3 > timeline). No schema/migration change (reuse existing `outbox_events`). |

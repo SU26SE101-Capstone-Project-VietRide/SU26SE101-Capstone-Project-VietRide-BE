@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Shared.Messaging.Abstractions;
 
 namespace VietRide.Shared.Messaging.RabbitMq;
@@ -15,12 +16,6 @@ namespace VietRide.Shared.Messaging.RabbitMq;
 /// </summary>
 public sealed class RabbitMqEventPublisher : IEventPublisher
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        WriteIndented = false,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-    };
-
     private readonly IRabbitMqConnectionFactory _connections;
     private readonly RabbitMqOptions _options;
     private readonly ILogger<RabbitMqEventPublisher> _logger;
@@ -42,7 +37,7 @@ public sealed class RabbitMqEventPublisher : IEventPublisher
         where TEvent : IIntegrationEvent
     {
         ArgumentNullException.ThrowIfNull(evt);
-        var json = JsonSerializer.Serialize(evt, evt.GetType(), JsonOptions);
+        var json = JsonSerializer.Serialize(evt, evt.GetType(), UtcJson.IgnoreNullOptions);
         return PublishRawAsync(evt.EventType, evt.EventId, json, ct);
     }
 
@@ -58,7 +53,7 @@ public sealed class RabbitMqEventPublisher : IEventPublisher
         ct.ThrowIfCancellationRequested();
 
         var channel = EnsureChannel();
-        var body = Encoding.UTF8.GetBytes(payloadJson);
+        var body = Encoding.UTF8.GetBytes(UtcJson.NormalizeInstants(payloadJson));
 
         var props = channel.CreateBasicProperties();
         props.ContentType = "application/json";

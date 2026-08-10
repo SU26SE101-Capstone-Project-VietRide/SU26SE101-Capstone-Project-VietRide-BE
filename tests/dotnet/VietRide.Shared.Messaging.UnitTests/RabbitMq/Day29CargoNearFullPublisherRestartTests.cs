@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using RabbitMQ.Client;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Shared.Messaging.RabbitMq;
 using Xunit;
 
@@ -27,6 +28,7 @@ public sealed class Day29CargoNearFullPublisherRestartTests
             maxCargoWeightKg = 100m,
             percentFull = 80m,
         });
+        var expectedPayload = UtcJson.NormalizeInstants(payload);
         var firstProperties = Substitute.For<IBasicProperties>();
         var restartedProperties = Substitute.For<IBasicProperties>();
         var firstChannel = Substitute.For<IModel>();
@@ -71,6 +73,6 @@ public sealed class Day29CargoNearFullPublisherRestartTests
                 properties.MessageId == eventId.ToString("D")
                 && properties.Type == routingKey
                 && properties.DeliveryMode == 2),
-            Arg.Is<ReadOnlyMemory<byte>>(body => body.ToArray().SequenceEqual(Encoding.UTF8.GetBytes(payload))));
+            Arg.Is<ReadOnlyMemory<byte>>(body => body.ToArray().SequenceEqual(Encoding.UTF8.GetBytes(expectedPayload))));
     }
 }

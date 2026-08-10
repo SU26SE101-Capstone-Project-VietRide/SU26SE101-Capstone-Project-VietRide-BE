@@ -243,7 +243,7 @@
 
 ### Day 23 — Wed 2026-06-24 — Schedule change 3 levels + BookingPendingAction ([SCV-100](https://hoangvutran088.atlassian.net/browse/SCV-100))
 - Producer duy nhất: PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING`; chỉ `ALL_PENDING` mới cascade giờ khởi hành của Trip đã sinh. Không thêm Trip schedule endpoint hoặc Gateway route.
-- Phân loại theo `delta = |newDeparture - oldDeparture|` và ngày lịch ICT: **MINOR** khi cùng ngày và `delta <= 2h`; **MEDIUM** khi cùng ngày và `delta > 2h && delta < 6h`; **MAJOR** khi `delta >= 6h` hoặc đổi ngày ICT.
+- Phân loại theo `delta = |newDeparture - oldDeparture|` và ngày lịch Việt Nam (`Asia/Ho_Chi_Minh`): **MINOR** khi cùng ngày và `delta <= 2h`; **MEDIUM** khi cùng ngày và `delta > 2h && delta < 6h`; **MAJOR** khi `delta >= 6h` hoặc đổi ngày Việt Nam.
 - Với Booking `CONFIRMED`, preflight `ALL_PENDING` dùng một clock capture: cả `oldDeparture - now` và `newDeparture - now` phải `>= 2h`; equality được phép. Bất kỳ giá trị nào `< 2h` trả `DRIVER_SCHEDULE_EDIT_TOO_LATE` trước write.
 - Booking giữ `trip_snapshot_departure` immutable và cập nhật projection `trip_current_departure` cho `PENDING_PAYMENT|CONFIRMED` theo CAS event (`current==old` apply, `current==new` duplicate, khác cả hai thì retry/quarantine). Chỉ `CONFIRMED` phát informational hoặc tạo đúng một active `SCHEDULE_CHANGE`.
 - Passenger owner resolve qua POST `/v1/bookings/{bookingId}/pending-actions/{actionId}/resolve` với UUID-v4 `Idempotency-Key` và body đúng `{ action: ACCEPTED|REJECTED, note? }`; `selectedStopId` invalid. Same-key/same-payload replay byte-identical trước khi xét terminal state.

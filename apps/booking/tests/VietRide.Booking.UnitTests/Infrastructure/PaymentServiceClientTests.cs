@@ -44,7 +44,9 @@ public sealed class PaymentServiceClientTests
 
         outcome.Should().BeOfType<ChargeOutcome.Success>();
         using var body = JsonDocument.Parse(handler.LastBody!);
-        body.RootElement.GetProperty("dueAt").GetDateTimeOffset().Should().Be(dueAt);
+        body.RootElement.GetProperty("dueAt").GetString()
+            .Should().Be("2026-07-31T10:07:00Z");
+        handler.LastBody.Should().NotContain("+00:00");
     }
 
     [Fact]

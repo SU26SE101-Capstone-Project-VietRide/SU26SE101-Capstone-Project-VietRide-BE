@@ -41,7 +41,7 @@ public sealed class OperatorAnalyticsQueryHandlerTests
     }
 
     [Fact]
-    public async Task RoutePerformance_UsesInclusiveIctMonthAndMapsSortedRows()
+    public async Task RoutePerformance_UsesInclusiveVietnamMonthAndMapsSortedRows()
     {
         var operatorId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
         var routeA = Guid.Parse("11111111-1111-4111-8111-111111111111");

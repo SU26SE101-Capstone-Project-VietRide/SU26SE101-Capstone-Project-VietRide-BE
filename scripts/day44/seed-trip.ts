@@ -14,7 +14,7 @@ const { Buffer } = require('node:buffer') as {
   Buffer: { from(value: string, encoding: 'base64'): Uint8Array };
 };
 
-const ICT_OFFSET_MILLISECONDS = 7 * 60 * 60 * 1000;
+const VIETNAM_OFFSET_MILLISECONDS = 7 * 60 * 60 * 1000;
 const UUID_NAMESPACE = '44000000-0000-5000-8000-000000000001';
 const LETTERS = ['A', 'B', 'C'] as const;
 const ROUTES = ['r1', 'r2', 'r3'] as const;
@@ -190,7 +190,7 @@ function parseDate(value: string): { year: number; month: number; day: number } 
     check.getUTCMonth() + 1 !== result.month ||
     check.getUTCDate() !== result.day
   ) {
-    throw new Error('startDate is not a valid ICT calendar date');
+    throw new Error('startDate is not a valid Asia/Ho_Chi_Minh calendar date');
   }
   return result;
 }
@@ -199,7 +199,7 @@ function ictInstant(date: string, hour = 0, minute = 0, offsetDays = 0): Date {
   const value = parseDate(date);
   return new Date(
     Date.UTC(value.year, value.month - 1, value.day + offsetDays, hour, minute) -
-      ICT_OFFSET_MILLISECONDS,
+      VIETNAM_OFFSET_MILLISECONDS,
   );
 }
 
@@ -211,7 +211,7 @@ function dateOnly(date: string, offsetDays: number): string {
 }
 
 function ictParts(instant: Date): { year: number; month: number; day: number } {
-  const shifted = new Date(instant.getTime() + ICT_OFFSET_MILLISECONDS);
+  const shifted = new Date(instant.getTime() + VIETNAM_OFFSET_MILLISECONDS);
   return {
     year: shifted.getUTCFullYear(),
     month: shifted.getUTCMonth() + 1,
@@ -228,7 +228,7 @@ function assertInputs(input: Day44TripPlannerInput): void {
   const startValue = start.year * 10_000 + start.month * 100 + start.day;
   const currentValue = current.year * 10_000 + current.month * 100 + current.day;
   if (startValue <= currentValue)
-    throw new Error('startDate must be at least one day after the current ICT date');
+    throw new Error('startDate must be at least one day after the current Asia/Ho_Chi_Minh date');
 }
 
 const stationDefinitions = [

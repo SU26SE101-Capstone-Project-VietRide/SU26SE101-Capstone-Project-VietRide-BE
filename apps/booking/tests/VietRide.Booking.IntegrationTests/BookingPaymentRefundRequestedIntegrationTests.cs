@@ -26,6 +26,7 @@ using VietRide.Booking.Infrastructure.Messaging;
 using VietRide.Shared.Application.Inbox;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Messaging.Abstractions;
 using VietRide.Shared.Messaging.RabbitMq;
@@ -1344,7 +1345,7 @@ public sealed class BookingPaymentRefundRequestedIntegrationTests
             false,
             properties,
             Arg.Is<ReadOnlyMemory<byte>>(body =>
-                Encoding.UTF8.GetString(body.ToArray()) == row.Payload));
+                Encoding.UTF8.GetString(body.ToArray()) == UtcJson.NormalizeInstants(row.Payload)));
     }
 
     private static RabbitMqEventPublisher CreatePublisher(IRabbitMqConnectionFactory connections)

@@ -11,7 +11,7 @@ namespace VietRide.Payment.Application.Features.Invoices;
 
 public sealed record SubscriptionPaymentSucceededInvoiceEvent(
     [property: JsonPropertyName("eventId")] Guid EventId,
-    [property: JsonPropertyName("occurredAt")] DateTime OccurredAt,
+    [property: JsonPropertyName("occurredAt")] DateTimeOffset OccurredAt,
     [property: JsonPropertyName("paymentId")] Guid PaymentId,
     [property: JsonPropertyName("upgradeAttemptId")] Guid UpgradeAttemptId,
     [property: JsonPropertyName("operatorId")] Guid OperatorId,
@@ -29,6 +29,9 @@ public sealed record SubscriptionPaymentSucceededInvoiceEvent(
 
     [JsonIgnore]
     string IIntegrationEvent.EventType => EventTypeValue;
+
+    [JsonIgnore]
+    DateTime IIntegrationEvent.OccurredAt => OccurredAt.UtcDateTime;
 }
 
 public sealed class SubscriptionPaymentSucceededInvoiceHandler
@@ -73,7 +76,7 @@ public sealed class SubscriptionPaymentSucceededInvoiceHandler
                 cancellationToken);
             if (existing is null)
             {
-                var periodKey = integrationEvent.OccurredAt.ToUniversalTime().ToString("yyyyMM");
+                var periodKey = InvoiceNumberPeriod.FromInstant(integrationEvent.OccurredAt);
                 var sequence = await _counters.NextAsync(periodKey, cancellationToken);
                 var invoiceNumber = $"VR-INV-{periodKey}-{sequence:000000}";
                 var metadata = new InvoiceMetadataV1(

@@ -11,7 +11,7 @@ const { createHash } = require('node:crypto') as {
   createHash(algorithm: 'sha256'): NodeHash;
 };
 
-const ICT_OFFSET_MILLISECONDS = 7 * 60 * 60 * 1000;
+const VIETNAM_OFFSET_MILLISECONDS = 7 * 60 * 60 * 1000;
 const BUSINESS_PLAN_ID = '44000000-0000-4000-8000-000000000001';
 const PAYMENT_EVENT_TYPE = 'payment.subscription.payment_succeeded';
 const SUBSCRIPTION_INVOICE_CONSUMER = 'payment.subscription-invoice';
@@ -144,17 +144,17 @@ export const day44CommerceFixtureIds = Object.freeze({
 function ictInstant(startDate: string, dayOffset: number, hour = 0, minute = 0): Date {
   const [year, month, day] = startDate.split('-').map(Number);
   return new Date(
-    Date.UTC(year, month - 1, day + dayOffset, hour, minute) - ICT_OFFSET_MILLISECONDS,
+    Date.UTC(year, month - 1, day + dayOffset, hour, minute) - VIETNAM_OFFSET_MILLISECONDS,
   );
 }
 
-function addIctMonth(startDate: string): string {
+function addVietnamMonth(startDate: string): string {
   const [year, month, day] = startDate.split('-').map(Number);
   const targetYear = month === 12 ? year + 1 : year;
   const targetMonthIndex = month === 12 ? 0 : month;
   const lastDay = new Date(Date.UTC(targetYear, targetMonthIndex + 1, 0)).getUTCDate();
   return new Date(
-    Date.UTC(targetYear, targetMonthIndex, Math.min(day, lastDay)) - ICT_OFFSET_MILLISECONDS,
+    Date.UTC(targetYear, targetMonthIndex, Math.min(day, lastDay)) - VIETNAM_OFFSET_MILLISECONDS,
   ).toISOString();
 }
 
@@ -188,11 +188,11 @@ function assertInputs(input: Day44CommercePlannerInput): void {
     throw new Error('Day 44 startDate must use YYYY-MM-DD');
   const start = ictInstant(input.startDate, 0);
   if (Number.isNaN(start.getTime())) throw new Error('Day 44 startDate is invalid');
-  const nowIct = new Date(input.currentInstant.getTime() + ICT_OFFSET_MILLISECONDS);
-  const todayIct = Date.UTC(nowIct.getUTCFullYear(), nowIct.getUTCMonth(), nowIct.getUTCDate());
-  const startIct = start.getTime() + ICT_OFFSET_MILLISECONDS;
-  if (startIct < todayIct + 24 * 60 * 60 * 1000)
-    throw new Error('Day 44 startDate must be at least one ICT day in the future');
+  const nowVietnam = new Date(input.currentInstant.getTime() + VIETNAM_OFFSET_MILLISECONDS);
+  const todayVietnam = Date.UTC(nowVietnam.getUTCFullYear(), nowVietnam.getUTCMonth(), nowVietnam.getUTCDate());
+  const startVietnam = start.getTime() + VIETNAM_OFFSET_MILLISECONDS;
+  if (startVietnam < todayVietnam + 24 * 60 * 60 * 1000)
+    throw new Error('Day 44 startDate must be at least one Asia/Ho_Chi_Minh day in the future');
 }
 
 function assertReferences(references: CommerceLogicalReferences): void {
@@ -243,7 +243,7 @@ function buildDesired(input: Day44CommercePlannerInput): ExistingCommerceFixture
   const dueAt = ictInstant(input.startDate, -1, 10, 10).toISOString();
   const topUpAt = ictInstant(input.startDate, -1, 9).toISOString();
   const invoicePdfCompletedAt = ictInstant(input.startDate, -1, 10, 1).toISOString();
-  const periodTo = addIctMonth(input.startDate);
+  const periodTo = addVietnamMonth(input.startDate);
   const validFrom = ictInstant(input.startDate, -7).toISOString();
   const validUntil = ictInstant(input.startDate, 60, 23, 59);
   validUntil.setUTCSeconds(validUntil.getUTCSeconds() + 59);

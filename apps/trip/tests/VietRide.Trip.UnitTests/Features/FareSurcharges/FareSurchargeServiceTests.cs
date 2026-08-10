@@ -27,7 +27,7 @@ public sealed class FareSurchargeServiceTests
     }
 
     [Fact]
-    public async Task ResolveAsync_UsesInclusiveIctDepartureDate()
+    public async Task ResolveAsync_UsesInclusiveVietnamDepartureDate()
     {
         var operatorId = Guid.NewGuid();
         var period = OperatorFareSurchargePeriod.Create(

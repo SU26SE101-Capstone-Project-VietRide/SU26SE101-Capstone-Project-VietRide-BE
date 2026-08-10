@@ -92,7 +92,7 @@ npm run postman:day11:local
 
 The Day-11 helper supplies `operatorAdminAccessToken`, `passengerAccessToken`,
 `day11DriverScheduleId`, `day11OriginStationId`, `day11DestinationStationId`, and
-`day11MissingStationId`, plus a runtime `day11DepartureDate` aligned to the next local ICT service
+`day11MissingStationId`, plus a runtime `day11DepartureDate` aligned to the next local Asia/Ho_Chi_Minh service
 day. The folder stays Gateway-only: it activates the seeded DriverSchedule,
 performs public trip search plus an empty-result adversarial search, and reads trip detail/seat-map
 as a passenger. After Newman, the harness polls for exactly one activation-generated scheduled/

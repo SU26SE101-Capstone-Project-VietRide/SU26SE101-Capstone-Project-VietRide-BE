@@ -14,7 +14,7 @@ import { z } from 'zod';
 export const ApiMetaSchema = z.object({
   /** Required correlation id stamped by the gateway (X-Request-Id / ADR 0002). */
   traceId: z.string(),
-  /** Response timestamp — UTC ISO-8601. */
+  /** FE-facing response timestamp — ISO-8601 in Asia/Ho_Chi_Minh (+07:00). */
   timestamp: z.string(),
 });
 

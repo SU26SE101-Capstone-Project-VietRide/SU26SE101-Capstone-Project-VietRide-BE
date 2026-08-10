@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Parcel.Infrastructure.Http;
 
@@ -11,10 +12,7 @@ namespace VietRide.Parcel.Infrastructure.Http;
 /// </summary>
 public sealed class PaymentRedirectLookupClient : IPaymentRedirectLookupClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.IgnoreNullOptions;
 
     private readonly HttpClient _httpClient;
 

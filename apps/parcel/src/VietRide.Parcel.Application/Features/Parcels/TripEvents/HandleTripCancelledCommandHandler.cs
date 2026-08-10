@@ -155,7 +155,7 @@ public sealed class HandleTripCancelledCommandHandler
         {
             await statsRepository.UpsertIncrementAsync(
                 group.Key,
-                DateOnly.FromDateTime(now.UtcDateTime),
+                VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now),
                 0,
                 0,
                 0,

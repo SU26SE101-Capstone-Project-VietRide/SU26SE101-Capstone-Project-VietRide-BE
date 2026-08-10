@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment -- Jest asymmetric matchers expose any by design. */
 import { ZodError } from 'zod';
 import { NotificationType } from '../generated/notification-prisma-client';
 import {
@@ -275,7 +274,7 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.PARCEL_FINAL_PAYMENT_REQUIRED,
-        body: expect.stringContaining('2026-07-18T04:00:00Z'),
+        body: expect.stringContaining('11:00 ngày 18/07/2026'),
       }),
     );
   });

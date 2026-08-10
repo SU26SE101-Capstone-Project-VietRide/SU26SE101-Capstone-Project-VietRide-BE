@@ -15,8 +15,11 @@ import { TRACKING_SOCKET_PATH } from '../../../../apps/tracking/src/location/loc
 import { LocationGateway } from '../../../../apps/tracking/src/location/location.gateway';
 import { LocationService } from '../../../../apps/tracking/src/location/location.service';
 import { OffRouteService } from '../../../../apps/tracking/src/off-route/off-route.service';
+import { ROUTE_GEOMETRY_PROVIDER } from '../../../../apps/tracking/src/off-route/off-route.constants';
+import { ShuttleEtaService } from '../../../../apps/tracking/src/shuttle/shuttle-eta.service';
 import { ShuttleService } from '../../../../apps/tracking/src/shuttle/shuttle.service';
 import { TripDelayService } from '../../../../apps/tracking/src/trip-delay/trip-delay.service';
+import { TripShareRealtimePublisher } from '../../../../apps/tracking/src/trip-sharing/trip-share-realtime.publisher';
 /* eslint-enable @nx/enforce-module-boundaries */
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
@@ -37,6 +40,13 @@ describe('Tracking Socket.IO MVP (e2e)', () => {
         LocationGateway,
         LocationService,
         { provide: RedisService, useValue: { getClient: () => redisClient } },
+        {
+          provide: ROUTE_GEOMETRY_PROVIDER,
+          useValue: {
+            peekCachedRouteGeometry: jest.fn(() => null),
+            getRouteGeometry: jest.fn(async () => null),
+          },
+        },
         { provide: TRACKING_JWT_VERIFIER, useValue: createJwtVerifier() },
         { provide: TRACKING_AUTHORIZATION_ADAPTER, useValue: createAuthorizationAdapter() },
         { provide: EtaService, useValue: { handleGpsUpdate: jest.fn(async () => null) } },
@@ -46,7 +56,16 @@ describe('Tracking Socket.IO MVP (e2e)', () => {
         },
         { provide: OffRouteService, useValue: { handleGpsUpdate: jest.fn(async () => undefined) } },
         { provide: TripDelayService, useValue: { handleEtaUpdate: jest.fn() } },
+        { provide: ShuttleEtaService, useValue: { handleGpsUpdate: jest.fn(async () => null) } },
         { provide: ShuttleService, useValue: {} },
+        {
+          provide: TripShareRealtimePublisher,
+          useValue: {
+            publishGps: jest.fn(async () => undefined),
+            publishEta: jest.fn(async () => undefined),
+            publishStatus: jest.fn(async () => undefined),
+          },
+        },
       ],
     })
       .compile();
@@ -110,7 +129,10 @@ describe('Tracking Socket.IO MVP (e2e)', () => {
     };
     const ack = await emitWithAck(driver, 'gps:update', payload);
 
-    await expect(received).resolves.toMatchObject(payload);
+    await expect(received).resolves.toMatchObject({
+      ...payload,
+      recordedAt: '2026-05-31T19:00:00.000+07:00',
+    });
     expect(ack).toEqual({ success: true });
     expect(redisClient.eval).toHaveBeenCalledTimes(1);
   });

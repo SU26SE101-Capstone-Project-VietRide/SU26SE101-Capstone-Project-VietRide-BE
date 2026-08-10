@@ -9,7 +9,7 @@ const { createHash } = require('node:crypto') as {
   createHash(algorithm: 'sha1'): NodeHash;
 };
 
-const ICT_OFFSET_MILLISECONDS = 7 * 60 * 60 * 1000;
+const VIETNAM_OFFSET_MILLISECONDS = 7 * 60 * 60 * 1000;
 const UUID_NAMESPACE = '44000000-0000-5000-8000-000000000001';
 const STARTER_PLAN_ID = '00000000-0000-0000-0000-000000000001';
 const BUSINESS_PLAN_ID = '44000000-0000-4000-8000-000000000001';
@@ -250,21 +250,21 @@ function parseDate(date: string): { year: number; month: number; day: number } {
     check.getUTCMonth() !== month - 1 ||
     check.getUTCDate() !== day
   ) {
-    throw new Error('startDate is not a valid ICT calendar date');
+    throw new Error('startDate is not a valid Asia/Ho_Chi_Minh calendar date');
   }
   return { year, month, day };
 }
 
 function ictInstant(year: number, month: number, day: number): Date {
-  return new Date(Date.UTC(year, month - 1, day) - ICT_OFFSET_MILLISECONDS);
+  return new Date(Date.UTC(year, month - 1, day) - VIETNAM_OFFSET_MILLISECONDS);
 }
 
-function addIctDays(date: string, days: number): Date {
+function addVietnamDays(date: string, days: number): Date {
   const value = parseDate(date);
   return new Date(ictInstant(value.year, value.month, value.day).getTime() + days * 86_400_000);
 }
 
-function addIctMonth(date: string): Date {
+function addVietnamMonth(date: string): Date {
   const value = parseDate(date);
   const targetMonthIndex = value.month;
   const targetYear = value.year + Math.floor(targetMonthIndex / 12);
@@ -274,7 +274,7 @@ function addIctMonth(date: string): Date {
 }
 
 function ictDateParts(instant: Date): { year: number; month: number; day: number } {
-  const shifted = new Date(instant.getTime() + ICT_OFFSET_MILLISECONDS);
+  const shifted = new Date(instant.getTime() + VIETNAM_OFFSET_MILLISECONDS);
   return {
     year: shifted.getUTCFullYear(),
     month: shifted.getUTCMonth() + 1,
@@ -304,7 +304,7 @@ function assertPlannerInputs(input: Day44IdentityPlannerInput): void {
   if (Number.isNaN(input.currentInstant.getTime())) throw new Error('currentInstant is invalid');
   const start = parseDate(input.startDate);
   if (compareDate(start, ictDateParts(input.currentInstant)) <= 0) {
-    throw new Error('startDate must be at least one day after the current ICT date');
+    throw new Error('startDate must be at least one day after the current Asia/Ho_Chi_Minh date');
   }
 }
 
@@ -516,7 +516,7 @@ function buildSubscriptions(
     status: 'ACTIVE',
     startedAt,
     expiresAt: fixtureTimestamp(
-      letter === 'C' ? addIctDays(input.startDate, 30) : addIctMonth(input.startDate),
+      letter === 'C' ? addVietnamDays(input.startDate, 30) : addVietnamMonth(input.startDate),
     ),
     paymentMethod: letter === 'C' ? null : 'VNPAY',
     billingPeriod: letter === 'C' ? null : 'MONTHLY',
@@ -615,8 +615,8 @@ export function planDay44IdentityFixture(
 ): Day44IdentityFixturePlan {
   assertPlannerInputs(input);
   assertListedIds();
-  const startedAt = fixtureTimestamp(addIctDays(input.startDate, 0));
-  const createdAt = fixtureTimestamp(addIctDays(input.startDate, -2));
+  const startedAt = fixtureTimestamp(addVietnamDays(input.startDate, 0));
+  const createdAt = fixtureTimestamp(addVietnamDays(input.startDate, -2));
   const subscriptionPlans = buildPlans(createdAt);
   const operators = buildOperators(createdAt);
   const users = buildUsers(createdAt);

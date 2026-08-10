@@ -13,7 +13,7 @@ public sealed class GetMyDriverScheduleHandlerTests
     private static readonly DateTimeOffset FixedUtcNow = new(2026, 6, 30, 3, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task Handle_DefaultWindow_ReturnsCallerAssignmentsWithinInclusiveIctDates()
+    public async Task Handle_DefaultWindow_ReturnsCallerAssignmentsWithinInclusiveVietnamDates()
     {
         var callerId = Guid.NewGuid();
         var otherUserId = Guid.NewGuid();

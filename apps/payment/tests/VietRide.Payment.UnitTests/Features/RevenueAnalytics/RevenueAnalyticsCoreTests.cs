@@ -7,7 +7,7 @@ namespace VietRide.Payment.UnitTests.Features.RevenueAnalytics;
 public sealed class RevenueAnalyticsCoreTests
 {
     [Fact]
-    public void AdminRange_UsesInclusiveIctBoundariesAndEqualPreviousPeriod()
+    public void AdminRange_UsesInclusiveVietnamBoundariesAndEqualPreviousPeriod()
     {
         var range = RevenueAnalyticsPeriodRules.AdminRange(
             new DateOnly(2026, 7, 1),
@@ -33,7 +33,7 @@ public sealed class RevenueAnalyticsCoreTests
     }
 
     [Fact]
-    public void OperatorMonth_ReturnsTwelveMonthsAndPreviousIctRange()
+    public void OperatorMonth_ReturnsTwelveMonthsAndPreviousVietnamRange()
     {
         var period = RevenueAnalyticsPeriodRules.OperatorMonth("2026-07");
 

@@ -245,7 +245,7 @@ public sealed class ResumeCargoRecoveryOperationCommandHandler
                 await EnqueueReturnSideEffectsAsync(operation, completed, now, cancellationToken);
                 await _statsRepository.UpsertIncrementAsync(
                     operation.OperatorId,
-                    DateOnly.FromDateTime(now.UtcDateTime),
+                    VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now),
                     0,
                     0,
                     0,

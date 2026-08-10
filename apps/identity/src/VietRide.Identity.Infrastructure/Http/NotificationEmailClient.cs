@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using VietRide.Identity.Application.Abstractions.Http;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Identity.Infrastructure.Http;
 
@@ -16,7 +17,7 @@ public sealed class NotificationEmailClient : INotificationEmailClient
 {
     private const string EmailsPath = "/internal/v1/emails";
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private readonly HttpClient _httpClient;
 

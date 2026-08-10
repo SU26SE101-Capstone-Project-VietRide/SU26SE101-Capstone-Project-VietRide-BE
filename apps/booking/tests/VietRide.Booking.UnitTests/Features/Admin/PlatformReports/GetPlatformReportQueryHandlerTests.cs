@@ -33,7 +33,7 @@ public sealed class GetPlatformReportQueryHandlerTests
     }
 
     [Fact]
-    public async Task Handle_CacheMiss_ConvertsIctInclusiveRangeAndCachesForSixtySeconds()
+    public async Task Handle_CacheMiss_ConvertsVietnamInclusiveRangeAndCachesForSixtySeconds()
     {
         var cache = new FakeCache();
         var client = new FakeClient();

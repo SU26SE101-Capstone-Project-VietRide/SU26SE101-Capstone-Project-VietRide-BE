@@ -26,6 +26,7 @@ export const PARCEL_STATES = Object.freeze(['READY_TO_LOAD', 'LOADED', 'IN_TRANS
 const root = process.cwd();
 const evidencePath = path.join(root, 'docs/handoff/day-30-sprint4-evidence.md');
 const baseUrl = process.env.GATEWAY_BASE_URL || 'http://localhost:3000';
+const businessTimeZone = 'Asia/Ho_Chi_Minh';
 const ids = Object.freeze({
   operator: crypto.randomUUID(),
   operatorAdmin: crypto.randomUUID(),
@@ -55,7 +56,7 @@ const phones = Object.freeze({
   sender: fixturePhone(4),
   recipient: fixturePhone(5),
 });
-const parcelCode = `VRP-${formatIctDate(new Date()).replaceAll('-', '')}-D30${runTag}`.slice(0, 30);
+const parcelCode = `VRP-${formatVietnamDate(new Date()).replaceAll('-', '')}-D30${runTag}`.slice(0, 30);
 const issuedIdempotency = [];
 let generatedScheduleId;
 let generatedTripId;
@@ -68,8 +69,41 @@ export function assert(condition, message) {
   assertionCount += 1;
 }
 
-export function formatIctDate(value) {
-  const shifted = new Date(value.getTime() + 7 * 60 * 60 * 1000);
+function assertFrontendTimestampPresentation(value, label, path = '$') {
+  if (typeof value === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
+      assert(value.endsWith('+07:00'), `${label}: ${path} must use Asia/Ho_Chi_Minh +07:00`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      assertFrontendTimestampPresentation(item, label, `${path}[${index}]`),
+    );
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) {
+      assertFrontendTimestampPresentation(item, label, `${path}.${key}`);
+    }
+  }
+}
+
+export function formatVietnamDate(value) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: businessTimeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .formatToParts(value)
+    .reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function addCalendarDays(value, days) {
+  const [year, month, day] = value.split('-').map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
   return [
     shifted.getUTCFullYear(),
     String(shifted.getUTCMonth() + 1).padStart(2, '0'),
@@ -77,19 +111,45 @@ export function formatIctDate(value) {
   ].join('-');
 }
 
-export function chooseTargetSchedule(fixtureNow) {
-  const shifted = new Date(fixtureNow.getTime() + 7 * 60 * 60 * 1000);
-  const targetLocal = new Date(
-    Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate() + 1, 12),
+function getTimeZoneOffsetMilliseconds(value, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  })
+    .formatToParts(value)
+    .reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
+  const representedAsUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
   );
-  const targetDate = [
-    targetLocal.getUTCFullYear(),
-    String(targetLocal.getUTCMonth() + 1).padStart(2, '0'),
-    String(targetLocal.getUTCDate()).padStart(2, '0'),
-  ].join('-');
-  const jsDay = targetLocal.getUTCDay();
+  return representedAsUtc - value.getTime();
+}
+
+function vietnamLocalDateTimeToUtc(date, time) {
+  const [year, month, day] = date.split('-').map(Number);
+  const [hour, minute, second] = time.split(':').map(Number);
+  const localFieldsAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const probe = new Date(localFieldsAsUtc);
+  const offset = getTimeZoneOffsetMilliseconds(probe, businessTimeZone);
+  return new Date(localFieldsAsUtc - offset);
+}
+
+export function chooseTargetSchedule(fixtureNow) {
+  const targetDate = addCalendarDays(formatVietnamDate(fixtureNow), 1);
+  const [year, month, day] = targetDate.split('-').map(Number);
+  const jsDay = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
   const departureTime = '12:00:00';
-  const departureDateTime = new Date(`${targetDate}T${departureTime}+07:00`);
+  const departureDateTime = vietnamLocalDateTimeToUtc(targetDate, departureTime);
   return {
     targetDate,
     dayOfWeek: jsDay === 0 ? 7 : jsDay,
@@ -312,6 +372,22 @@ async function issueToken(sub, role, operatorId = ids.operator) {
     .sign(key);
 }
 
+async function fetchWithTransientRetry(url, options, label) {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      const code = error?.cause?.code;
+      const isTransientReset = code === 'ECONNRESET' || code === 'UND_ERR_SOCKET';
+      if (!isTransientReset || attempt === maxAttempts) throw error;
+      console.log(`RETRY | ${label} transport reset | attempt ${attempt + 1}/${maxAttempts}`);
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    }
+  }
+  throw new Error(`${label}: transient retry loop ended unexpectedly`);
+}
+
 async function post(pathname, jwt, { key, body } = {}) {
   const headers = {
     Authorization: `Bearer ${jwt}`,
@@ -319,11 +395,31 @@ async function post(pathname, jwt, { key, body } = {}) {
   };
   if (key) headers['Idempotency-Key'] = key;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const response = await fetch(`${baseUrl}${pathname}`, {
-    method: 'POST',
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const response = await fetchWithTransientRetry(
+    `${baseUrl}${pathname}`,
+    {
+      method: 'POST',
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    },
+    `POST ${pathname}`,
+  );
+  const raw = await response.text();
+  return {
+    status: response.status,
+    raw,
+    body: raw ? parseJson(raw, pathname) : null,
+  };
+}
+
+async function get(pathname, jwt) {
+  const headers = { 'X-Request-Id': crypto.randomUUID() };
+  if (jwt) headers.Authorization = `Bearer ${jwt}`;
+  const response = await fetchWithTransientRetry(
+    `${baseUrl}${pathname}`,
+    { headers },
+    `GET ${pathname}`,
+  );
   const raw = await response.text();
   return {
     status: response.status,
@@ -347,6 +443,7 @@ function expectApi(result, expectedStatus, label) {
   assert(result.body?.statusCode === expectedStatus, `${label}: envelope status mismatch`);
   assert(typeof result.body?.meta?.traceId === 'string', `${label}: traceId missing`);
   assert(Number.isFinite(Date.parse(result.body?.meta?.timestamp)), `${label}: timestamp missing`);
+  assertFrontendTimestampPresentation(result.body, label);
   assert(result.body?.data && typeof result.body.data === 'object', `${label}: data missing`);
   console.log(`PASS | ${label} | HTTP ${expectedStatus}`);
   return result.body.data;
@@ -385,9 +482,9 @@ COMMIT;
     'vietride_trip',
     `
 BEGIN;
-INSERT INTO vietride_trip.stations (id,name,slug,city,province) VALUES
-  ('${ids.originStation}','Day30 Origin ${runTag}','day30-origin-${runTag.toLowerCase()}','Ho Chi Minh City','Ho Chi Minh City'),
-  ('${ids.destinationStation}','Day30 Destination ${runTag}','day30-destination-${runTag.toLowerCase()}','Da Lat','Lam Dong');
+INSERT INTO vietride_trip.stations (id,name,slug,city) VALUES
+  ('${ids.originStation}','Day30 Origin ${runTag}','day30-origin-${runTag.toLowerCase()}','Ho Chi Minh City'),
+  ('${ids.destinationStation}','Day30 Destination ${runTag}','day30-destination-${runTag.toLowerCase()}','Da Lat');
 INSERT INTO vietride_trip.stops (id,operator_id,name,address,latitude,longitude) VALUES
   ('${ids.stop}','${ids.operator}','Day30 Dropoff ${runTag}','Day30 generated fixture stop',10.77,106.70);
 INSERT INTO vietride_trip.vehicle_types
@@ -420,8 +517,8 @@ COMMIT;
 async function createScheduleAndAwaitGeneratedTrip(tokens, fixtureNow) {
   const target = chooseTargetSchedule(fixtureNow);
   assert(
-    target.targetDate > formatIctDate(fixtureNow),
-    'targetDate must be at least tomorrow in ICT',
+    target.targetDate > formatVietnamDate(fixtureNow),
+    'targetDate must be at least tomorrow in Asia/Ho_Chi_Minh',
   );
   assert(
     target.departureDateTime.getTime() <= fixtureNow.getTime() + 14 * 24 * 60 * 60 * 1000,
@@ -458,6 +555,7 @@ async function createScheduleAndAwaitGeneratedTrip(tokens, fixtureNow) {
   );
   assert(schedule.validFrom === target.targetDate, 'DriverSchedule validFrom mismatch');
   assert(schedule.validUntil === target.targetDate, 'DriverSchedule validUntil mismatch');
+  assert(schedule.timeZone === businessTimeZone, 'DriverSchedule timeZone mismatch');
   const tripJson = await poll(
     'exactly one AUTO_FROM_SCHEDULE Trip generated from created schedule',
     () =>
@@ -471,7 +569,7 @@ async function createScheduleAndAwaitGeneratedTrip(tokens, fixtureNow) {
           'driverUserId',driver_user_id,
           'assistantUserId',assistant_user_id,
           'driverScheduleId',driver_schedule_id,
-          'departureDate',to_char(departure_date_time AT TIME ZONE 'Asia/Bangkok','YYYY-MM-DD'),
+          'departureDate',to_char(departure_date_time AT TIME ZONE 'Asia/Ho_Chi_Minh','YYYY-MM-DD'),
           'departureDateTime',departure_date_time,
           'status',status,
           'source',source
@@ -492,13 +590,17 @@ async function createScheduleAndAwaitGeneratedTrip(tokens, fixtureNow) {
   assert(trip.source === 'AUTO_FROM_SCHEDULE', 'generated Trip source mismatch');
   assert(trip.status === 'SCHEDULED', 'generated Trip initial status mismatch');
   assert(trip.driverScheduleId === generatedScheduleId, 'generated Trip schedule link mismatch');
-  assert(trip.departureDate === target.targetDate, 'generated Trip ICT date mismatch');
+  assert(trip.departureDate === target.targetDate, 'generated Trip Asia/Ho_Chi_Minh date mismatch');
   assert(trip.operatorId === ids.operator, 'generated Trip operator mismatch');
   assert(trip.routeId === ids.route, 'generated Trip route mismatch');
   assert(trip.vehicleId === ids.vehicle, 'generated Trip vehicle mismatch');
   assert(trip.driverUserId === ids.driver, 'generated Trip driver mismatch');
   assert(trip.assistantUserId === ids.assistant, 'generated Trip assistant mismatch');
   const departure = new Date(trip.departureDateTime);
+  assert(
+    departure.getTime() === target.departureDateTime.getTime(),
+    'generated Trip UTC instant does not match DriverSchedule Asia/Ho_Chi_Minh calendar time',
+  );
   const leadMs = departure.getTime() - fixtureNow.getTime();
   assert(leadMs > 30 * 60 * 1000, 'generated Trip raced auto-boarding before fixture helper');
   const graph = psql(
@@ -509,10 +611,59 @@ async function createScheduleAndAwaitGeneratedTrip(tokens, fixtureNow) {
     'generated Trip graph evidence',
   );
   assert(graph === '1|2', `generated Trip graph mismatch: ${graph}`);
+  await verifyGeneratedTripSearch(target);
   console.log(
     'PASS | generated Trip linkage, SCHEDULED proof, one TripStop, and generated seats verified',
   );
   return { target, preAdvanceBeyondThirtyMinutes: leadMs > 30 * 60 * 1000 };
+}
+
+async function verifyGeneratedTripSearch(target) {
+  const search = async (departureDate) => {
+    const query = new URLSearchParams({
+      originStationId: ids.originStation,
+      destinationStationId: ids.destinationStation,
+      departureDate,
+      passengerCount: '1',
+      allowAlongRoutePickup: 'false',
+    });
+    const result = await get(`/v1/trips/search?${query}`);
+    return expectApi(result, 200, `passenger searches trips for Asia/Ho_Chi_Minh date ${departureDate}`);
+  };
+
+  const matching = await search(target.targetDate);
+  const matchingTrips = matching.items.filter((item) => item.tripId === generatedTripId);
+  assert(matchingTrips.length === 1, 'generated Trip must appear exactly once on its Asia/Ho_Chi_Minh date');
+  assert(
+    matchingTrips[0].departureDateTime.endsWith('+07:00'),
+    'search departureDateTime must use Asia/Ho_Chi_Minh +07:00',
+  );
+  assert(
+    matchingTrips[0].estimatedArrivalTime.endsWith('+07:00'),
+    'search estimatedArrivalTime must use Asia/Ho_Chi_Minh +07:00',
+  );
+  assert(
+    matchingTrips[0].departureDateTime.startsWith(`${target.targetDate}T12:00:00`),
+    'search departureDateTime must preserve the operator schedule wall-clock time',
+  );
+  assert(
+    Date.parse(matchingTrips[0].departureDateTime) === target.departureDateTime.getTime(),
+    'search departureDateTime instant mismatch',
+  );
+
+  for (const adjacentDate of [
+    addCalendarDays(target.targetDate, -1),
+    addCalendarDays(target.targetDate, 1),
+  ]) {
+    const adjacent = await search(adjacentDate);
+    assert(
+      adjacent.items.every((item) => item.tripId !== generatedTripId),
+      `generated Trip leaked into adjacent Asia/Ho_Chi_Minh date ${adjacentDate}`,
+    );
+  }
+  console.log(
+    `PASS | schedule ${target.departureTime} Asia/Ho_Chi_Minh maps to ${target.departureDateTime.toISOString()} and searches only on ${target.targetDate}`,
+  );
 }
 
 async function awaitAutoBoarding(fixtureNow) {
@@ -1004,7 +1155,16 @@ async function runDemo(failureInjection) {
     const tokens = { operatorAdmin, driver, assistant };
     journey = await createScheduleAndAwaitGeneratedTrip(tokens, fixtureNow);
     await awaitAutoBoarding(fixtureNow);
-    lifecycle = await runLifecycle(tokens);
+    const [refreshedDriver, refreshedAssistant] = await Promise.all([
+      issueToken(ids.driver, 'DRIVER'),
+      issueToken(ids.assistant, 'ASSISTANT'),
+    ]);
+    console.log('PASS | Driver and Assistant access tokens refreshed after cron wait');
+    lifecycle = await runLifecycle({
+      ...tokens,
+      driver: refreshedDriver,
+      assistant: refreshedAssistant,
+    });
     if (failureInjection) {
       injected = true;
       throw new Error('DAY30_EXPECTED_FAILURE_INJECTION');

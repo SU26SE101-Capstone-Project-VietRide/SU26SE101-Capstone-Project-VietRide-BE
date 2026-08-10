@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { transformFrontendTimestamps } from '@vietride/nest-common';
 import { RedisService } from '@vietride/nest-redis';
 import { exportSPKI, generateKeyPair, SignJWT, type KeyLike } from 'jose';
 import { io, type Socket } from 'socket.io-client';
@@ -403,11 +404,11 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const receivedGps = await gpsPromise;
 
     expect(ack).toEqual({ success: true });
-    expect(receivedGps).toEqual(payload);
+    expect(receivedGps).toEqual(transformFrontendTimestamps(payload));
     expect(shuttleEtaHandleGpsUpdate).toHaveBeenCalledWith(payload, context);
 
     releaseEta();
-    await expect(etaPromise).resolves.toEqual(eta);
+    await expect(etaPromise).resolves.toEqual(transformFrontendTimestamps(eta));
     socket.disconnect();
   });
 
@@ -550,12 +551,12 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const receivedEta = await etaPromise;
 
     expect(ack).toEqual({ success: true });
-    expect(receivedEta).toEqual({
+    expect(receivedEta).toEqual(transformFrontendTimestamps({
       ...etaUpdate,
       delayed: false,
       delayStatus: 'UNKNOWN',
       delayMinutes: null,
-    });
+    }));
     expect(approachingHandleEtaUpdate).toHaveBeenCalledWith({
       ...etaUpdate,
       delayed: false,
@@ -603,7 +604,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const receivedStatus = await statusPromise;
 
     expect(ack).toEqual({ success: true });
-    expect(receivedEta).toEqual({
+    expect(receivedEta).toEqual(transformFrontendTimestamps({
       tripId: delayedEtaUpdate.tripId,
       stopId: delayedEtaUpdate.stopId,
       etaMinutes: delayedEtaUpdate.etaMinutes,
@@ -613,14 +614,14 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       delayed: delayedEtaUpdate.delayed,
       delayStatus: delayedEtaUpdate.delayStatus,
       delayMinutes: delayedEtaUpdate.delayMinutes,
-    });
-    expect(receivedStatus).toEqual({
+    }));
+    expect(receivedStatus).toEqual(transformFrontendTimestamps({
       tripId: TEST_TRIP_ID,
       stopId: etaUpdate.stopId,
       status: 'DELAYED',
       delayMinutes: 35,
       updatedAt: etaUpdate.updatedAt,
-    });
+    }));
     expect(approachingHandleEtaUpdate).toHaveBeenCalledWith(delayedEtaUpdate);
     expect(sharedPublishEta).toHaveBeenCalledWith({
       tripId: delayedEtaUpdate.tripId,
@@ -673,7 +674,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const receivedEta = await etaPromise;
     const receivedStatus = await statusPromise;
 
-    expect(receivedEta).toEqual({
+    expect(receivedEta).toEqual(transformFrontendTimestamps({
       tripId: clearedEtaUpdate.tripId,
       stopId: clearedEtaUpdate.stopId,
       etaMinutes: clearedEtaUpdate.etaMinutes,
@@ -683,14 +684,14 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       delayed: clearedEtaUpdate.delayed,
       delayStatus: clearedEtaUpdate.delayStatus,
       delayMinutes: clearedEtaUpdate.delayMinutes,
-    });
-    expect(receivedStatus).toEqual({
+    }));
+    expect(receivedStatus).toEqual(transformFrontendTimestamps({
       tripId: TEST_TRIP_ID,
       stopId: etaUpdate.stopId,
       status: 'DELAY_CLEARED',
       delayMinutes: 30,
       updatedAt: etaUpdate.updatedAt,
-    });
+    }));
     expect(sharedPublishStatus).toHaveBeenCalledWith({
       tripId: TEST_TRIP_ID,
       status: 'DELAY_CLEARED',

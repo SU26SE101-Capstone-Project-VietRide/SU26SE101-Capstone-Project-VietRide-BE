@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Booking.Application.Features.BookingStats.UpdateBookingStats;
@@ -9,8 +10,6 @@ namespace VietRide.Booking.Application.Features.BookingStats.UpdateBookingStats;
 public sealed class UpdateBookingStatsCommandHandler
     : IRequestHandler<UpdateBookingStatsCommand, bool>
 {
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
-
     private readonly IBookingRepository _bookings;
     private readonly IBookingStatsRepository _stats;
     private readonly IOperatorServiceClient _operatorClient;
@@ -99,7 +98,7 @@ public sealed class UpdateBookingStatsCommandHandler
             _ => null,
         };
 
-        return DateOnly.FromDateTime((timestamp ?? DateTimeOffset.UtcNow).ToOffset(IctOffset).DateTime);
+        return BusinessTime.ToLocalDate(timestamp ?? DateTimeOffset.UtcNow);
     }
 
     private static void ApplyTransition(

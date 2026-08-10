@@ -15,7 +15,7 @@ Hoàn thiện Payment & Wallet cho ba năng lực liên kết: ghi nhận doanh 
 - [ ] Chính các money handler gốc của booking/parcel payment success và refund ghi PlatformWallet movement cùng OperatorLedgerEntry trong một local transaction; Payment không tự consume event outbound của mình để ghi tiền lần hai; không thu platform fee trên doanh thu booking/parcel trong Day 38.
 - [ ] `identity.operator.approved` bootstrap đúng một OperatorWallet bằng consumer có durable dedupe; operator đã approved trước Day 38 được backfill bằng Identity Outbox và vẫn có lazy-create an toàn khi money operation đầu tiên đến trước backfill.
 - [ ] `trip.trip.completed` và `trip.trip.disrupted` tạo tối đa một `OperatorTripSettlement` cho mỗi `(operator_id, trip_id)`; riêng Payment settlement coi `hasSubstitution` là audit-only và không đổi số tiền.
-- [ ] Job eligibility chạy `0 19 * * *` UTC (02:00 ICT) và weekly settlement chạy `0 2 * * 1` UTC (09:00 ICT thứ Hai); settlement cân bằng PlatformWallet DEBIT = OperatorWallet CREDIT = `netAmount`.
+- [ ] Job eligibility chạy `0 19 * * *` UTC (02:00 Asia/Ho_Chi_Minh) và weekly settlement chạy `0 2 * * 1` UTC (09:00 Asia/Ho_Chi_Minh thứ Hai); settlement cân bằng PlatformWallet DEBIT = OperatorWallet CREDIT = `netAmount`.
 - [ ] Thiếu PlatformWallet balance rollback toàn bộ, giữ cùng settlement ở `ELIGIBLE`, retry hằng tuần không giới hạn, có failure metadata và cảnh báo vận hành không spam.
 - [ ] OperatorWallet subscription payment atomically DEBIT OperatorWallet + CREDIT PlatformWallet; WALLET và VNPay cùng phát `payment.subscription.payment_succeeded` với một contract canonical.
 - [ ] Mỗi subscription payment `SUCCEEDED` tạo tối đa một Invoice với invoice number được cấp phát atomic; PDF thành công chuyển DRAFT → ISSUED và phát `payment.invoice.issued`; năm total attempts bao gồm stale PROCESSING recovery.
@@ -91,7 +91,7 @@ Producer Outbox và business mutation phải commit cùng local transaction; con
 | forbidden scope | Không viết implementation; không sửa `.agents/**`, `.codex/**`, `.claude/**`, `.env`, secret, generated client, migration hoặc business code; ngoài Invoice/OperatorWallet/Settlement chỉ được đổi exact Trip terminal dependency seam đã liệt kê, không mở rộng Trip business scope khác; không thêm e-invoice provider/bank withdrawal/platform fee; không git ops. |
 | depends on | Không có. Đây là baseline bắt buộc trước mọi task feature. |
 | invariant flags | Docs/TS LF; tiếng Việt có dấu trong `docs/`; ADR 0004; mutations có `Idempotency-Key`; money BIGINT đến đồng; Outbox routing key canonical; no cross-DB FK; tenant isolation; no commercial dependency; stable URL không chứa signed token. |
-| acceptance | Contract ghi đủ request/response/status/error/auth/pagination, gồm complete Trip và invoice download wire shape duy nhất; event payload canonical khớp producer/consumer; money-handler ownership, wallet bootstrap/backfill, phased legacy rollout, state machine, invoice-number primitive, cron UTC/ICT, dedupe keys, retry/backoff/race result và no-platform-fee được freeze; ghi bằng chứng QuestPDF eligibility hoặc chốt `PDFsharp-MigraDoc`, đồng thời ghi approval `Google.Cloud.Storage.V1`; contract tests/JSON schemas pass. |
+| acceptance | Contract ghi đủ request/response/status/error/auth/pagination, gồm complete Trip và invoice download wire shape duy nhất; event payload canonical khớp producer/consumer; money-handler ownership, wallet bootstrap/backfill, phased legacy rollout, state machine, invoice-number primitive, cron UTC/Asia/Ho_Chi_Minh, dedupe keys, retry/backoff/race result và no-platform-fee được freeze; ghi bằng chứng QuestPDF eligibility hoặc chốt `PDFsharp-MigraDoc`, đồng thời ghi approval `Google.Cloud.Storage.V1`; contract tests/JSON schemas pass. |
 | source citations | `BE_TIMELINE_VU.md` Day 38; technical context v7 §4.5(e), §4.6, §5; BSOT §5.6, §7.3, §7.4, §8.9 và Hangfire registry; API contract “Operator/Admin Management”; `db-schema/payment-wallet/README.md`. |
 
 ### Task 38.1 — Booking/Parcel payment context seams và canonical success/refund events
@@ -308,9 +308,9 @@ Disrupt Trip B/C với `hasSubstitution=false/true`; Payment settlement áp cùn
 
 Subscription VNPay success tạo DRAFT; test storage fail một attempt rồi thành công; assert attempt increments, object path canonical, ISSUED một lần, PDF hợp lệ và một `payment.invoice.issued`.
 
-**E2E-10 — Eligibility cron UTC/ICT**
+**E2E-10 — Eligibility cron UTC/Asia/Ho_Chi_Minh**
 
-Time-warp PENDING_HOLD quanh boundary; chạy job; chỉ row `eligible_at <= now` thành ELIGIBLE. Re-run no-op; kiểm tra cron `0 19 * * *` UTC tương ứng 02:00 ICT.
+Time-warp PENDING_HOLD quanh boundary; chạy job; chỉ row `eligible_at <= now` thành ELIGIBLE. Re-run no-op; kiểm tra cron `0 19 * * *` UTC tương ứng 02:00 Asia/Ho_Chi_Minh.
 
 **E2E-11 — Weekly auto-settlement balanced**
 

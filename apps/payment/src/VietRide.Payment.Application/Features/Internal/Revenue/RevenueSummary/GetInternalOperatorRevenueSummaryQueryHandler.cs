@@ -50,7 +50,7 @@ public sealed class GetInternalOperatorRevenueSummaryQueryHandler
             summary.NetParcelRevenueVnd,
             summary.GrossParcelRevenueVnd,
             summary.ParcelRefundsVnd,
-            clock.UtcNow.UtcDateTime);
+            clock.UtcNow);
         await cache.SetAsync(key, result, RevenueReportCacheKeys.Expiration, cancellationToken);
         return result;
     }

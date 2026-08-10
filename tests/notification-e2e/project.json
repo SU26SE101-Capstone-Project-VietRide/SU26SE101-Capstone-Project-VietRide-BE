@@ -14,11 +14,7 @@
       "options": {
         "jestConfig": "tests/notification-e2e/jest.config.cts",
         "passWithNoTests": true
-      },
-      "dependsOn": [
-        "notification:build",
-        "notification:serve"
-      ]
+      }
     }
   }
 }

@@ -15,7 +15,7 @@ namespace VietRide.Identity.IntegrationTests.Persistence;
 public sealed class AdminDashboardIdentityMetricsRepositoryTests
 {
     [Fact]
-    public async Task Repository_UsesCurrentStateIctBoundariesAndOneSql()
+    public async Task Repository_UsesCurrentStateVietnamBoundariesAndOneSql()
     {
         var databaseName = $"vietride_identity_ui17_metrics_{Guid.NewGuid():N}";
         var connectionString = CreateConnectionString(databaseName);

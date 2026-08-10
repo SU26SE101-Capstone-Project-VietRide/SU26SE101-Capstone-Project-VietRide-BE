@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Middleware;
+using VietRide.Shared.Web.Serialization;
 
 namespace VietRide.Shared.Web.Authentication;
 
@@ -93,9 +94,11 @@ public static class InternalJwtAuthenticationExtensions
         var envelope = ApiResponse.Failure(
             statusCode,
             new ApiError { Code = code, Message = message },
-            ApiMeta.Create(GetTraceId(context)));
+            ApiTimestampPresentation.CreateMeta(context, GetTraceId(context)));
 
-        await context.Response.WriteAsJsonAsync(envelope, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        await context.Response.WriteAsJsonAsync(
+            envelope,
+            ApiTimestampPresentation.CreateSerializerOptions(context));
     }
 
     private static string GetTraceId(HttpContext context)

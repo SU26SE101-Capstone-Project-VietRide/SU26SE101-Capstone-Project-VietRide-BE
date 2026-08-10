@@ -8,4 +8,4 @@ public sealed record OperatorRevenueAnalyticsResponse(
     IReadOnlyList<OperatorRevenueMonthItem> Monthly,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<OperatorRoutePerformanceItem>? RoutePerformance,
-    DateTime GeneratedAt);
+    DateTimeOffset GeneratedAt);

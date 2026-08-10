@@ -15,7 +15,7 @@ namespace VietRide.Parcel.IntegrationTests;
 public sealed class OperatorParcelStatsPersistenceIntegrationTests
 {
     [Fact]
-    public async Task OperatorParcelStats_RepositoryUsesTenantIctRangeStatusAndHistoricalRouteSnapshot()
+    public async Task OperatorParcelStats_RepositoryUsesTenantVietnamRangeStatusAndHistoricalRouteSnapshot()
     {
         var databaseName = $"vietride_parcel_ui16_stats_{Guid.NewGuid():N}";
         var connectionString = CreateConnectionString(databaseName);

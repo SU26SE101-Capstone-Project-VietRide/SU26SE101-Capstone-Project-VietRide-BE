@@ -28,7 +28,7 @@ internal sealed class ExpiredSeatLockReleaseJobRegistrationHostedService : IHost
             JobId,
             Job.FromExpression<ExpiredSeatLockReleaseJob>(job => job.ReleaseExpiredAsync(CancellationToken.None)),
             Cron.Minutely(),
-            new RecurringJobOptions { QueueName = queueName });
+            new RecurringJobOptions { QueueName = queueName, TimeZone = TimeZoneInfo.Utc });
 #pragma warning restore CS0618
         return Task.CompletedTask;
     }

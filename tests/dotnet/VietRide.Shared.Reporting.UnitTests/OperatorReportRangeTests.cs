@@ -8,7 +8,7 @@ namespace VietRide.Shared.Reporting.UnitTests;
 public sealed class OperatorReportRangeTests
 {
     [Fact]
-    public void Create_DefaultRange_UsesThirtyInclusiveIctDays()
+    public void Create_DefaultRange_UsesThirtyInclusiveVietnamDays()
     {
         var result = OperatorReportRange.Create(null, null, new FixedClock());
 

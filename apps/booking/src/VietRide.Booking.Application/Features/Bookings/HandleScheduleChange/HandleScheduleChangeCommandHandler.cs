@@ -10,6 +10,7 @@ using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Booking.Application.Features.Bookings.HandleScheduleChange;
@@ -24,7 +25,6 @@ public sealed class HandleScheduleChangeCommandHandler(
     IScheduleChangeAutoAcceptScheduler autoAcceptScheduler)
     : IRequestHandler<HandleScheduleChangeCommand, int>
 {
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<int> Handle(
@@ -259,7 +259,7 @@ public sealed class HandleScheduleChangeCommandHandler(
     private static string CalculateSeverity(DateTimeOffset oldDeparture, DateTimeOffset newDeparture)
     {
         var delta = (newDeparture - oldDeparture).Duration();
-        var sameLocalDate = oldDeparture.ToOffset(IctOffset).Date == newDeparture.ToOffset(IctOffset).Date;
+        var sameLocalDate = BusinessTime.ToLocalDate(oldDeparture) == BusinessTime.ToLocalDate(newDeparture);
         if (sameLocalDate && delta <= TimeSpan.FromHours(2))
         {
             return "MINOR";

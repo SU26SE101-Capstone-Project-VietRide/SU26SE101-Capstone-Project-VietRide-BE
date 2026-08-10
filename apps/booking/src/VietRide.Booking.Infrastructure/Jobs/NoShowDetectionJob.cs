@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using VietRide.Booking.Application.Abstractions.Repositories;
@@ -12,6 +11,7 @@ using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Shared.Persistence.Outbox;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
@@ -24,10 +24,7 @@ public sealed class NoShowDetectionJob(
     ITripServiceClient trips,
     IClock clock)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.IgnoreNullOptions;
 
     [Queue("booking")]
     [AutomaticRetry(Attempts = 5)]

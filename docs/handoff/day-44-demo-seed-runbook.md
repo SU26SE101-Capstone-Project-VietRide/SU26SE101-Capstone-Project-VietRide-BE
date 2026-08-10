@@ -21,7 +21,7 @@ point it at production databases or reuse the canonical system seed as demo data
 
 ## Commands
 
-Use the same explicit future ICT date for both commands in a handoff session.
+Use the same explicit future Asia/Ho_Chi_Minh date for both commands in a handoff session.
 
 Seed an already-running compatible local stack:
 
@@ -84,7 +84,7 @@ The E2E gate validates the complete fixture, including:
   4,000,000 VND.
 - Trip: 5 Stations; 15 OperatorStation links; 9 Stops; 9 Routes; 3 return pairs;
   3 AlternativeRoutes; 9 RouteStops; 9 AlternativeRouteStops; 9 Vehicles; 9 schedules;
-  126 Trips; 126 TripStops; and 3,948 TripSeats, with the calculated ICT monthly counters.
+  126 Trips; 126 TripStops; and 3,948 TripSeats, with the calculated Asia/Ho_Chi_Minh monthly counters.
 - Commerce: 10 wallets, 10 successful top-ups, and 10 immutable wallet transactions; exactly
   5 Vouchers and 2 accepted operator consents; exactly 2 active SMALL ParcelRouteFares.
 - RAG: exactly 3 approved documents and 3 searchable chunks, each with a 2,048-dimensional

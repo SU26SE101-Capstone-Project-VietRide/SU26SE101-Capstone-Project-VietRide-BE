@@ -1,4 +1,5 @@
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Shared.Application.Reporting;
 
@@ -19,14 +20,15 @@ public readonly record struct ExcelReportCell(
     long? Integer = null,
     decimal? Decimal = null,
     DateOnly? Date = null,
-    DateTime? DateTime = null,
+    DateTimeOffset? Instant = null,
     bool? Boolean = null)
 {
     public static ExcelReportCell TextValue(string value) => new(ExcelReportCellType.Text, Text: value);
     public static ExcelReportCell IntegerValue(long value) => new(ExcelReportCellType.Integer, Integer: value);
     public static ExcelReportCell DecimalValue(decimal value) => new(ExcelReportCellType.Decimal, Decimal: value);
     public static ExcelReportCell DateValue(DateOnly value) => new(ExcelReportCellType.Date, Date: value);
-    public static ExcelReportCell DateTimeValue(DateTime value) => new(ExcelReportCellType.DateTime, DateTime: value);
+    public static ExcelReportCell DateTimeValue(DateTimeOffset value) =>
+        new(ExcelReportCellType.DateTime, Instant: value.ToUniversalTime());
     public static ExcelReportCell BooleanValue(bool value) => new(ExcelReportCellType.Boolean, Boolean: value);
     public static ExcelReportCell BlankValue() => new(ExcelReportCellType.Blank);
 }
@@ -69,7 +71,7 @@ public sealed record OperatorReportRange(
 
     public static OperatorReportRange Create(DateOnly? from, DateOnly? to, IClock clock)
     {
-        var today = DateOnly.FromDateTime(clock.UtcNow.UtcDateTime.AddHours(7));
+        var today = BusinessTime.ToLocalDate(clock.UtcNow);
         var toDate = to ?? today;
         DateOnly fromDate;
         try
@@ -85,20 +87,13 @@ public sealed record OperatorReportRange(
         if (fromDate > toDate || inclusiveDays > MaximumDays || toDate == DateOnly.MaxValue)
             throw InvalidRange();
 
-        var fromUtc = ToUtcBoundary(fromDate, TimeOnly.MinValue);
-        var toUtc = ToUtcBoundary(toDate.AddDays(1), TimeOnly.MinValue);
-        return new OperatorReportRange(fromDate, toDate, fromUtc, toUtc);
+        var range = BusinessTime.GetUtcRange(fromDate, toDate);
+        return new OperatorReportRange(fromDate, toDate, range.FromUtc, range.ToUtcExclusive);
     }
 
     private static VietRide.Shared.Application.Exceptions.CodedValidationException InvalidRange()
         => new(
             "REPORT_RANGE_INVALID",
-            $"Report range must contain 1 to {MaximumDays} ICT calendar days.");
+            $"Report range must contain 1 to {MaximumDays} Asia/Ho_Chi_Minh calendar days.");
 
-    private static DateTimeOffset ToUtcBoundary(DateOnly date, TimeOnly time)
-    {
-        var local = date.ToDateTime(time, DateTimeKind.Unspecified);
-        var offset = TimeSpan.FromHours(7);
-        return new DateTimeOffset(local, offset).ToUniversalTime();
-    }
 }

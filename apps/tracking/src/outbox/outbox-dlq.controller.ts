@@ -27,7 +27,10 @@ export class OutboxDlqController {
   @ApiOkResponse({ description: 'Raw DLQ rows ordered by terminal cursor' })
   @ApiUnauthorizedResponse({ description: 'Internal JWT is missing or invalid' })
   list(
-    @Query(new ZodValidationPipe(outboxDlqQuerySchema)) query: OutboxDlqQueryDto,
+    @Query(new ZodValidationPipe(outboxDlqQuerySchema, {
+      statusCode: 422,
+      errorCode: 'VALIDATION_ERROR',
+    })) query: OutboxDlqQueryDto,
   ): Promise<OutboxDlqReadItem[]> {
     return this.service.list(query);
   }

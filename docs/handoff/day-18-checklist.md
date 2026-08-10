@@ -8,7 +8,7 @@
 
 ## DoD result
 
-- ✅ `GET /v1/driver/me/schedule` derives the caller from JWT `sub`, returns only trips assigned as driver/assistant, and applies inclusive ICT date bounds (default today through today + 14 days). Trip unit tests and the real Gateway flow passed.
+- ✅ `GET /v1/driver/me/schedule` derives the caller from JWT `sub`, returns only trips assigned as driver/assistant, and applies inclusive Asia/Ho_Chi_Minh date bounds (default today through today + 14 days). Trip unit tests and the real Gateway flow passed.
 - ✅ `GET /v1/bookings/trips/{tripId}/manifest` authorizes assigned crew, sorts terminal pickup first then route stops by `OrderIndex`, and exposes only `seatNumber`, `bookingCode`, `pickupStop`, and `boardingStatus`. The real Gateway response passed the no-PII assertion.
 - ✅ `POST /v1/bookings/trips/{tripId}/boarding/passenger/{passengerRecordId}` persists `PENDING → BOARDED` with `boardedAt`; re-tick returns `409 BOOKING_PASSENGER_ALREADY_BOARDED`; wrong-trip passenger returns `422 BOOKING_NOT_FOR_THIS_TRIP`.
 - ✅ `POST /v1/bookings/trips/{tripId}/boarding/qr-scan` returns passenger records for a confirmed booking without mutating them; wrong-trip returns `422 BOOKING_NOT_FOR_THIS_TRIP`; unknown code returns `404 BOOKING_NOT_FOUND`.

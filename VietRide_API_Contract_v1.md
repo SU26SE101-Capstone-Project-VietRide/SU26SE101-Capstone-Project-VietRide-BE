@@ -10,7 +10,9 @@
 - Idempotent write endpoints require `Idempotency-Key: <uuid>` where noted.
 - Error response: `ApiResponse` envelope `{ success: false, statusCode, error: { code, message, fields? }, meta: { traceId, timestamp } }` — ADR 0004; `error.code` từ BSOT §5.9 registry (UPPER_SNAKE_CASE). `application/problem+json` (RFC 7807) đã DROP.
 - Money fields are VND `number` in JSON, stored as BIGINT in DB.
-- Datetime fields are ISO 8601 strings with offset.
+- FE-facing `/v1/*` JSON HTTP responses and Tracking WebSocket emissions serialize instant fields as RFC 3339 through IANA `Asia/Ho_Chi_Minh`, ending in the resolved `+07:00` offset. Internal HTTP, Redis/Outbox/RabbitMQ events and persistence serialize the same instant as UTC ending in `Z`. Datetime request values must contain `Z` or an explicit offset and are normalized to UTC; a missing offset returns `422 VALIDATION_ERROR`.
+- Calendar fields (`date`, date-only `from`/`to`, `TimeOnly`, `dayOfWeek`, recurring schedules) use `Asia/Ho_Chi_Minh`. Date-only ranges are inclusive Vietnam dates and are queried as UTC half-open ranges.
+- Public clients receive the Vietnam representation directly and must parse RFC 3339 values instead of comparing raw strings. Example: public `2026-08-10T12:00:00+07:00` and internal `2026-08-10T05:00:00Z` are the same instant.
 - IDs are UUID strings unless explicitly named code fields.
 
 ## Identity & User Service
@@ -40,7 +42,7 @@ Response `201`:
     "status": "PENDING_EMAIL_VERIFICATION",
     "otpTtlMinutes": 5
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -50,7 +52,7 @@ Error `409` — duplicate email:
   "success": false,
   "statusCode": 409,
   "error": { "code": "AUTH_EMAIL_ALREADY_REGISTERED", "message": "Email đã được đăng ký." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -76,7 +78,7 @@ Response `200`:
     "userId": "uuid",
     "status": "ACTIVE"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -86,7 +88,7 @@ Error `400` — wrong OTP code:
   "success": false,
   "statusCode": 400,
   "error": { "code": "AUTH_OTP_INVALID", "message": "Mã xác thực không đúng." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -96,7 +98,7 @@ Error `400` — expired OTP:
   "success": false,
   "statusCode": 400,
   "error": { "code": "AUTH_OTP_EXPIRED", "message": "Mã xác thực đã hết hạn." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -122,7 +124,7 @@ Response `200`:
     "status": "PENDING_EMAIL_VERIFICATION",
     "otpTtlMinutes": 5
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -132,7 +134,7 @@ Error `400` - unknown email or invalid purpose:
   "success": false,
   "statusCode": 400,
   "error": { "code": "AUTH_OTP_INVALID", "message": "Ma xac thuc khong dung." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -142,7 +144,7 @@ Error `409` - email already verified:
   "success": false,
   "statusCode": 409,
   "error": { "code": "AUTH_EMAIL_ALREADY_VERIFIED", "message": "Email da duoc xac minh." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -152,7 +154,7 @@ Error `429` - OTP rate limit exceeded:
   "success": false,
   "statusCode": 429,
   "error": { "code": "AUTH_OTP_RATE_LIMIT_EXCEEDED", "message": "Too many OTP requests. Please try again later." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -176,7 +178,7 @@ Response `200`:
     "email": "user@example.com",
     "otpTtlMinutes": 5
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -186,7 +188,7 @@ Error `429` - password reset OTP rate limit exceeded:
   "success": false,
   "statusCode": 429,
   "error": { "code": "AUTH_OTP_RATE_LIMIT_EXCEEDED", "message": "Too many OTP requests. Please try again later." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -212,7 +214,7 @@ Response `200`:
     "userId": "uuid",
     "status": "ACTIVE"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -222,7 +224,7 @@ Error `400` - wrong OTP code or non-eligible account:
   "success": false,
   "statusCode": 400,
   "error": { "code": "AUTH_OTP_INVALID", "message": "Ma xac thuc khong dung." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -232,7 +234,7 @@ Error `400` - expired OTP:
   "success": false,
   "statusCode": 400,
   "error": { "code": "AUTH_OTP_EXPIRED", "message": "Ma xac thuc da het han." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -268,7 +270,7 @@ Response `200`:
       "avatarUrl": "https://example.com/avatar.png"
     }
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -282,7 +284,7 @@ Error `401` — invalid credentials:
   "success": false,
   "statusCode": 401,
   "error": { "code": "AUTH_INVALID_CREDENTIALS", "message": "Email hoặc mật khẩu không đúng." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -292,7 +294,7 @@ Error `403` — unverified email for non-passenger accounts:
   "success": false,
   "statusCode": 403,
   "error": { "code": "AUTH_EMAIL_NOT_VERIFIED", "message": "Email chưa được xác minh." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -302,7 +304,7 @@ Error `403` — account locked:
   "success": false,
   "statusCode": 403,
   "error": { "code": "AUTH_ACCOUNT_LOCKED", "message": "Tài khoản đã bị khóa." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -312,7 +314,7 @@ Error `403` — OPERATOR_ADMIN/OPERATOR_STAFF belongs to an operator that is not
   "success": false,
   "statusCode": 403,
   "error": { "code": "FORBIDDEN", "message": "Nhà xe chưa được phép truy cập hệ thống." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -335,7 +337,7 @@ Error `401` — invalid or reused refresh token:
   "success": false,
   "statusCode": 401,
   "error": { "code": "AUTH_TOKEN_INVALID", "message": "Refresh token không hợp lệ hoặc đã bị thu hồi." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -403,7 +405,7 @@ Response `200`:
       "avatarUrl": "https://example.com/avatar.png"
     }
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -417,7 +419,7 @@ Error `401` — invalid Google ID token:
   "success": false,
   "statusCode": 401,
   "error": { "code": "AUTH_GOOGLE_TOKEN_INVALID", "message": "Google ID token signature/expiry/audience invalid." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -442,7 +444,7 @@ Response `200`:
     "phone": "+84901234567",
     "message": "Hồ sơ hoàn tất."
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -452,7 +454,7 @@ Error `400` — invalid phone format:
   "success": false,
   "statusCode": 400,
   "error": { "code": "AUTH_PHONE_INVALID_FORMAT", "message": "Số điện thoại không đúng định dạng." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -462,7 +464,7 @@ Error `409` — duplicate phone:
   "success": false,
   "statusCode": 409,
   "error": { "code": "AUTH_PHONE_ALREADY_REGISTERED", "message": "Số điện thoại đã được đăng ký." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -472,7 +474,7 @@ Error `422` — phone already set:
   "success": false,
   "statusCode": 422,
   "error": { "code": "VALIDATION_ERROR", "message": "Phone already exists and cannot be overwritten from this endpoint." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -495,7 +497,7 @@ Response `200`:
     "status": "ACTIVE",
     "avatarUrl": "https://example.com/avatar.png"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -505,7 +507,7 @@ Error `401` — missing or invalid token:
   "success": false,
   "statusCode": 401,
   "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -531,7 +533,7 @@ Response `200`:
   "success": true,
   "statusCode": 200,
   "data": { "avatarUrl": "https://firebasestorage.googleapis.com/..." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-23T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-23T17:00:00+07:00" }
 }
 ```
 
@@ -560,7 +562,7 @@ Response `200`:
     "status": "ACTIVE",
     "avatarUrl": "https://example.com/avatar.png"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -570,7 +572,7 @@ Error `401` — missing or invalid token:
   "success": false,
   "statusCode": 401,
   "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -595,7 +597,7 @@ Response `200`:
     "hasNext": false,
     "hasPrev": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -605,7 +607,7 @@ Error `401` — missing or invalid token:
   "success": false,
   "statusCode": 401,
   "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -630,7 +632,7 @@ Response `200`:
     "userId": "uuid",
     "status": "ACTIVE"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -640,7 +642,7 @@ Error `400` — invalid initial-password token:
   "success": false,
   "statusCode": 400,
   "error": { "code": "AUTH_INITIAL_PASSWORD_TOKEN_INVALID", "message": "SET_INITIAL_PASSWORD token không hợp lệ." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -650,7 +652,7 @@ Error `400` — expired initial-password token:
   "success": false,
   "statusCode": 400,
   "error": { "code": "AUTH_INITIAL_PASSWORD_TOKEN_EXPIRED", "message": "SET_INITIAL_PASSWORD token đã hết hạn." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -660,7 +662,7 @@ Error `422` — user is not pending initial password:
   "success": false,
   "statusCode": 422,
   "error": { "code": "USER_INVALID_STATUS_TRANSITION", "message": "User status không cho phép đặt mật khẩu lần đầu." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -687,7 +689,7 @@ Response `200`:
     "platform": "ANDROID",
     "isActive": true
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -697,7 +699,7 @@ Error `401` — missing or invalid token:
   "success": false,
   "statusCode": 401,
   "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -707,7 +709,7 @@ Error `422` — invalid device token payload:
   "success": false,
   "statusCode": 422,
   "error": { "code": "VALIDATION_ERROR", "message": "Dữ liệu device token không hợp lệ.", "fields": [{ "field": "platform", "message": "platform must be IOS, ANDROID, or WEB." }] },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -730,7 +732,7 @@ Error `401` — missing or invalid token:
   "success": false,
   "statusCode": 401,
   "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -740,7 +742,7 @@ Error `422` — invalid device token payload:
   "success": false,
   "statusCode": 422,
   "error": { "code": "VALIDATION_ERROR", "message": "Dữ liệu device token không hợp lệ.", "fields": [{ "field": "fcmToken", "message": "fcmToken is required." }] },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -779,7 +781,7 @@ Response `200`:
     "purpose": "VEHICLE_IMAGE",
     "uploadPath": "vehicles/operator-id/"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-20T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-20T17:00:00+07:00" }
 }
 ```
 
@@ -801,9 +803,9 @@ Response `200`:
   "data": {
     "userId": "uuid",
     "status": "PENDING_INITIAL_PASSWORD",
-    "expiresAt": "2026-06-08T10:00:00Z"
+    "expiresAt": "2026-06-08T17:00:00+07:00"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -813,7 +815,7 @@ Error `401` — missing or invalid token:
   "success": false,
   "statusCode": 401,
   "error": { "code": "AUTH_TOKEN_INVALID", "message": "Token không hợp lệ." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -823,7 +825,7 @@ Error `403` — caller is not an operator admin, cross-operator target, or calle
   "success": false,
   "statusCode": 403,
   "error": { "code": "FORBIDDEN", "message": "Bạn không có quyền thực hiện thao tác này." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -833,7 +835,7 @@ Error `404` — target user not found:
   "success": false,
   "statusCode": 404,
   "error": { "code": "RESOURCE_NOT_FOUND", "message": "User không tồn tại." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -843,7 +845,7 @@ Error `422` — target user is not pending initial password:
   "success": false,
   "statusCode": 422,
   "error": { "code": "USER_INVALID_STATUS_TRANSITION", "message": "Chỉ user ở trạng thái PENDING_INITIAL_PASSWORD mới được gửi lại link đặt mật khẩu." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -893,7 +895,7 @@ Response `201`:
     "role": "SYSTEM_ADMIN",
     "status": "PENDING_INITIAL_PASSWORD"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -903,7 +905,7 @@ Error `403` — caller is not a system admin:
   "success": false,
   "statusCode": 403,
   "error": { "code": "FORBIDDEN", "message": "Bạn không có quyền thực hiện thao tác này." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -913,7 +915,7 @@ Error `409` — duplicate email:
   "success": false,
   "statusCode": 409,
   "error": { "code": "AUTH_EMAIL_ALREADY_REGISTERED", "message": "Email đã được đăng ký." },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -951,8 +953,8 @@ Response `200`: `PagedResult<AdminUserListItemDto>` in the ADR 0004 envelope.
       "role": "PASSENGER",
       "status": "ACTIVE",
       "operatorId": null,
-      "createdAt": "2026-07-16T01:00:00Z",
-      "updatedAt": "2026-07-16T01:00:00Z",
+      "createdAt": "2026-07-16T08:00:00+07:00",
+      "updatedAt": "2026-07-16T08:00:00+07:00",
       "deletedAt": null
     }],
     "page": 1,
@@ -962,7 +964,7 @@ Response `200`: `PagedResult<AdminUserListItemDto>` in the ADR 0004 envelope.
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T01:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T08:00:00+07:00" }
 }
 ```
 
@@ -986,7 +988,7 @@ Response `200`:
   "success": true,
   "statusCode": 200,
   "data": { "userId": "uuid", "status": "LOCKED", "statusChanged": true },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T01:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T08:00:00+07:00" }
 }
 ```
 
@@ -1009,7 +1011,7 @@ Response `200`:
     "status": "PENDING_EMAIL_VERIFICATION",
     "statusChanged": true
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T01:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T08:00:00+07:00" }
 }
 ```
 
@@ -1049,7 +1051,7 @@ Response `200`: `PagedResult<AdminActivityLogItemDto>` in the ADR 0004 envelope.
       },
       "ipAddress": "203.0.113.10",
       "userAgent": "VietRide Admin Web",
-      "createdAt": "2026-07-16T01:00:00Z"
+      "createdAt": "2026-07-16T08:00:00+07:00"
     }],
     "page": 1,
     "pageSize": 20,
@@ -1058,7 +1060,7 @@ Response `200`: `PagedResult<AdminActivityLogItemDto>` in the ADR 0004 envelope.
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T01:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T08:00:00+07:00" }
 }
 ```
 
@@ -1110,7 +1112,7 @@ Response `200`: ADR 0004 success envelope whose `data` contains exactly:
     "bookingId": "uuid",
     "status": "PENDING_PAYMENT"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-13T01:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-13T08:00:00+07:00" }
 }
 ```
 
@@ -1132,7 +1134,7 @@ Query parameters:
 |---|---|---|---|
 | `status` | string? | null | One `booking_status` value or a comma-separated list. Empty entries or unknown values return `422 VALIDATION_ERROR`. |
 | `tripId` | UUID? | null | Exact trip id; malformed UUID returns `422 VALIDATION_ERROR`. |
-| `date` | `YYYY-MM-DD`? | null | Calendar day in `Asia/Ho_Chi_Minh` (ICT). Convert local midnight and the next local midnight to the UTC half-open interval `[fromUtc, toUtc)` and filter `trip_current_departure`. Invalid dates return `422 VALIDATION_ERROR`. |
+| `date` | `YYYY-MM-DD`? | null | Calendar day in `Asia/Ho_Chi_Minh` (Asia/Ho_Chi_Minh). Convert local midnight and the next local midnight to the UTC half-open interval `[fromUtc, toUtc)` and filter `trip_current_departure`. Invalid dates return `422 VALIDATION_ERROR`. |
 | `passengerPhone` | string? | null | Trim outer whitespace, then apply `PhoneNumber.Normalize`: accept only local `0xxxxxxxxx`/`0xxxxxxxxxx` or canonical `+84xxxxxxxxx`/`+84xxxxxxxxxx`; canonicalize local input to E.164. Internal spaces, hyphens, parentheses, or other separators are invalid and are not stripped. |
 | `bookingCode` | string? | null | Trimmed, non-empty, maximum 30 characters, exact case-insensitive match. |
 | `page` | integer | `1` | Must be `>= 1`. |
@@ -1165,7 +1167,7 @@ Response `200`: ADR 0004 success envelope whose `data` is the seven-field `Paged
       },
       "seatCount": 2,
       "totalAmount": 500000,
-      "createdAt": "2026-06-17T12:00:00Z"
+      "createdAt": "2026-06-17T19:00:00+07:00"
     }],
     "page": 1,
     "pageSize": 20,
@@ -1174,7 +1176,7 @@ Response `200`: ADR 0004 success envelope whose `data` is the seven-field `Paged
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-18T01:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-18T08:00:00+07:00" }
 }
 ```
 
@@ -1221,7 +1223,7 @@ Response `200`:
     "bookingGroupId": null,
     "tripDirection": null,
     "cancellationReason": "USER_INITIATED",
-    "createdAt": "2026-06-17T12:00:00Z",
+    "createdAt": "2026-06-17T19:00:00+07:00",
     "seats": [{
       "passengerRecordId": "uuid",
       "ticketId": "uuid",
@@ -1231,11 +1233,11 @@ Response `200`:
       "boardingStatus": "PENDING"
     }],
     "statusTimeline": [
-      { "status": "PENDING_PAYMENT", "occurredAt": "2026-06-17T12:00:00Z", "reasonCode": null },
-      { "status": "CANCELLED", "occurredAt": "2026-06-17T12:05:00Z", "reasonCode": "USER_INITIATED" }
+      { "status": "PENDING_PAYMENT", "occurredAt": "2026-06-17T19:00:00+07:00", "reasonCode": null },
+      { "status": "CANCELLED", "occurredAt": "2026-06-17T19:05:00+07:00", "reasonCode": "USER_INITIATED" }
     ]
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-18T01:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-18T08:00:00+07:00" }
 }
 ```
 
@@ -1288,7 +1290,7 @@ Response `201`:
       }
     ]
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -1338,7 +1340,7 @@ Response `201`:
     "status": "PENDING_PAYMENT",
     "paymentRedirectUrl": "https://vnpay.vn/..."
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -1375,7 +1377,7 @@ Response `200`:
         "bookingCode": "VR-20260518-ABCD1234",
         "tripId": "uuid",
         "status": "CONFIRMED",
-        "createdAt": "2026-05-01T09:00:00Z",
+        "createdAt": "2026-05-01T16:00:00+07:00",
         "departureDateTime": "2026-05-18T08:00:00+07:00",
         "originName": "Bến xe Miền Đông",
         "destinationName": "Bến xe Mỹ Đình",
@@ -1402,7 +1404,7 @@ Response `200`:
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -1536,7 +1538,7 @@ Response `200`:
     "refundAmount": 175000,
     "refundMethod": "WALLET"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -1564,7 +1566,7 @@ Response `200`:
     "refundAmount": 0,
     "paymentRedirectUrl": null
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -1591,7 +1593,7 @@ Response `200`:
     "dropoff": { "stationId": null, "stopId": "uuid" },
     "fareDelta": 0
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -1684,7 +1686,7 @@ Response `200`:
     "resolvedAction": "ACCEPTED",
     "resolvedAt": "2026-05-18T09:00:00+07:00"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -1730,7 +1732,7 @@ Response `200`:
     ],
     "totalBookings": 120
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -1759,7 +1761,7 @@ Response `200`:
     ],
     "totalBookings": 120
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -1831,8 +1833,8 @@ Request:
   "maxDiscountAmount": 50000,
   "totalUsageLimit": 1000,
   "perUserLimit": 1,
-  "validFrom": "2026-06-01T00:00:00+07:00",
-  "validUntil": "2026-08-31T23:59:59+07:00",
+  "validFrom": "2026-05-31T17:00:00Z",
+  "validUntil": "2026-08-31T16:59:59Z",
   "applicableOperatorIds": null,
   "applicableRouteIds": null,
   "fundingType": "VIETRIDE_FUNDED"
@@ -1896,8 +1898,8 @@ Request (admin-only fields `fundingType`/`applicableOperatorIds`/`ownerOperatorI
   "maxDiscountAmount": null,
   "totalUsageLimit": 100,
   "perUserLimit": 1,
-  "validFrom": "2026-06-01T00:00:00+07:00",
-  "validUntil": "2026-08-31T23:59:59+07:00",
+  "validFrom": "2026-05-31T17:00:00Z",
+  "validUntil": "2026-08-31T16:59:59Z",
   "applicableRouteIds": null
 }
 ```
@@ -1982,7 +1984,7 @@ Response `200`: active locations sorted by `sortOrder`, then `name`.
       "sortOrder": 5
     }
   ],
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-08T00:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-08T07:00:00+07:00" }
 }
 ```
 
@@ -2057,7 +2059,7 @@ Response `200`:
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -2097,7 +2099,7 @@ Response `200`:
       { "seatNumber": "A01", "status": "AVAILABLE", "type": "SLEEPER_LOWER", "row": 1, "col": 1, "deck": 1, "disabledReason": null }
     ]
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -2170,9 +2172,9 @@ Response `200` (raw):
   "routeId": "uuid",
   "vehicleId": "uuid",
   "status": "SCHEDULED",
-  "departureDateTime": "2026-05-18T08:00:00+07:00",
+  "departureDateTime": "2026-05-18T01:00:00Z",
   "actualDepartureTime": null,
-  "estimatedArrivalTime": "2026-05-18T20:00:00+07:00",
+  "estimatedArrivalTime": "2026-05-18T13:00:00Z",
   "baseFare": 400000,
   "totalDistanceKm": 1700.0,
   "originStation": { "id": "uuid", "name": "Bến xe Miền Đông" },
@@ -2186,7 +2188,7 @@ Response `200` (raw):
       "allowDropoff": false,
       "status": "PENDING",
       "actualArrivalTime": null,
-      "estimatedArrivalTime": "2026-05-18T09:30:00+07:00",
+      "estimatedArrivalTime": "2026-05-18T02:30:00Z",
       "distanceFromOriginKm": 42.5,
       "fareFromThisStop": 350000
     }
@@ -2269,7 +2271,7 @@ Response `200`:
   "data": {
     "seatLockToken": "uuid",
     "lockedSeats": ["A01", "A02"],
-    "expiresAt": "2026-05-18T08:10:00+07:00"
+    "expiresAt": "2026-05-18T01:10:00Z"
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
@@ -2318,13 +2320,13 @@ Response `200`:
       "tripId": "uuid",
       "seatLockToken": "uuid",
       "lockedSeats": ["A01", "A02"],
-      "expiresAt": "2026-05-18T08:10:00+07:00"
+      "expiresAt": "2026-05-18T01:10:00Z"
     },
     "return": {
       "tripId": "uuid",
       "seatLockToken": "uuid",
       "lockedSeats": ["A01", "A02"],
-      "expiresAt": "2026-05-18T08:10:00+07:00"
+      "expiresAt": "2026-05-18T01:10:00Z"
     }
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
@@ -2515,14 +2517,14 @@ Response `200` data:
           "stationId": null,
           "stationName": "Alternative stop",
           "sequence": 1,
-          "estimatedArrivalAt": "2026-07-23T01:45:00Z"
+          "estimatedArrivalAt": "2026-07-23T08:45:00+07:00"
         },
         {
           "stopId": null,
           "stationId": "00000000-0000-4000-8000-000000000038",
           "stationName": "Destination station",
           "sequence": 2,
-          "estimatedArrivalAt": "2026-07-23T04:50:00Z"
+          "estimatedArrivalAt": "2026-07-23T11:50:00+07:00"
         }
       ]
     }
@@ -2572,7 +2574,7 @@ cross-tenant proposal lookup is masked as `404 ROUTE_CHANGE_PROPOSAL_NOT_FOUND`.
   "type": "EXISTING",
   "status": "PENDING",
   "sourceAlternativeRouteId": "uuid",
-  "sourceUpdatedAt": "2026-08-04T02:00:00Z",
+  "sourceUpdatedAt": "2026-08-04T09:00:00+07:00",
   "incidentId": null,
   "reason": "Traffic congestion ahead",
   "snapshot": {
@@ -2597,8 +2599,8 @@ cross-tenant proposal lookup is masked as `404 ROUTE_CHANGE_PROPOSAL_NOT_FOUND`.
   "resolutionCode": null,
   "supersededByProposalId": null,
   "approvedAlternativeRouteId": null,
-  "createdAt": "2026-08-04T02:00:00Z",
-  "updatedAt": "2026-08-04T02:00:00Z"
+  "createdAt": "2026-08-04T09:00:00+07:00",
+  "updatedAt": "2026-08-04T09:00:00+07:00"
 }
 ```
 
@@ -2827,13 +2829,13 @@ Response `200`:
     "oldTripStatus": "DISRUPTED",
     "newTripId": "uuid",
     "newTripStatus": "BOARDING",
-    "newTripDepartureDateTime": "2026-07-25T08:30:00Z",
+    "newTripDepartureDateTime": "2026-07-25T15:30:00+07:00",
     "transferStatus": "QUEUED",
     "affectedBookingCount": 2,
     "affectedPassengerCount": 5,
     "pendingSeatAssignmentCount": 1
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-25T08:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-25T15:00:00+07:00" }
 }
 ```
 
@@ -2879,11 +2881,11 @@ Response `200`:
   "data": {
     "tripId": "uuid",
     "status": "DISRUPTED",
-    "disruptedAt": "2026-07-30T03:00:00Z",
+    "disruptedAt": "2026-07-30T10:00:00+07:00",
     "hasSubstitution": false,
     "reason": "Road closure with no replacement vehicle available"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-30T03:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-30T10:00:00+07:00" }
 }
 ```
 
@@ -2989,7 +2991,7 @@ Response `200`: `ApiResponse<TripDetailDto>`. Day 22 extends the existing DTO wi
     "returnRouteId": null,
     "fareBreakdown": { "baseFare": 420000, "stopFares": [] }
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T17:00:00+07:00" }
 }
 ```
 
@@ -3051,7 +3053,7 @@ writes allow `OPERATOR_ADMIN` only and require a UUID-v4 `Idempotency-Key`.
 
 `FareSurchargePeriodDto` is `{ periodId, name, startDate, endDate, surchargePercent, isActive,
 status, createdAt, updatedAt }`; `status` is `UPCOMING|APPLYING|EXPIRED|DISABLED` based on the
-current ICT date and activation flag. Dates are inclusive; `name` is trimmed `1..120`, percentage
+current Asia/Ho_Chi_Minh date and activation flag. Dates are inclusive; `name` is trimmed `1..120`, percentage
 is an integer `1..100`, and `startDate <= endDate`. Active non-deleted periods for one operator
 must not overlap. Errors: `404 FARE_SURCHARGE_PERIOD_NOT_FOUND`, `422
 FARE_SURCHARGE_PERIOD_OVERLAP`, or generic `422 VALIDATION_ERROR`.
@@ -3115,7 +3117,7 @@ Response `200`:
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -3176,7 +3178,7 @@ Response `201`:
     "voucherCode": null,
     "settlementPolicyVersion": 2
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -3228,7 +3230,7 @@ Response `200`:
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -3268,7 +3270,7 @@ Response `200` item shape:
   "code": "VR-20260518-ABCD1234",
   "tripId": "uuid",
   "status": "CONFIRMED",
-  "createdAt": "2026-05-01T09:00:00Z",
+  "createdAt": "2026-05-01T16:00:00+07:00",
   "totalAmount": 350000,
   "originName": "Bến xe Miền Đông",
   "destinationName": "Bến xe Mỹ Đình",
@@ -3364,7 +3366,7 @@ Response `200`:
     "status": "DELIVERY_CONFIRMED",
     "confirmedAt": "2026-05-18T20:15:00+07:00"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -3391,7 +3393,7 @@ Response `200`:
     "rejectedAt": "2026-05-18T20:15:00+07:00",
     "canUndoUntil": "2026-05-18T20:30:00+07:00"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -3417,7 +3419,7 @@ Response `200`:
     "status": "DELIVERED_PENDING_CONFIRM",
     "undoneAt": "2026-05-18T20:20:00+07:00"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 Decision note: invalid, expired, and revoked delivery tokens return 400 with
@@ -3448,7 +3450,7 @@ Response `200` data:
 {
   "parcelId": "uuid",
   "status": "DELIVERED_PENDING_CONFIRM",
-  "expiresAt": "2026-08-01T03:00:00Z"
+  "expiresAt": "2026-08-01T10:00:00+07:00"
 }
 ```
 
@@ -3532,7 +3534,7 @@ Response `200`:
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -3575,7 +3577,7 @@ Response `200` in the ADR 0004 envelope:
     "sizeCategory": "SMALL",
     "photoUrl": "https://storage.googleapis.com/vietride.appspot.com/parcels/photo.jpg"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-28T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-28T17:00:00+07:00" }
 }
 ```
 
@@ -3643,7 +3645,7 @@ Response `200`:
     "refundDueVnd": 0,
     "finalPaymentDeadline": "2026-05-18T07:50:00+07:00"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -3682,7 +3684,7 @@ Response `200` (`ApiResponse`):
     "parcelCode": "VR-PCL-20260722-ABCDEFGH",
     "status": "LOADED"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-22T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-22T17:00:00+07:00" }
 }
 ```
 
@@ -3819,7 +3821,7 @@ Response `200`:
     "parcelId": "uuid",
     "tripId": "uuid",
     "status": "LOADED",
-    "transferConfirmedAt": "2026-05-18T10:00:00+07:00"
+    "transferConfirmedAt": "2026-05-18T03:00:00Z"
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
 }
@@ -3941,13 +3943,13 @@ Response `200` uses the ADR 0004 paged envelope. Items are ordered by `createdAt
         "balancePaidVnd": 0,
         "refundDueVnd": 0,
         "forfeitedDepositVnd": 0,
-        "latestCheckInAt": "2026-07-27T09:30:00Z",
-        "loadCutoffAt": "2026-07-27T09:50:00Z",
+        "latestCheckInAt": "2026-07-27T16:30:00+07:00",
+        "loadCutoffAt": "2026-07-27T16:50:00+07:00",
         "finalPaymentDeadline": null,
         "pendingActionType": null,
         "pendingActionReason": null,
         "photoUrl": null,
-        "createdAt": "2026-07-27T08:00:00Z"
+        "createdAt": "2026-07-27T15:00:00+07:00"
       }
     ],
     "page": 1,
@@ -3957,7 +3959,7 @@ Response `200` uses the ADR 0004 paged envelope. Items are ordered by `createdAt
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-27T08:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-27T15:00:00+07:00" }
 }
 ```
 
@@ -4017,7 +4019,7 @@ Response `200` for the retained physical-transfer branch:
     "status": "PENDING_TRANSFER_CONFIRM",
     "transferTargetTripId": "uuid"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -4074,7 +4076,7 @@ Response `200`:
     "refundChoice": "POLICY",
     "refundAmount": 35000
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-30T03:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-30T10:00:00+07:00" }
 }
 ```
 
@@ -4109,7 +4111,7 @@ Response `200`:
     "status": "PENDING",
     "tripId": "uuid"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -4137,7 +4139,7 @@ Response `200`:
     "status": "PENDING",
     "tripId": "uuid"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -4177,7 +4179,7 @@ Response `200`:
     "returnReason": "Sender requested return after trip disruption",
     "returnedAt": "2026-05-18T11:00:00+07:00"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -4205,7 +4207,7 @@ Response `200`:
     "referenceId": "uuid",
     "status": "PENDING_REDIRECT"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-24T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-24T17:00:00+07:00" }
 }
 ```
 
@@ -4235,7 +4237,7 @@ Response `201`:
     "status": "PENDING",
     "paymentRedirectUrl": "https://vnpay.vn/..."
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -4253,7 +4255,7 @@ Response `200`:
     "balance": 1000000,
     "currency": "VND"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -4516,14 +4518,14 @@ room; Passenger room không nhận. `booking:created` được giữ tương th�
 ```json
 {
   "eventId": "uuid",
-  "occurredAt": "2026-08-05T10:00:01.000Z",
+  "occurredAt": "2026-08-05T17:00:01.000+07:00",
   "bookingId": "uuid",
   "bookingCode": "VR-20260805-ABCDEFGH",
   "tripId": "uuid",
   "status": "CONFIRMED",
   "ticketCodes": ["VT-20260805-ABCDEFGH"],
   "seatNumbers": ["A01"],
-  "departureDateTime": "2026-08-05T12:00:00.000Z",
+  "departureDateTime": "2026-08-05T19:00:00.000+07:00",
   "passengerCount": 1,
   "pickup": { "stationId": "uuid", "stopId": null, "address": null },
   "dropoff": { "stationId": null, "stopId": "uuid", "address": null },
@@ -4542,7 +4544,7 @@ recipient hiện có với dedupe riêng theo `eventId + recipientUserId`. FCM g
 ```json
 {
   "eventId": "uuid",
-  "occurredAt": "2026-08-05T10:00:01.000Z",
+  "occurredAt": "2026-08-05T17:00:01.000+07:00",
   "tripId": "uuid",
   "bookingId": "uuid",
   "reason": "PASSENGER_BOARDED",
@@ -4550,7 +4552,7 @@ recipient hiện có với dedupe riêng theo `eventId + recipientUserId`. FCM g
   "seatNumbers": ["A01"],
   "passengerRecordId": "uuid",
   "ticketCode": "VT-20260805-ABCDEFGH",
-  "boardedAt": "2026-08-05T10:00:01.000Z"
+  "boardedAt": "2026-08-05T17:00:01.000+07:00"
 }
 ```
 
@@ -4587,9 +4589,9 @@ Tracking Phase 10 invariants (legacy fields remain compatible; delay fields belo
   "tripId": "uuid",
   "stopId": "uuid",
   "etaMinutes": 12,
-  "estimatedArrivalTime": "2026-08-05T10:12:00.000Z",
+  "estimatedArrivalTime": "2026-08-05T17:12:00.000+07:00",
   "distanceMeters": 8500,
-  "updatedAt": "2026-08-05T10:00:01.000Z",
+  "updatedAt": "2026-08-05T17:00:01.000+07:00",
   "estimateQuality": "TRAFFIC_AWARE",
   "delayed": false,
   "delayStatus": "ON_TIME",
@@ -4610,22 +4612,22 @@ targets. `targetKind=STOP` uses `stopId`; the terminal target uses `targetKind=S
       "stopId": "uuid",
       "sequence": 2,
       "etaMinutes": 12,
-      "estimatedArrivalTime": "2026-08-05T10:12:00.000Z",
+      "estimatedArrivalTime": "2026-08-05T17:12:00.000+07:00",
       "distanceMeters": 8500,
-      "updatedAt": "2026-08-05T10:00:01.000Z",
+      "updatedAt": "2026-08-05T17:00:01.000+07:00",
       "estimateQuality": "TRAFFIC_AWARE"
     },
     {
       "targetKind": "STATION",
       "stationId": "uuid",
       "etaMinutes": 95,
-      "estimatedArrivalTime": "2026-08-05T11:35:00.000Z",
+      "estimatedArrivalTime": "2026-08-05T18:35:00.000+07:00",
       "distanceMeters": 112000,
-      "updatedAt": "2026-08-05T10:00:01.000Z",
+      "updatedAt": "2026-08-05T17:00:01.000+07:00",
       "estimateQuality": "TRAFFIC_AWARE"
     }
   ],
-  "updatedAt": "2026-08-05T10:00:01.000Z"
+  "updatedAt": "2026-08-05T17:00:01.000+07:00"
 }
 ```
 
@@ -4639,7 +4641,7 @@ recovery event. `trip:statusChanged` is emitted only on a transition and has thi
   "stopId": "uuid",
   "status": "DELAYED",
   "delayMinutes": 31,
-  "updatedAt": "2026-08-05T10:00:01.000Z"
+  "updatedAt": "2026-08-05T17:00:01.000+07:00"
 }
 ```
 
@@ -4663,9 +4665,9 @@ fields and adds:
     "tripId": "uuid",
     "stopId": "uuid",
     "etaMinutes": 12,
-    "estimatedArrivalTime": "2026-08-05T10:12:00.000Z",
+    "estimatedArrivalTime": "2026-08-05T17:12:00.000+07:00",
     "distanceMeters": 8500,
-    "updatedAt": "2026-08-05T10:00:01.000Z",
+    "updatedAt": "2026-08-05T17:00:01.000+07:00",
     "estimateQuality": "TRAFFIC_AWARE",
     "delayed": null,
     "delayStatus": "UNKNOWN",
@@ -4718,7 +4720,7 @@ Only the assigned Shuttle driver may emit `shuttle:gps:update`:
   "longitude": 106.660172,
   "speedKmh": 30,
   "heading": 90,
-  "recordedAt": "2026-08-01T01:00:00.000Z"
+  "recordedAt": "2026-08-01T08:00:00.000+07:00"
 }
 ```
 
@@ -4730,9 +4732,9 @@ broadcast `shuttle:eta:update`:
   "shuttleTripId": "uuid",
   "nextPickupOrder": 1,
   "etaMinutes": 17,
-  "estimatedArrivalTime": "2026-08-01T01:17:00.000Z",
+  "estimatedArrivalTime": "2026-08-01T08:17:00.000+07:00",
   "distanceMeters": 5909,
-  "updatedAt": "2026-08-01T01:00:01.000Z"
+  "updatedAt": "2026-08-01T08:00:01.000+07:00"
 }
 ```
 
@@ -4869,9 +4871,9 @@ nhận cùng link và `200`:
   "statusCode": 200,
   "data": {
     "shareUrl": "https://app.vietride.vn/trip-sharing#token=v1.grant.signature",
-    "expiresAt": "2026-08-04T09:30:00.000Z"
+    "expiresAt": "2026-08-04T16:30:00.000+07:00"
   },
-  "meta": { "traceId": "req-123", "timestamp": "2026-08-03T09:30:00.000Z" }
+  "meta": { "traceId": "req-123", "timestamp": "2026-08-03T16:30:00.000+07:00" }
 }
 ```
 
@@ -4890,7 +4892,7 @@ active do chính user đó tạo và luôn idempotent:
   "success": true,
   "statusCode": 200,
   "data": { "revoked": true },
-  "meta": { "traceId": "req-124", "timestamp": "2026-08-03T09:31:00.000Z" }
+  "meta": { "traceId": "req-124", "timestamp": "2026-08-03T16:31:00.000+07:00" }
 }
 ```
 
@@ -4905,15 +4907,15 @@ Response `200` dùng ADR 0004 envelope; `data` có shape cố định:
 ```json
 {
   "status": "IN_PROGRESS",
-  "expiresAt": "2026-08-04T09:30:00.000Z",
-  "lastUpdatedAt": "2026-08-03T09:35:12.000Z",
+  "expiresAt": "2026-08-04T16:30:00.000+07:00",
+  "lastUpdatedAt": "2026-08-03T16:35:12.000+07:00",
   "vehicle": {
     "location": {
       "latitude": 10.7812,
       "longitude": 106.6981,
       "heading": 42,
       "speedKph": 38,
-      "recordedAt": "2026-08-03T09:35:12.000Z"
+      "recordedAt": "2026-08-03T16:35:12.000+07:00"
     }
   },
   "route": {
@@ -4925,10 +4927,10 @@ Response `200` dùng ADR 0004 envelope; `data` có shape cố định:
     }
   },
   "eta": {
-    "estimatedArrivalAt": "2026-08-03T15:10:00.000Z",
+    "estimatedArrivalAt": "2026-08-03T22:10:00.000+07:00",
     "remainingSeconds": 20100,
     "delayMinutes": null,
-    "updatedAt": "2026-08-03T09:35:00.000Z"
+    "updatedAt": "2026-08-03T16:35:00.000+07:00"
   }
 }
 ```
@@ -5045,9 +5047,9 @@ Response `200`:
         "language": "vi",
         "status": "APPROVED",
         "ingestStatus": "COMPLETED",
-        "createdAt": "2026-06-01T10:00:00Z",
-        "updatedAt": "2026-06-01T10:00:00Z",
-        "approvedAt": "2026-06-01T10:00:00Z"
+        "createdAt": "2026-06-01T17:00:00+07:00",
+        "updatedAt": "2026-06-01T17:00:00+07:00",
+        "approvedAt": "2026-06-01T17:00:00+07:00"
       }
     ],
     "page": 1,
@@ -5057,7 +5059,7 @@ Response `200`:
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -5076,7 +5078,7 @@ Response `201`:
     "documentId": "uuid",
     "status": "PENDING_REVIEW"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -5093,7 +5095,7 @@ Response `200`:
     "documentId": "uuid",
     "status": "APPROVED"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -5146,8 +5148,8 @@ Response `200`:
     "subscriptionId": "uuid",
     "status": "ACTIVE",
     "billingPeriod": "MONTHLY",
-    "startedAt": "2026-07-14T10:00:00Z",
-    "expiresAt": "2026-08-14T10:00:00Z",
+    "startedAt": "2026-07-14T17:00:00+07:00",
+    "expiresAt": "2026-08-14T17:00:00+07:00",
     "plan": { "planId": "uuid", "name": "Pro", "price": 500000, "limits": {}, "modules": {} },
     "usage": {},
     "pendingUpgrade": {
@@ -5155,12 +5157,12 @@ Response `200`:
       "targetPlan": { "planId": "uuid", "name": "Enterprise", "limits": {}, "modules": {} },
       "amount": 900000,
       "billingPeriod": "MONTHLY",
-      "dueAt": "2026-07-14T10:15:00Z",
+      "dueAt": "2026-07-14T17:15:00+07:00",
       "remainingSeconds": 720,
       "latestPayment": { "paymentId": "uuid", "status": "FAILED", "canRetry": true }
     }
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-14T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-14T17:00:00+07:00" }
 }
 ```
 
@@ -5202,11 +5204,11 @@ Response `202`:
     "amount": 500000,
     "billingPeriod": "MONTHLY",
     "paymentRedirectUrl": "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?...",
-    "dueAt": "2026-07-14T10:15:00Z",
+    "dueAt": "2026-07-14T17:15:00+07:00",
     "activePlan": { "planId": "uuid", "name": "Starter", "limits": {}, "modules": {} },
     "pendingTargetPlan": { "planId": "uuid", "name": "Pro", "limits": {}, "modules": {} }
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-14T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-14T17:00:00+07:00" }
 }
 ```
 
@@ -5227,7 +5229,7 @@ For `paymentMethod=WALLET`, a successful atomic OperatorWallet charge returns `2
     "billingPeriod": "MONTHLY",
     "invoiceStatus": "PENDING"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T17:00:00+07:00" }
 }
 ```
 
@@ -5266,11 +5268,11 @@ Item shape:
   "status": "ISSUED",
   "amount": 500000,
   "billingPeriod": "MONTHLY",
-  "periodFrom": "2026-07-15T00:00:00Z",
-  "periodTo": "2026-08-15T00:00:00Z",
+  "periodFrom": "2026-07-15T07:00:00+07:00",
+  "periodTo": "2026-08-15T07:00:00+07:00",
   "pdfGenerationStatus": "COMPLETED",
-  "createdAt": "2026-07-15T10:00:00Z",
-  "issuedAt": "2026-07-15T10:01:00Z"
+  "createdAt": "2026-07-15T17:00:00+07:00",
+  "issuedAt": "2026-07-15T17:01:00+07:00"
 }
 ```
 
@@ -5288,9 +5290,9 @@ Auth: `OPERATOR_ADMIN`. Rate limit: 10 requests/minute per `(userId, invoiceId)`
   "statusCode": 200,
   "data": {
     "downloadUrl": "https://storage.googleapis.com/...signed...",
-    "expiresAt": "2026-07-15T11:00:00Z"
+    "expiresAt": "2026-07-15T18:00:00+07:00"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T17:00:00+07:00" }
 }
 ```
 
@@ -5335,7 +5337,7 @@ Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`.
     "updatedAt": "2026-07-15T10:00:00Z",
     "calculatedAt": "2026-07-15T10:00:03Z"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T17:00:00+07:00" }
 }
 ```
 
@@ -5396,8 +5398,8 @@ Xác thực: `SYSTEM_ADMIN`. Booking sở hữu facade và orchestration; Gatewa
 nào đọc database của service khác. Booking lấy các chỉ số vận hành từ Booking/Trip/Parcel, lấy doanh
 thu cuối cùng từ Payment ledger, rồi gọi các endpoint raw và Identity bên dưới bằng Internal JWT.
 
-`from` và `to` là hai ngày ICT bắt buộc theo `YYYY-MM-DD`, inclusive, `from <= to`, tối đa 366 ngày.
-Booking diễn giải input theo lịch ICT rồi chuẩn hóa ngay thành hai timestamp UTC
+`from` và `to` là hai ngày Asia/Ho_Chi_Minh bắt buộc theo `YYYY-MM-DD`, inclusive, `from <= to`, tối đa 366 ngày.
+Booking diễn giải input theo lịch Asia/Ho_Chi_Minh rồi chuẩn hóa ngay thành hai timestamp UTC
 `[fromUtc, toUtcExclusive)` để query DB/gọi nguồn nội bộ. Công thức là
 `fromUtc = UTC(from 00:00 Asia/Ho_Chi_Minh)` và
 `toUtcExclusive = UTC((to + 1 ngày) 00:00 Asia/Ho_Chi_Minh)`; ví dụ
@@ -5433,9 +5435,9 @@ Response `200`:
       "netParcelRevenueVnd": 3200000,
       "netTransportRevenueVnd": 51200000
     }],
-    "generatedAt": "2026-08-01T00:00:01Z"
+    "generatedAt": "2026-08-01T07:00:01+07:00"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-08-01T00:00:01Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-08-01T07:00:01+07:00" }
 }
 ```
 
@@ -5566,7 +5568,7 @@ Response `201`:
     "operatorId": "uuid",
     "message": "Đơn đăng ký đã nhận, vui lòng xác thực email"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -5601,7 +5603,7 @@ Response `200`:
         "taxCode": "0312345678",
         "registrationStatus": "PENDING",
         "isActive": true,
-        "createdAt": "2026-06-01T10:00:00Z",
+        "createdAt": "2026-06-01T17:00:00+07:00",
         "approvedAt": null,
         "suspendedAt": null
       }
@@ -5613,7 +5615,7 @@ Response `200`:
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -5680,12 +5682,12 @@ Response `201`:
       "planId": "00000000-0000-0000-0000-000000000001",
       "planName": "Starter (Free Trial)",
       "status": "ACTIVE",
-      "startedAt": "2026-06-01T10:00:00Z",
-      "expiresAt": "2026-07-01T10:00:00Z",
+      "startedAt": "2026-06-01T17:00:00+07:00",
+      "expiresAt": "2026-07-01T17:00:00+07:00",
       "currentOperatorUsers": 1
     }
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -5713,7 +5715,7 @@ Response `200`:
     "operatorId": "uuid",
     "registrationStatus": "APPROVED"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -5743,7 +5745,7 @@ Response `200`:
     "operatorId": "uuid",
     "registrationStatus": "REJECTED"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -5773,7 +5775,7 @@ Response `200`:
     "operatorId": "uuid",
     "registrationStatus": "SUSPENDED"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -5811,7 +5813,7 @@ Response `200`:
         "role": "DRIVER",
         "status": "PENDING_INITIAL_PASSWORD",
         "operatorId": "uuid",
-        "createdAt": "2026-06-01T10:00:00Z",
+        "createdAt": "2026-06-01T17:00:00+07:00",
         "avatarUrl": null
       }
     ],
@@ -5822,7 +5824,7 @@ Response `200`:
     "hasNextPage": false,
     "hasPreviousPage": false
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -5860,9 +5862,9 @@ Response `201`:
     "role": "DRIVER",
     "status": "PENDING_INITIAL_PASSWORD",
     "operatorId": "uuid",
-    "initialPasswordExpiresAt": "2026-06-03T10:00:00Z"
+    "initialPasswordExpiresAt": "2026-06-03T17:00:00+07:00"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -5906,7 +5908,7 @@ Response `200`:
     "parcelNoShowPolicy": { "noShowFeePercent": 0, "additionalPaymentTimeoutMinutes": 30 },
     "luggagePolicy": { "defaultLuggageKgPerSeat": 10 }
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -6135,7 +6137,7 @@ null display fields.
 ### GET `/v1/operator/shuttle-trips`
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Query `page`, `pageSize`, `from`, `to`, and optional
-comma-separated `status=SCHEDULED,IN_PROGRESS,COMPLETED,CANCELLED`. `from/to` are ICT dates and
+comma-separated `status=SCHEDULED,IN_PROGRESS,COMPLETED,CANCELLED`. `from/to` are Asia/Ho_Chi_Minh dates and
 `to` includes the whole day. Without a status filter all statuses, including `CANCELLED`, are
 returned. Default ordering is `scheduledDepartureTime DESC, shuttleTripId DESC`.
 
@@ -6183,7 +6185,7 @@ Auth: `DRIVER` only. Chỉ trả ShuttleTrip có `driverUserId` trùng với `su
 trạng thái `CANCELLED`.
 
 Query tùy chọn: `from=YYYY-MM-DD`, `to=YYYY-MM-DD`. Khi không truyền, cửa sổ mặc định là ngày
-hiện tại đến ngày hiện tại + 14 ngày theo ICT. `to` không được trước `from`; khoảng truy vấn tối
+hiện tại đến ngày hiện tại + 14 ngày theo Asia/Ho_Chi_Minh. `to` không được trước `from`; khoảng truy vấn tối
 đa 32 ngày.
 
 Response `200`:
@@ -6200,8 +6202,8 @@ Response `200`:
       "status": "SCHEDULED",
       "vehicleId": "uuid",
       "licensePlate": "51B-123.45",
-      "scheduledDepartureTime": "2026-08-05T01:00:00Z",
-      "scheduledEndTime": "2026-08-05T02:00:00Z",
+      "scheduledDepartureTime": "2026-08-05T08:00:00+07:00",
+      "scheduledEndTime": "2026-08-05T09:00:00+07:00",
       "passengerCount": 2,
       "stopCount": 1
     }
@@ -6231,8 +6233,8 @@ SHUTTLE_MANIFEST_INCONSISTENT_STATUS` thay vì báo sai `PENDING`.
   "stationName": "Bến xe Miền Đông",
   "stationLatitude": 10.8012,
   "stationLongitude": 106.7144,
-  "scheduledDepartureTime": "2026-08-05T01:00:00Z",
-  "scheduledEndTime": "2026-08-05T02:00:00Z",
+  "scheduledDepartureTime": "2026-08-05T08:00:00+07:00",
+  "scheduledEndTime": "2026-08-05T09:00:00+07:00",
   "stops": [
     {
       "pickupOrder": 1,
@@ -6273,7 +6275,7 @@ Response `200`:
   "shuttleTripId": "uuid",
   "pickupOrder": 1,
   "pickedUpPassengerCount": 2,
-  "pickedUpAt": "2026-08-02T01:00:00Z"
+  "pickedUpAt": "2026-08-02T08:00:00+07:00"
 }
 ```
 
@@ -6401,7 +6403,7 @@ Duplicate-nearby response `200`:
       }
     ]
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -6417,7 +6419,7 @@ Response `201`:
     "stationId": "uuid",
     "isActive": true
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
 
@@ -6505,7 +6507,7 @@ Response `200` is exactly `ApiResponse<{ stop: StopDto, warning: null }>`:
   "success": true,
   "statusCode": 200,
   "data": { "stop": { "id": "uuid", "isActive": false }, "warning": null },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-25T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-25T17:00:00+07:00" }
 }
 ```
 
@@ -6616,7 +6618,7 @@ Response `200`:
       "flattenedRedirects": 1
     }
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T01:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-16T08:00:00+07:00" }
 }
 ```
 
@@ -6717,8 +6719,8 @@ Route create/update money fields are VND BIGINT-compatible JSON numbers. Persist
   "estimatedDurationMinutes": 420,
   "pathPolyline": "encoded-google-polyline-precision-5",
   "isActive": true,
-  "createdAt": "2026-06-10T10:00:00Z",
-  "updatedAt": "2026-06-10T10:00:00Z"
+  "createdAt": "2026-06-10T17:00:00+07:00",
+  "updatedAt": "2026-06-10T17:00:00+07:00"
 }
 ```
 
@@ -6733,13 +6735,14 @@ Each `departureSchedules` item has this shape:
   "id": "uuid",
   "dayOfWeek": [1, 3, 5],
   "departureTime": "08:00:00",
+  "timeZone": "Asia/Ho_Chi_Minh",
   "validFrom": "2026-07-01",
   "validUntil": "2026-12-31",
   "isActive": true
 }
 ```
 
-`dayOfWeek` uses `1=Monday` through `7=Sunday`. `departureTime` is a timezone-free `TIME` value with local ICT semantics. `validUntil` is nullable. Items are ordered by `departureTime`, then `validFrom`, then `id`.
+`dayOfWeek` uses `1=Monday` through `7=Sunday`. `departureTime` is a timezone-free `TIME` value interpreted with the returned constant `timeZone: "Asia/Ho_Chi_Minh"`. `validUntil` is nullable. Items are ordered by `departureTime`, then `validFrom`, then `id`.
 
 ### POST `/v1/operator/routes`
 
@@ -6837,8 +6840,8 @@ Response `200`: updated `RouteDto` including `pathPolyline`.
   "distanceFromOriginKm": 75.25,
   "allowPickup": true,
   "allowDropoff": false,
-  "createdAt": "2026-06-10T10:00:00Z",
-  "updatedAt": "2026-06-10T10:00:00Z"
+  "createdAt": "2026-06-10T17:00:00+07:00",
+  "updatedAt": "2026-06-10T17:00:00+07:00"
 }
 ```
 
@@ -6893,8 +6896,8 @@ Response `200`: success envelope with `{ "deleted": true }`.
   "fareFromThisStop": 200000,
   "effectiveFrom": "2026-07-01T00:00:00+07:00",
   "effectiveUntil": "2026-08-01T00:00:00+07:00",
-  "createdAt": "2026-06-10T10:00:00Z",
-  "updatedAt": "2026-06-10T10:00:00Z"
+  "createdAt": "2026-06-10T17:00:00+07:00",
+  "updatedAt": "2026-06-10T17:00:00+07:00"
 }
 ```
 
@@ -6911,8 +6914,8 @@ Request:
 {
   "stopId": "uuid",
   "fareFromThisStop": 200000,
-  "effectiveFrom": "2026-07-01T00:00:00+07:00",
-  "effectiveUntil": "2026-08-01T00:00:00+07:00"
+  "effectiveFrom": "2026-06-30T17:00:00Z",
+  "effectiveUntil": "2026-07-31T17:00:00Z"
 }
 ```
 
@@ -6945,8 +6948,8 @@ Response `200`: `PagedResult<RouteStopFareTemplateDto>` in the ADR 0004 success 
   "orderIndex": 1,
   "estimatedDurationFromOriginMinutes": 80,
   "distanceFromOriginKm": 70.25,
-  "createdAt": "2026-06-10T10:00:00Z",
-  "updatedAt": "2026-06-10T10:00:00Z"
+  "createdAt": "2026-06-10T17:00:00+07:00",
+  "updatedAt": "2026-06-10T17:00:00+07:00"
 }
 ```
 
@@ -6969,12 +6972,12 @@ Response `200`: `PagedResult<RouteStopFareTemplateDto>` in the ADR 0004 success 
       "orderIndex": 1,
       "estimatedDurationFromOriginMinutes": 80,
       "distanceFromOriginKm": 70.25,
-      "createdAt": "2026-06-10T10:00:00Z",
-      "updatedAt": "2026-06-10T10:00:00Z"
+      "createdAt": "2026-06-10T17:00:00+07:00",
+      "updatedAt": "2026-06-10T17:00:00+07:00"
     }
   ],
-  "createdAt": "2026-06-10T10:00:00Z",
-  "updatedAt": "2026-06-10T10:00:00Z"
+  "createdAt": "2026-06-10T17:00:00+07:00",
+  "updatedAt": "2026-06-10T17:00:00+07:00"
 }
 ```
 
@@ -7088,7 +7091,7 @@ RouteStop order conflict:
       { "field": "orderIndex", "message": "Order index must be unique within a route." }
     ]
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-10T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-10T17:00:00+07:00" }
 }
 ```
 
@@ -7104,7 +7107,7 @@ RouteStop flags invalid:
       { "field": "allowPickup", "message": "allowPickup and allowDropoff cannot both be false." }
     ]
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-10T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-10T17:00:00+07:00" }
 }
 ```
 
@@ -7144,8 +7147,8 @@ Vehicle tenant isolation: a missing Vehicle, a soft-deleted Vehicle, or a Vehicl
   "defaultSeatCount": 9,
   "isSystemDefined": true,
   "isActive": true,
-  "createdAt": "2026-06-11T10:00:00Z",
-  "updatedAt": "2026-06-11T10:00:00Z"
+  "createdAt": "2026-06-11T17:00:00+07:00",
+  "updatedAt": "2026-06-11T17:00:00+07:00"
 }
 ```
 
@@ -7268,8 +7271,8 @@ Either failure returns `422 VALIDATION_ERROR` with `error.fields` identifying `t
   "maxCargoVolumeM3": 8.50,
   "status": "ACTIVE",
   "isActive": true,
-  "createdAt": "2026-06-11T10:00:00Z",
-  "updatedAt": "2026-06-11T10:00:00Z"
+  "createdAt": "2026-06-11T17:00:00+07:00",
+  "updatedAt": "2026-06-11T17:00:00+07:00"
 }
 ```
 
@@ -7423,16 +7426,17 @@ Response `200`: updated `VehicleDto` in the ADR 0004 success envelope.
   "assistantUserId": "uuid",
   "dayOfWeek": [1, 3, 5],
   "departureTime": "08:00:00",
+  "timeZone": "Asia/Ho_Chi_Minh",
   "validFrom": "2026-07-01",
   "validUntil": "2026-12-31",
   "baseFare": 400000,
   "isActive": true,
-  "createdAt": "2026-06-11T10:00:00Z",
-  "updatedAt": "2026-06-11T10:00:00Z"
+  "createdAt": "2026-06-11T17:00:00+07:00",
+  "updatedAt": "2026-06-11T17:00:00+07:00"
 }
 ```
 
-`vehicleId`, `assistantUserId`, `validUntil`, and `baseFare` are nullable. `dayOfWeek` is a JSON array using `1=Monday`, `2=Tuesday`, ..., `7=Sunday`. `departureTime` is a timezone-free `TIME` value with local ICT semantics. `baseFare` is an optional recurring override in VND; generated Trips use `DriverSchedule.baseFare ?? Route.baseFare`.
+`vehicleId`, `assistantUserId`, `validUntil`, and `baseFare` are nullable. `dayOfWeek` is a JSON array using `1=Monday`, `2=Tuesday`, ..., `7=Sunday`. `departureTime` is a timezone-free `TIME` value interpreted with the returned constant `timeZone: "Asia/Ho_Chi_Minh"`. `baseFare` is an optional recurring override in VND; generated Trips use `DriverSchedule.baseFare ?? Route.baseFare`.
 
 ### POST `/v1/operator/driver-schedules`
 
@@ -7464,7 +7468,7 @@ Validation:
 - `vehicleId`, when present, must resolve to a non-soft-deleted Vehicle owned by the caller's operator; otherwise return `404 VEHICLE_NOT_FOUND`.
 - `driverUserId` must resolve through Identity `GET /internal/v1/users/{userId}` to a user with `role=DRIVER` under the caller operator. Missing Identity user, wrong role, wrong operator, or upstream logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields.driverUserId`.
 - `assistantUserId`, when present, must resolve through Identity `GET /internal/v1/users/{userId}` to a user with `role=ASSISTANT` under the caller operator. Missing Identity user, wrong role, wrong operator, or upstream logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields.assistantUserId`.
-- An active schedule conflicts when the same `driverUserId` has any intersecting `dayOfWeek`, the same local-ICT `departureTime`, and an overlapping `[validFrom, validUntil]` window. Return `409 TRIP_DRIVER_CONFLICT`.
+- An active schedule conflicts when the same `driverUserId` has any intersecting `dayOfWeek`, the same `departureTime` interpreted in `Asia/Ho_Chi_Minh`, and an overlapping `[validFrom, validUntil]` window. Return `409 TRIP_DRIVER_CONFLICT`.
 
 Response `201`: `DriverScheduleDto` in the ADR 0004 success envelope.
 
@@ -7501,8 +7505,8 @@ only canonical path that cascades a new `departureDateTime` to generated Trips;
 Trip schedule endpoint or Gateway route exists.
 
 For each actual departure change, compute `delta = |newDeparture - oldDeparture|` and compare the
-calendar dates in ICT (`Asia/Ho_Chi_Minh`): MINOR is the same ICT date with `delta <= 2h`; MEDIUM
-is the same ICT date with `delta > 2h && delta < 6h`; MAJOR is `delta >= 6h` or any ICT date
+calendar dates in Asia/Ho_Chi_Minh (`Asia/Ho_Chi_Minh`): MINOR is the same Asia/Ho_Chi_Minh date with `delta <= 2h`; MEDIUM
+is the same Asia/Ho_Chi_Minh date with `delta > 2h && delta < 6h`; MAJOR is `delta >= 6h` or any Asia/Ho_Chi_Minh date
 change.
 
 Scope behavior:
@@ -7616,7 +7620,7 @@ Seat-layout count failure:
       { "field": "totalSeats", "message": "totalSeats must equal seatLayoutJson.totalSeats and seats.length." }
     ]
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-11T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-11T17:00:00+07:00" }
 }
 ```
 
@@ -7629,7 +7633,7 @@ Driver schedule conflict:
     "code": "TRIP_DRIVER_CONFLICT",
     "message": "The driver already has an active schedule at this weekly time slot."
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-11T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-11T17:00:00+07:00" }
 }
 ```
 
@@ -7642,9 +7646,9 @@ Auth: `DRIVER` or `ASSISTANT`.
 Returns only Trips assigned to the authenticated JWT `sub`, where the caller is either the
 Trip's `driverUserId` or `assistantUserId`. A caller cannot supply or override a user identifier.
 
-`from` and `to` are ICT (`UTC+7`) calendar dates and are inclusive at both ends. Both parameters
+`from` and `to` are `Asia/Ho_Chi_Minh` calendar dates and are inclusive at both ends. Both parameters
 must be supplied together or omitted together. When both are omitted, the range defaults to the
-current ICT date through current ICT date plus 14 days. Supplying exactly one parameter, or a
+current Asia/Ho_Chi_Minh date through current Asia/Ho_Chi_Minh date plus 14 days. Supplying exactly one parameter, or a
 `to` date before `from`, returns `422 VALIDATION_ERROR`.
 
 Response `200`: `GetMyDriverScheduleResult` in the ADR 0004 success envelope.
@@ -7662,8 +7666,8 @@ Response `200`: `GetMyDriverScheduleResult` in the ADR 0004 success envelope.
         "operatorId": "uuid",
         "routeId": "uuid",
         "vehicleId": "uuid",
-        "departureDateTime": "2026-06-30T01:00:00Z",
-        "estimatedArrivalTime": "2026-06-30T04:00:00Z",
+        "departureDateTime": "2026-06-30T08:00:00+07:00",
+        "estimatedArrivalTime": "2026-06-30T11:00:00+07:00",
         "status": "SCHEDULED",
         "assignmentRole": "DRIVER"
       }
@@ -7671,13 +7675,13 @@ Response `200`: `GetMyDriverScheduleResult` in the ADR 0004 success envelope.
   },
   "meta": {
     "traceId": "req-abc123",
-    "timestamp": "2026-06-30T03:00:00Z"
+    "timestamp": "2026-06-30T10:00:00+07:00"
   }
 }
 ```
 
 Trips are ordered by `departureDateTime`, then by `tripId`. Date filtering converts the inclusive
-ICT date range to UTC boundaries before querying. No Trip state is mutated.
+Asia/Ho_Chi_Minh date range to UTC boundaries before querying. No Trip state is mutated.
 
 ### GET `/v1/driver/trips/{tripId}/route`
 
@@ -7713,13 +7717,13 @@ Response `200` uses the ADR 0004 success envelope:
         "latitude": 10.947,
         "longitude": 107.221,
         "orderIndex": 1,
-        "estimatedArrivalTime": "2026-07-12T03:30:00Z",
+        "estimatedArrivalTime": "2026-07-12T10:30:00+07:00",
         "allowPickup": true,
         "allowDropoff": true
       }
     ]
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-12T01:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-12T08:00:00+07:00" }
 }
 ```
 
@@ -7767,9 +7771,9 @@ Response `200` uses the ADR 0004 success envelope. Every data field is required 
   "data": {
     "tripId": "2f0cc13f-2207-4b62-9e0f-82f67f5a5bc2",
     "status": "IN_PROGRESS",
-    "actualDepartureTime": "2026-06-22T01:30:00Z"
+    "actualDepartureTime": "2026-06-22T08:30:00+07:00"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-22T01:30:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-22T08:30:00+07:00" }
 }
 ```
 
@@ -7803,10 +7807,10 @@ this manual endpoint:
   "data": {
     "tripId": "2f0cc13f-2207-4b62-9e0f-82f67f5a5bc2",
     "status": "COMPLETED",
-    "completedAt": "2026-06-22T05:30:00Z",
+    "completedAt": "2026-06-22T12:30:00+07:00",
     "completedByUserId": "7226afd8-c107-413f-8235-c39e75f7a71f"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-22T05:30:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-22T12:30:00+07:00" }
 }
 ```
 
@@ -7834,11 +7838,11 @@ Response `200` uses the public ADR 0004 envelope and data is exactly `{ tripId, 
   "data": {
     "tripId": "uuid",
     "stopId": "uuid",
-    "departedAt": "2026-06-25T10:00:00Z",
+    "departedAt": "2026-06-25T17:00:00+07:00",
     "pendingPassengerCount": 2,
     "eventEmitted": true
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-25T10:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-25T17:00:00+07:00" }
 }
 ```
 
@@ -7880,7 +7884,7 @@ Response `200` in the ADR 0004 success envelope:
   },
   "meta": {
     "traceId": "req-abc123",
-    "timestamp": "2026-06-30T03:00:00Z"
+    "timestamp": "2026-06-30T10:00:00+07:00"
   }
 }
 ```
@@ -7908,7 +7912,7 @@ Response `200` in the ADR 0004 success envelope:
   "data": {
     "passengerRecordId": "uuid",
     "boardingStatus": "BOARDED",
-    "boardedAt": "2026-06-30T03:00:00Z",
+    "boardedAt": "2026-06-30T10:00:00+07:00",
     "boardedAtStopId": null,
     "ticketId": "uuid",
     "ticketCode": "VT-20260630-ABCDEFGH",
@@ -7916,7 +7920,7 @@ Response `200` in the ADR 0004 success envelope:
   },
   "meta": {
     "traceId": "req-abc123",
-    "timestamp": "2026-06-30T03:00:00Z"
+    "timestamp": "2026-06-30T10:00:00+07:00"
   }
 }
 ```
@@ -7951,10 +7955,10 @@ Response `200`:
     "passengerId": "uuid",
     "newTripId": "uuid",
     "confirmationStatus": "CONFIRMED",
-    "confirmedAt": "2026-07-25T09:00:00Z",
+    "confirmedAt": "2026-07-25T16:00:00+07:00",
     "confirmedByUserId": "uuid"
   },
-  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-25T09:00:00Z" }
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-25T16:00:00+07:00" }
 }
 ```
 
@@ -8005,7 +8009,7 @@ Response `200` in the ADR 0004 success envelope:
   },
   "meta": {
     "traceId": "req-abc123",
-    "timestamp": "2026-06-30T03:00:00Z"
+    "timestamp": "2026-06-30T10:00:00+07:00"
   }
 }
 ```
@@ -8654,7 +8658,7 @@ owns the source database:
 
 All routes require `OPERATOR_ADMIN` or `OPERATOR_STAFF`. `operatorId` is read only from the
 authenticated operator claim; query/body values are ignored and are not accepted. `from` and `to`
-are optional ICT dates, inclusive. The default is the last 30 ICT calendar days including `to`;
+are optional Asia/Ho_Chi_Minh dates, inclusive. The default is the last 30 Asia/Ho_Chi_Minh calendar days including `to`;
 the maximum is 92 inclusive days. The service converts the range to UTC `[from,to)` and rejects
 invalid or oversized ranges with `422 REPORT_RANGE_INVALID`.
 
@@ -8664,7 +8668,7 @@ attachment`, and a deterministic filename ending in `.xlsx`. Errors use the ADR 
 Empty ranges still produce a valid workbook. No report contains passenger, sender or recipient
 PII. Legacy CSV `GET /v1/operator/parcels/reports/export?format=csv` vẫn giữ filename/MIME/counts,
 nhưng breaking đổi ba cột tiền thành `grossParcelRevenueVnd`, signed `parcelRefundsVnd` và
-`netParcelRevenueVnd`; cả ba lấy từ Payment cho cùng khoảng ngày ICT.
+`netParcelRevenueVnd`; cả ba lấy từ Payment cho cùng khoảng ngày Asia/Ho_Chi_Minh.
 
 Workbook columns are stable and typed as follows:
 
@@ -8691,7 +8695,7 @@ list. Revenue XLSX áp dụng đúng canonical signed predicate của Payment; R
 
 ### Platform report stabilization
 
-`GET /v1/admin/reports/platform?from=&to=` vẫn là public route nhận ngày ICT inclusive. Booking
+`GET /v1/admin/reports/platform?from=&to=` vẫn là public route nhận ngày Asia/Ho_Chi_Minh inclusive. Booking
 chuẩn hóa thành UTC half-open `[fromUtc,toUtcExclusive)` trước mọi query/internal call. Từ Day 42,
 Booking sở hữu facade và chỉ gọi internal raw source; mỗi source đọc database của chính mình.
 Booking/Trip/Parcel sở hữu các count vận hành. Payment ledger là nguồn authoritative cho
@@ -8732,7 +8736,7 @@ composite of service, terminal timestamp and event id. The success data is:
   "items": [{
     "service": "booking", "eventId": "uuid", "eventType": "booking.booking_confirmed",
     "payload": {}, "retryCount": 6, "lastError": "...",
-    "createdAt": "2026-07-22T00:00:00Z", "terminalAt": "2026-07-22T00:01:00Z"
+    "createdAt": "2026-07-22T07:00:00+07:00", "terminalAt": "2026-07-22T07:01:00+07:00"
   }],
   "nextCursor": null,
   "unavailableServices": []
@@ -8773,11 +8777,11 @@ require `Idempotency-Key`. Internal successes are raw DTOs and require Internal 
 Auth: `OPERATOR_ADMIN` only. The operator is read from the JWT; `operatorId` is not accepted.
 
 Query: `search?`, `status?`, `from?`, `to?`, `page=1`, `pageSize=20` (1..100),
-`sortBy=departureAt`, `sortDir=asc|desc`. `from`/`to` are ICT dates and `from <= to`.
+`sortBy=departureAt`, `sortDir=asc|desc`. `from`/`to` are Asia/Ho_Chi_Minh dates and `from <= to`.
 `search` matches route name case-insensitively and vehicle plate after removing separators.
-The date range is inclusive theo lịch ICT nhưng mọi filter persistence dùng timestamp UTC
+The date range is inclusive theo lịch Asia/Ho_Chi_Minh nhưng mọi filter persistence dùng timestamp UTC
 `[fromUtc, toUtcExclusive)`, với hai mốc được chuẩn hóa từ local midnight; không query DB bằng
-timestamp mang offset ICT.
+timestamp mang offset Asia/Ho_Chi_Minh.
 
 Each paged item is:
 
@@ -8872,8 +8876,8 @@ Create body and response use the following canonical field names:
     "displayName": "System Admin",
     "email": "admin@vietride.vn"
   },
-  "createdAt": "2026-07-29T10:00:00Z",
-  "updatedAt": "2026-07-29T10:00:00Z"
+  "createdAt": "2026-07-29T17:00:00+07:00",
+  "updatedAt": "2026-07-29T17:00:00+07:00"
 }
 ```
 
@@ -8903,7 +8907,7 @@ Auth: `OPERATOR_ADMIN`; route ownership comes from JWT tenant. Body:
 
 ```json
 {
-  "effectiveFrom": "2026-08-01T00:00:00+07:00",
+  "effectiveFrom": "2026-07-31T17:00:00Z",
   "effectiveUntil": null,
   "items": [
     { "sizeCategory": "SMALL", "priceVnd": 50000 },
@@ -8941,16 +8945,16 @@ fabricated.
 
 Existing BookingStats routes add `groupBy=month` while retaining existing group values. Month/day
 buckets use `Asia/Ho_Chi_Minh`, zero-fill missing buckets and reconcile item totals with summary.
-Their `from/to` parameters are inclusive ICT dates and use the UTC half-open conversion described
+Their `from/to` parameters are inclusive Asia/Ho_Chi_Minh dates and use the UTC half-open conversion described
 for Operator Trip search; the maximum requested range is 366 inclusive days.
 
 `GET /v1/operator/parcel-stats?from=&to=&groupBy=status|route&limit=` is `OPERATOR_ADMIN`-only,
 tenant-scoped and uses stable route snapshots so inactive routes retain historical names.
-Its `from/to` range uses the same inclusive ICT rule.
+Its `from/to` range uses the same inclusive Asia/Ho_Chi_Minh rule.
 
 BookingStats không trả bất kỳ field tiền nào. Month items là
 `{ date, totalBookings, totalCancellations }`; operator variant thêm `totalCompleted` và các count
-no-show hiện có. `date` là ngày ICT đầu tiên của tháng. Parcel status items là `{ key, count }`
+no-show hiện có. `date` là ngày Asia/Ho_Chi_Minh đầu tiên của tháng. Parcel status items là `{ key, count }`
 where `key` is a current ParcelStatus; route items are
 `{ routeId, routeName, parcelCount }`. Both Parcel shapes return `totalParcels`.
 
@@ -8959,10 +8963,10 @@ BookingStats with Identity internal metrics and does not call Platform Report. `
 the account is currently non-deleted/unlocked and its latest `lastLoginAt` is in the period.
 `activeOperators` is the intersection of operators currently non-deleted,
 `APPROVED + isActive` and operators with at least one BookingStats booking in the period. The
-previous period is the immediately preceding equal-length ICT range. `userDistribution` counts
+previous period is the immediately preceding equal-length Asia/Ho_Chi_Minh range. `userDistribution` counts
 current non-deleted users by role (locked users remain in this distribution), while
 `operatorStatusDistribution` counts current non-deleted operators by registration status.
-The range is 1..366 inclusive ICT days; missing, reversed or oversized ranges return
+The range is 1..366 inclusive Asia/Ho_Chi_Minh days; missing, reversed or oversized ranges return
 `422 VALIDATION_ERROR`.
 Identity timeout, 5xx or malformed metrics fail the whole Dashboard with
 `503 UPSTREAM_UNAVAILABLE`; no partial summary/distribution is returned.
@@ -9031,7 +9035,7 @@ object `settlement` và không thuộc bất kỳ công thức revenue nào. Sub
 refund/proration; nếu nghiệp vụ này thay đổi phải mở contract mới trước khi sửa công thức.
 
 `GET /v1/admin/revenue/analytics?from=&to=&groupBy=month&top=5` is `SYSTEM_ADMIN`-only; `top` is
-clamped 1..20. The range is 1..366 inclusive ICT days and `groupBy` is exactly `month`.
+clamped 1..20. The range is 1..366 inclusive Asia/Ho_Chi_Minh days and `groupBy` is exactly `month`.
 Monthly buckets are zero-filled and reconcile with summary. Response data contains:
 
 - `summary.revenue`: comparisons cho `totalProjectRevenueVnd`, `netTransportRevenueVnd`,
@@ -9065,7 +9069,7 @@ financial có thể trễ tối đa 60 giây do cache Payment. Query lỗi khôn
 
 ### Internal revenue summaries — không qua Gateway
 
-Hai endpoint dưới đây yêu cầu Internal JWT, dùng ICT inclusive range, trả raw DTO thành công và
+Hai endpoint dưới đây yêu cầu Internal JWT, dùng Asia/Ho_Chi_Minh inclusive range, trả raw DTO thành công và
 không được đăng ký Gateway:
 
 - `GET /internal/v1/revenue/admin-summary?from=YYYY-MM-DD&to=YYYY-MM-DD` trả
@@ -9115,12 +9119,12 @@ Gateway:
 |---|---|---|
 | `GET /internal/v1/users?ids=<uuid>&ids=<uuid>` | Identity | Existing 1..100 batch adds phone/email/avatar/status and includes soft-deleted IDs as redacted users |
 | `POST /internal/v1/operators/summaries/batch` | Identity | Existing read-only batch adds logo/contact phone; response remains deterministic by operator ID |
-| `GET /internal/v1/admin/dashboard/identity-metrics?from=&to=` | Identity | Raw `{ activeUserCount, approvedActiveOperatorIds, userRoleCounts, operatorStatusCounts }`; ICT range and current-state semantics described above |
+| `GET /internal/v1/admin/dashboard/identity-metrics?from=&to=` | Identity | Raw `{ activeUserCount, approvedActiveOperatorIds, userRoleCounts, operatorStatusCounts }`; Asia/Ho_Chi_Minh range and current-state semantics described above |
 | `POST /internal/v1/trips/summaries/batch` | Trip | Body `{ tripIds }`, 1..100 distinct IDs; raw trip/route/station/vehicle/crew/timing summaries, missing IDs omitted |
 | `POST /internal/v1/operators/vehicle-counts/batch` | Trip | Body `{ operatorIds }`, 1..100 distinct IDs; raw `{ operatorId, vehicleCount }[]` |
-| `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Trip | Raw ICT-month `{ routeId, routeName, originName, destinationName, tripCount, completedTripCount }[]` |
-| `GET /internal/v1/revenue/admin-summary?from=&to=` | Payment | Raw canonical project revenue + independent payout summary; ICT inclusive |
-| `GET /internal/v1/revenue/operators/{operatorId}/summary?from=&to=` | Payment | Raw canonical operator ticket/parcel summary, gồm gross Parcel và signed refund; ICT inclusive |
+| `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Trip | Raw Asia/Ho_Chi_Minh-month `{ routeId, routeName, originName, destinationName, tripCount, completedTripCount }[]` |
+| `GET /internal/v1/revenue/admin-summary?from=&to=` | Payment | Raw canonical project revenue + independent payout summary; Asia/Ho_Chi_Minh inclusive |
+| `GET /internal/v1/revenue/operators/{operatorId}/summary?from=&to=` | Payment | Raw canonical operator ticket/parcel summary, gồm gross Parcel và signed refund; Asia/Ho_Chi_Minh inclusive |
 | `POST /internal/v1/revenue/backfills/parcel-voucher-reversals?dryRun=true|false` | Payment | Internal maintenance; mặc định dry-run, raw `{ scannedRefundCount, candidateCount, skippedExistingCount, legacyUnclassifiedCount, totalAdjustmentVnd, appliedCount }` |
 
 User batch items are `{ id, displayName, phone, email, avatarUrl, role, operatorId, status,

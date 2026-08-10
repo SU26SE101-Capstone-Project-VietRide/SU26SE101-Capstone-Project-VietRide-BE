@@ -28,8 +28,8 @@ RUN dotnet publish "apps/trip/src/VietRide.Trip.Api/VietRide.Trip.Api.csproj" \
 # ── Runtime stage ───────────────────────────────────────────────────────────────
 FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS runtime
 # The alpine runtime ships without ICU; .NET aborts on startup without it (globalization
-# is not invariant). Install icu-libs so culture-aware formatting (Money, dates) works.
-RUN apk add --no-cache icu-libs
+# is not invariant). tzdata is required for the Asia/Ho_Chi_Minh business calendar.
+RUN apk add --no-cache icu-libs tzdata
 WORKDIR /app
 COPY --from=build /app/publish .
 

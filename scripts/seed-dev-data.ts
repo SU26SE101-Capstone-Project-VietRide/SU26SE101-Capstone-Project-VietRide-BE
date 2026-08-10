@@ -150,10 +150,10 @@ export function validateSeedOptions(options: SeedOptions): Required<SeedOptions>
     throw new Error('Day 44 seed is forbidden in Production');
   if (!password.trim()) throw new Error('DEMO_SEED_ACCOUNT_PASSWORD is required');
   if (!parseCalendarDate(startDate)) {
-    throw new Error('--start-date must be a valid YYYY-MM-DD ICT date');
+    throw new Error('--start-date must be a valid YYYY-MM-DD Asia/Ho_Chi_Minh date');
   }
   if (startDate <= ictDate(now))
-    throw new Error('--start-date must be at least one day after the current ICT date');
+    throw new Error('--start-date must be at least one day after the current Asia/Ho_Chi_Minh date');
   return { environment, password, startDate, now };
 }
 

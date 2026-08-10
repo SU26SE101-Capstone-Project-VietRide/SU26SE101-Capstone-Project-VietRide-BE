@@ -2,6 +2,7 @@ using MediatR;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Identity.Application.Features.Internal.AdminDashboard;
 
@@ -9,7 +10,6 @@ public sealed class GetAdminDashboardIdentityMetricsQueryHandler
     : IRequestHandler<GetAdminDashboardIdentityMetricsQuery, AdminDashboardIdentityMetricsResponse>
 {
     private const int MaximumInclusiveDays = 366;
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
 
     private readonly IAdminDashboardIdentityMetricsRepository _repository;
 
@@ -86,12 +86,12 @@ public sealed class GetAdminDashboardIdentityMetricsQueryHandler
     private static DateTimeOffset ToUtcStart(DateOnly date)
         => date == DateOnly.MinValue
             ? DateTimeOffset.MinValue
-            : new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), IctOffset).ToUniversalTime();
+            : BusinessTime.ToUtc(date, TimeOnly.MinValue);
 
     private static DateTimeOffset ToUtcExclusive(DateOnly date)
         => date == DateOnly.MaxValue
             ? DateTimeOffset.MaxValue
-            : new DateTimeOffset(date.AddDays(1).ToDateTime(TimeOnly.MinValue), IctOffset).ToUniversalTime();
+            : BusinessTime.ToUtc(date.AddDays(1), TimeOnly.MinValue);
 
     private static int GetUserRoleOrder(string role)
         => Enum.TryParse<UserRole>(role, ignoreCase: false, out var parsed)

@@ -7,13 +7,14 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Events;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Booking.Infrastructure.Jobs;
 
 public sealed class StopDisabledAutoFallbackJob(BookingDbContext db, IBookingPendingActionRepository actions, IClock clock)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     [Queue("booking")]
     [AutomaticRetry(Attempts = 5)]

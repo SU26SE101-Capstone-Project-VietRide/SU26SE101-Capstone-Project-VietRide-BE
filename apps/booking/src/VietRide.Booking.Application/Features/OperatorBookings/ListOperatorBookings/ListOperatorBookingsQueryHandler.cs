@@ -4,6 +4,7 @@ using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
@@ -13,7 +14,6 @@ public sealed class ListOperatorBookingsQueryHandler
 {
     private static readonly HashSet<string> AllowedSortFields =
         ["createdAt", "departureAt", "bookingCode", "status", "totalAmount"];
-    private static readonly TimeZoneInfo IctTimeZone = ResolveIctTimeZone();
     private readonly IBookingRepository _bookings;
     private readonly IIdentityUserServiceClient _identityUsers;
 
@@ -105,30 +105,7 @@ public sealed class ListOperatorBookingsQueryHandler
         if (date is null)
             return (null, null);
 
-        var localFrom = date.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        var localTo = date.Value.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
-        return (
-            new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localFrom, IctTimeZone), TimeSpan.Zero),
-            new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(localTo, IctTimeZone), TimeSpan.Zero));
-    }
-
-    private static TimeZoneInfo ResolveIctTimeZone()
-    {
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            try
-            {
-                return TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
-            }
-            catch (TimeZoneNotFoundException)
-            {
-                return TimeZoneInfo.CreateCustomTimeZone(
-                    "Asia/Ho_Chi_Minh", TimeSpan.FromHours(7), "ICT", "ICT");
-            }
-        }
+        var range = BusinessTime.GetUtcDayRange(date.Value);
+        return (range.FromUtc, range.ToUtcExclusive);
     }
 }

@@ -98,7 +98,7 @@ CREATE TABLE stations (
     longitude DECIMAL(10,7) NULL,
     contact_phone VARCHAR(20) NULL,
     contact_email VARCHAR(255) NULL,
-    -- {"mon":"06:00-22:00",...} local ICT
+    -- {"mon":"06:00-22:00",...} local Asia/Ho_Chi_Minh
     operating_hours JSONB NULL,
     -- e.g. ["waiting_room","parking","ticket_counter"]
     facilities JSONB NULL,
@@ -226,7 +226,7 @@ CREATE TABLE operator_fare_surcharge_settings (
 );
 
 -- -----------------------------------------------------------------------------
--- operator_fare_surcharge_periods (inclusive ICT holiday dates)
+-- operator_fare_surcharge_periods (inclusive Asia/Ho_Chi_Minh holiday dates)
 -- -----------------------------------------------------------------------------
 CREATE TABLE operator_fare_surcharge_periods (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -259,7 +259,7 @@ CREATE INDEX idx_operator_fare_surcharge_periods_operator_start
 COMMENT ON TABLE operator_fare_surcharge_settings IS
     'Trip-owned operator holiday-fare switch. operator_id is a logical FK to Identity; missing row means disabled.';
 COMMENT ON TABLE operator_fare_surcharge_periods IS
-    'Named holiday surcharge windows using inclusive ICT calendar dates. Active windows cannot overlap per operator.';
+    'Named holiday surcharge windows using inclusive Asia/Ho_Chi_Minh calendar dates. Active windows cannot overlap per operator.';
 
 -- -----------------------------------------------------------------------------
 -- route_stops (junction: only intermediate stops; not origin/destination Station)
@@ -421,7 +421,7 @@ CREATE TABLE driver_schedules (
     driver_user_id UUID NOT NULL,    -- logical FK → identity.users (role=DRIVER)
     assistant_user_id UUID NULL,     -- logical FK → identity.users (role=ASSISTANT)
     day_of_week JSONB NOT NULL,      -- e.g. [1,3,5] (1=Mon, 7=Sun)
-    departure_time TIME NOT NULL,    -- local ICT
+    departure_time TIME NOT NULL,    -- local Asia/Ho_Chi_Minh
     valid_from DATE NOT NULL,
     valid_until DATE NULL,
     base_fare BIGINT NULL,
@@ -447,7 +447,7 @@ CREATE INDEX idx_driver_schedules_route_active
 COMMENT ON COLUMN driver_schedules.day_of_week IS
     'JSONB array of ints 1-7 (1=Mon). Hangfire weekly job iterates dayOfWeek to generate Trip.';
 COMMENT ON COLUMN driver_schedules.departure_time IS
-    'TIME (no timezone). Stored as local ICT semantic.';
+    'TIME (no timezone). Stored as local Asia/Ho_Chi_Minh semantic.';
 COMMENT ON COLUMN driver_schedules.base_fare IS
     'Optional recurring fare override. Generated Trips fall back to routes.base_fare when NULL.';
 

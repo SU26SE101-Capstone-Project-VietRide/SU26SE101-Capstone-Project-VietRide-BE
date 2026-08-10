@@ -281,7 +281,7 @@ function validInput(): Day44IdentityPlannerInput {
 }
 
 describe('Day 44 identity fixture planner', () => {
-  test('plans the exact manifest roles, tenants, plans, subscriptions, and ICT counters', () => {
+  test('plans the exact manifest roles, tenants, plans, subscriptions, and Asia/Ho_Chi_Minh counters', () => {
     const plan = planDay44IdentityFixture(validInput());
 
     assert.deepEqual(plan, {
@@ -323,7 +323,7 @@ describe('Day 44 identity fixture planner', () => {
     });
   });
 
-  test('calculates the ICT-month Trip counter across a month boundary', () => {
+  test('calculates the Asia/Ho_Chi_Minh-month Trip counter across a month boundary', () => {
     const input = validInput();
     input.startDate = '2026-08-25';
     input.tripDepartureInstantsByOperator = {

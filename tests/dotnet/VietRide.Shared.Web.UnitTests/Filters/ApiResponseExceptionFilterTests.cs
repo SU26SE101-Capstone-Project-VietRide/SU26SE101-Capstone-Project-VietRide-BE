@@ -259,7 +259,7 @@ public sealed class ApiResponseExceptionFilterTests
         var result = (ObjectResult)ctx.Result!;
         var envelope = (ApiResponse)result.Value!;
         envelope.Meta.TraceId.Should().Be("req-123");
-        envelope.Meta.Timestamp.Should().NotBeNullOrWhiteSpace();
+        envelope.Meta.Timestamp.Should().NotBe(default);
     }
 
     [Fact]
