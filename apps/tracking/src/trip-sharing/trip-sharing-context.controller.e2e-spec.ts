@@ -119,13 +119,21 @@ describe('TripSharePublicController (e2e)', () => {
       statusCode: 200,
       data: {
         status: 'IN_PROGRESS',
+        lastUpdatedAt: '2026-08-03T17:02:00.000+07:00',
+        vehicle: {
+          location: { recordedAt: '2026-08-03T17:01:00.000+07:00' },
+        },
+        eta: {
+          estimatedArrivalAt: '2026-08-03T17:20:00.000+07:00',
+          updatedAt: '2026-08-03T17:02:00.000+07:00',
+        },
         route: {
           originName: 'Origin',
           destinationName: 'Destination',
           geometry: { type: 'LineString', coordinates: [[106, 10], [106.2, 10.2]] },
         },
       },
-      meta: { traceId: expect.any(String), timestamp: expect.any(String) },
+      meta: { traceId: expect.any(String), timestamp: expect.stringMatching(/\+07:00$/) },
     });
     const json = JSON.stringify(response.body);
     for (const forbidden of [TRIP_ID, GRANT_ID, ORIGIN_ID, DESTINATION_ID, STOP_ID, 'tripId', 'stopId']) {

@@ -384,8 +384,8 @@ describe('TrackingDataController REST fallback (e2e)', () => {
       }),
     );
     expect(response.body.data?.items.map((item) => item.recordedAt)).toEqual([
-      '2026-06-03T10:00:00.000Z',
-      '2026-06-03T10:05:00.000Z',
+      '2026-06-03T17:00:00.000+07:00',
+      '2026-06-03T17:05:00.000+07:00',
     ]);
     expect(response.body.data?.page).toBe(1);
     expect(response.body.data?.pageSize).toBe(20);
@@ -393,6 +393,30 @@ describe('TrackingDataController REST fallback (e2e)', () => {
     expect(response.body.data?.totalPages).toBe(1);
     expect(response.body.data?.hasNextPage).toBe(false);
     expect(response.body.data?.hasPreviousPage).toBe(false);
+  });
+
+  it('normalizes explicit offsets and rejects an offsetless trail timestamp with 422', async () => {
+    const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
+    const accepted = await getJson<ApiEnvelope<unknown>>(
+      `/v1/tracking/trips/${TEST_TRIP_ID}/trail?from=2026-06-03T16:00:00%2B07:00&to=2026-06-03T18:00:00%2B07:00`,
+      token,
+    );
+    expect(accepted.status).toBe(200);
+    expect(prismaFindMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        recordedAt: {
+          gte: new Date('2026-06-03T09:00:00.000Z'),
+          lte: new Date('2026-06-03T11:00:00.000Z'),
+        },
+      }),
+    }));
+
+    const rejected = await getJson<ApiEnvelope<unknown>>(
+      `/v1/tracking/trips/${TEST_TRIP_ID}/trail?from=2026-06-03T16:00:00&to=2026-06-03T18:00:00`,
+      token,
+    );
+    expect(rejected.status).toBe(422);
+    expect(rejected.body.error?.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns cached ETA from Redis', async () => {

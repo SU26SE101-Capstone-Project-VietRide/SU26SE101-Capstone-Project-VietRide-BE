@@ -6,12 +6,13 @@ using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Parcel.Infrastructure.Http;
 
 public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServiceClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private readonly HttpClient _httpClient;
     private readonly ILogger<TripServiceClient> _logger;

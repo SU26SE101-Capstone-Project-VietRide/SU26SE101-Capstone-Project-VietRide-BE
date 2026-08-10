@@ -41,7 +41,7 @@ Narrate the ordered journey exactly as follows:
 `Operator → DriverSchedule → AUTO_FROM_SCHEDULE Trip → load → start → arrival → unload → complete`
 
 1. The operator creates one active DriverSchedule through Gateway. The runner selects a single
-   future ICT service date inside the generation horizon and waits for exactly one linked Trip;
+   future Asia/Ho_Chi_Minh service date inside the generation horizon and waits for exactly one linked Trip;
    it verifies the schedule id, operator, route, vehicle, assigned driver/assistant, generated
    stop, and seats before any fixture-only time adjustment.
 2. The generated Trip starts at `SCHEDULED`. The existing scheduler moves it to `BOARDING` and

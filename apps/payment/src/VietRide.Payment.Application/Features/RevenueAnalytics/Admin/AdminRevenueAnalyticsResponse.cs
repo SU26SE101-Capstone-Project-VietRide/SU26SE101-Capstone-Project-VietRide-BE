@@ -5,4 +5,4 @@ public sealed record AdminRevenueAnalyticsResponse(
     AdminRevenueSummary Summary,
     IReadOnlyList<AdminRevenueMonthItem> Monthly,
     IReadOnlyList<AdminTopOperatorItem> TopOperators,
-    DateTime GeneratedAt);
+    DateTimeOffset GeneratedAt);

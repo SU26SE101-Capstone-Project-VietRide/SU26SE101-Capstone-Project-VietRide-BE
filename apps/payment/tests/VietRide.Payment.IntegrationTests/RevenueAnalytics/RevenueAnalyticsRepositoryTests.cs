@@ -24,7 +24,7 @@ public sealed class RevenueAnalyticsRepositoryTests
     private const string ScratchPrefix = "vietride_ui20_revenue_";
 
     [Fact]
-    public async Task PostgreSqlCoreUsesCanonicalSourcesClassificationIctBoundariesAndOneSqlPerRead()
+    public async Task PostgreSqlCoreUsesCanonicalSourcesClassificationVietnamBoundariesAndOneSqlPerRead()
     {
         var databaseName = $"{ScratchPrefix}{Guid.NewGuid():N}";
         var connectionString = CreateConnectionString(databaseName);

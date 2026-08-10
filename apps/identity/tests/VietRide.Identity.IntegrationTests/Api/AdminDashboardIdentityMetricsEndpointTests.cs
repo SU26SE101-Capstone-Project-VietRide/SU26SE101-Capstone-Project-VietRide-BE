@@ -24,7 +24,7 @@ public sealed class AdminDashboardIdentityMetricsEndpointTests
     private const string InternalJwtSecret = "identity-internal-test-secret-32-chars";
 
     [Fact]
-    public async Task Endpoint_WithInternalJwt_ReturnsRawMetricsAndPassesIctRange()
+    public async Task Endpoint_WithInternalJwt_ReturnsRawMetricsAndPassesVietnamRange()
     {
         var operatorId = Guid.Parse("11111111-1111-4111-8111-111111111111");
         var repository = new FakeAdminDashboardIdentityMetricsRepository

@@ -589,7 +589,7 @@ function assertAcceptanceMatrix() {
       'vietride_identity',
       `SELECT count(*) FROM vietride_identity.operator_subscriptions WHERE operator_id='${operatorId}' AND current_trips_this_month=${expectedCounter}`,
       1,
-      `ICT trip counter ${operatorId}`,
+      `Asia/Ho_Chi_Minh trip counter ${operatorId}`,
     );
   }
 

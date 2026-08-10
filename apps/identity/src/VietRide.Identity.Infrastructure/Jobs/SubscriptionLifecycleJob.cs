@@ -10,6 +10,7 @@ using VietRide.Identity.Infrastructure.Messaging;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Identity.Infrastructure.Jobs;
 
@@ -208,9 +209,12 @@ public sealed class SubscriptionLifecycleJob
     public async Task ResetMonthlyTripUsageAsync(CancellationToken cancellationToken = default)
     {
         var now = _clock.UtcNow;
-        var ictNow = now.ToOffset(TimeSpan.FromHours(7));
+        var localToday = BusinessTime.ToLocalDate(now);
+        var currentMonthStartUtc = BusinessTime.ToUtc(
+            new DateOnly(localToday.Year, localToday.Month, 1),
+            TimeOnly.MinValue);
         var subscriptions = await _subscriptions.Query()
-            .Where(subscription => subscription.LastResetAt < new DateTimeOffset(ictNow.Year, ictNow.Month, 1, 0, 0, 0, TimeSpan.FromHours(7)).ToUniversalTime())
+            .Where(subscription => subscription.LastResetAt < currentMonthStartUtc)
             .ToListAsync(cancellationToken);
         foreach (var subscription in subscriptions)
         {

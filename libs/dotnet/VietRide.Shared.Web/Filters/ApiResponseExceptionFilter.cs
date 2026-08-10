@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Middleware;
+using VietRide.Shared.Web.Serialization;
 
 namespace VietRide.Shared.Web.Filters;
 
@@ -33,7 +34,7 @@ public sealed class ApiResponseExceptionFilter : IExceptionFilter
     {
         var (statusCode, errorCode, message, fields) = Map(context.Exception);
         var traceId = GetTraceId(context);
-        var meta = ApiMeta.Create(traceId);
+        var meta = ApiTimestampPresentation.CreateMeta(context.HttpContext, traceId);
 
         var error = new ApiError
         {

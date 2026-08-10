@@ -4,4 +4,4 @@ public sealed record PlatformReportResult(
     PlatformReportPeriod Period,
     PlatformReportTotals Totals,
     IReadOnlyList<PlatformReportOperatorItem> ByOperator,
-    DateTime GeneratedAt);
+    DateTimeOffset GeneratedAt);

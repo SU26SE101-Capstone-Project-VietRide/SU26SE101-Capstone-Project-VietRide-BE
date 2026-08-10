@@ -1,3 +1,4 @@
+using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Features.Routes;
 using VietRide.Trip.Application.Features.Vehicles;
@@ -9,4 +10,7 @@ public sealed record DriverScheduleDetailDto(
     IReadOnlyCollection<int> DayOfWeek, TimeOnly DepartureTime, DateOnly ValidFrom, DateOnly? ValidUntil,
     bool IsActive, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
     RouteDto? Route, VehicleDto? Vehicle, IdentityUserProfile? Driver, IdentityUserProfile? Assistant,
-    long? BaseFare = null);
+    long? BaseFare = null)
+{
+    public string TimeZone => BusinessTime.TimeZoneId;
+}

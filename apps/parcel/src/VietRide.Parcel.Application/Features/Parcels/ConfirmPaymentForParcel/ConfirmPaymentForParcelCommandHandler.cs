@@ -96,7 +96,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             await ConsumeVoucherIfNeededAsync(request.ReferenceId, request.Method, cancellationToken);
             await _statsRepository.UpsertIncrementAsync(
                 snapshot.OperatorId,
-                DateOnly.FromDateTime(now.UtcDateTime),
+                VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now),
                 0, 0, 0, 0, 0, snapshot.DepositAmount, 0,
                 cancellationToken);
             await TryReserveCargoAfterPaymentAsync(snapshot, request.PaymentId, cancellationToken);
@@ -128,7 +128,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             }
             await _statsRepository.UpsertIncrementAsync(
                 snapshot.OperatorId,
-                DateOnly.FromDateTime(now.UtcDateTime),
+                VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now),
                 0, 0, 0, 0, 0, snapshot.AdditionalAmount, 0,
                 cancellationToken);
             await TryReserveCargoAfterPaymentAsync(snapshot, request.PaymentId, cancellationToken);
@@ -182,7 +182,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
 
         await _statsRepository.UpsertIncrementAsync(
             snapshot.OperatorId,
-            DateOnly.FromDateTime(now.UtcDateTime),
+            VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now),
             0, 0, 0, canStillServe ? 0 : 1, 0, request.Amount, refundAmount,
             cancellationToken);
         return true;
@@ -288,7 +288,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
         {
             await _statsRepository.UpsertIncrementAsync(
                 snapshot.OperatorId,
-                DateOnly.FromDateTime(now.UtcDateTime),
+                VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now),
                 0, 0, 0, 0, 0, request.Amount, 0,
                 cancellationToken);
             return true;
@@ -363,7 +363,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
 
         await _statsRepository.UpsertIncrementAsync(
             snapshot.OperatorId,
-            DateOnly.FromDateTime(now.UtcDateTime),
+            VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now),
             0, 0, 0, canStillServe ? 0 : 1, 0, request.Amount, refundAmount,
             cancellationToken);
         return true;

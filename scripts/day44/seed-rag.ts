@@ -11,7 +11,7 @@ import {
   verifyRagFixture,
 } from './generate-rag-fixture';
 
-const ICT_OFFSET_MILLISECONDS = 7 * 60 * 60 * 1_000;
+const VIETNAM_OFFSET_MILLISECONDS = 7 * 60 * 60 * 1_000;
 
 export const DAY44_RAG_FIXTURE_PATH = 'scripts/day44/fixtures/rag-embeddings.json';
 export const DAY44_RAG_PROVENANCE_PATH = 'scripts/day44/fixtures/rag-embeddings.provenance.json';
@@ -140,7 +140,7 @@ function ictInstant(startDate: string, dayOffset: number, hour = 0, minute = 0):
   const month = Number(monthText);
   const day = Number(dayText);
   const instant = new Date(
-    Date.UTC(year, month - 1, day + dayOffset, hour, minute) - ICT_OFFSET_MILLISECONDS,
+    Date.UTC(year, month - 1, day + dayOffset, hour, minute) - VIETNAM_OFFSET_MILLISECONDS,
   );
   const normalized = new Date(Date.UTC(year, month - 1, day));
   if (

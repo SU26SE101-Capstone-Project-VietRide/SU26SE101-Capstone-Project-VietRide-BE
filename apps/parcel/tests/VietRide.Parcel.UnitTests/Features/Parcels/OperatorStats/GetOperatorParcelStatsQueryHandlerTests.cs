@@ -12,7 +12,7 @@ public sealed class GetOperatorParcelStatsQueryHandlerTests
     private readonly IOperatorParcelStatsRepository _repository = Substitute.For<IOperatorParcelStatsRepository>();
 
     [Fact]
-    public async Task OperatorParcelStats_Status_UsesInclusiveIctRangeAndMapsExactShape()
+    public async Task OperatorParcelStats_Status_UsesInclusiveVietnamRangeAndMapsExactShape()
     {
         _repository.GetAsync(
                 OperatorId,

@@ -21,11 +21,11 @@ public sealed class Day23AllPendingScheduleChangeProducerTests
 {
     public static IEnumerable<object[]> SeverityCases =>
     [
-        [IctDeparture(2026, 7, 20, 10, 0), IctDeparture(2026, 7, 20, 12, 0), "MINOR"],
-        [IctDeparture(2026, 7, 20, 10, 0), IctDeparture(2026, 7, 20, 12, 0).AddTicks(1), "MEDIUM"],
-        [IctDeparture(2026, 7, 20, 10, 0), IctDeparture(2026, 7, 20, 16, 0).AddTicks(-1), "MEDIUM"],
-        [IctDeparture(2026, 7, 20, 10, 0), IctDeparture(2026, 7, 20, 16, 0), "MAJOR"],
-        [IctDeparture(2026, 7, 20, 23, 45), IctDeparture(2026, 7, 21, 0, 15), "MAJOR"],
+        [VietnamDeparture(2026, 7, 20, 10, 0), VietnamDeparture(2026, 7, 20, 12, 0), "MINOR"],
+        [VietnamDeparture(2026, 7, 20, 10, 0), VietnamDeparture(2026, 7, 20, 12, 0).AddTicks(1), "MEDIUM"],
+        [VietnamDeparture(2026, 7, 20, 10, 0), VietnamDeparture(2026, 7, 20, 16, 0).AddTicks(-1), "MEDIUM"],
+        [VietnamDeparture(2026, 7, 20, 10, 0), VietnamDeparture(2026, 7, 20, 16, 0), "MAJOR"],
+        [VietnamDeparture(2026, 7, 20, 23, 45), VietnamDeparture(2026, 7, 21, 0, 15), "MAJOR"],
     ];
 
     [Theory]
@@ -116,7 +116,7 @@ public sealed class Day23AllPendingScheduleChangeProducerTests
 
     [Theory]
     [MemberData(nameof(SeverityCases))]
-    public void Severity_UsesAllDeltaEdgesAndIctCalendarDate(
+    public void Severity_UsesAllDeltaEdgesAndVietnamCalendarDate(
         DateTimeOffset oldDeparture,
         DateTimeOffset newDeparture,
         string expected)
@@ -129,8 +129,8 @@ public sealed class Day23AllPendingScheduleChangeProducerTests
     public async Task PreflightFetchesWholeBatchBeforeRejectingNewDepartureWithoutWrites()
     {
         var fixture = Fixture.Create(maxClockReads: 1);
-        var safeTrip = fixture.AddTrip(IctDeparture(2026, 7, 16, 20, 0), confirmed: true);
-        var blockedTrip = fixture.AddTrip(IctDeparture(2026, 7, 15, 20, 0), confirmed: true);
+        var safeTrip = fixture.AddTrip(VietnamDeparture(2026, 7, 16, 20, 0), confirmed: true);
+        var blockedTrip = fixture.AddTrip(VietnamDeparture(2026, 7, 15, 20, 0), confirmed: true);
         var blockedNewTime = TimeOnly.FromTimeSpan(TimeSpan.FromHours(19) - TimeSpan.FromTicks(1));
 
         var action = () => fixture.Handler.Handle(fixture.Command(blockedNewTime), CancellationToken.None);
@@ -149,7 +149,7 @@ public sealed class Day23AllPendingScheduleChangeProducerTests
     public async Task SuccessfulCascadeStagesOneExactIdentityEvent_AndReplayNoOpStagesNone()
     {
         var fixture = Fixture.Create(maxClockReads: 2);
-        var oldDeparture = IctDeparture(2026, 7, 16, 20, 0);
+        var oldDeparture = VietnamDeparture(2026, 7, 16, 20, 0);
         var trip = fixture.AddTrip(oldDeparture, confirmed: true);
         var stop = TripStop.Create(
             trip.Id,
@@ -196,7 +196,7 @@ public sealed class Day23AllPendingScheduleChangeProducerTests
         fixture.Booking.RequestedTripIds.Should().BeEmpty();
     }
 
-    private static DateTimeOffset IctDeparture(int year, int month, int day, int hour, int minute) =>
+    private static DateTimeOffset VietnamDeparture(int year, int month, int day, int hour, int minute) =>
         new(year, month, day, hour, minute, 0, TimeSpan.FromHours(7));
 
     private sealed class Fixture

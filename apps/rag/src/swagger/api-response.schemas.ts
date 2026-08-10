@@ -5,7 +5,7 @@ const metaSchema: SchemaObject = {
   required: ['traceId', 'timestamp'],
   properties: {
     traceId: { type: 'string', example: 'req_01HZY7B9Q6Y8Y4J4XJ4Z6X9YQ8' },
-    timestamp: { type: 'string', format: 'date-time', example: '2026-06-24T10:00:00.000Z' },
+    timestamp: { type: 'string', format: 'date-time', example: '2026-06-24T17:00:00.000+07:00' },
   },
 };
 

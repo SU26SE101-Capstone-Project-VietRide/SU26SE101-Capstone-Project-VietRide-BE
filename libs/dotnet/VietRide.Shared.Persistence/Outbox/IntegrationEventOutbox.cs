@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Shared.Persistence.Outbox;
 
@@ -111,12 +112,12 @@ public sealed class IntegrationEventOutbox : IIntegrationEventOutbox
                     nameof(payloadJson));
             }
 
-            return new NormalizedPayload(payloadEventId, payloadJson);
+            return new NormalizedPayload(payloadEventId, UtcJson.NormalizeInstants(payloadJson));
         }
 
         var canonicalEventId = suppliedEventId ?? Guid.NewGuid();
         payload["eventId"] = canonicalEventId;
-        return new NormalizedPayload(canonicalEventId, payload.ToJsonString());
+        return new NormalizedPayload(canonicalEventId, UtcJson.NormalizeInstants(payload.ToJsonString()));
     }
 
     private sealed record NormalizedPayload(Guid EventId, string PayloadJson);

@@ -20,14 +20,7 @@ internal sealed class InvoiceJobsRegistrationHostedService : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _jobs.AddOrUpdate<InvoicePdfReconciliationJob>(
-            InvoicePdfReconciliationJob.RecurringJobId,
-            job => job.RunAsync(CancellationToken.None),
-            _options.ReconciliationCron);
-        _jobs.AddOrUpdate<Day38InvoiceBackfillJob>(
-            Day38InvoiceBackfillJob.RecurringJobId,
-            job => job.RunAsync(CancellationToken.None),
-            "*/10 * * * *");
+        PaymentRecurringJobRegistration.RegisterInvoiceJobs(_jobs, _options.ReconciliationCron);
         return Task.CompletedTask;
     }
 

@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Booking.Infrastructure.Http;
 
@@ -21,10 +22,7 @@ namespace VietRide.Booking.Infrastructure.Http;
 /// </summary>
 public sealed class PaymentServiceClient : IPaymentServiceClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.IgnoreNullOptions;
 
     private readonly HttpClient _httpClient;
     private readonly ILogger<PaymentServiceClient> _logger;

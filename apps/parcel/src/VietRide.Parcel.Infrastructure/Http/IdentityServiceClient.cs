@@ -3,12 +3,13 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Parcel.Infrastructure.Http;
 
 public sealed class IdentityServiceClient : IIdentityServiceClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private readonly HttpClient _httpClient;
     private readonly ILogger<IdentityServiceClient> _logger;

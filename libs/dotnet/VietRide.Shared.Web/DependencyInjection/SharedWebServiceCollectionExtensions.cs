@@ -5,9 +5,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Shared.Web.Authentication;
 using VietRide.Shared.Web.Filters;
 using VietRide.Shared.Web.Health;
+using VietRide.Shared.Web.ModelBinding;
+using VietRide.Shared.Web.Serialization;
 using VietRide.Shared.Web.Swagger;
 
 namespace VietRide.Shared.Web.DependencyInjection;
@@ -21,6 +24,10 @@ public static class SharedWebServiceCollectionExtensions
         IConfiguration configuration,
         string serviceName)
     {
+        // Fail at startup instead of silently falling back to the host/container timezone.
+        BusinessTime.EnsureTimeZoneAvailable();
+        services.AddHttpContextAccessor();
+
         // Clock (IClock — testable DateTimeOffset.UtcNow)
         services.AddSingleton<IClock, VietRide.Shared.Kernel.Abstractions.SystemClock>();
 
@@ -36,10 +43,25 @@ public static class SharedWebServiceCollectionExtensions
         // ApiResponseExceptionFilter replaces ProblemDetailsExceptionFilter (RFC 7807 removed).
         // ApiResponseResultFilter (IAlwaysRunResultFilter) auto-wraps ObjectResult success values.
         services.AddControllers(o =>
-        {
-            o.Filters.Add<ApiResponseExceptionFilter>();
-            o.Filters.Add<ApiResponseResultFilter>();
-        });
+            {
+                o.Filters.Add<ApiResponseExceptionFilter>();
+                o.Filters.Add<ApiResponseResultFilter>();
+                o.ModelBinderProviders.Insert(0, new UtcDateTimeOffsetModelBinderProvider());
+            });
+
+        services.AddOptions<JsonOptions>()
+            .Configure<IHttpContextAccessor>((options, accessor) =>
+            {
+                bool UseVietnamPresentation() =>
+                    ApiTimestampPresentation.IsFrontendRequest(accessor.HttpContext);
+
+                options.JsonSerializerOptions.Converters.Add(
+                    new UtcDateTimeOffsetJsonConverter(UseVietnamPresentation));
+                options.JsonSerializerOptions.Converters.Add(
+                    new UtcDateTimeJsonConverter(UseVietnamPresentation));
+                options.JsonSerializerOptions.Converters.Add(
+                    new FrontendJsonElementConverter(UseVietnamPresentation));
+            });
 
         // Model-binding failures (malformed JSON, missing required fields, type mismatches) route
         // through the same error envelope via InvalidModelStateResponseFactory (ADR 0004 Rule 5).
@@ -64,7 +86,10 @@ public static class SharedWebServiceCollectionExtensions
                     Fields = fields.Count > 0 ? fields : null,
                 };
 
-                var envelope = ApiResponse.Failure(422, error, ApiMeta.Create(traceId));
+                var envelope = ApiResponse.Failure(
+                    422,
+                    error,
+                    ApiTimestampPresentation.CreateMeta(ctx.HttpContext, traceId));
                 return new ObjectResult(envelope) { StatusCode = 422 };
             };
         });

@@ -18,7 +18,7 @@ public sealed class Day23MutableScheduleGenerationDedupeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task MutatedScheduleTime_DoesNotGenerateSecondTripForCoveredIctServiceDate(
+    public async Task MutatedScheduleTime_DoesNotGenerateSecondTripForCoveredVietnamServiceDate(
         bool cascadeExistingTrip)
     {
         var fixture = Fixture.Create();

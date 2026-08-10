@@ -1,6 +1,7 @@
 using System.Globalization;
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.Repositories;
 
 namespace VietRide.Trip.Application.Features.Internal.OperatorAnalytics;
@@ -8,7 +9,6 @@ namespace VietRide.Trip.Application.Features.Internal.OperatorAnalytics;
 public sealed class GetOperatorRoutePerformanceQueryHandler
     : IRequestHandler<GetOperatorRoutePerformanceQuery, IReadOnlyList<OperatorRoutePerformanceResponse>>
 {
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
     private readonly IOperatorAnalyticsRepository repository;
 
     public GetOperatorRoutePerformanceQueryHandler(IOperatorAnalyticsRepository repository)
@@ -68,22 +68,8 @@ public sealed class GetOperatorRoutePerformanceQueryHandler
             throw Validation("month", "month must have a representable following month.");
         }
 
-        var fromUtc = new DateTimeOffset(
-            firstDay.Year,
-            firstDay.Month,
-            firstDay.Day,
-            0,
-            0,
-            0,
-            IctOffset).ToUniversalTime();
-        var toUtc = new DateTimeOffset(
-            nextMonth.Year,
-            nextMonth.Month,
-            nextMonth.Day,
-            0,
-            0,
-            0,
-            IctOffset).ToUniversalTime();
+        var fromUtc = BusinessTime.ToUtc(firstDay, TimeOnly.MinValue);
+        var toUtc = BusinessTime.ToUtc(nextMonth, TimeOnly.MinValue);
         return (fromUtc, toUtc);
     }
 

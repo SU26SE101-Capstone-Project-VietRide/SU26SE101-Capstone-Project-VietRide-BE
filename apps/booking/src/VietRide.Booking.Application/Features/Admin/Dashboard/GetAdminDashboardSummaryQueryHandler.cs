@@ -3,6 +3,7 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.BookingStats.GetAdminBookingStatsAggregate;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Booking.Application.Features.Admin.Dashboard;
 
@@ -10,7 +11,7 @@ public sealed class GetAdminDashboardSummaryQueryHandler
     : IRequestHandler<GetAdminDashboardSummaryQuery, AdminDashboardSummaryResponse>
 {
     private const int MaximumInclusiveDays = 366;
-    private const string IctTimezone = "Asia/Ho_Chi_Minh";
+    private const string BusinessTimeZoneId = BusinessTime.TimeZoneId;
 
     private readonly IBookingStatsRepository _stats;
     private readonly IIdentityDashboardMetricsClient _identity;
@@ -83,7 +84,7 @@ public sealed class GetAdminDashboardSummaryQueryHandler
             .ToArray();
 
         return new AdminDashboardSummaryResponse(
-            new AdminDashboardPeriodResponse(range.CurrentFrom, range.CurrentTo, IctTimezone),
+            new AdminDashboardPeriodResponse(range.CurrentFrom, range.CurrentTo, BusinessTimeZoneId),
             Compare(currentRevenue.TotalProjectRevenueVnd, previousRevenue.TotalProjectRevenueVnd),
             Compare(currentRevenue.NetTransportRevenueVnd, previousRevenue.NetTransportRevenueVnd),
             Compare(currentRevenue.NetTicketRevenueVnd, previousRevenue.NetTicketRevenueVnd),

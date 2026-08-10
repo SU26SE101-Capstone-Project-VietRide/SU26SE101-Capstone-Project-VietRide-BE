@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { QueryOptionsSchema } from '@vietride/contracts';
+import { toUtcIso } from '@vietride/nest-common';
 
 export const TripIdParamSchema = z.object({
   tripId: z.string().uuid(),
@@ -9,8 +10,8 @@ export type TripIdParamDto = z.infer<typeof TripIdParamSchema>;
 
 export const TrailQuerySchema = z
   .object({
-    from: z.string().datetime().optional(),
-    to: z.string().datetime().optional(),
+    from: z.string().datetime({ offset: true }).transform(toUtcIso).optional(),
+    to: z.string().datetime({ offset: true }).transform(toUtcIso).optional(),
     sortBy: z.enum(['recordedAt']).default('recordedAt'),
     sortDir: z.enum(['asc', 'desc']).default('asc'),
   })

@@ -31,7 +31,7 @@ test('UI-25 committed environment contains placeholders only for runtime secrets
   assert.ok(result.environmentKeys.includes('ui25PolicyValidationKey'));
 });
 
-test('fixture timestamps stay inside one requested ICT day near midnight', () => {
+test('fixture timestamps stay inside one requested Asia/Ho_Chi_Minh day near midnight', () => {
   for (const now of [new Date('2026-07-29T17:01:00Z'), new Date('2026-07-29T21:59:00Z')]) {
     const time = ui25TimeWindow(now);
 

@@ -367,7 +367,7 @@ public sealed class CreateParcelCommandHandler
 
             await _statsRepository.UpsertIncrementAsync(
                 parcel.OperatorId,
-                DateOnly.FromDateTime(now.UtcDateTime),
+                VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now),
                 totalParcels: 1,
                 totalLoaded: 0,
                 totalDelivered: 0,

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 
 namespace VietRide.Trip.Infrastructure.ExternalClients;
@@ -10,7 +11,7 @@ namespace VietRide.Trip.Infrastructure.ExternalClients;
 /// </summary>
 public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscriptionQuotaClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private readonly HttpClient _httpClient;
 

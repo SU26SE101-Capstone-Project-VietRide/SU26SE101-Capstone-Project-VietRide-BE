@@ -67,7 +67,7 @@ class ShuttlePassengerContextMetaSwaggerDto {
   @ApiProperty({ example: 'req-a1b2c3d4' })
   traceId!: string;
 
-  @ApiProperty({ example: '2026-08-02T12:00:00.000Z' })
+  @ApiProperty({ example: '2026-08-02T19:00:00.000+07:00' })
   timestamp!: string;
 }
 

@@ -19,6 +19,7 @@ using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Admin;
 using VietRide.Payment.Application.Features.RevenueAnalytics.Core;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Payment.IntegrationTests.RevenueAnalytics;
 
@@ -67,7 +68,11 @@ public sealed class AdminRevenueAnalyticsEndpointTests : IClassFixture<AdminReve
             .GetProperty("currentValue").GetInt64().Should().Be(1_400);
         data.GetProperty("summary").GetProperty("settlement").GetProperty("paidToOperatorsVnd")
             .GetProperty("currentValue").GetInt64().Should().Be(300);
-        data.GetProperty("generatedAt").GetDateTime().Kind.Should().Be(DateTimeKind.Utc);
+        var generatedAt = data.GetProperty("generatedAt").GetDateTimeOffset();
+        generatedAt.Offset.Should().Be(BusinessTime.ToLocalOffset(generatedAt).Offset);
+        data.GetProperty("generatedAt").GetString().Should().EndWith("+07:00");
+        document.RootElement.GetProperty("meta").GetProperty("timestamp").GetString()
+            .Should().EndWith("+07:00");
         data.GetProperty("topOperators")[0].GetProperty("vehicleCount").GetInt32().Should().Be(4);
     }
 

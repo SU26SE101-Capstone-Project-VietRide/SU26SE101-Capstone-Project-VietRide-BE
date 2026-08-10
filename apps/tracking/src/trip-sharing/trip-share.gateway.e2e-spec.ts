@@ -116,8 +116,8 @@ describe('TripShareGateway (e2e)', () => {
 
     const events = await Promise.all([firstEvent, secondEvent]);
     expect(events).toEqual([
-      { location: { latitude: 10.7, longitude: 106.6, speedKph: 42, heading: 90, recordedAt: '2026-08-03T10:00:00.000Z' } },
-      { location: { latitude: 10.7, longitude: 106.6, speedKph: 42, heading: 90, recordedAt: '2026-08-03T10:00:00.000Z' } },
+      { location: { latitude: 10.7, longitude: 106.6, speedKph: 42, heading: 90, recordedAt: '2026-08-03T17:00:00.000+07:00' } },
+      { location: { latitude: 10.7, longitude: 106.6, speedKph: 42, heading: 90, recordedAt: '2026-08-03T17:00:00.000+07:00' } },
     ]);
     expect(JSON.stringify(events)).not.toMatch(/tripId|grantId|userId/);
     first.disconnect();

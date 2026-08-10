@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Shared.Messaging.Abstractions;
 
 namespace VietRide.Trip.Application.Events;
@@ -6,7 +7,6 @@ namespace VietRide.Trip.Application.Events;
 public sealed class TripScheduleChangedIntegrationEvent : IntegrationEventBase
 {
     public const string EventTypeValue = "trip.trip.schedule_changed";
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
 
     public TripScheduleChangedIntegrationEvent(
         Guid eventId,
@@ -48,15 +48,15 @@ public sealed class TripScheduleChangedIntegrationEvent : IntegrationEventBase
         DateTimeOffset newDeparture)
     {
         var delta = (newDeparture - oldDeparture).Duration();
-        var sameIctDate = oldDeparture.ToOffset(IctOffset).Date
-            == newDeparture.ToOffset(IctOffset).Date;
+        var sameBusinessDate = BusinessTime.ToLocalDate(oldDeparture)
+            == BusinessTime.ToLocalDate(newDeparture);
 
-        if (sameIctDate && delta <= TimeSpan.FromHours(2))
+        if (sameBusinessDate && delta <= TimeSpan.FromHours(2))
         {
             return "MINOR";
         }
 
-        if (sameIctDate && delta < TimeSpan.FromHours(6))
+        if (sameBusinessDate && delta < TimeSpan.FromHours(6))
         {
             return "MEDIUM";
         }

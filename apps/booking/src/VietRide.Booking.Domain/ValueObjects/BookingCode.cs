@@ -1,3 +1,5 @@
+using VietRide.Shared.Kernel.Time;
+
 namespace VietRide.Booking.Domain.ValueObjects;
 
 /// <summary>
@@ -15,11 +17,11 @@ public readonly record struct BookingCode
     private BookingCode(string value) => Value = value;
 
     /// <summary>
-    /// Generates a new unique booking code using the current UTC date and a random 8-char Base32 suffix.
+    /// Generates a new unique booking code using the Vietnam business date and a random 8-char Base32 suffix.
     /// </summary>
     public static BookingCode Generate(DateTimeOffset utcNow)
     {
-        var datePart = utcNow.UtcDateTime.ToString("yyyyMMdd");
+        var datePart = BusinessTime.ToLocalDate(utcNow).ToString("yyyyMMdd");
         var randomPart = GenerateBase32(8);
         return new BookingCode($"VR-{datePart}-{randomPart}");
     }

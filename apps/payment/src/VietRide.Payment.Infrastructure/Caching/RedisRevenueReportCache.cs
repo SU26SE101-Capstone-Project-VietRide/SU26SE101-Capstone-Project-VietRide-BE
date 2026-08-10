@@ -1,11 +1,12 @@
 using System.Text.Json;
 using VietRide.Payment.Application.Abstractions.Services;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Payment.Infrastructure.Caching;
 
 public sealed class RedisRevenueReportCache : IRevenueReportCache
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
     private readonly IRevenueCacheStore store;
 
     public RedisRevenueReportCache(IRevenueCacheStore store)

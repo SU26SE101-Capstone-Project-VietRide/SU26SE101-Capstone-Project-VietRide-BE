@@ -1,12 +1,13 @@
 using System.Text.Json;
 using StackExchange.Redis;
 using VietRide.Parcel.Application.Abstractions.Caching;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Parcel.Infrastructure.Caching;
 
 internal sealed class RedisParcelReportCache : IParcelReportCache
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private readonly IConnectionMultiplexer redis;
 

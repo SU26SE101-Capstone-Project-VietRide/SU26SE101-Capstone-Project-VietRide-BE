@@ -75,8 +75,16 @@ test('day30 runner contract', () => {
   assert.equal(target.targetDate, '2026-07-23');
   assert.equal(target.dayOfWeek, 4);
   assert.equal(target.departureTime, '12:00:00');
+  assert.equal(target.departureDateTime.toISOString(), '2026-07-23T05:00:00.000Z');
   assert.ok(target.departureDateTime.getTime() > fixtureNow.getTime() + 30 * 60 * 1000);
   assert.ok(target.departureDateTime.getTime() <= fixtureNow.getTime() + 14 * 86_400_000);
+
+  const beforeVietnamMidnight = chooseTargetSchedule(new Date('2026-08-09T16:30:00.000Z'));
+  assert.equal(beforeVietnamMidnight.targetDate, '2026-08-10');
+  assert.equal(beforeVietnamMidnight.departureDateTime.toISOString(), '2026-08-10T05:00:00.000Z');
+  const afterVietnamMidnight = chooseTargetSchedule(new Date('2026-08-09T17:30:00.000Z'));
+  assert.equal(afterVietnamMidnight.targetDate, '2026-08-11');
+  assert.equal(afterVietnamMidnight.departureDateTime.toISOString(), '2026-08-11T05:00:00.000Z');
 
   const timeSql = buildTimeAdvanceSql(
     '10000000-0000-4000-8000-000000000001',
@@ -149,6 +157,8 @@ test('day30 runner contract', () => {
   assert.match(source, /try\s*{/);
   assert.match(source, /finally\s*{/);
   assert.match(source, /DAY30_REDACTED_SUMMARY=/);
+  assert.match(source, /Asia\/Ho_Chi_Minh/);
+  assert.doesNotMatch(source, /Asia\/Bangkok/);
   assert.match(source, /generatedTripIds = new Set/);
   assert.match(source, /for \(const trip of trips\)/);
   assert.match(

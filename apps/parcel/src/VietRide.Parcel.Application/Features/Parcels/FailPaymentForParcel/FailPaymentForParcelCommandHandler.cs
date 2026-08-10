@@ -86,7 +86,7 @@ public sealed class FailPaymentForParcelCommandHandler
                 cancellationToken);
             await _statsRepository.UpsertIncrementAsync(
                 snapshot.OperatorId,
-                DateOnly.FromDateTime(now.UtcDateTime),
+                VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now),
                 0, 0, 0, 1, 0, 0, refundAmount,
                 cancellationToken);
 

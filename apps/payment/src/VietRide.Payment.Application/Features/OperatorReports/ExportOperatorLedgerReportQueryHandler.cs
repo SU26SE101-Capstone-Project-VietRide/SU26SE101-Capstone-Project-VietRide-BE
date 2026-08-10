@@ -29,7 +29,7 @@ public sealed class ExportOperatorLedgerReportQueryHandler
         var prefix = refundOnly ? "refunds" : "revenue";
         var spec = new ExcelReportSpec(
             refundOnly ? "Refunds" : "Revenue",
-            ["entry_id", "entry_type", "reference_type", "reference_id", "trip_id", "amount_vnd", "occurred_at", "note"],
+            ["entry_id", "entry_type", "reference_type", "reference_id", "trip_id", "amount_vnd", "occurred_at_asia_ho_chi_minh", "note"],
             $"{prefix}-report-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.xlsx",
             new HashSet<int> { 5 });
 
@@ -54,7 +54,7 @@ public sealed class ExportOperatorLedgerReportQueryHandler
                 ExcelReportCell.TextValue(row.ReferenceId.ToString("D")),
                 ExcelReportCell.TextValue(row.TripId?.ToString("D") ?? string.Empty),
                 ExcelReportCell.IntegerValue(row.AmountVnd),
-                ExcelReportCell.DateTimeValue(row.OccurredAt.UtcDateTime),
+                ExcelReportCell.DateTimeValue(row.OccurredAt),
                 ExcelReportCell.TextValue(row.Note ?? string.Empty),
             ]);
         }

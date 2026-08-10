@@ -12,12 +12,12 @@ describe('NotificationSentryExceptionFilter', () => {
     status: jest.fn().mockReturnThis(),
     json: jest.fn(),
   };
-  const host = {
+  const createHost = (url = '/v1/test') => ({
     switchToHttp: () => ({
       getResponse: () => response,
-      getRequest: () => ({ url: '/test', headers: { 'x-request-id': 'request-id' } }),
+      getRequest: () => ({ url, path: url, headers: { 'x-request-id': 'request-id' } }),
     }),
-  } as unknown as ArgumentsHost;
+  }) as unknown as ArgumentsHost;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -27,7 +27,7 @@ describe('NotificationSentryExceptionFilter', () => {
   it('does not capture expected 4xx errors', () => {
     const filter = new NotificationSentryExceptionFilter();
 
-    filter.catch(new BadRequestException({ errorCode: 'VALIDATION_FAILED' }), host);
+    filter.catch(new BadRequestException({ errorCode: 'VALIDATION_FAILED' }), createHost());
 
     expect(Sentry.captureException).not.toHaveBeenCalled();
   });
@@ -36,12 +36,24 @@ describe('NotificationSentryExceptionFilter', () => {
     const filter = new NotificationSentryExceptionFilter();
     const exception = new InternalServerErrorException({ errorCode: 'INTERNAL_ERROR' });
 
-    filter.catch(exception, host);
+    filter.catch(exception, createHost());
 
     expect(Sentry.captureException).toHaveBeenCalledWith(exception);
     expect(response.status).toHaveBeenCalledWith(500);
     expect(response.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: false, statusCode: 500 }),
     );
+  });
+
+  it('uses UTC Z for internal error envelopes and Vietnam offset for public errors', () => {
+    const filter = new NotificationSentryExceptionFilter();
+
+    filter.catch(new BadRequestException(), createHost('/internal/v1/emails'));
+    const internal = response.json.mock.calls.at(-1)?.[0] as { meta: { timestamp: string } };
+    expect(internal.meta.timestamp).toMatch(/Z$/);
+
+    filter.catch(new BadRequestException(), createHost('/v1/notifications'));
+    const frontend = response.json.mock.calls.at(-1)?.[0] as { meta: { timestamp: string } };
+    expect(frontend.meta.timestamp).toMatch(/\+07:00$/);
   });
 });

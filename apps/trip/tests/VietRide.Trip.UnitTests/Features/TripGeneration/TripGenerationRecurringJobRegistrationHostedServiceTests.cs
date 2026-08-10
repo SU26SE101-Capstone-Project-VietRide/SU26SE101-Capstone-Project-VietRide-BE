@@ -9,14 +9,14 @@ namespace VietRide.Trip.UnitTests.Features.TripGeneration;
 public sealed class TripGenerationRecurringJobRegistrationHostedServiceTests
 {
     [Fact]
-    public async Task StartAsync_RegistersWeeklySunday2300IctAsUtcTripGenerationJob()
+    public async Task StartAsync_RegistersWeeklySunday2300VietnamAsUtcTripGenerationJob()
     {
         var recurringJobs = new CapturingRecurringJobManager();
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Hangfire:QueueName"] = "trip",
-                ["Hangfire:TripGenerationTimeZoneId"] = "SE Asia Standard Time"
+                ["Hangfire:TripGenerationTimeZoneId"] = "Asia/Ho_Chi_Minh"
             })
             .Build();
         var service = new TripGenerationRecurringJobRegistrationHostedService(configuration, recurringJobs);

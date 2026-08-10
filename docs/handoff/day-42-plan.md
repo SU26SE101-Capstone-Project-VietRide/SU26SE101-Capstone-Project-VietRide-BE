@@ -11,7 +11,7 @@
 - Redis cache TTL 5 phút; key gồm exact UTC range và `platform-report:v1`; cache miss gọi đủ downstream.
 - Downstream lỗi, timeout, malformed payload hoặc reconciliation mismatch làm cả request trả `503`, không trả partial hoặc stale totals.
 - Reconciliation phải đối chiếu `BookingStats`, `ParcelStats` và nguồn earned live; mismatch được ghi structured log và không được promote hot read.
-- Date range ICT inclusive ở public query, chuyển thành UTC `[from,to)`; mặc định 30 ngày, tối đa 92 ngày.
+- Date range Asia/Ho_Chi_Minh inclusive ở public query, chuyển thành UTC `[from,to)`; mặc định 30 ngày, tối đa 92 ngày.
 
 ## Tasks
 

@@ -89,7 +89,7 @@ VALUES
     }
 
     [Fact]
-    public async Task BookingStatsMonth_Repository_GroupsByFirstIctCalendarDateWithoutSplittingOperators()
+    public async Task BookingStatsMonth_Repository_GroupsByFirstVietnamCalendarDateWithoutSplittingOperators()
     {
         await _factory.InitializeAsync();
 

@@ -93,7 +93,7 @@ Không enum nào missing value.
 ### 4. Data Type Correctness — ✅ PASS
 
 - ✅ Mọi money column: `BIGINT` (no FLOAT/DECIMAL/REAL/DOUBLE PRECISION). Verified across 22 money fields.
-- ✅ Mọi timestamp: `TIMESTAMPTZ` (UTC). Exception: `driver_schedules.departure_time TIME` (local ICT semantic per v6).
+- ✅ Mọi timestamp: `TIMESTAMPTZ` (UTC). Exception: `driver_schedules.departure_time TIME` (local Asia/Ho_Chi_Minh semantic per v6).
 - ✅ Mọi PK: `UUID DEFAULT gen_random_uuid()`. Không SERIAL/BIGSERIAL.
 - ✅ JSON config dùng `JSONB` (cancellationPolicy, parcelNoShowPolicy, luggagePolicy, seatLayoutJson, operatingHours, facilities, dayOfWeek, photoUrls, metadata, bankAccountSnapshot, data, payload). Không có cột nào dùng JSON thuần.
 - ✅ pgvector: `halfvec(2048)` cho `knowledge_chunks.embedding` + `CREATE EXTENSION IF NOT EXISTS "vector"` ở đầu rag-ai/schema.sql.

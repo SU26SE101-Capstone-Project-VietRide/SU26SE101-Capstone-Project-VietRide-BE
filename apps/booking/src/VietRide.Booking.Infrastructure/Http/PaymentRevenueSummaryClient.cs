@@ -3,12 +3,13 @@ using System.Text.Json;
 using Polly.CircuitBreaker;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.Admin.Dashboard;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Booking.Infrastructure.Http;
 
 public sealed class PaymentRevenueSummaryClient : IPaymentRevenueSummaryClient
 {
-    private const string IctTimezone = "Asia/Ho_Chi_Minh";
+    private const string BusinessTimeZoneId = BusinessTime.TimeZoneId;
     private readonly HttpClient client;
 
     public PaymentRevenueSummaryClient(HttpClient client)
@@ -69,7 +70,7 @@ public sealed class PaymentRevenueSummaryClient : IPaymentRevenueSummaryClient
             || to != expectedTo
             || !period.TryGetProperty("timezone", out var timezone)
             || timezone.ValueKind != JsonValueKind.String
-            || !string.Equals(timezone.GetString(), IctTimezone, StringComparison.Ordinal)
+            || !string.Equals(timezone.GetString(), BusinessTimeZoneId, StringComparison.Ordinal)
             || !TryInt64(root, "totalProjectRevenueVnd", out var totalProject)
             || !TryInt64(root, "netTransportRevenueVnd", out var netTransport)
             || !TryInt64(root, "netTicketRevenueVnd", out var netTicket)

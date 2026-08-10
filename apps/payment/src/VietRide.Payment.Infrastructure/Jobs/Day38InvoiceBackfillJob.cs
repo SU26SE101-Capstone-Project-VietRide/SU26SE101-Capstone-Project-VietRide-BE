@@ -74,7 +74,7 @@ public sealed class Day38InvoiceBackfillJob
                     .AsNoTracking()
                     .SingleAsync(candidate => candidate.Id == paymentId, cancellationToken);
                 var context = SubscriptionPaymentContextCodec.DeserializeTrusted(payment.Context);
-                var issuedMonth = payment.SucceededAt!.Value.ToUniversalTime().ToString("yyyyMM");
+                var issuedMonth = InvoiceNumberPeriod.FromInstant(payment.SucceededAt!.Value);
                 var sequence = await _counters.NextAsync(issuedMonth, cancellationToken);
                 var invoice = Invoice.CreateDraft(
                     $"VR-INV-{issuedMonth}-{sequence:000000}",

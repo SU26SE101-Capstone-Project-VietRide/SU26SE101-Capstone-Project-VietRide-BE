@@ -1,5 +1,6 @@
 using ClosedXML.Excel;
 using VietRide.Shared.Application.Reporting;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Shared.Reporting;
 
@@ -101,7 +102,9 @@ public sealed class ClosedXmlExcelReportWriter : IExcelReportWriter
                 cell.Style.DateFormat.Format = "yyyy-mm-dd";
                 break;
             case ExcelReportCellType.DateTime:
-                cell.Value = value.DateTime ?? DateTime.MinValue;
+                cell.Value = value.Instant.HasValue
+                    ? BusinessTime.ToLocalDateTime(value.Instant.Value)
+                    : DateTime.MinValue;
                 cell.Style.DateFormat.Format = "yyyy-mm-dd hh:mm:ss";
                 break;
             case ExcelReportCellType.Boolean:
