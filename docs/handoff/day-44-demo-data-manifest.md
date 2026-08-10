@@ -80,8 +80,8 @@ The persisted Business Demo description is exactly
 Operators A and B use Business Demo; C uses Starter. All three are active and `APPROVED`.
 Fixture business-registration/tax/phone values are test-only natural keys:
 `D44-BRN-{A|B|C}`, `D44-TAX-{A|B|C}`, and `+8490444000{1|2|3}`. Contact email equals the
-Operator Admin email. Address is `44 Demo Street`, ward `Demo Ward`, district `Demo District`,
-province `Hồ Chí Minh`; representative name is `Day44 Operator {A|B|C} Admin` and representative
+Operator Admin email. Address is street `44 Demo Street`, ward `Demo Ward`, province
+`Hồ Chí Minh`; representative name is `Day44 Operator {A|B|C} Admin` and representative
 phone equals the operator phone. Policy/bank fields are null.
 
 Every non-bootstrap account is login-ready with `status=ACTIVE`, no OAuth identity, and no
@@ -109,16 +109,18 @@ counts: A/B/C each have vehicles `3`, drivers `3`, assistants `1`, operator user
 
 ### Stations
 
-| Key | Name | City | Ward | Latitude | Longitude | State |
-|---|---|---|---|---:|---:|---|
-| `station:mien-tay` | Bến xe Miền Tây | Hồ Chí Minh | An Lạc | `10.741037` | `106.618980` | slug `day44-ben-xe-mien-tay`, active |
-| `station:mien-dong-moi` | Bến xe Miền Đông mới | Hồ Chí Minh | Long Bình | `10.879550` | `106.816190` | slug `day44-ben-xe-mien-dong-moi`, active |
-| `station:can-tho` | Bến xe Trung tâm TP Cần Thơ | Cần Thơ | Cái Răng | `10.005200` | `105.772310` | slug `day44-ben-xe-trung-tam-can-tho`, active |
-| `station:long-chau` | Bến xe khách Phường Long Châu | Vĩnh Long | Long Châu | `10.238230` | `105.957730` | slug `day44-ben-xe-khach-phuong-long-chau`, active |
-| `station:ben-tre` | Bến xe Bến Tre | Vĩnh Long | Sơn Đông | `10.267025` | `106.359834` | slug `day44-ben-xe-ben-tre`, active |
+| Key | Name | Province snapshot | Ward snapshot | Official leaf code | Latitude | Longitude | State |
+|---|---|---|---|---|---:|---:|---|
+| `station:mien-tay` | Bến xe Miền Tây | Thành phố Hồ Chí Minh | Phường An Lạc | `27460` | `10.741037` | `106.618980` | slug `day44-ben-xe-mien-tay`, active |
+| `station:mien-dong-moi` | Bến xe Miền Đông mới | Thành phố Hồ Chí Minh | Phường Long Bình | `26833` | `10.879550` | `106.816190` | slug `day44-ben-xe-mien-dong-moi`, active |
+| `station:can-tho` | Bến xe Trung tâm TP Cần Thơ | Thành phố Cần Thơ | Phường Cái Răng | `31186` | `10.005200` | `105.772310` | slug `day44-ben-xe-trung-tam-can-tho`, active |
+| `station:long-chau` | Bến xe khách Phường Long Châu | Vĩnh Long | Phường Long Châu | `29551` | `10.238230` | `105.957730` | slug `day44-ben-xe-khach-phuong-long-chau`, active |
+| `station:ben-tre` | Bến xe Bến Tre | Vĩnh Long | Phường Bến Tre | `28789` | `10.267025` | `106.359834` | slug `day44-ben-xe-ben-tre`, active |
 
-Station address/contact/operating-hours/facilities are null, `supportsShuttle=false`, and no
-geocoding occurs. Every Operator has one active `OperatorStation` link to all five Stations;
+Every Station and copied Stop references the deterministic Location ID generated from its official
+leaf code; province/ward text is the hierarchy-derived compatibility snapshot. Station
+address/contact/operating-hours/facilities are null, `supportsShuttle=false`, and no geocoding
+occurs. Every Operator has one active `OperatorStation` link to all five Stations;
 optional override/counter/contact/instruction fields are null.
 
 ### Routes, stops, alternatives, vehicles, and schedules

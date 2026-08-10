@@ -1140,7 +1140,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"{{operatorSelfRegisterName}}\",\n  \"contactEmail\": \"{{operatorSelfRegisterEmail}}\",\n  \"contactPhone\": \"{{operatorSelfRegisterPhone}}\",\n  \"businessRegistrationNumber\": \"{{operatorBusinessRegistrationNumber}}\",\n  \"taxCode\": \"{{operatorTaxCode}}\",\n  \"addressStreet\": \"123 Le Loi\",\n  \"addressWard\": \"Ben Nghe\",\n  \"addressDistrict\": \"District 1\",\n  \"addressProvince\": \"Ho Chi Minh City\",\n  \"representativeName\": \"Nguyen Van Operator\",\n  \"representativePhone\": \"{{operatorRepresentativePhone}}\",\n  \"password\": \"{{operatorSelfRegisterPassword}}\"\n}"
+              "raw": "{\n  \"name\": \"{{operatorSelfRegisterName}}\",\n  \"contactEmail\": \"{{operatorSelfRegisterEmail}}\",\n  \"contactPhone\": \"{{operatorSelfRegisterPhone}}\",\n  \"businessRegistrationNumber\": \"{{operatorBusinessRegistrationNumber}}\",\n  \"taxCode\": \"{{operatorTaxCode}}\",\n  \"addressStreet\": \"123 Le Loi\",\n  \"addressWard\": \"Ben Nghe\",\n  \"addressProvince\": \"Ho Chi Minh City\",\n  \"representativeName\": \"Nguyen Van Operator\",\n  \"representativePhone\": \"{{operatorRepresentativePhone}}\",\n  \"password\": \"{{operatorSelfRegisterPassword}}\"\n}"
             },
             "description": "Path 1: public self-register creates a PENDING operator and OPERATOR_ADMIN pending email verification. Expected data: { operatorId, message }."
           }
@@ -1356,7 +1356,7 @@
                   "  pm.expect(body.data).to.have.property('registrationStatus', 'APPROVED');",
                   "  pm.expect(body.data).to.have.property('isActive').that.is.a('boolean');",
                   "  pm.expect(body.data).to.have.property('address');",
-                  "  pm.expect(body.data.address).to.include.keys(['street', 'ward', 'district', 'province']);",
+                  "  pm.expect(body.data.address).to.include.keys(['street', 'ward', 'province']);",
                   "  pm.expect(body.data).to.have.property('parcelNoShowPolicy');",
                   "  pm.expect(body.data).to.have.property('luggagePolicy');",
                   "  pm.expect(body.meta).to.have.property('traceId');",
@@ -1385,7 +1385,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"{{operatorSelfRegisterName}} Updated\",\n  \"contactPhone\": \"{{operatorSelfRegisterPhone}}\",\n  \"logoUrl\": \"https://cdn.vietride.app/operators/logo.png\",\n  \"addressStreet\": \"456 Nguyen Hue\",\n  \"addressWard\": \"Ben Nghe\",\n  \"addressDistrict\": \"District 1\",\n  \"addressProvince\": \"Ho Chi Minh City\",\n  \"representativeName\": \"Nguyen Van Operator\",\n  \"representativePhone\": \"{{operatorRepresentativePhone}}\",\n  \"cancellationPolicy\": [\n    { \"hoursBeforeDeparture\": 24, \"feePercent\": 10 },\n    { \"hoursBeforeDeparture\": 2, \"feePercent\": 50 }\n  ],\n  \"parcelNoShowPolicy\": {\n    \"noShowFeePercent\": 0,\n    \"additionalPaymentTimeoutMinutes\": 30\n  },\n  \"luggagePolicy\": {\n    \"defaultLuggageKgPerSeat\": 10\n  }\n}"
+              "raw": "{\n  \"name\": \"{{operatorSelfRegisterName}} Updated\",\n  \"contactPhone\": \"{{operatorSelfRegisterPhone}}\",\n  \"logoUrl\": \"https://cdn.vietride.app/operators/logo.png\",\n  \"addressStreet\": \"456 Nguyen Hue\",\n  \"addressWard\": \"Ben Nghe\",\n  \"addressProvince\": \"Ho Chi Minh City\",\n  \"representativeName\": \"Nguyen Van Operator\",\n  \"representativePhone\": \"{{operatorRepresentativePhone}}\",\n  \"cancellationPolicy\": [\n    { \"hoursBeforeDeparture\": 24, \"feePercent\": 10 },\n    { \"hoursBeforeDeparture\": 2, \"feePercent\": 50 }\n  ],\n  \"parcelNoShowPolicy\": {\n    \"noShowFeePercent\": 0,\n    \"additionalPaymentTimeoutMinutes\": 30\n  },\n  \"luggagePolicy\": {\n    \"defaultLuggageKgPerSeat\": 10\n  }\n}"
             },
             "description": "Path 1: OPERATOR_ADMIN of an APPROVED operator updates own profile and policy JSONB."
           }
@@ -1488,7 +1488,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"VietRide Admin Created Operator {{day6RunId}}\",\n  \"contactEmail\": \"{{adminCreatedOperatorEmail}}\",\n  \"contactPhone\": \"{{adminCreatedOperatorPhone}}\",\n  \"businessRegistrationNumber\": \"{{adminCreatedOperatorBusinessRegistrationNumber}}\",\n  \"taxCode\": \"{{adminCreatedOperatorTaxCode}}\",\n  \"addressStreet\": \"789 Hai Ba Trung\",\n  \"addressWard\": \"Vo Thi Sau\",\n  \"addressDistrict\": \"District 3\",\n  \"addressProvince\": \"Ho Chi Minh City\",\n  \"representativeName\": \"Tran Admin Operator\",\n  \"representativePhone\": \"{{adminCreatedOperatorRepresentativePhone}}\"\n}"
+              "raw": "{\n  \"name\": \"VietRide Admin Created Operator {{day6RunId}}\",\n  \"contactEmail\": \"{{adminCreatedOperatorEmail}}\",\n  \"contactPhone\": \"{{adminCreatedOperatorPhone}}\",\n  \"businessRegistrationNumber\": \"{{adminCreatedOperatorBusinessRegistrationNumber}}\",\n  \"taxCode\": \"{{adminCreatedOperatorTaxCode}}\",\n  \"addressStreet\": \"789 Hai Ba Trung\",\n  \"addressWard\": \"Vo Thi Sau\",\n  \"addressProvince\": \"Ho Chi Minh City\",\n  \"representativeName\": \"Tran Admin Operator\",\n  \"representativePhone\": \"{{adminCreatedOperatorRepresentativePhone}}\"\n}"
             },
             "description": "Path 2: SYSTEM_ADMIN creates an APPROVED operator and passwordless OPERATOR_ADMIN. Paid-plan/planId fields are intentionally omitted; Day 6 supports Starter Free-Trial only."
           }
@@ -4075,6 +4075,43 @@
               ]
             },
             "description": "Public Gateway search for the deterministic Day-11 Saigon → Can Tho generated trip."
+          }
+        },
+        {
+          "name": "2b. Search trips by current administrative hierarchy",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Province-only hierarchy search returns the seeded trip', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(body.success).to.equal(true);",
+                  "  pm.expect(body.data.items).to.be.an('array').that.is.not.empty;",
+                  "  pm.expect(body.data.items[0].pickupPoints).to.be.an('array').that.is.not.empty;",
+                  "  pm.expect(body.data.items[0].dropoffPoints).to.be.an('array').that.is.not.empty;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/trips/search?originProvinceCode=79&destinationProvinceCode=92&departureDate={{day11DepartureDate}}&passengerCount=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "trips", "search"],
+              "query": [
+                { "key": "originProvinceCode", "value": "79" },
+                { "key": "destinationProvinceCode", "value": "92" },
+                { "key": "departureDate", "value": "{{day11DepartureDate}}" },
+                { "key": "passengerCount", "value": "1" }
+              ]
+            },
+            "description": "Current two-level catalog search. Omitting ward codes expands every active leaf under Ho Chi Minh City and Can Tho."
           }
         },
         {
