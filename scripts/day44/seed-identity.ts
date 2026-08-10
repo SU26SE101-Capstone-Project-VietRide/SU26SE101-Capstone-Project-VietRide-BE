@@ -49,7 +49,6 @@ export interface IdentityOperatorFixture {
   logoUrl: null;
   addressStreet: '44 Demo Street';
   addressWard: 'Demo Ward';
-  addressDistrict: 'Demo District';
   addressProvince: 'Hồ Chí Minh';
   representativeName: string;
   representativePhone: string;
@@ -367,7 +366,6 @@ function buildOperators(createdAt: string): ReadonlyArray<IdentityOperatorFixtur
       logoUrl: null,
       addressStreet: '44 Demo Street',
       addressWard: 'Demo Ward',
-      addressDistrict: 'Demo District',
       addressProvince: 'Hồ Chí Minh',
       representativeName: `Day44 Operator ${letter} Admin`,
       representativePhone: phone,

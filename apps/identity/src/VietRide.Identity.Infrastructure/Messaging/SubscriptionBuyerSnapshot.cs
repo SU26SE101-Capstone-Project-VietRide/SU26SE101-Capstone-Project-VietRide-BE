@@ -9,6 +9,5 @@ public sealed class SubscriptionBuyerSnapshot
     public string ContactPhone { get; init; } = string.Empty;
     public string? AddressStreet { get; init; }
     public string? AddressWard { get; init; }
-    public string? AddressDistrict { get; init; }
     public string? AddressProvince { get; init; }
 }

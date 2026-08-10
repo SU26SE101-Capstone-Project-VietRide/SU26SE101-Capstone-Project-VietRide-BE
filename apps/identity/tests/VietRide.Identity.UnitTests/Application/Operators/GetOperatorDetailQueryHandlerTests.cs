@@ -21,7 +21,6 @@ public sealed class GetOperatorDetailQueryHandlerTests
             "+84901234567",
             "1 Street",
             "Ward",
-            "District",
             "Province",
             "Representative",
             "+84901234568");
@@ -37,7 +36,6 @@ public sealed class GetOperatorDetailQueryHandlerTests
         result.OperatorId.Should().Be(operatorEntity.Id);
         result.Address.Street.Should().Be("1 Street");
         result.Address.Ward.Should().Be("Ward");
-        result.Address.District.Should().Be("District");
         result.Address.Province.Should().Be("Province");
         result.RepresentativeName.Should().Be("Representative");
         result.RepresentativePhone.Should().Be("+84901234568");

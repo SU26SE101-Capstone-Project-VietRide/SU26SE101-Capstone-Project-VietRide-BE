@@ -41,7 +41,6 @@ public sealed class OperatorRepositoryPersistenceTests : IClassFixture<UserDevic
             operatorTenant.LogoUrl,
             operatorTenant.AddressStreet,
             operatorTenant.AddressWard,
-            operatorTenant.AddressDistrict,
             operatorTenant.AddressProvince,
             operatorTenant.RepresentativeName,
             operatorTenant.RepresentativePhone,

@@ -140,7 +140,6 @@ public sealed class RegisterOperatorCommandHandlerTests
             "+84901234000",
             "Street",
             "Ward",
-            "District",
             "Province",
             "Rep",
             "+84901234001");
@@ -175,7 +174,6 @@ public sealed class RegisterOperatorCommandHandlerTests
             TaxCode: "TAX-001",
             AddressStreet: "1 Street",
             AddressWard: "Ward",
-            AddressDistrict: "District",
             AddressProvince: "Province",
             RepresentativeName: "Operator Admin",
             RepresentativePhone: "+84901234568",

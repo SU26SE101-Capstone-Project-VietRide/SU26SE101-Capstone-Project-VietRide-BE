@@ -93,7 +93,6 @@ public sealed class InvoicePdfGenerationJob
                         metadata.BuyerSnapshot.ContactPhone,
                         metadata.BuyerSnapshot.AddressStreet,
                         metadata.BuyerSnapshot.AddressWard,
-                        metadata.BuyerSnapshot.AddressDistrict,
                         metadata.BuyerSnapshot.AddressProvince)),
                 cancellationToken);
             if (contents.Length == 0)

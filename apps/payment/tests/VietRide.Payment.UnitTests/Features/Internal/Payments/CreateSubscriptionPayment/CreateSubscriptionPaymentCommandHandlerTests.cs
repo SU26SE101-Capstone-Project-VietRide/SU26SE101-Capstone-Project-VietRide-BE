@@ -46,7 +46,9 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
         using var payload = JsonDocument.Parse(fixture.Outbox.Events.Should().ContainSingle().Subject.Payload);
         payload.RootElement.GetProperty("method").GetString().Should().Be("WALLET");
         payload.RootElement.GetProperty("operatorSubscriptionId").GetGuid().Should().Be(fixture.SubscriptionId);
-        payload.RootElement.GetProperty("buyerSnapshot").GetProperty("name").GetString().Should().Be("VietRide Bus");
+        var buyerSnapshot = payload.RootElement.GetProperty("buyerSnapshot");
+        buyerSnapshot.GetProperty("name").GetString().Should().Be("VietRide Bus");
+        buyerSnapshot.TryGetProperty("addressDistrict", out _).Should().BeFalse();
     }
 
     [Fact]
@@ -238,7 +240,6 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
                     "+84901234567",
                     "1 Nguyen Hue",
                     null,
-                    "District 1",
                     "Ho Chi Minh City")),
             idempotencyKey,
             "203.0.113.10");

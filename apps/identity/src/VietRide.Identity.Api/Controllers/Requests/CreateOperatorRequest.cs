@@ -28,7 +28,6 @@ public sealed class CreateOperatorRequest
         string taxCode,
         string addressStreet,
         string addressWard,
-        string addressDistrict,
         string addressProvince,
         string representativeName,
         string representativePhone)
@@ -40,7 +39,6 @@ public sealed class CreateOperatorRequest
         TaxCode = taxCode;
         AddressStreet = addressStreet;
         AddressWard = addressWard;
-        AddressDistrict = addressDistrict;
         AddressProvince = addressProvince;
         RepresentativeName = representativeName;
         RepresentativePhone = representativePhone;
@@ -53,7 +51,6 @@ public sealed class CreateOperatorRequest
     public string TaxCode { get; init; } = string.Empty;
     public string AddressStreet { get; init; } = string.Empty;
     public string AddressWard { get; init; } = string.Empty;
-    public string AddressDistrict { get; init; } = string.Empty;
     public string AddressProvince { get; init; } = string.Empty;
     public string RepresentativeName { get; init; } = string.Empty;
     public string RepresentativePhone { get; init; } = string.Empty;

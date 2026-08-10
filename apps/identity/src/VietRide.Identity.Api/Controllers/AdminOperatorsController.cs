@@ -96,7 +96,6 @@ public sealed class AdminOperatorsController : ControllerBase
                 request.TaxCode,
                 request.AddressStreet,
                 request.AddressWard,
-                request.AddressDistrict,
                 request.AddressProvince,
                 request.RepresentativeName,
                 request.RepresentativePhone,

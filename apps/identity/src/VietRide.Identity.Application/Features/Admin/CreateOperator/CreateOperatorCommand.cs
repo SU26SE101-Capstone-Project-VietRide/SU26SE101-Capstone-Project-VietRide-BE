@@ -12,7 +12,6 @@ public sealed record CreateOperatorCommand(
     string TaxCode,
     string AddressStreet,
     string AddressWard,
-    string AddressDistrict,
     string AddressProvince,
     string RepresentativeName,
     string RepresentativePhone,

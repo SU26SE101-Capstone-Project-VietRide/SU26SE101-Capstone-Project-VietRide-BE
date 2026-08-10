@@ -23,7 +23,6 @@ public sealed class ProfileOperatorProfileHandlerTests
             "https://cdn.vietride.app/operators/logo.png",
             "123 Le Loi",
             "Ben Nghe",
-            "District 1",
             "Ho Chi Minh City",
             "Nguyen Van Operator",
             "+84907654321",
@@ -43,7 +42,6 @@ public sealed class ProfileOperatorProfileHandlerTests
         Assert.Equal("https://cdn.vietride.app/operators/logo.png", response.LogoUrl);
         Assert.Equal("123 Le Loi", response.Address.Street);
         Assert.Equal("Ben Nghe", response.Address.Ward);
-        Assert.Equal("District 1", response.Address.District);
         Assert.Equal("Ho Chi Minh City", response.Address.Province);
         Assert.Equal("Nguyen Van Operator", response.RepresentativeName);
         Assert.Equal("+84907654321", response.RepresentativePhone);
@@ -78,7 +76,6 @@ public sealed class ProfileOperatorProfileHandlerTests
         Assert.Equal("https://cdn.vietride.app/operators/updated.png", response.LogoUrl);
         Assert.Equal("456 Nguyen Hue", response.Address.Street);
         Assert.Equal("Ben Thanh", response.Address.Ward);
-        Assert.Equal("District 1", response.Address.District);
         Assert.Equal("Ho Chi Minh City", response.Address.Province);
         Assert.Equal("Tran Van Admin", response.RepresentativeName);
         Assert.Equal("+84901112222", response.RepresentativePhone);
@@ -162,7 +159,6 @@ public sealed class ProfileOperatorProfileHandlerTests
             "https://cdn.vietride.app/operators/updated.png",
             "456 Nguyen Hue",
             "Ben Thanh",
-            "District 1",
             "Ho Chi Minh City",
             "Tran Van Admin",
             "0901112222",
@@ -188,7 +184,6 @@ public sealed class ProfileOperatorProfileHandlerTests
             "+84901234567",
             "123 Le Loi",
             "Ben Nghe",
-            "District 1",
             "Ho Chi Minh City",
             "Nguyen Van Operator",
             "+84907654321");

@@ -23,5 +23,4 @@ public sealed record InvoicePdfBuyer(
     string ContactPhone,
     string? AddressStreet,
     string? AddressWard,
-    string? AddressDistrict,
     string? AddressProvince);

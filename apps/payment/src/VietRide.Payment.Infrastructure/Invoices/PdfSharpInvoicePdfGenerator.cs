@@ -177,7 +177,6 @@ public sealed class PdfSharpInvoicePdfGenerator : IInvoicePdfGenerator
         {
             buyer.AddressStreet,
             buyer.AddressWard,
-            buyer.AddressDistrict,
             buyer.AddressProvince,
         };
         var address = string.Join(", ", components.Where(value => !string.IsNullOrWhiteSpace(value)));

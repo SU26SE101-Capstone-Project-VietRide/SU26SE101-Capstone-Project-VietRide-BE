@@ -122,7 +122,6 @@ public sealed class OperatorsControllerTests :
                 "TAX-001",
                 "1 Street",
                 "Ward",
-                "District",
                 "Province",
                 "Operator Admin",
                 "+84901234568",
@@ -162,7 +161,6 @@ public sealed class OperatorsControllerTests :
                 "TAX-001",
                 "1 Street",
                 "Ward",
-                "District",
                 "Province",
                 "Operator Admin",
                 "+84901234568"),
@@ -176,7 +174,6 @@ public sealed class OperatorsControllerTests :
         var command = sender.LastRequest.Should().BeOfType<CreateOperatorCommand>().Subject;
         command.AddressStreet.Should().Be("1 Street");
         command.AddressWard.Should().Be("Ward");
-        command.AddressDistrict.Should().Be("District");
         command.AddressProvince.Should().Be("Province");
     }
 
@@ -207,7 +204,6 @@ public sealed class OperatorsControllerTests :
                 taxCode = $"TAX-{Guid.NewGuid():N}",
                 addressStreet = "1 Street",
                 addressWard = "Ward",
-                addressDistrict = "District",
                 addressProvince = "Province",
                 representativeName = "Operator Admin",
                 representativePhone = "+84901234568",
@@ -412,7 +408,6 @@ public sealed class OperatorsControllerTests :
             taxCode = taxCode ?? $"TAX-{Guid.NewGuid():N}",
             addressStreet = "1 Street",
             addressWard = "Ward",
-            addressDistrict = "District",
             addressProvince = "Province",
             representativeName = "Operator Admin",
             representativePhone = representativePhone ?? "+84901234568",
@@ -459,7 +454,6 @@ public sealed class OperatorsControllerTests :
             taxCode = taxCode ?? $"TAX-{Guid.NewGuid():N}",
             addressStreet = "1 Street",
             addressWard = "Ward",
-            addressDistrict = "District",
             addressProvince = "Province",
             representativeName = "Operator Admin",
             representativePhone = representativePhone ?? "+84901234568",
