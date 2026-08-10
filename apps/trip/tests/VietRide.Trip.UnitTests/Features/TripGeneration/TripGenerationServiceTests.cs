@@ -5,6 +5,7 @@ using Hangfire;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -26,13 +27,13 @@ public sealed class TripGenerationServiceTests
 
         var result = await fixture.Service.GenerateAsync(fixture.Schedule.Id, CancellationToken.None);
 
-        result.GeneratedCount.Should().Be(4);
+        result.GeneratedCount.Should().Be(9);
         result.SkippedCount.Should().Be(0);
         fixture.Trips.Items.Select(trip => ToContractDayOfWeek(DateOnly.FromDateTime(trip.DepartureDateTime.Date)))
             .Should().OnlyContain(day => day == 2 || day == 4);
-        fixture.TripSeats.Items.Should().HaveCount(8);
+        fixture.TripSeats.Items.Should().HaveCount(18);
         fixture.TripSeats.Items.Select(seat => seat.SeatNumber).Should().OnlyContain(seat => seat == "A1" || seat == "A3");
-        fixture.TripStops.Items.Should().HaveCount(8);
+        fixture.TripStops.Items.Should().HaveCount(18);
         fixture.TripStopFares.Items.Should().BeEmpty();
 
         var firstTrip = fixture.Trips.Items.OrderBy(trip => trip.DepartureDateTime).First();
@@ -56,6 +57,19 @@ public sealed class TripGenerationServiceTests
         firstTripStops[1].AllowDropoff.Should().BeTrue();
         firstTripStops[1].DistanceFromOriginKm.Should().Be(120.5m);
         firstTripStops[1].EstimatedArrivalTime.Should().Be(firstTrip.DepartureDateTime.AddMinutes(210));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_CamelCaseSeatLayout_CreatesTripSeats()
+    {
+        var fixture = TripGenerationFixture.Create(
+            routeDurationMinutes: 180,
+            useCamelCaseSeatLayout: true);
+
+        var result = await fixture.Service.GenerateAsync(fixture.Schedule.Id, CancellationToken.None);
+
+        result.GeneratedCount.Should().Be(9);
+        fixture.TripSeats.Items.Should().HaveCount(18);
     }
 
     [Fact]
@@ -97,6 +111,22 @@ public sealed class TripGenerationServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_RollingWindow_IncludesDayThirtyAndExcludesDayThirtyOne()
+    {
+        var fixture = TripGenerationFixture.Create(
+            routeDurationMinutes: 180,
+            dayOfWeek: [1, 2, 3, 4, 5, 6, 7],
+            validUntil: new DateOnly(2026, 7, 31));
+
+        await fixture.Service.GenerateAsync(fixture.Schedule.Id, CancellationToken.None);
+
+        fixture.Trips.Items.Should().Contain(trip =>
+            BusinessTime.ToLocalDate(trip.DepartureDateTime) == new DateOnly(2026, 7, 15));
+        fixture.Trips.Items.Should().NotContain(trip =>
+            BusinessTime.ToLocalDate(trip.DepartureDateTime) == new DateOnly(2026, 7, 16));
+    }
+
+    [Fact]
     public async Task GenerateAsync_SundayScheduleAfterDepartureTime_DoesNotCreatePastTrip()
     {
         var fixture = TripGenerationFixture.Create(
@@ -114,7 +144,8 @@ public sealed class TripGenerationServiceTests
         fixture.Trips.Items.Should().Contain(trip => trip.DepartureDateTime == BuildUtcDepartureDateTime(new DateOnly(2026, 6, 16), new TimeOnly(8, 0)));
         fixture.Trips.Items.Should().OnlyContain(trip => trip.DepartureDateTime.Offset == TimeSpan.Zero);
         fixture.Trips.Items.Should().OnlyContain(trip => trip.DepartureDateTime > new DateTimeOffset(2026, 6, 14, 16, 0, 0, TimeSpan.Zero));
-        fixture.Trips.Items.Should().OnlyContain(trip => trip.DepartureDateTime <= new DateTimeOffset(2026, 6, 28, 16, 0, 0, TimeSpan.Zero));
+        fixture.Trips.Items.Should().OnlyContain(trip =>
+            BusinessTime.ToLocalDate(trip.DepartureDateTime) <= new DateOnly(2026, 7, 14));
     }
 
     [Fact]
@@ -136,8 +167,8 @@ public sealed class TripGenerationServiceTests
         var result = await fixture.Service.GenerateAsync(null, CancellationToken.None);
 
         result.GeneratedCount.Should().Be(0);
-        result.SkippedCount.Should().Be(4);
-        fixture.SkipLogs.Items.Should().HaveCount(4);
+        result.SkippedCount.Should().Be(9);
+        fixture.SkipLogs.Items.Should().HaveCount(9);
         fixture.SkipLogs.Items.Should().OnlyContain(log => log.Message == "Route duration or route-stop duration is required.");
         fixture.Trips.Items.Should().BeEmpty();
     }
@@ -163,8 +194,8 @@ public sealed class TripGenerationServiceTests
         var result = await fixture.Service.GenerateAsync(fixture.Schedule.Id, CancellationToken.None);
 
         result.GeneratedCount.Should().Be(0);
-        result.SkippedCount.Should().Be(4);
-        fixture.SkipLogs.Items.Should().HaveCount(4)
+        result.SkippedCount.Should().Be(9);
+        fixture.SkipLogs.Items.Should().HaveCount(9)
             .And.OnlyContain(log =>
                 log.DriverScheduleId == fixture.Schedule.Id
                 && log.Reason == TripGenerationSkipReason.OTHER
@@ -224,10 +255,10 @@ public sealed class TripGenerationServiceTests
 
         var result = await fixture.Service.GenerateAsync(fixture.Schedule.Id, CancellationToken.None);
 
-        result.GeneratedCount.Should().Be(3);
+        result.GeneratedCount.Should().Be(8);
         result.SkippedCount.Should().Be(1);
         fixture.SkipLogs.Items.Should().ContainSingle(log => log.Reason == TripGenerationSkipReason.VEHICLE_CONFLICT);
-        fixture.Trips.Items.Should().HaveCount(4);
+        fixture.Trips.Items.Should().HaveCount(9);
     }
 
     [Fact]
@@ -239,7 +270,7 @@ public sealed class TripGenerationServiceTests
         var result = await fixture.Service.GenerateAsync(fixture.Schedule.Id, CancellationToken.None);
 
         result.GeneratedCount.Should().Be(0);
-        result.SkippedCount.Should().Be(4);
+        result.SkippedCount.Should().Be(9);
         fixture.Trips.Items.Should().BeEmpty();
         fixture.TripSeats.Items.Should().BeEmpty();
         fixture.TripStops.Items.Should().BeEmpty();
@@ -247,8 +278,10 @@ public sealed class TripGenerationServiceTests
         fixture.SkipLogs.Items.Should().OnlyContain(log =>
             log.DriverScheduleId == fixture.Schedule.Id
             && log.Reason == TripGenerationSkipReason.SUBSCRIPTION_LIMIT_EXCEEDED);
-        quotaClient.Claims.Should().HaveCount(4);
-        quotaClient.Claims.Should().OnlyContain(claim => claim.Resource == "TRIPS_THIS_MONTH" && claim.PeriodKey == "2026-06");
+        quotaClient.Claims.Should().HaveCount(9);
+        quotaClient.Claims.Should().OnlyContain(claim =>
+            claim.Resource == "TRIPS_THIS_MONTH"
+            && (claim.PeriodKey == "2026-06" || claim.PeriodKey == "2026-07"));
     }
 
     [Fact]
@@ -325,7 +358,8 @@ public sealed class TripGenerationServiceTests
             DateOnly? validFrom = null,
             DateOnly? validUntil = null,
             ISubscriptionQuotaClient? quotaClient = null,
-            long? scheduleBaseFare = null)
+            long? scheduleBaseFare = null,
+            bool useCamelCaseSeatLayout = false)
         {
             var operatorId = Guid.NewGuid();
             var route = Route.Create(
@@ -340,7 +374,11 @@ public sealed class TripGenerationServiceTests
                 operatorId,
                 Guid.NewGuid(),
                 "51B-12345",
-                JsonSerializer.SerializeToElement(CreateSeatLayout()),
+                JsonSerializer.SerializeToElement(
+                    CreateSeatLayout(),
+                    useCamelCaseSeatLayout
+                        ? new JsonSerializerOptions(JsonSerializerDefaults.Web)
+                        : null),
                 4,
                 1000m,
                 null);

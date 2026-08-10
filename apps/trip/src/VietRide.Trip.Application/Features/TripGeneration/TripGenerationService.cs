@@ -13,7 +13,7 @@ namespace VietRide.Trip.Application.Features.TripGeneration;
 
 public sealed class TripGenerationService
 {
-    private const int GenerationWindowDays = 14;
+    private const int GenerationWindowDays = 30;
 
     private const string TripAssignedEventType = "trip.trip.assigned";
     private const string SubscriptionLimitTripSkippedEventType = "subscription.limit.trip_skipped";
@@ -424,8 +424,6 @@ public sealed class TripGenerationService
         DateTimeOffset now)
     {
         var localToday = BusinessTime.ToLocalDate(now);
-        var generationWindowEnd = now.AddDays(GenerationWindowDays);
-
         for (var offset = 0; offset <= GenerationWindowDays; offset++)
         {
             var candidate = localToday.AddDays(offset);
@@ -433,8 +431,7 @@ public sealed class TripGenerationService
             if (candidate < schedule.ValidFrom
                 || (schedule.ValidUntil.HasValue && candidate > schedule.ValidUntil.Value)
                 || !scheduleDays.Contains(BusinessTime.ToIsoDayOfWeek(candidate))
-                || departureDateTime <= now
-                || departureDateTime > generationWindowEnd)
+                || departureDateTime <= now)
             {
                 continue;
             }
@@ -489,7 +486,7 @@ public sealed class TripGenerationService
 
     private async Task AddSeatsAsync(Guid tripId, Vehicle vehicle, CancellationToken cancellationToken)
     {
-        var layout = vehicle.SeatLayoutJson.Deserialize<SeatLayoutDto>()
+        var layout = vehicle.SeatLayoutJson.Deserialize<SeatLayoutDto>(JsonOptions)
             ?? throw new ValidationException(
                 "Vehicle seat layout is required for trip generation.",
                 [new ValidationError("seatLayoutJson", "Seat layout could not be parsed.")]);
