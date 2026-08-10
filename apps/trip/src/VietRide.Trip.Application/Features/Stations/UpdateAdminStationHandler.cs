@@ -9,6 +9,7 @@ using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Events;
+using VietRide.Trip.Application.Features.Locations;
 
 namespace VietRide.Trip.Application.Features.Stations;
 
@@ -20,17 +21,29 @@ public sealed class UpdateAdminStationHandler : IRequestHandler<UpdateAdminStati
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IClock _clock;
+    private readonly ILocationRepository? _locations;
+
+    public UpdateAdminStationHandler(
+        IStationRepository stations,
+        ILocationRepository locations,
+        IIntegrationEventOutbox outbox,
+        IUnitOfWork unitOfWork,
+        IClock clock)
+    {
+        _stations = stations;
+        _locations = locations;
+        _outbox = outbox;
+        _unitOfWork = unitOfWork;
+        _clock = clock;
+    }
 
     public UpdateAdminStationHandler(
         IStationRepository stations,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
         IClock clock)
+        : this(stations, null!, outbox, unitOfWork, clock)
     {
-        _stations = stations;
-        _outbox = outbox;
-        _unitOfWork = unitOfWork;
-        _clock = clock;
     }
 
     public async Task<StationDto> Handle(UpdateAdminStationCommand request, CancellationToken cancellationToken)
@@ -49,8 +62,27 @@ public sealed class UpdateAdminStationHandler : IRequestHandler<UpdateAdminStati
 
         var before = StationEventSnapshot.FromStation(station);
         var name = request.Name ?? station.Name;
-        var city = request.City ?? station.City;
-        var ward = request.Ward ?? station.Ward;
+        var city = station.City;
+        var ward = station.Ward;
+        var locationId = station.LocationId;
+        var effectiveLocationId = request.LocationId ?? station.LocationId;
+        if (effectiveLocationId.HasValue && _locations is not null)
+        {
+            var location = await LocationHierarchyGuard.ResolveActiveLeafAsync(
+                _locations,
+                effectiveLocationId,
+                null,
+                nameof(request.LocationId),
+                "locationCode",
+                cancellationToken);
+            locationId = location.Leaf.Id;
+            city = location.Parent.Name;
+            ward = location.Leaf.Name;
+        }
+        else if (request.LocationId.HasValue)
+        {
+            throw new InvalidOperationException("Location repository is required when changing a station location.");
+        }
         var baseSlug = Slugify($"{name} {city} {ward}");
         if (baseSlug.Length == 0)
             baseSlug = $"station-{station.Id:N}";
@@ -70,7 +102,7 @@ public sealed class UpdateAdminStationHandler : IRequestHandler<UpdateAdminStati
             city,
             ward,
             request.AddressStreet ?? station.AddressStreet,
-            request.LocationId ?? station.LocationId,
+            locationId,
             request.Latitude ?? station.Latitude,
             request.Longitude ?? station.Longitude,
             request.ContactPhone ?? station.ContactPhone,

@@ -5,4 +5,5 @@ public sealed record UpdateLocationRequest(
     string? Name,
     string? Type,
     int? SortOrder,
-    bool? IsActive);
+    bool? IsActive,
+    string? ParentCode = null);

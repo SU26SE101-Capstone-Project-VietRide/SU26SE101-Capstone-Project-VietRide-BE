@@ -10,34 +10,33 @@ public sealed class ListStopsHandler : IRequestHandler<ListStopsQuery, PagedResu
     private const int DefaultPageSize = 20;
     private const int MaxPageSize = 100;
 
+    private readonly ILocationRepository? locationRepository;
     private readonly IStopRepository stopRepository;
 
-    public ListStopsHandler(IStopRepository stopRepository)
+    public ListStopsHandler(IStopRepository stopRepository, ILocationRepository? locationRepository = null)
     {
         this.stopRepository = stopRepository;
+        this.locationRepository = locationRepository;
     }
 
     public Task<PagedResult<StopDto>> Handle(ListStopsQuery request, CancellationToken cancellationToken)
     {
         var page = request.Page ?? DefaultPage;
         var pageSize = Math.Min(request.PageSize ?? DefaultPageSize, MaxPageSize);
-        var query = stopRepository.QueryNoTracking()
+        var query = (string.IsNullOrWhiteSpace(request.Search)
+                ? stopRepository.QueryNoTracking()
+                : stopRepository.SearchByTextNoTracking(request.Search))
             .Where(stop => stop.OperatorId == request.OperatorId && stop.DeletedAt == null);
 
-        if (!string.IsNullOrWhiteSpace(request.Search))
-        {
-            var search = request.Search.Trim();
-            query = query.Where(stop => stop.Name.Contains(search) || (stop.Address != null && stop.Address.Contains(search)));
-        }
-
         var totalItems = query.LongCount();
-        var items = query
+        var stops = query
             .OrderBy(stop => stop.Name)
             .ThenBy(stop => stop.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(StopMapper.ToDto)
             .ToList();
+        var locations = StopLocationContextResolver.Resolve(locationRepository, stops);
+        var items = stops.Select(stop => StopMapper.ToDto(stop, locations)).ToList();
 
         return Task.FromResult(PagedResult<StopDto>.Create(items, page, pageSize, totalItems));
     }

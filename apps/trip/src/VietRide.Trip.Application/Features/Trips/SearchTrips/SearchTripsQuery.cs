@@ -8,6 +8,8 @@ public sealed record SearchTripsQuery(
     DateOnly DepartureDate,
     int PassengerCount,
     bool? AllowAlongRoutePickup,
-    string? OriginLocationCode = null,
-    string? DestinationLocationCode = null)
+    string? OriginProvinceCode = null,
+    string? OriginWardCode = null,
+    string? DestinationProvinceCode = null,
+    string? DestinationWardCode = null)
     : IRequest<SearchTripsResult>;

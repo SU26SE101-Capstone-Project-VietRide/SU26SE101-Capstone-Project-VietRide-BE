@@ -60,6 +60,63 @@ public sealed class StationRepositorySearchTests
         }
     }
 
+    [Fact]
+    public async Task CatalogStationAndStopSearch_ReturnAccentInsensitiveMatches_FromPostgres()
+    {
+        var databaseName = $"vietride_trip_accent_search_{Guid.NewGuid():N}";
+        await using var dbContext = CreateDbContext(databaseName);
+        var locations = CreateLocationRepository(dbContext);
+        var stations = CreateRepository(dbContext);
+        var stops = CreateStopRepository(dbContext);
+
+        try
+        {
+            await dbContext.Database.MigrateAsync();
+
+            var hcm = await locations.GetActiveByCodeAsync("79", CancellationToken.None);
+            var vungTau = await locations.GetActiveByCodeAsync("26506", CancellationToken.None);
+            hcm.Should().NotBeNull();
+            vungTau.Should().NotBeNull();
+
+            var station = Station.Create(
+                "Bến xe Vũng Tàu",
+                $"ben-xe-vung-tau-{Guid.NewGuid():N}",
+                hcm!.Name,
+                vungTau!.Name,
+                locationId: vungTau.Id);
+            var stop = Stop.Create(
+                Guid.NewGuid(),
+                "Bến xe dọc tuyến",
+                10.40m,
+                107.12m,
+                address: "Phường Vũng Tàu, Thành phố Hồ Chí Minh",
+                locationId: vungTau.Id);
+            dbContext.Stations.Add(station);
+            dbContext.Stops.Add(stop);
+            await dbContext.SaveChangesAsync();
+
+            var roots = await locations.ListActiveTopLevelAsync("ho chi minh", CancellationToken.None);
+            roots.Should().ContainSingle(location => location.Id == hcm.Id);
+            var children = await locations.ListActiveChildrenAsync(hcm.Id, "vung tau", CancellationToken.None);
+            children.Should().ContainSingle(location => location.Id == vungTau.Id);
+            var adminLocations = await locations.ListAsync(1, 20, "vung tau", true, CancellationToken.None);
+            adminLocations.Items.Should().ContainSingle(location => location.Id == vungTau.Id);
+
+            var stationNameMatches = await stations.SearchByTextNoTracking("ben xe", false).ToListAsync();
+            stationNameMatches.Should().ContainSingle(item => item.Id == station.Id);
+            var stationLocationMatches = await stations.SearchByTextNoTracking("vung tau", true).ToListAsync();
+            stationLocationMatches.Should().ContainSingle(item => item.Id == station.Id);
+            var stopNameMatches = await stops.SearchByTextNoTracking("ben xe").ToListAsync();
+            stopNameMatches.Should().ContainSingle(item => item.Id == stop.Id);
+            var stopAddressMatches = await stops.SearchByTextNoTracking("ho chi minh").ToListAsync();
+            stopAddressMatches.Should().ContainSingle(item => item.Id == stop.Id);
+        }
+        finally
+        {
+            await dbContext.Database.EnsureDeletedAsync();
+        }
+    }
+
     private static IStationRepository CreateRepository(TripDbContext dbContext)
     {
         var repositoryType = typeof(TripDbContext).Assembly.GetType(
@@ -67,6 +124,24 @@ public sealed class StationRepositorySearchTests
             throwOnError: true)!;
 
         return (IStationRepository)Activator.CreateInstance(repositoryType, dbContext)!;
+    }
+
+    private static ILocationRepository CreateLocationRepository(TripDbContext dbContext)
+    {
+        var repositoryType = typeof(TripDbContext).Assembly.GetType(
+            "VietRide.Trip.Infrastructure.Persistence.Repositories.LocationRepository",
+            throwOnError: true)!;
+
+        return (ILocationRepository)Activator.CreateInstance(repositoryType, dbContext)!;
+    }
+
+    private static IStopRepository CreateStopRepository(TripDbContext dbContext)
+    {
+        var repositoryType = typeof(TripDbContext).Assembly.GetType(
+            "VietRide.Trip.Infrastructure.Persistence.Repositories.StopRepository",
+            throwOnError: true)!;
+
+        return (IStopRepository)Activator.CreateInstance(repositoryType, dbContext)!;
     }
 
     private static TripDbContext CreateDbContext(string databaseName)

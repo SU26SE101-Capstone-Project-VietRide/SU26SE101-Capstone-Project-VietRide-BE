@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore.Query;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Repositories;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
@@ -314,7 +315,7 @@ public sealed class TripHandlerProjectionTests
     }
 
     [Fact]
-    public async Task Search_ByLocationCodes_MapsToRouteStations()
+    public async Task Search_ByProvinceCodes_MapsToRouteStationsInAnyActiveChild()
     {
         var fixture = SearchFixture.Create();
         var trip = CreateTrip(fixture.OperatorId, fixture.Route.Id, DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"));
@@ -327,13 +328,233 @@ public sealed class TripHandlerProjectionTests
             new DateOnly(2026, 5, 18),
             1,
             false,
-            "HCM",
-            "HN");
+            "79",
+            null,
+            "01",
+            null);
 
         var result = await fixture.Handler.Handle(query, CancellationToken.None);
 
         result.Items.Should().ContainSingle()
             .Which.TripId.Should().Be(trip.Id);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Search_HierarchyMode_AllowsProvinceOnlyAndExactWardIndependently(
+        bool exactOrigin,
+        bool exactDestination)
+    {
+        var fixture = SearchFixture.Create();
+        var trip = CreateTrip(fixture.OperatorId, fixture.Route.Id, DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"));
+        fixture.Trips.Add(trip);
+        fixture.Seats.Add(TripSeat.Create(trip.Id, "A01"));
+
+        var result = await fixture.Handler.Handle(
+            new SearchTripsQuery(
+                null,
+                null,
+                new DateOnly(2026, 5, 18),
+                1,
+                null,
+                fixture.OriginProvince.Code,
+                exactOrigin ? fixture.OriginLocation.Code : null,
+                fixture.DestinationProvince.Code,
+                exactDestination ? fixture.DestinationLocation.Code : null),
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle().Which.TripId.Should().Be(trip.Id);
+    }
+
+    [Fact]
+    public async Task Search_HierarchyMode_RejectsWardFromAnotherProvince()
+    {
+        var fixture = SearchFixture.Create();
+
+        var act = () => fixture.Handler.Handle(
+            new SearchTripsQuery(
+                null,
+                null,
+                new DateOnly(2026, 5, 18),
+                1,
+                null,
+                fixture.OriginProvince.Code,
+                fixture.DestinationLocation.Code,
+                fixture.DestinationProvince.Code,
+                null),
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().Contain(error => error.Field == nameof(SearchTripsQuery.OriginWardCode));
+    }
+
+    [Fact]
+    public async Task Search_ByProvinceAndWardCodes_MatchesActiveStopsAndReturnsOnlyPointsInValidSequence()
+    {
+        var fixture = SearchFixture.Create();
+        var pickupProvince = Location.Create("75", "Đồng Nai", Location.ProvinceType, 3);
+        var pickupLocation = Location.Create("26188", "Phường Trấn Biên", Location.WardType, pickupProvince.Id, 1);
+        var dropoffProvince = Location.Create("80", "Tây Ninh", Location.ProvinceType, 4);
+        var dropoffLocation = Location.Create("27637", "Phường Tân Ninh", Location.WardType, dropoffProvince.Id, 1);
+        var pickupStop = Stop.Create(
+            fixture.OperatorId,
+            "Pickup stop",
+            10.7m,
+            106.7m,
+            address: "Pickup address",
+            locationId: pickupLocation.Id);
+        var ignoredPickupStop = Stop.Create(
+            fixture.OperatorId,
+            "Late pickup",
+            10.8m,
+            106.8m,
+            locationId: pickupLocation.Id);
+        var dropoffStop = Stop.Create(
+            fixture.OperatorId,
+            "Dropoff stop",
+            10.9m,
+            106.9m,
+            address: "Dropoff address",
+            locationId: dropoffLocation.Id);
+        fixture.Locations.AddRange([pickupProvince, pickupLocation, dropoffProvince, dropoffLocation]);
+        fixture.CanonicalStops.AddRange([pickupStop, ignoredPickupStop, dropoffStop]);
+        var trip = CreateTrip(fixture.OperatorId, fixture.Route.Id, DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"));
+        fixture.Trips.Add(trip);
+        fixture.Seats.Add(TripSeat.Create(trip.Id, "A01"));
+        fixture.Stops.AddRange([
+            TripStop.Create(trip.Id, pickupStop.Id, 1, trip.DepartureDateTime.AddHours(1), true, false, 10m),
+            TripStop.Create(trip.Id, dropoffStop.Id, 2, trip.DepartureDateTime.AddHours(2), false, true, 20m),
+            TripStop.Create(trip.Id, ignoredPickupStop.Id, 3, trip.DepartureDateTime.AddHours(3), true, false, 30m),
+        ]);
+
+        var result = await fixture.Handler.Handle(
+            new SearchTripsQuery(null, null, new DateOnly(2026, 5, 18), 1, true, "75", "26188", "80", "27637"),
+            CancellationToken.None);
+
+        var item = result.Items.Should().ContainSingle().Which;
+        item.PickupPoints.Should().ContainSingle().Which.Should().Match<SearchTripPointDto>(point =>
+            point.Type == "STOP"
+            && point.StationId == null
+            && point.StopId == pickupStop.Id
+            && point.AllowPickup
+            && !point.AllowDropoff);
+        item.DropoffPoints.Should().ContainSingle().Which.Should().Match<SearchTripPointDto>(point =>
+            point.Type == "STOP"
+            && point.StationId == null
+            && point.StopId == dropoffStop.Id
+            && !point.AllowPickup
+            && point.AllowDropoff);
+    }
+
+    [Fact]
+    public async Task Search_ByHierarchyCodes_ExcludesTripWhenPickupIsNotBeforeDropoff()
+    {
+        var fixture = SearchFixture.Create();
+        var pickupProvince = Location.Create("75", "Đồng Nai", Location.ProvinceType, 3);
+        var pickupLocation = Location.Create("26188", "Phường Trấn Biên", Location.WardType, pickupProvince.Id, 1);
+        var dropoffProvince = Location.Create("80", "Tây Ninh", Location.ProvinceType, 4);
+        var dropoffLocation = Location.Create("27637", "Phường Tân Ninh", Location.WardType, dropoffProvince.Id, 1);
+        var pickupStop = Stop.Create(fixture.OperatorId, "Pickup stop", 10.7m, 106.7m, locationId: pickupLocation.Id);
+        var dropoffStop = Stop.Create(fixture.OperatorId, "Dropoff stop", 10.8m, 106.8m, locationId: dropoffLocation.Id);
+        fixture.Locations.AddRange([pickupProvince, pickupLocation, dropoffProvince, dropoffLocation]);
+        fixture.CanonicalStops.AddRange([pickupStop, dropoffStop]);
+        var trip = CreateTrip(fixture.OperatorId, fixture.Route.Id, DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"));
+        fixture.Trips.Add(trip);
+        fixture.Seats.Add(TripSeat.Create(trip.Id, "A01"));
+        fixture.Stops.AddRange([
+            TripStop.Create(trip.Id, dropoffStop.Id, 1, trip.DepartureDateTime.AddHours(1), false, true, 10m),
+            TripStop.Create(trip.Id, pickupStop.Id, 2, trip.DepartureDateTime.AddHours(2), true, false, 20m),
+        ]);
+
+        var result = await fixture.Handler.Handle(
+            new SearchTripsQuery(null, null, new DateOnly(2026, 5, 18), 1, null, "75", "26188", "80", "27637"),
+            CancellationToken.None);
+
+        result.Items.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("pickup-not-allowed")]
+    [InlineData("inactive-stop")]
+    [InlineData("deleted-stop")]
+    [InlineData("wrong-ward")]
+    public async Task Search_ByHierarchyCodes_ExcludesIneligibleStops(string caseName)
+    {
+        var fixture = SearchFixture.Create();
+        var pickupProvince = Location.Create("75", "Đồng Nai", Location.ProvinceType, 3);
+        var pickupLocation = Location.Create("26188", "Phường Trấn Biên", Location.WardType, pickupProvince.Id, 1);
+        var otherPickupLocation = Location.Create("26191", "Phường Tam Hiệp", Location.WardType, pickupProvince.Id, 2);
+        var dropoffProvince = Location.Create("80", "Tây Ninh", Location.ProvinceType, 4);
+        var dropoffLocation = Location.Create("27637", "Phường Tân Ninh", Location.WardType, dropoffProvince.Id, 1);
+        var pickupStop = Stop.Create(
+            fixture.OperatorId,
+            "Pickup stop",
+            10.7m,
+            106.7m,
+            locationId: caseName == "wrong-ward" ? otherPickupLocation.Id : pickupLocation.Id);
+        var dropoffStop = Stop.Create(
+            fixture.OperatorId,
+            "Dropoff stop",
+            10.8m,
+            106.8m,
+            locationId: dropoffLocation.Id);
+        if (caseName == "inactive-stop") pickupStop.Deactivate();
+        if (caseName == "deleted-stop") pickupStop.SoftDelete(DateTimeOffset.UtcNow);
+        fixture.Locations.AddRange([
+            pickupProvince,
+            pickupLocation,
+            otherPickupLocation,
+            dropoffProvince,
+            dropoffLocation,
+        ]);
+        fixture.CanonicalStops.AddRange([pickupStop, dropoffStop]);
+        var trip = CreateTrip(fixture.OperatorId, fixture.Route.Id, DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"));
+        fixture.Trips.Add(trip);
+        fixture.Seats.Add(TripSeat.Create(trip.Id, "A01"));
+        fixture.Stops.AddRange([
+            TripStop.Create(
+                trip.Id,
+                pickupStop.Id,
+                1,
+                trip.DepartureDateTime.AddHours(1),
+                caseName != "pickup-not-allowed",
+                caseName == "pickup-not-allowed",
+                10m),
+            TripStop.Create(trip.Id, dropoffStop.Id, 2, trip.DepartureDateTime.AddHours(2), false, true, 20m),
+        ]);
+
+        var result = await fixture.Handler.Handle(
+            new SearchTripsQuery(
+                null,
+                null,
+                new DateOnly(2026, 5, 18),
+                1,
+                null,
+                "75",
+                "26188",
+                "80",
+                "27637"),
+            CancellationToken.None);
+
+        result.Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Search_StationMode_RemainsExactAndIgnoresLegacyAlongRouteInput()
+    {
+        var fixture = SearchFixture.Create();
+        var trip = CreateTrip(fixture.OperatorId, fixture.Route.Id, DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"));
+        fixture.Trips.Add(trip);
+        fixture.Seats.Add(TripSeat.Create(trip.Id, "A01"));
+
+        var result = await fixture.Handler.Handle(
+            fixture.Query with { AllowAlongRoutePickup = true },
+            CancellationToken.None);
+
+        var item = result.Items.Should().ContainSingle().Which;
+        item.PickupPoints.Should().ContainSingle().Which.StationId.Should().Be(fixture.OriginStation.Id);
+        item.DropoffPoints.Should().ContainSingle().Which.StationId.Should().Be(fixture.DestinationStation.Id);
     }
 
     [Fact]
@@ -542,8 +763,10 @@ public sealed class TripHandlerProjectionTests
         private SearchFixture(string operatorName, IFareSurchargeService? fareSurchargeService)
         {
             OperatorId = Guid.NewGuid();
-            OriginLocation = Location.Create("HCM", "Ho Chi Minh City", Location.MunicipalityType, 5);
-            DestinationLocation = Location.Create("HN", "Ha Noi", Location.MunicipalityType, 1);
+            OriginProvince = Location.Create("79", "Thành phố Hồ Chí Minh", Location.MunicipalityType, 5);
+            OriginLocation = Location.Create("26734", "Phường Thủ Đức", Location.WardType, OriginProvince.Id, 1);
+            DestinationProvince = Location.Create("01", "Thành phố Hà Nội", Location.MunicipalityType, 1);
+            DestinationLocation = Location.Create("00070", "Phường Hoàn Kiếm", Location.WardType, DestinationProvince.Id, 1);
             OriginStation = Station.Create("Bến xe Miền Đông", "ben-xe-mien-dong", "Hồ Chí Minh", "Hồ Chí Minh");
             DestinationStation = Station.Create("Bến xe Mỹ Đình", "ben-xe-my-dinh", "Hà Nội", "Hà Nội");
             OriginStation.UpdateProfile(
@@ -576,7 +799,7 @@ public sealed class TripHandlerProjectionTests
                 DestinationStation.SupportsShuttle);
             Route = Route.Create(OperatorId, "HCM - HN", OriginStation.Id, DestinationStation.Id, Money.FromRaw(400000), 1000m, 720);
             Stations.AddRange([OriginStation, DestinationStation]);
-            Locations.AddRange([OriginLocation, DestinationLocation]);
+            Locations.AddRange([OriginProvince, OriginLocation, DestinationProvince, DestinationLocation]);
             Identity = new FakeIdentityInternalClient(new Dictionary<Guid, string> { [OperatorId] = operatorName });
             Handler = new SearchTripsHandler(
                 new InMemoryTripRepository(Trips),
@@ -586,12 +809,15 @@ public sealed class TripHandlerProjectionTests
                 new InMemoryTripStopRepository(Stops),
                 new InMemoryLocationRepository(Locations),
                 Identity,
-                fareSurchargeService);
+                fareSurchargeService,
+                new InMemoryStopRepository(CanonicalStops));
             Query = new SearchTripsQuery(OriginStation.Id, DestinationStation.Id, new DateOnly(2026, 5, 18), 1, false);
         }
 
         public Guid OperatorId { get; }
+        public Location OriginProvince { get; }
         public Location OriginLocation { get; }
+        public Location DestinationProvince { get; }
         public Location DestinationLocation { get; }
         public Station OriginStation { get; }
         public Station DestinationStation { get; }
@@ -601,6 +827,7 @@ public sealed class TripHandlerProjectionTests
         public List<DomainTrip> Trips { get; } = [];
         public List<TripSeat> Seats { get; } = [];
         public List<TripStop> Stops { get; } = [];
+        public List<Stop> CanonicalStops { get; } = [];
         public FakeIdentityInternalClient Identity { get; }
         public SearchTripsHandler Handler { get; }
         public SearchTripsQuery Query { get; }
@@ -871,13 +1098,6 @@ public sealed class TripHandlerProjectionTests
             Task.FromResult(Query().Any(location =>
                 location.Code == code.Trim().ToUpperInvariant()
                 && (!exceptId.HasValue || location.Id != exceptId.Value)));
-
-        public Task<IReadOnlyList<Location>> ListActiveAsync(CancellationToken cancellationToken) =>
-            Task.FromResult((IReadOnlyList<Location>)Query()
-                .Where(location => location.IsActive)
-                .OrderBy(location => location.SortOrder)
-                .ThenBy(location => location.Name)
-                .ToList());
 
         public Task<PagedResult<Location>> ListAsync(
             int page,

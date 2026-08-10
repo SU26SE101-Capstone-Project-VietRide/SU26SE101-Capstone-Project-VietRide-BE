@@ -69,19 +69,31 @@ CREATE TABLE locations (
     code VARCHAR(20) NOT NULL,
     name VARCHAR(100) NOT NULL,
     type VARCHAR(20) NOT NULL,
+    parent_location_id UUID NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     sort_order INT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT chk_locations_type CHECK (type IN ('PROVINCE', 'MUNICIPALITY')),
+    CONSTRAINT chk_locations_type CHECK (
+        type IN ('PROVINCE', 'MUNICIPALITY', 'WARD', 'COMMUNE', 'SPECIAL_ZONE')
+    ),
+    CONSTRAINT chk_locations_parent_level CHECK (
+        (type IN ('PROVINCE', 'MUNICIPALITY') AND parent_location_id IS NULL)
+        OR (type IN ('WARD', 'COMMUNE', 'SPECIAL_ZONE') AND parent_location_id IS NOT NULL)
+    ),
+    CONSTRAINT fk_locations_parent_location_id
+        FOREIGN KEY (parent_location_id) REFERENCES locations (id) ON DELETE RESTRICT,
     CONSTRAINT chk_locations_sort_order_non_negative CHECK (sort_order >= 0)
 );
 
 CREATE UNIQUE INDEX uq_locations_code ON locations (code);
 CREATE INDEX idx_locations_active_sort ON locations (is_active, sort_order, name);
+CREATE INDEX idx_locations_active_parent_sort
+    ON locations (parent_location_id, sort_order, name)
+    WHERE parent_location_id IS NOT NULL AND is_active = TRUE;
 
 COMMENT ON TABLE locations IS
-    'Admin-managed location catalog for FE trip search/cache. Stations and Stops point here via nullable location_id.';
+    'Current two-level administrative catalog. Province/municipality rows are roots; ward/commune/special-zone rows are leaves.';
 
 -- -----------------------------------------------------------------------------
 -- stations (canonical platform-level)
@@ -125,9 +137,9 @@ CREATE INDEX idx_stations_name_trgm ON stations USING gin (name gin_trgm_ops)
 COMMENT ON TABLE stations IS
     'Canonical platform-level bến xe. KHÔNG có operatorId. OperatorStation maps which operators serve a Station.';
 COMMENT ON COLUMN stations.city IS
-    'Province or centrally governed municipality in the current two-tier address model.';
+    'Compatibility snapshot derived from the parent of stations.location_id.';
 COMMENT ON COLUMN stations.ward IS
-    'Commune, ward or special zone. Nullable only for legacy rows awaiting manual normalization.';
+    'Compatibility snapshot derived from the leaf referenced by stations.location_id.';
 COMMENT ON COLUMN stations.supports_shuttle IS
     'Per-Station flag toggled by Operator or SYSTEM_ADMIN. Only true Stations support shuttle service. Stops never have shuttle.';
 

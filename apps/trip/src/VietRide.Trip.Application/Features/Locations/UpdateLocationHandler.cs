@@ -28,10 +28,20 @@ public sealed class UpdateLocationHandler : IRequestHandler<UpdateLocationComman
             throw new ConflictException("LOCATION_CODE_CONFLICT", "A location with the same code already exists.");
         }
 
+        var targetType = (request.Type ?? location.Type).Trim().ToUpperInvariant();
+        LocationHierarchyGuard.ValidateOfficialCode(code, targetType);
+        var parent = await LocationHierarchyGuard.ResolveParentAsync(
+            locationRepository,
+            targetType,
+            request.ParentCode,
+            location.ParentLocationId,
+            cancellationToken);
+
         location.UpdateDetails(
             code,
             request.Name ?? location.Name,
-            request.Type ?? location.Type,
+            targetType,
+            parent?.Id,
             request.SortOrder ?? location.SortOrder);
         if (request.IsActive == true)
         {
@@ -45,6 +55,6 @@ public sealed class UpdateLocationHandler : IRequestHandler<UpdateLocationComman
         locationRepository.Update(location);
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return LocationMapper.ToDto(location);
+        return LocationMapper.ToDto(location, parent);
     }
 }

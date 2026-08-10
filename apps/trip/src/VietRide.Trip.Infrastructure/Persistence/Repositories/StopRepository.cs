@@ -51,4 +51,18 @@ internal sealed class StopRepository : IStopRepository
 
     public IQueryable<Stop> QueryNoTracking()
         => _dbContext.Stops.AsNoTracking();
+
+    public IQueryable<Stop> SearchByTextNoTracking(string search)
+    {
+        var normalized = search.Trim();
+        return _dbContext.Stops
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_trip.stops
+                WHERE deleted_at IS NULL
+                  AND (unaccent(name) ILIKE unaccent('%' || {normalized} || '%')
+                    OR unaccent(address) ILIKE unaccent('%' || {normalized} || '%'))
+                """)
+            .AsNoTracking();
+    }
 }

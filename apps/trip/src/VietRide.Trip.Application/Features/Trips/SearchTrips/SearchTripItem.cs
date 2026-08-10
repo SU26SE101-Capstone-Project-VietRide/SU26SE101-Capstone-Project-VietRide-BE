@@ -19,4 +19,6 @@ public sealed record SearchTripItem(
     public long EffectiveFare { get; init; } = BaseFare;
     public Guid? SurchargePeriodId { get; init; }
     public string? SurchargePeriodName { get; init; }
+    public IReadOnlyList<SearchTripPointDto> PickupPoints { get; init; } = [];
+    public IReadOnlyList<SearchTripPointDto> DropoffPoints { get; init; } = [];
 }

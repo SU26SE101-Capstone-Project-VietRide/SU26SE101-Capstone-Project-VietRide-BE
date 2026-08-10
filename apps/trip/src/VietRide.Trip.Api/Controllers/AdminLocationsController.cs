@@ -49,7 +49,8 @@ public sealed class AdminLocationsController : ControllerBase
                 request.Name,
                 request.Type,
                 request.SortOrder,
-                request.IsActive ?? true),
+                request.IsActive ?? true,
+                request.ParentCode),
             cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, response);
@@ -73,7 +74,8 @@ public sealed class AdminLocationsController : ControllerBase
                 request.Name,
                 request.Type,
                 request.SortOrder,
-                request.IsActive),
+                request.IsActive,
+                request.ParentCode),
             cancellationToken));
     }
 

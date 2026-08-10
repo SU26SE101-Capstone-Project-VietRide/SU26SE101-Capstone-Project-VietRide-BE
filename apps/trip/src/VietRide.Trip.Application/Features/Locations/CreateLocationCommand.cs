@@ -7,4 +7,5 @@ public sealed record CreateLocationCommand(
     string? Name,
     string? Type,
     int? SortOrder,
-    bool IsActive) : IRequest<LocationDto>;
+    bool IsActive,
+    string? ParentCode = null) : IRequest<LocationDto>;

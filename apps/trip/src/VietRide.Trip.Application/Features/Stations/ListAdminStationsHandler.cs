@@ -11,19 +11,13 @@ public sealed class ListAdminStationsHandler(IStationRepository stations)
     {
         var page = Math.Max(request.Page ?? 1, 1);
         var size = Math.Clamp(request.PageSize ?? 20, 1, 100);
-        var query = stations.QueryNoTracking();
+        var query = string.IsNullOrWhiteSpace(request.Search)
+            ? stations.QueryNoTracking()
+            : stations.SearchByTextNoTracking(request.Search, includeLocationSnapshots: true);
 
         if (request.IsActive.HasValue)
         {
             query = query.Where(x => x.IsActive == request.IsActive.Value);
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.Search))
-        {
-            var search = request.Search.Trim().ToLower();
-            query = query.Where(x => x.Name.ToLower().Contains(search)
-                || x.City.ToLower().Contains(search)
-                || (x.Ward != null && x.Ward.ToLower().Contains(search)));
         }
 
         var total = query.Count();
