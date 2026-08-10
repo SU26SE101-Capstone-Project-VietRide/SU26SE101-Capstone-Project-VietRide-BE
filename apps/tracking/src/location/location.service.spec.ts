@@ -21,7 +21,11 @@ describe('LocationService Phase 10 raw/published GPS', () => {
         points: [{ latitude: 10, longitude: 106 }, { latitude: 10.1, longitude: 106 }],
       }));
     routeGet = jest.fn(async (tripId: string) => { void tripId; return null; });
-    routeProvider = { peekCachedRouteGeometry: routePeek, getRouteGeometry: routeGet };
+    routeProvider = {
+      peekCachedRouteGeometry: routePeek,
+      getRouteGeometry: routeGet,
+      invalidateRouteGeometry: jest.fn(),
+    };
     const moduleRef = await Test.createTestingModule({
       providers: [
         LocationService,

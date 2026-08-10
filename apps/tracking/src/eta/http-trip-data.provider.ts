@@ -40,6 +40,7 @@ interface CacheEntry {
 @Injectable()
 export class HttpTripDataProvider implements TripDataProvider {
   private readonly cache = new Map<string, CacheEntry>();
+  private readonly cacheVersions = new Map<string, number>();
 
   constructor(
     @Inject(ENV_TOKEN) private readonly env: Env,
@@ -52,6 +53,7 @@ export class HttpTripDataProvider implements TripDataProvider {
       return cached.data;
     }
 
+    const cacheVersion = this.cacheVersions.get(tripId) ?? 0;
     const url = this.buildUrl(tripId);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.env.TRACKING_DATA_PROVIDER_TIMEOUT_MS);
@@ -93,10 +95,12 @@ export class HttpTripDataProvider implements TripDataProvider {
         ...(stop.estimatedArrivalTime != null ? { estimatedArrivalTime: stop.estimatedArrivalTime } : {}),
       }));
 
-      this.cache.set(tripId, {
-        data: stops,
-        expiresAt: Date.now() + this.env.TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS * 1000,
-      });
+      if ((this.cacheVersions.get(tripId) ?? 0) === cacheVersion) {
+        this.cache.set(tripId, {
+          data: stops,
+          expiresAt: Date.now() + this.env.TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS * 1000,
+        });
+      }
 
       return stops;
     } catch {
@@ -104,6 +108,11 @@ export class HttpTripDataProvider implements TripDataProvider {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  invalidateRouteStops(tripId: string): void {
+    this.cacheVersions.set(tripId, (this.cacheVersions.get(tripId) ?? 0) + 1);
+    this.cache.delete(tripId);
   }
 
   private buildUrl(tripId: string): string {

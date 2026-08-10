@@ -164,6 +164,75 @@ describe('HttpRouteGeometryProvider', () => {
     await provider.getDetailedRouteGeometry(TRIP_ID);
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
+
+  it('invalidates cached route geometry immediately for a changed trip route', async () => {
+    const firstRouteId = '22222222-2222-4222-8222-222222222222';
+    const secondRouteId = '33333333-3333-4333-8333-333333333333';
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, validEnvelope({ effectiveRouteId: firstRouteId })))
+      .mockResolvedValueOnce(jsonResponse(200, validEnvelope({ effectiveRouteId: secondRouteId }))) as typeof fetch;
+    const provider = createProvider();
+
+    await expect(provider.getDetailedRouteGeometry(TRIP_ID)).resolves.toEqual(
+      expect.objectContaining({
+        kind: 'ok',
+        snapshot: expect.objectContaining({ effectiveRouteId: firstRouteId }),
+      }),
+    );
+    await provider.getDetailedRouteGeometry(TRIP_ID);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    provider.invalidateRouteGeometry(TRIP_ID);
+
+    expect(provider.peekCachedRouteGeometry(TRIP_ID)).toBeNull();
+    await expect(provider.getDetailedRouteGeometry(TRIP_ID)).resolves.toEqual(
+      expect.objectContaining({
+        kind: 'ok',
+        snapshot: expect.objectContaining({ effectiveRouteId: secondRouteId }),
+      }),
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let an in-flight response repopulate the cache after invalidation', async () => {
+    const staleRouteId = '22222222-2222-4222-8222-222222222222';
+    const currentRouteId = '33333333-3333-4333-8333-333333333333';
+    let resolveStaleFetch: (response: Response) => void = () => undefined;
+    global.fetch = jest
+      .fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => {
+        resolveStaleFetch = resolve;
+      }))
+      .mockResolvedValueOnce(jsonResponse(200, validEnvelope({ effectiveRouteId: currentRouteId }))) as typeof fetch;
+    const provider = createProvider();
+
+    const staleRequest = provider.getDetailedRouteGeometry(TRIP_ID);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    provider.invalidateRouteGeometry(TRIP_ID);
+
+    await expect(provider.getDetailedRouteGeometry(TRIP_ID)).resolves.toEqual(
+      expect.objectContaining({
+        kind: 'ok',
+        snapshot: expect.objectContaining({ effectiveRouteId: currentRouteId }),
+      }),
+    );
+    resolveStaleFetch(jsonResponse(200, validEnvelope({ effectiveRouteId: staleRouteId })));
+    await expect(staleRequest).resolves.toEqual(
+      expect.objectContaining({
+        kind: 'ok',
+        snapshot: expect.objectContaining({ effectiveRouteId: staleRouteId }),
+      }),
+    );
+
+    await expect(provider.getDetailedRouteGeometry(TRIP_ID)).resolves.toEqual(
+      expect.objectContaining({
+        kind: 'ok',
+        snapshot: expect.objectContaining({ effectiveRouteId: currentRouteId }),
+      }),
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
 });
 
 function createProvider(): HttpRouteGeometryProvider {

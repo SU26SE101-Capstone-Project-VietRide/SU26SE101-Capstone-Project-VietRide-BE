@@ -470,6 +470,7 @@ public sealed class EditTripCommandHandlerTests
     public async Task RouteOnlyChange_RebuildsStopsAndClearsObsoleteFareOverrides()
     {
         var fixture = new Fixture();
+        fixture.Trip.ChangeAlternativeRoute(Guid.NewGuid());
         var oldStopId = Guid.NewGuid();
         var newStopId = Guid.NewGuid();
         fixture.Stops.Items.Add(TripStop.Create(
@@ -491,6 +492,7 @@ public sealed class EditTripCommandHandlerTests
 
         fixture.Stops.Items.Should().ContainSingle(stop => stop.StopId == newStopId);
         fixture.Fares.Items.Should().BeEmpty();
+        fixture.Trip.AlternativeRouteId.Should().BeNull();
         fixture.Trip.EstimatedArrivalTime.Should().Be(fixture.Trip.DepartureDateTime.AddMinutes(240));
         fixture.Outbox.Items.Should().ContainSingle(item => item.EventType == "trip.trip.route_changed");
     }

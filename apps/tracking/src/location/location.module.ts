@@ -18,9 +18,18 @@ import { BookingCreatedRealtimeConsumer } from './booking-created-realtime.consu
 import { BookingManifestRealtimeConsumer } from './booking-manifest-realtime.consumer';
 import { OperatorTripProjectionProvider } from '../tracking-data/operator-trip-projection.provider';
 import { RouteChangeProposalRealtimeConsumer } from './route-change-proposal-realtime.consumer';
+import { TripRouteChangedStateInvalidationConsumer } from './trip-route-changed-state-invalidation.consumer';
+import { RouteStateGenerationModule } from '../route-state/route-state-generation.module';
 
 @Module({
-  imports: [EtaModule, ApproachingAlertModule, OffRouteModule, TripDelayModule, TripSharingModule],
+  imports: [
+    EtaModule,
+    ApproachingAlertModule,
+    OffRouteModule,
+    TripDelayModule,
+    TripSharingModule,
+    RouteStateGenerationModule,
+  ],
   providers: [
     LocationGateway,
     LocationService,
@@ -34,6 +43,7 @@ import { RouteChangeProposalRealtimeConsumer } from './route-change-proposal-rea
     BookingManifestRealtimeConsumer,
     OperatorTripProjectionProvider,
     RouteChangeProposalRealtimeConsumer,
+    TripRouteChangedStateInvalidationConsumer,
   ],
   controllers: [ShuttleTrackingController],
   exports: [LocationService],

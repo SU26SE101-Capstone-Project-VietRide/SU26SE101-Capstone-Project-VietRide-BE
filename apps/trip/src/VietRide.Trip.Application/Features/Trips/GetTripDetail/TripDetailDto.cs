@@ -17,6 +17,7 @@ public sealed record TripDetailDto(
     Guid? ReturnRouteId,
     TripFareBreakdownDto FareBreakdown)
 {
+    public Guid? AlternativeRouteId { get; init; }
     public string? Notes { get; init; }
     public string PlannedEtaQuality { get; init; } = "FALLBACK";
     public int SurchargePercent { get; init; }

@@ -6,9 +6,10 @@ import { TrackingInternalJwtSigner } from '../authorization/tracking-internal-jw
 import { OffRouteModule } from '../off-route/off-route.module';
 import { GoogleRoutesEtaProvider } from './google-routes-eta.provider';
 import { LocalRouteEtaProvider } from './local-route-eta.provider';
+import { RouteStateGenerationModule } from '../route-state/route-state-generation.module';
 
 @Module({
-  imports: [OffRouteModule],
+  imports: [OffRouteModule, RouteStateGenerationModule],
   providers: [
     EtaService,
     TrackingInternalJwtSigner,

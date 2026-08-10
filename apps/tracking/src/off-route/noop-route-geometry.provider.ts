@@ -17,6 +17,10 @@ export class NoopRouteGeometryProvider implements DetailedRouteGeometryProvider 
     return null;
   }
 
+  invalidateRouteGeometry(tripId: string): void {
+    void tripId;
+  }
+
   async getDetailedRouteGeometry(tripId: string): Promise<RouteGeometryFetchResult> {
     void tripId;
     return { kind: 'unavailable' };

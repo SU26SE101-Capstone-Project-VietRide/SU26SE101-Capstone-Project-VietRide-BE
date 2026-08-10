@@ -5,6 +5,7 @@ import type { EtaUpdateEvent } from '../eta/eta.service';
 import type { TripDataProvider, TripStopSnapshot } from '../eta/trip-data.provider';
 import { TRACKING_ACTIVE_TRIPS_KEY, trackingEtaKey } from '../location/location.constants';
 import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
+import { RouteStateGenerationRegistry } from '../route-state/route-state-generation.registry';
 import {
   TRIP_DELAY_DEDUPE_TTL_SECONDS,
   TRIP_DELAY_LOCK_TTL_SECONDS,
@@ -37,6 +38,7 @@ describe('TripDelayService', () => {
   let redisEval: jest.MockedFunction<(...args: unknown[]) => Promise<number>>;
   let outboxCreate: jest.MockedFunction<(args: unknown) => Promise<unknown>>;
   let tripDataProvider: jest.Mocked<TripDataProvider>;
+  let routeStateGeneration: RouteStateGenerationRegistry;
 
   beforeEach(async () => {
     redisSmembers = jest.fn(async (key: string) => {
@@ -62,6 +64,7 @@ describe('TripDelayService', () => {
         void tripId;
         return [createStop()];
       }),
+      invalidateRouteStops: jest.fn(),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -90,10 +93,12 @@ describe('TripDelayService', () => {
           provide: TRIP_DATA_PROVIDER,
           useValue: tripDataProvider,
         },
+        RouteStateGenerationRegistry,
       ],
     }).compile();
 
     service = moduleRef.get(TripDelayService);
+    routeStateGeneration = moduleRef.get(RouteStateGenerationRegistry);
   });
 
   it('does not publish when delay is equal to the 30 minute threshold', async () => {
@@ -295,6 +300,34 @@ describe('TripDelayService', () => {
       delayStatus: 'DELAYED',
       statusTransition: 'DELAYED',
     });
+  });
+
+  it('does not write delay state or Outbox when route invalidation wins the provider race', async () => {
+    let resolveStops: ((value: TripStopSnapshot[]) => void) | undefined;
+    tripDataProvider.getRouteStops.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveStops = resolve;
+    }));
+    const eta: EtaUpdateEvent = {
+      tripId: TEST_TRIP_ID,
+      stopId: TEST_STOP_ID,
+      etaMinutes: 45,
+      estimatedArrivalTime: DELAYED_DYNAMIC_ETA,
+      distanceMeters: 10_000,
+      updatedAt: '2026-06-04T09:15:00.000Z',
+    };
+
+    const evaluation = service.handleEtaUpdate(eta);
+    await Promise.resolve();
+    routeStateGeneration.invalidate(TEST_TRIP_ID);
+    if (!resolveStops) throw new Error('Trip stop read did not start');
+    resolveStops([createStop()]);
+
+    await expect(evaluation).resolves.toEqual(expect.objectContaining({
+      delayStatus: 'UNKNOWN',
+      delayMinutes: null,
+    }));
+    expect(redisSet).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
   });
 
   it('does not let a stale older stop overwrite the realtime pointer or repeat DELAYED', async () => {

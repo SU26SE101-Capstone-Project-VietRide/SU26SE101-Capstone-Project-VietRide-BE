@@ -86,4 +86,98 @@ describe('HttpTripDataProvider', () => {
     await provider.getRouteStops(TRIP_ID);
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
+
+  it('invalidates cached route stops immediately for a changed trip route', async () => {
+    let status = 'PENDING';
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          stops: [{
+            stopId: STOP_ID,
+            latitude: 10.75,
+            longitude: 106.67,
+            sequence: 1,
+            status,
+          }],
+        },
+      }),
+    } as Response)) as typeof fetch;
+    const provider = new HttpTripDataProvider({
+      TRIP_SERVICE_BASE_URL: 'http://trip.test',
+      TRIP_ROUTE_STOPS_PATH: '/internal/v1/trips/:tripId/route-stops',
+      TRACKING_DATA_PROVIDER_TIMEOUT_MS: 1_000,
+      TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: 60,
+    } as Env, {
+      sign: jest.fn(async () => 'internal-token'),
+    } as unknown as TrackingInternalJwtSigner);
+
+    await expect(provider.getRouteStops(TRIP_ID)).resolves.toEqual([
+      expect.objectContaining({ status: 'PENDING' }),
+    ]);
+    status = 'SKIPPED';
+    await provider.getRouteStops(TRIP_ID);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    provider.invalidateRouteStops(TRIP_ID);
+
+    await expect(provider.getRouteStops(TRIP_ID)).resolves.toEqual([
+      expect.objectContaining({ status: 'SKIPPED' }),
+    ]);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let an in-flight response repopulate the cache after invalidation', async () => {
+    let resolveStaleFetch: (response: Response) => void = () => undefined;
+    global.fetch = jest
+      .fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => {
+        resolveStaleFetch = resolve;
+      }))
+      .mockResolvedValueOnce(routeStopsResponse('SKIPPED')) as typeof fetch;
+    const provider = new HttpTripDataProvider({
+      TRIP_SERVICE_BASE_URL: 'http://trip.test',
+      TRIP_ROUTE_STOPS_PATH: '/internal/v1/trips/:tripId/route-stops',
+      TRACKING_DATA_PROVIDER_TIMEOUT_MS: 1_000,
+      TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: 60,
+    } as Env, {
+      sign: jest.fn(async () => 'internal-token'),
+    } as unknown as TrackingInternalJwtSigner);
+
+    const staleRequest = provider.getRouteStops(TRIP_ID);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    provider.invalidateRouteStops(TRIP_ID);
+
+    await expect(provider.getRouteStops(TRIP_ID)).resolves.toEqual([
+      expect.objectContaining({ status: 'SKIPPED' }),
+    ]);
+    resolveStaleFetch(routeStopsResponse('PENDING'));
+    await expect(staleRequest).resolves.toEqual([
+      expect.objectContaining({ status: 'PENDING' }),
+    ]);
+
+    await expect(provider.getRouteStops(TRIP_ID)).resolves.toEqual([
+      expect.objectContaining({ status: 'SKIPPED' }),
+    ]);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
 });
+
+function routeStopsResponse(status: 'PENDING' | 'SKIPPED'): Response {
+  return {
+    ok: true,
+    json: async () => ({
+      success: true,
+      data: {
+        stops: [{
+          stopId: STOP_ID,
+          latitude: 10.75,
+          longitude: 106.67,
+          sequence: 1,
+          status,
+        }],
+      },
+    }),
+  } as Response;
+}

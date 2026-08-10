@@ -82,6 +82,20 @@ internal sealed class TripStopRepository : ITripStopRepository
 
     public void RemoveRange(IEnumerable<TripStop> stops) => _dbContext.TripStops.RemoveRange(stops);
 
+    public async Task DeleteNonArrivedByTripAsync(Guid tripId, CancellationToken cancellationToken)
+    {
+        EnsureCallerTransaction();
+        await _dbContext.TripStops
+            .Where(stop => stop.TripId == tripId && stop.Status != TripStopStatus.ARRIVED)
+            .ExecuteDeleteAsync(cancellationToken);
+        foreach (var entry in _dbContext.ChangeTracker.Entries<TripStop>()
+                     .Where(entry => entry.Entity.TripId == tripId
+                         && entry.Entity.Status != TripStopStatus.ARRIVED))
+        {
+            entry.State = EntityState.Detached;
+        }
+    }
+
     public async Task DeleteByTripAsync(Guid tripId, CancellationToken cancellationToken)
     {
         EnsureCallerTransaction();

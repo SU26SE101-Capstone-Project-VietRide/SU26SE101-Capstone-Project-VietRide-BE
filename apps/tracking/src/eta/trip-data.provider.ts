@@ -11,4 +11,5 @@ export interface TripStopSnapshot {
 
 export interface TripDataProvider {
   getRouteStops(tripId: string): Promise<TripStopSnapshot[]>;
+  invalidateRouteStops(tripId: string): void;
 }

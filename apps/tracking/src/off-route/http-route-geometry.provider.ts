@@ -71,6 +71,7 @@ interface CacheEntry {
 export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider {
   private readonly cache = new Map<string, CacheEntry>();
   private readonly inFlight = new Map<string, Promise<RouteGeometryFetchResult>>();
+  private readonly cacheVersions = new Map<string, number>();
 
   constructor(
     @Inject(ENV_TOKEN) private readonly env: Env,
@@ -94,12 +95,13 @@ export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider 
     const existing = options?.bypassCache ? undefined : this.inFlight.get(tripId);
     if (existing) return existing;
 
-    const request = this.fetchRouteGeometry(tripId);
+    const cacheVersion = this.cacheVersions.get(tripId) ?? 0;
+    const request = this.fetchRouteGeometry(tripId, cacheVersion);
     this.inFlight.set(tripId, request);
     try {
       return await request;
     } finally {
-      this.inFlight.delete(tripId);
+      if (this.inFlight.get(tripId) === request) this.inFlight.delete(tripId);
     }
   }
 
@@ -109,7 +111,13 @@ export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider 
     return this.toLegacySnapshot(cached.result);
   }
 
-  private async fetchRouteGeometry(tripId: string): Promise<RouteGeometryFetchResult> {
+  invalidateRouteGeometry(tripId: string): void {
+    this.cacheVersions.set(tripId, (this.cacheVersions.get(tripId) ?? 0) + 1);
+    this.cache.delete(tripId);
+    this.inFlight.delete(tripId);
+  }
+
+  private async fetchRouteGeometry(tripId: string, cacheVersion: number): Promise<RouteGeometryFetchResult> {
     const url = this.buildUrl(tripId);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.env.TRACKING_DATA_PROVIDER_TIMEOUT_MS);
@@ -129,22 +137,22 @@ export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider 
       });
 
       if (response.status === 404) {
-        return this.cacheTransient(tripId, { kind: 'not_found' });
+        return this.cacheTransient(tripId, { kind: 'not_found' }, cacheVersion);
       }
       if (!response.ok) {
-        return this.cacheTransient(tripId, { kind: 'unavailable' });
+        return this.cacheTransient(tripId, { kind: 'unavailable' }, cacheVersion);
       }
 
       const body = await response.json();
 
       const envelope = apiResponseEnvelopeSchema.safeParse(body);
       if (!envelope.success) {
-        return this.cacheTransient(tripId, { kind: 'unavailable' });
+        return this.cacheTransient(tripId, { kind: 'unavailable' }, cacheVersion);
       }
 
       const parsed = routeGeometryDataSchema.safeParse(envelope.data.data);
       if (!parsed.success || parsed.data.tripId !== tripId) {
-        return this.cacheTransient(tripId, { kind: 'unavailable' });
+        return this.cacheTransient(tripId, { kind: 'unavailable' }, cacheVersion);
       }
 
       const points: RouteGeometryPoint[] = parsed.data.points.map((p) => ({
@@ -175,18 +183,20 @@ export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider 
 
       const fetchResult: RouteGeometryFetchResult = { kind: 'ok', snapshot: result };
 
-      this.cache.set(tripId, {
-        result: fetchResult,
-        expiresAt: Date.now() + (
-          result.geometrySource === 'STOPS_ONLY'
-            ? ETA_STOPS_ONLY_CACHE_TTL_SECONDS
-            : this.env.TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS
-        ) * 1000,
-      });
+      if ((this.cacheVersions.get(tripId) ?? 0) === cacheVersion) {
+        this.cache.set(tripId, {
+          result: fetchResult,
+          expiresAt: Date.now() + (
+            result.geometrySource === 'STOPS_ONLY'
+              ? ETA_STOPS_ONLY_CACHE_TTL_SECONDS
+              : this.env.TRACKING_ROUTE_GEOMETRY_CACHE_TTL_SECONDS
+          ) * 1000,
+        });
+      }
 
       return fetchResult;
     } catch {
-      return this.cacheTransient(tripId, { kind: 'unavailable' });
+      return this.cacheTransient(tripId, { kind: 'unavailable' }, cacheVersion);
     } finally {
       clearTimeout(timeout);
     }
@@ -200,8 +210,11 @@ export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider 
   private cacheTransient(
     tripId: string,
     result: Extract<RouteGeometryFetchResult, { kind: 'not_found' | 'unavailable' }>,
+    cacheVersion: number,
   ): RouteGeometryFetchResult {
-    this.cache.set(tripId, { result, expiresAt: Date.now() + 30_000 });
+    if ((this.cacheVersions.get(tripId) ?? 0) === cacheVersion) {
+      this.cache.set(tripId, { result, expiresAt: Date.now() + 30_000 });
+    }
     return result;
   }
 

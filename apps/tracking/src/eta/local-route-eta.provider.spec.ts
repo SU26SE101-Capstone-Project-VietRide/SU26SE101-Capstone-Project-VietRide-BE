@@ -7,6 +7,7 @@ describe('LocalRouteEtaProvider', () => {
     const provider = new LocalRouteEtaProvider({
       peekCachedRouteGeometry: () => null,
       getRouteGeometry,
+      invalidateRouteGeometry: jest.fn(),
     });
 
     await expect(provider.calculate({
@@ -35,6 +36,7 @@ describe('LocalRouteEtaProvider', () => {
         ],
       }),
       getRouteGeometry: async () => null,
+      invalidateRouteGeometry: jest.fn(),
     };
     const provider = new LocalRouteEtaProvider(routeProvider);
     const result = await provider.calculate({

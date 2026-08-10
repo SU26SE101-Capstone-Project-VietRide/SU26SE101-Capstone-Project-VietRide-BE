@@ -12,6 +12,7 @@ import {
   trackingOffRouteSinceKey,
 } from './off-route.constants';
 import { projectPointToRoute, type RouteGeometryPoint, type RouteGeometryProvider } from './route-geometry.provider';
+import { RouteStateGenerationRegistry } from '../route-state/route-state-generation.registry';
 
 interface OffRouteState {
   firstDetectedAt: string;
@@ -38,6 +39,7 @@ export class OffRouteService {
     private readonly redis: RedisService,
     private readonly prisma: TrackingPrismaService,
     @Inject(ROUTE_GEOMETRY_PROVIDER) private readonly routeGeometryProvider: RouteGeometryProvider,
+    private readonly routeStateGeneration: RouteStateGenerationRegistry,
   ) {}
 
   async handleGpsUpdate(gps: GpsUpdateEvent): Promise<OffRouteAlertPayload | null> {
@@ -50,6 +52,7 @@ export class OffRouteService {
   }
 
   private async evaluateGpsUpdate(gps: GpsUpdateEvent): Promise<OffRouteAlertPayload | null> {
+    const routeGeneration = this.routeStateGeneration.capture(gps.tripId);
     const route = this.routeGeometryProvider.peekCachedRouteGeometry(gps.tripId);
     if (!route) {
       void this.routeGeometryProvider.getRouteGeometry(gps.tripId).catch(() => null);
@@ -60,12 +63,14 @@ export class OffRouteService {
     const distanceMeters = Math.round(calculateNearestRouteDistanceMeters(gps, route.points));
     const stateKey = trackingOffRouteSinceKey(gps.tripId);
     if (distanceMeters <= OFF_ROUTE_DISTANCE_THRESHOLD_METERS) {
+      if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
       await this.redis.getClient().del(stateKey);
       return null;
     }
 
     const detectedAtMs = new Date(gps.recordedAt).getTime();
     const state = await this.readState(stateKey);
+    if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
     if (!state) {
       await this.writeInitialState(stateKey, { firstDetectedAt: gps.recordedAt });
       return null;
@@ -85,9 +90,11 @@ export class OffRouteService {
       durationSeconds: Math.floor((detectedAtMs - firstDetectedAtMs) / MILLISECONDS_PER_SECOND),
       detectedAt: gps.recordedAt,
     };
+    if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
     await this.createOutboxEvent(payload);
+    if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
     await this.writeState(stateKey, { ...state, alertedAt: gps.recordedAt });
-    return payload;
+    return this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration) ? payload : null;
   }
 
   private async readState(key: string): Promise<OffRouteState | null> {

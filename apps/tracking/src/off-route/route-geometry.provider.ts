@@ -39,6 +39,7 @@ export type RouteGeometryFetchResult =
 export interface RouteGeometryProvider {
   peekCachedRouteGeometry(tripId: string): RouteGeometrySnapshot | null;
   getRouteGeometry(tripId: string): Promise<RouteGeometrySnapshot | null>;
+  invalidateRouteGeometry(tripId: string): void;
 }
 
 export interface DetailedRouteGeometryProvider extends RouteGeometryProvider {

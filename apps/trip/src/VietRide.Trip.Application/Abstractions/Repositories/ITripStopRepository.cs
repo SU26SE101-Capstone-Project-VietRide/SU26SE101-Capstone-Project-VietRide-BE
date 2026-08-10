@@ -11,6 +11,9 @@ public interface ITripStopRepository : IRepository<TripStop, (Guid TripId, Guid 
     void RemoveRange(IEnumerable<TripStop> stops)
         => throw new NotSupportedException("Trip-stop range removal is not supported by this repository implementation.");
 
+    Task DeleteNonArrivedByTripAsync(Guid tripId, CancellationToken cancellationToken)
+        => throw new NotSupportedException("Non-arrived Trip-stop replacement is not supported by this repository implementation.");
+
     Task DeleteByTripAsync(Guid tripId, CancellationToken cancellationToken)
         => throw new NotSupportedException("Trip-stop replacement is not supported by this repository implementation.");
 

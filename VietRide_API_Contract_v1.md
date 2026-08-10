@@ -2562,7 +2562,7 @@ TripStops from the selected AlternativeRoute in route order. A selected-route st
 in the preserved arrival history is not duplicated. Planned stop and destination timestamps use
 `actualDepartureTime ?? departureDateTime` as their baseline and the AlternativeRoute duration
 snapshots. Tracking consumes `trip.trip.route_changed` to invalidate route-stop/geometry caches
-and clear stale ETA/off-route state before processing subsequent GPS updates.
+and clear stale ETA/off-route/delay state before processing subsequent GPS updates.
 
 Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
 
