@@ -1089,15 +1089,17 @@ public sealed class AuthEndpointsTests :
     private static string FindWorkspaceFile(params string[] relativeSegments)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "AGENTS.md")))
+        while (directory is not null)
         {
+            var candidatePath = Path.Combine([directory.FullName, .. relativeSegments]);
+            if (File.Exists(candidatePath))
+                return candidatePath;
+
             directory = directory.Parent;
         }
 
-        if (directory is null)
-            throw new InvalidOperationException("Could not locate the VietRide workspace root.");
-
-        return Path.Combine([directory.FullName, .. relativeSegments]);
+        throw new FileNotFoundException(
+            $"Could not locate workspace file '{Path.Combine(relativeSegments)}'.");
     }
 
     private static void AssertOperatorAdminLogin(JsonDocument doc, string email, Guid operatorId)
