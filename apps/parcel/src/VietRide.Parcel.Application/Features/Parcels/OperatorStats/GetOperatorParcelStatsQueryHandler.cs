@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Parcel.Application.Features.Parcels.OperatorStats;
 
@@ -12,7 +13,6 @@ public sealed class GetOperatorParcelStatsQueryHandler
     private const int DefaultRouteLimit = 10;
     private const int MaximumRouteLimit = 100;
     private const int MaximumInclusiveDays = 366;
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
     private static readonly HashSet<string> SupportedGroups = new(StringComparer.OrdinalIgnoreCase)
     {
         StatusGroup,
@@ -114,7 +114,7 @@ public sealed class GetOperatorParcelStatsQueryHandler
             return DateTimeOffset.MinValue;
         }
 
-        return new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), IctOffset).ToUniversalTime();
+        return BusinessTime.ToUtc(date, TimeOnly.MinValue);
     }
 
     private static DateTimeOffset ToUtcExclusive(DateOnly date)
@@ -124,6 +124,6 @@ public sealed class GetOperatorParcelStatsQueryHandler
             return DateTimeOffset.MaxValue;
         }
 
-        return new DateTimeOffset(date.AddDays(1).ToDateTime(TimeOnly.MinValue), IctOffset).ToUniversalTime();
+        return BusinessTime.ToUtc(date.AddDays(1), TimeOnly.MinValue);
     }
 }

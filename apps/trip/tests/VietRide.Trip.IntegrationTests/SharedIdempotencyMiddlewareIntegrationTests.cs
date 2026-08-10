@@ -110,6 +110,38 @@ public sealed class SharedIdempotencyMiddlewareIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task PublicTimestamp_FirstResponseAndReplayUseVietnamOffset_ButRedisStoresUtcZ()
+    {
+        var key = NewKey();
+        var invoked = 0;
+        RequestDelegate next = async context =>
+        {
+            invoked++;
+            context.Response.StatusCode = StatusCodes.Status201Created;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(
+                "{\"departureDateTime\":\"2026-08-10T12:00:00+07:00\","
+                + "\"meta\":{\"timestamp\":\"2026-08-10T05:00:00Z\"}}");
+        };
+
+        var first = await InvokeAsync(key, next);
+        var replay = await InvokeAsync(key, next);
+
+        Assert.Equal(1, invoked);
+        Assert.Contains("2026-08-10T12:00:00.0000000+07:00", first.Body, StringComparison.Ordinal);
+        Assert.Contains("2026-08-10T12:00:00.0000000+07:00", replay.Body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Z", first.Body, StringComparison.Ordinal);
+        Assert.Equal(first.Body, replay.Body);
+
+        var cachedEntry = (await _redis.GetDatabase().StringGetAsync(ResponseKey(key))).ToString();
+        using var cachedDocument = JsonDocument.Parse(cachedEntry);
+        var cachedBody = Encoding.UTF8.GetString(Convert.FromBase64String(
+            cachedDocument.RootElement.GetProperty("body").GetString()!));
+        Assert.Contains("2026-08-10T05:00:00.0000000Z", cachedBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("+07:00", cachedBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NoContent_FirstRequestAndReplay_DoNotWriteResponseBody()
     {
         var key = NewKey();

@@ -55,7 +55,7 @@ public sealed class GetInternalAdminRevenueSummaryQueryHandler
             parcel,
             subscription,
             paid,
-            clock.UtcNow.UtcDateTime);
+            clock.UtcNow);
         await cache.SetAsync(key, result, RevenueReportCacheKeys.Expiration, cancellationToken);
         return result;
     }

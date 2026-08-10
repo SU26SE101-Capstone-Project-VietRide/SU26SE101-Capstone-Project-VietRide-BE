@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Exceptions;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Booking.Infrastructure.Http;
 
@@ -26,10 +27,7 @@ public sealed class TripServiceClient : ITripServiceClient
             "SKIPPED",
         };
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.IgnoreNullOptions;
 
     private readonly HttpClient _httpClient;
     private readonly ILogger<TripServiceClient> _logger;
@@ -140,7 +138,7 @@ public sealed class TripServiceClient : ITripServiceClient
         DateTimeOffset pricingAt,
         CancellationToken cancellationToken)
     {
-        var utcPricingAt = pricingAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        var utcPricingAt = UtcJson.Format(pricingAt);
         var uri = $"/internal/v1/trips/{tripId:D}?pricingAt={Uri.EscapeDataString(utcPricingAt)}";
         return await GetTripSnapshotCoreAsync(uri, cancellationToken).ConfigureAwait(false);
     }

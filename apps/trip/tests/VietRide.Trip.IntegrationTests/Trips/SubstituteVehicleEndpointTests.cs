@@ -141,17 +141,18 @@ public sealed class SubstituteVehicleEndpointTests
         invalidKey.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         await harness.AssertUnchangedAsync(unchanged);
 
-        using var nonUtc = await harness.SendAsync(
-            recoveryDeparture: new DateTimeOffset(
-                2026,
-                7,
-                25,
-                9,
-                0,
-                0,
-                TimeSpan.FromHours(7)));
-        nonUtc.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
-        await AssertErrorAsync(nonUtc, "VALIDATION_ERROR");
+        using var missingOffset = await harness.SendRawAsync(
+            $$"""
+            {
+              "replacementVehicleId":"{{harness.ReplacementVehicleId:D}}",
+              "estimatedRecoveryDepartureAt":"2026-07-25T09:00:00",
+              "reason":"breakdown",
+              "notifyPassengers":true,
+              "replacementCrew":null
+            }
+            """);
+        missingOffset.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertErrorAsync(missingOffset, "VALIDATION_ERROR");
         await harness.AssertUnchangedAsync(unchanged);
 
         var replayKey = Guid.NewGuid().ToString("D");

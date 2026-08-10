@@ -5,7 +5,7 @@ namespace VietRide.Payment.Application.Events;
 
 public sealed record TripCompletedConsumerEvent(
     [property: JsonPropertyName("eventId")] Guid EventId,
-    [property: JsonPropertyName("occurredAt")] DateTime OccurredAt,
+    [property: JsonPropertyName("occurredAt")] DateTimeOffset OccurredAt,
     [property: JsonPropertyName("tripId")] Guid TripId,
     [property: JsonPropertyName("operatorId")] Guid OperatorId,
     [property: JsonPropertyName("terminalAt")] DateTimeOffset TerminalAt,
@@ -14,11 +14,13 @@ public sealed record TripCompletedConsumerEvent(
     public const string EventTypeValue = "trip.trip.completed";
     [JsonIgnore]
     string IIntegrationEvent.EventType => EventTypeValue;
+    [JsonIgnore]
+    DateTime IIntegrationEvent.OccurredAt => OccurredAt.UtcDateTime;
 }
 
 public sealed record TripDisruptedConsumerEvent(
     [property: JsonPropertyName("eventId")] Guid EventId,
-    [property: JsonPropertyName("occurredAt")] DateTime OccurredAt,
+    [property: JsonPropertyName("occurredAt")] DateTimeOffset OccurredAt,
     [property: JsonPropertyName("tripId")] Guid TripId,
     [property: JsonPropertyName("operatorId")] Guid OperatorId,
     [property: JsonPropertyName("terminalAt")] DateTimeOffset TerminalAt,
@@ -28,4 +30,6 @@ public sealed record TripDisruptedConsumerEvent(
     public const string EventTypeValue = "trip.trip.disrupted";
     [JsonIgnore]
     string IIntegrationEvent.EventType => EventTypeValue;
+    [JsonIgnore]
+    DateTime IIntegrationEvent.OccurredAt => OccurredAt.UtcDateTime;
 }

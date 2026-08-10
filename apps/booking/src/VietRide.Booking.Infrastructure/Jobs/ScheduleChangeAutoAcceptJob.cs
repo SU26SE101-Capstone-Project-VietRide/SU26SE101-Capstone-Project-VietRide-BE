@@ -8,6 +8,7 @@ using VietRide.Booking.Application.Events;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.Services;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Booking.Infrastructure.Jobs;
@@ -17,7 +18,7 @@ public sealed class ScheduleChangeAutoAcceptJob(
     IScheduleChangeAutoAcceptScheduler scheduler,
     IClock clock)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     [Queue("booking")]
     [AutomaticRetry(Attempts = 5)]

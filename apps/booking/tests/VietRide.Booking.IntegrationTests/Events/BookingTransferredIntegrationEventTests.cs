@@ -9,6 +9,7 @@ using RabbitMQ.Client;
 using VietRide.Booking.Application.Events;
 using VietRide.Booking.Infrastructure.Messaging;
 using VietRide.Booking.IntegrationTests.Messaging;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Shared.Messaging.RabbitMq;
 
 namespace VietRide.Booking.IntegrationTests.Events;
@@ -131,7 +132,7 @@ public sealed class BookingTransferredIntegrationEventTests
                 false,
                 properties,
                 Arg.Is<ReadOnlyMemory<byte>>(body =>
-                    Encoding.UTF8.GetString(body.ToArray()) == row.Payload));
+                    Encoding.UTF8.GetString(body.ToArray()) == UtcJson.NormalizeInstants(row.Payload)));
         });
     }
 

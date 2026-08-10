@@ -4,12 +4,13 @@ using Polly.CircuitBreaker;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels.Reports;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Parcel.Infrastructure.Http;
 
 public sealed class PaymentOperatorRevenueSummaryClient : IPaymentOperatorRevenueSummaryClient
 {
-    private const string IctTimezone = "Asia/Ho_Chi_Minh";
+    private const string BusinessTimeZoneId = BusinessTime.TimeZoneId;
     private readonly HttpClient client;
 
     public PaymentOperatorRevenueSummaryClient(HttpClient client)
@@ -75,7 +76,7 @@ public sealed class PaymentOperatorRevenueSummaryClient : IPaymentOperatorRevenu
             || to != expectedTo
             || !period.TryGetProperty("timezone", out var timezone)
             || timezone.ValueKind != JsonValueKind.String
-            || !string.Equals(timezone.GetString(), IctTimezone, StringComparison.Ordinal)
+            || !string.Equals(timezone.GetString(), BusinessTimeZoneId, StringComparison.Ordinal)
             || !root.TryGetProperty("operatorId", out var operatorElement)
             || operatorElement.ValueKind != JsonValueKind.String
             || !operatorElement.TryGetGuid(out var operatorId)

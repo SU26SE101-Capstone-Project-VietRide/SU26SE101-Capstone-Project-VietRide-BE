@@ -1,3 +1,4 @@
+using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.Services;
 
@@ -5,7 +6,6 @@ namespace VietRide.Trip.Application.Services;
 
 public sealed class FareSurchargeService : IFareSurchargeService
 {
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
     private readonly IOperatorFareSurchargePeriodRepository _periods;
     private readonly IOperatorFareSurchargeSettingRepository _settings;
 
@@ -26,7 +26,7 @@ public sealed class FareSurchargeService : IFareSurchargeService
         if (setting?.IsEnabled != true)
             return null;
 
-        var departureDate = DateOnly.FromDateTime(departureDateTime.ToOffset(IctOffset).DateTime);
+        var departureDate = BusinessTime.ToLocalDate(departureDateTime);
         var period = await _periods.GetActiveForDateAsync(operatorId, departureDate, cancellationToken);
         return period is null
             ? null

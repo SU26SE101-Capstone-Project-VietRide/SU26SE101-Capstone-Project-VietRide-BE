@@ -89,42 +89,7 @@ if (registerMessaging)
 {
     using var scope = app.Services.CreateScope();
     var recurringJobs = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
-    recurringJobs.AddOrUpdate<TopUpExpiredJob>(
-        TopUpExpiredJob.RecurringJobId,
-        job => job.RunAsync(CancellationToken.None),
-        Cron.Minutely());
-    recurringJobs.AddOrUpdate<RefundFailureRetryJob>(
-        RefundFailureRetryJob.RecurringJobId,
-        job => job.RunAsync(CancellationToken.None),
-        "*/10 * * * *");
-    recurringJobs.AddOrUpdate<PaymentExpiredJob>(
-        PaymentExpiredJob.RecurringJobId,
-        job => job.RunAsync(CancellationToken.None),
-        Cron.Minutely());
-    recurringJobs.AddOrUpdate<Day38PaymentContextBackfillJob>(
-        Day38PaymentContextBackfillJob.RecurringJobId,
-        job => job.RunAsync(CancellationToken.None),
-        "*/5 * * * *");
-    recurringJobs.AddOrUpdate<Day38RevenueLedgerBackfillJob>(
-        Day38RevenueLedgerBackfillJob.RecurringJobId,
-        job => job.RunAsync(CancellationToken.None),
-        "*/10 * * * *");
-    recurringJobs.AddOrUpdate<TripSettlementEligibilityFlagJob>(
-        TripSettlementEligibilityFlagJob.RecurringJobId,
-        job => job.RunAsync(CancellationToken.None),
-        "0 19 * * *");
-    recurringJobs.AddOrUpdate<TripSettlementWeeklyAutoSettleJob>(
-        TripSettlementWeeklyAutoSettleJob.RecurringJobId,
-        job => job.RunAsync(CancellationToken.None),
-        "0 2 * * 1");
-    recurringJobs.AddOrUpdate<TripSettlementStuckAlertJob>(
-        TripSettlementStuckAlertJob.RecurringJobId,
-        job => job.RunAsync(CancellationToken.None),
-        Cron.Hourly());
-    recurringJobs.AddOrUpdate<FinancialProjectionBackfillJob>(
-        FinancialProjectionBackfillJob.RecurringJobId,
-        job => job.RunAsync(CancellationToken.None),
-        "*/5 * * * *");
+    PaymentRecurringJobRegistration.Register(recurringJobs);
 }
 
 app.Run();

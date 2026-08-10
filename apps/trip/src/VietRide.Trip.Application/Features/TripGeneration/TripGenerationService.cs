@@ -2,6 +2,7 @@ using System.Text.Json;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.Services;
@@ -13,7 +14,6 @@ namespace VietRide.Trip.Application.Features.TripGeneration;
 public sealed class TripGenerationService
 {
     private const int GenerationWindowDays = 14;
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
 
     private const string TripAssignedEventType = "trip.trip.assigned";
     private const string SubscriptionLimitTripSkippedEventType = "subscription.limit.trip_skipped";
@@ -73,7 +73,7 @@ public sealed class TripGenerationService
         CancellationToken cancellationToken)
     {
         var now = clock.UtcNow;
-        var today = DateOnly.FromDateTime(now.ToOffset(IctOffset).DateTime);
+        var today = BusinessTime.ToLocalDate(now);
         var schedules = GetSchedules(driverScheduleId, today);
         var generatedCount = 0;
         var skippedCount = 0;
@@ -423,7 +423,7 @@ public sealed class TripGenerationService
         IReadOnlySet<int> scheduleDays,
         DateTimeOffset now)
     {
-        var localToday = DateOnly.FromDateTime(now.ToOffset(IctOffset).DateTime);
+        var localToday = BusinessTime.ToLocalDate(now);
         var generationWindowEnd = now.AddDays(GenerationWindowDays);
 
         for (var offset = 0; offset <= GenerationWindowDays; offset++)
@@ -432,7 +432,7 @@ public sealed class TripGenerationService
             var departureDateTime = BuildDepartureDateTime(candidate, schedule.DepartureTime);
             if (candidate < schedule.ValidFrom
                 || (schedule.ValidUntil.HasValue && candidate > schedule.ValidUntil.Value)
-                || !scheduleDays.Contains(ToContractDayOfWeek(candidate))
+                || !scheduleDays.Contains(BusinessTime.ToIsoDayOfWeek(candidate))
                 || departureDateTime <= now
                 || departureDateTime > generationWindowEnd)
             {
@@ -449,7 +449,7 @@ public sealed class TripGenerationService
             .Where(trip => trip.Status != TripStatus.CANCELLED
                 && trip.DriverScheduleId == driverScheduleId)
             .AsEnumerable()
-            .Select(trip => DateOnly.FromDateTime(trip.DepartureDateTime.ToOffset(IctOffset).DateTime))
+            .Select(trip => BusinessTime.ToLocalDate(trip.DepartureDateTime))
             .ToHashSet();
     }
 
@@ -574,23 +574,14 @@ public sealed class TripGenerationService
             cancellationToken);
     }
 
-    private static DateTimeOffset BuildDepartureDateTime(DateOnly date, TimeOnly time)
-    {
-        var localDateTime = date.ToDateTime(time);
-        return new DateTimeOffset(localDateTime, IctOffset).ToUniversalTime();
-    }
+    private static DateTimeOffset BuildDepartureDateTime(DateOnly date, TimeOnly time) =>
+        BusinessTime.ToUtc(date, time);
 
     private static HashSet<int> ParseScheduleDays(JsonElement dayOfWeek)
     {
         return dayOfWeek.EnumerateArray()
             .Select(day => day.GetInt32())
             .ToHashSet();
-    }
-
-    private static int ToContractDayOfWeek(DateOnly date)
-    {
-        var day = (int)date.DayOfWeek;
-        return day == 0 ? 7 : day;
     }
 
     private static TripSeatType MapSeatType(string? seatType)

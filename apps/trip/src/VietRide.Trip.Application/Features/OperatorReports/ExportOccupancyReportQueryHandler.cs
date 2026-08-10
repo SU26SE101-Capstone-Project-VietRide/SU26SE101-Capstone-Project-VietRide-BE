@@ -27,7 +27,7 @@ public sealed class ExportOccupancyReportQueryHandler
         var range = OperatorReportRange.Create(request.From, request.To, _clock);
         var spec = new ExcelReportSpec(
             "Occupancy",
-            ["trip_id", "route_id", "status", "departure_at", "sellable_seat_count", "booked_seat_count", "occupancy_percent"],
+            ["trip_id", "route_id", "status", "departure_at_asia_ho_chi_minh", "sellable_seat_count", "booked_seat_count", "occupancy_percent"],
             $"occupancy-report-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.xlsx");
         return _writer.WriteAsync(spec, ToRowsAsync(request.OperatorId, range, ct), ct);
     }
@@ -49,7 +49,7 @@ public sealed class ExportOccupancyReportQueryHandler
                 ExcelReportCell.TextValue(row.TripId.ToString("D")),
                 ExcelReportCell.TextValue(row.RouteId.ToString("D")),
                 ExcelReportCell.TextValue(row.Status),
-                ExcelReportCell.DateTimeValue(row.DepartureAt.UtcDateTime),
+                ExcelReportCell.DateTimeValue(row.DepartureAt),
                 ExcelReportCell.IntegerValue(row.SellableSeatCount),
                 ExcelReportCell.IntegerValue(row.BookedSeatCount),
                 ExcelReportCell.DecimalValue(occupancy),

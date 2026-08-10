@@ -153,7 +153,7 @@ public sealed class ManualCancelParcelCommandHandler
 
         await statsRepository.UpsertIncrementAsync(
             snapshot.OperatorId,
-            DateOnly.FromDateTime(now.UtcDateTime),
+            VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now),
             0,
             0,
             0,

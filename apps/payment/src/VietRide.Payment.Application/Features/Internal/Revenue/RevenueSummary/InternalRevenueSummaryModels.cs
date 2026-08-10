@@ -10,7 +10,7 @@ public sealed record InternalAdminRevenueSummaryResult(
     long NetParcelRevenueVnd,
     long SubscriptionRevenueVnd,
     long PaidToOperatorsVnd,
-    DateTime GeneratedAt);
+    DateTimeOffset GeneratedAt);
 
 public sealed record InternalOperatorRevenueSummaryResult(
     InternalRevenuePeriod Period,
@@ -20,4 +20,4 @@ public sealed record InternalOperatorRevenueSummaryResult(
     long NetParcelRevenueVnd,
     long GrossParcelRevenueVnd,
     long ParcelRefundsVnd,
-    DateTime GeneratedAt);
+    DateTimeOffset GeneratedAt);

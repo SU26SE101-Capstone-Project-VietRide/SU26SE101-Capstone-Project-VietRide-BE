@@ -27,7 +27,7 @@ public sealed class ExportParcelXlsxQueryHandler
         var range = OperatorReportRange.Create(request.From, request.To, _clock);
         var spec = new ExcelReportSpec(
             "Parcels",
-            ["parcel_id", "parcel_code", "trip_id", "status", "size_category", "total_price_vnd", "deposit_amount_vnd", "additional_amount_vnd", "refund_amount_vnd", "created_at", "confirmed_at"],
+            ["parcel_id", "parcel_code", "trip_id", "status", "size_category", "total_price_vnd", "deposit_amount_vnd", "additional_amount_vnd", "refund_amount_vnd", "created_at_asia_ho_chi_minh", "confirmed_at_asia_ho_chi_minh"],
             $"parcels-report-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.xlsx",
             new HashSet<int> { 5, 6, 7, 8 });
 
@@ -54,9 +54,9 @@ public sealed class ExportParcelXlsxQueryHandler
                 ExcelReportCell.IntegerValue(row.DepositAmountVnd),
                 ExcelReportCell.IntegerValue(row.AdditionalAmountVnd),
                 ExcelReportCell.IntegerValue(row.RefundAmountVnd),
-                ExcelReportCell.DateTimeValue(row.CreatedAt.UtcDateTime),
+                ExcelReportCell.DateTimeValue(row.CreatedAt),
                 row.ConfirmedAt.HasValue
-                    ? ExcelReportCell.DateTimeValue(row.ConfirmedAt.Value.UtcDateTime)
+                    ? ExcelReportCell.DateTimeValue(row.ConfirmedAt.Value)
                     : ExcelReportCell.BlankValue(),
             ]);
         }

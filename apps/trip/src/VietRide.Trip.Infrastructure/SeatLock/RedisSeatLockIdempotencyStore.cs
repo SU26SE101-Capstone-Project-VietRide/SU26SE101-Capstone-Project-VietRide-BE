@@ -1,5 +1,6 @@
 using System.Text.Json;
 using StackExchange.Redis;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Trip.Application.Abstractions.SeatLock;
 using VietRide.Trip.Application.Features.Internal.Trips.LockSeats;
 
@@ -10,7 +11,7 @@ public sealed class RedisSeatLockIdempotencyStore : ISeatLockIdempotencyStore
     private const string KeyPrefix = "trip:idem:lock-seats";
     private const string StoreCompletedScript = "local current = redis.call('GET', KEYS[1]) if not current then return 0 end local decoded = cjson.decode(current) if decoded.requestFingerprint ~= ARGV[1] then return -1 end if decoded.reservationToken ~= ARGV[2] then return -2 end if decoded.result ~= cjson.null then return -3 end redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[4]) return 1";
     private const string RemoveReservationScript = "local current = redis.call('GET', KEYS[1]) if not current then return 0 end local decoded = cjson.decode(current) if decoded.reservationToken ~= ARGV[1] then return 0 end if decoded.result ~= cjson.null then return 0 end return redis.call('DEL', KEYS[1])";
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private readonly IConnectionMultiplexer redis;
 

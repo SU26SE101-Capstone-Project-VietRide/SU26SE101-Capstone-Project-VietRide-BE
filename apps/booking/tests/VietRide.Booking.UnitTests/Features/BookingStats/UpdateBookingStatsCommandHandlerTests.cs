@@ -67,7 +67,7 @@ public sealed class UpdateBookingStatsCommandHandlerTests
     }
 
     [Fact]
-    public async Task BookingStatsMonth_ConfirmedAtUtcMonthBoundary_StoresIctDate()
+    public async Task BookingStatsMonth_ConfirmedAtUtcMonthBoundary_StoresVietnamDate()
     {
         var confirmedAt = DateTimeOffset.Parse("2026-01-31T18:00:00Z");
         var booking = CreateBooking();

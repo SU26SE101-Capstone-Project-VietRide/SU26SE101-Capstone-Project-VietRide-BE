@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using VietRide.Payment.Application.Abstractions.ExternalClients;
 using VietRide.Payment.Application.Exceptions;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Payment.Infrastructure.VnPay;
@@ -240,5 +241,5 @@ public sealed class VnPayClient : IVnPayClient
     }
 
     private static string FormatVnPayDate(DateTimeOffset value)
-        => value.ToOffset(TimeSpan.FromHours(7)).ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
+        => BusinessTime.ToLocalDateTime(value).ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
 }

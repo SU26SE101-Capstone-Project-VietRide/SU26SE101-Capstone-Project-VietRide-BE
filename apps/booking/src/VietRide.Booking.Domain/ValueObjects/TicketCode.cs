@@ -1,3 +1,5 @@
+using VietRide.Shared.Kernel.Time;
+
 namespace VietRide.Booking.Domain.ValueObjects;
 
 /// <summary>
@@ -14,7 +16,7 @@ public readonly record struct TicketCode
 
     public static TicketCode Generate(DateTimeOffset utcNow)
     {
-        var datePart = utcNow.UtcDateTime.ToString("yyyyMMdd");
+        var datePart = BusinessTime.ToLocalDate(utcNow).ToString("yyyyMMdd");
         return new TicketCode($"VT-{datePart}-{GenerateBase32(8)}");
     }
 

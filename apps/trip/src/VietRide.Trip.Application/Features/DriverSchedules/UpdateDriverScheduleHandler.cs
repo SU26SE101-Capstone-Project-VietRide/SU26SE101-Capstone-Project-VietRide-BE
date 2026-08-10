@@ -5,6 +5,8 @@ using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
+using VietRide.Shared.Kernel.Serialization;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -21,8 +23,7 @@ public sealed class UpdateDriverScheduleHandler
     : IRequestHandler<UpdateDriverScheduleCommand, DriverScheduleDto>
 {
     private const string CrewChangedEventType = "trip.trip.crew_changed";
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly TimeSpan IctOffset = TimeSpan.FromHours(7);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private readonly IDriverScheduleRepository schedules;
     private readonly IDriverScheduleAuditLogRepository scheduleAudits;
@@ -393,8 +394,8 @@ public sealed class UpdateDriverScheduleHandler
         CancellationToken cancellationToken)
     {
         var trip = item.Trip;
-        var localDate = DateOnly.FromDateTime(trip.DepartureDateTime.ToOffset(IctOffset).DateTime);
-        var contractDay = ToContractDayOfWeek(localDate);
+        var localDate = BusinessTime.ToLocalDate(trip.DepartureDateTime);
+        var contractDay = BusinessTime.ToIsoDayOfWeek(localDate);
         if (changedFields.Contains("dayOfWeek") && !effective.DayOfWeek.Contains(contractDay))
         {
             var previousStatus = trip.Status;
@@ -958,17 +959,13 @@ public sealed class UpdateDriverScheduleHandler
             return false;
         }
 
-        var localDate = DateOnly.FromDateTime(trip.DepartureDateTime.ToOffset(IctOffset).DateTime);
+        var localDate = BusinessTime.ToLocalDate(trip.DepartureDateTime);
         var newDeparture = BuildDepartureDateTime(localDate, effective.DepartureTime);
         return newDeparture - now < TimeSpan.FromHours(2);
     }
 
     private static DateTimeOffset BuildDepartureDateTime(DateOnly date, TimeOnly time) =>
-        new DateTimeOffset(date.ToDateTime(time), IctOffset).ToUniversalTime();
-
-    private static int ToContractDayOfWeek(DateOnly date) => date.DayOfWeek == DayOfWeek.Sunday
-        ? 7
-        : (int)date.DayOfWeek;
+        BusinessTime.ToUtc(date, time);
 
     private static IReadOnlyList<int> NormalizeDays(IEnumerable<int> days) =>
         days.Distinct().Order().ToArray();

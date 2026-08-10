@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Parcel.Infrastructure.Http;
 
@@ -11,7 +12,7 @@ public sealed class NotificationParcelDeliveryEmailClient : IParcelDeliveryEmail
 {
     private const string EmailsPath = "/internal/v1/emails";
     private const string TemplateKey = "PARCEL_DELIVERY_LINK";
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private readonly HttpClient _httpClient;
     private readonly string _publicAppUrl;

@@ -8,6 +8,7 @@ using VietRide.Parcel.Application.Features.Parcels.TripEvents;
 using VietRide.Parcel.Infrastructure.Messaging;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Serialization;
 using VietRide.Shared.Messaging.Abstractions;
 
 namespace VietRide.Parcel.UnitTests.Features.Parcels;
@@ -39,9 +40,10 @@ public sealed class Day35VehicleSubstitutedConsumerTests
     [Fact]
     public async Task CanonicalUtcOffsetJson_DeserializesAndDispatches()
     {
-        var serializerOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var serializerOptions = UtcJson.Options;
         var json = JsonSerializer.Serialize(Event(), serializerOptions);
-        json.Should().Contain("\"occurredAt\":\"2026-07-30T05:00:00+00:00\"");
+        json.Should().Contain("\"occurredAt\":\"2026-07-30T05:00:00Z\"");
+        json.Should().NotContain("+00:00");
         var integrationEvent = JsonSerializer.Deserialize<TripVehicleSubstitutedIntegrationEvent>(
             json,
             serializerOptions)!;

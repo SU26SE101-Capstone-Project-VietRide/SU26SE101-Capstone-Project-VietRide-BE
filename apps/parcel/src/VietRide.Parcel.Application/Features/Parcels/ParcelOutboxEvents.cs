@@ -1,11 +1,12 @@
 using System.Text.Json;
 using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Kernel.Serialization;
 
 namespace VietRide.Parcel.Application.Features.Parcels;
 
 public static class ParcelOutboxEvents
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     public const string Created = "parcel.parcel.created";
     public const string Loaded = "parcel.parcel.loaded";

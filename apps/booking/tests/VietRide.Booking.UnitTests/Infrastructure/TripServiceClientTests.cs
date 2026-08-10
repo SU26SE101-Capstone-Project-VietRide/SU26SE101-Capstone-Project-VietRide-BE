@@ -59,7 +59,7 @@ public class TripServiceClientTests
         result.Should().NotBeNull();
         var pathAndQuery = Uri.UnescapeDataString(handler.LastRequest!.RequestUri!.PathAndQuery);
         pathAndQuery.Should().Be(
-            $"/internal/v1/trips/{TripId:D}?pricingAt={pricingAt.ToUniversalTime():O}");
+            $"/internal/v1/trips/{TripId:D}?pricingAt=2026-07-15T07:30:45.1230000Z");
     }
 
     [Fact]

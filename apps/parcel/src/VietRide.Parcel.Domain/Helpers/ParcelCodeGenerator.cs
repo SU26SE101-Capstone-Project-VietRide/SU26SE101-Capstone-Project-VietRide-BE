@@ -22,5 +22,5 @@ public static class ParcelCodeGenerator
     }
 
     public static string Generate(DateTimeOffset now)
-        => Generate(DateOnly.FromDateTime(now.UtcDateTime));
+        => Generate(VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now));
 }
