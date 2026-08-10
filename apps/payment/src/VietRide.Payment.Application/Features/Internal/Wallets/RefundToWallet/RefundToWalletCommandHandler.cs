@@ -48,6 +48,7 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
         CancellationToken cancellationToken)
     {
         var referenceType = ParseReferenceType(request.ReferenceType);
+        var occurredAt = _clock?.UtcNow ?? DateTimeOffset.UtcNow;
 
         await _wallets.AcquireWalletTransactionReferenceLockAsync(
                 referenceType,
@@ -191,6 +192,7 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
                     request.ReferenceId),
                 source.Context,
                 request.ReferenceId,
+                occurredAt,
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -223,6 +225,7 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
                 source.Context,
                 request.ReferenceId,
                 refundAmount,
+                occurredAt,
                 cancellationToken).ConfigureAwait(false);
             await ReconcileCapturedPaymentAsync(
                 source.Payment,
@@ -322,6 +325,7 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
                 source.Context,
                 request.ReferenceId,
                 refundAmount,
+                occurredAt,
                 cancellationToken).ConfigureAwait(false);
         }
         else
@@ -331,6 +335,7 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
                 source.Context,
                 request.ReferenceId,
                 refundAmount,
+                occurredAt,
                 cancellationToken).ConfigureAwait(false);
         }
         await EnqueueWalletCreditedAsync(creditedEvent, cancellationToken).ConfigureAwait(false);

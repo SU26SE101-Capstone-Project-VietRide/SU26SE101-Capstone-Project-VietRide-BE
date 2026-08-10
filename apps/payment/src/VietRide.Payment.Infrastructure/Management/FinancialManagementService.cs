@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -8,12 +9,15 @@ using VietRide.Payment.Application.Exceptions;
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
 using VietRide.Payment.Application.Features.Internal.Payments.CreateSubscriptionPayment;
 using VietRide.Payment.Application.Features.Management;
+using VietRide.Payment.Application.Features.RevenueAnalytics.Core;
+using VietRide.Payment.Application.Features.Settlements;
 using VietRide.Payment.Application.Features.Settlements.SettleTrip;
 using VietRide.Payment.Application.Models;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Payment.Domain.ValueObjects;
 using VietRide.Payment.Infrastructure.Invoices;
+using VietRide.Payment.Infrastructure.Persistence.Repositories;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
@@ -25,8 +29,10 @@ internal sealed class FinancialManagementService : IFinancialManagementService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly PaymentDbContext _db;
+    private readonly IOperatorLedgerEntryRepository _ledger;
     private readonly IPlatformWalletRepository _platformWallets;
     private readonly IIdentityFinancialProjectionClient _identity;
+    private readonly ITripRevenueAnalyticsClient _trips;
     private readonly IFinancialActorPrivacyStore _actorPrivacy;
     private readonly TripSettlementService _settlements;
     private readonly OperatorWebOptions _operatorWeb;
@@ -36,8 +42,10 @@ internal sealed class FinancialManagementService : IFinancialManagementService
 
     public FinancialManagementService(
         PaymentDbContext db,
+        IOperatorLedgerEntryRepository ledger,
         IPlatformWalletRepository platformWallets,
         IIdentityFinancialProjectionClient identity,
+        ITripRevenueAnalyticsClient trips,
         IFinancialActorPrivacyStore actorPrivacy,
         TripSettlementService settlements,
         IOptions<OperatorWebOptions> operatorWeb,
@@ -46,8 +54,10 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         ILogger<FinancialManagementService> logger)
     {
         _db = db;
+        _ledger = ledger;
         _platformWallets = platformWallets;
         _identity = identity;
+        _trips = trips;
         _actorPrivacy = actorPrivacy;
         _settlements = settlements;
         _operatorWeb = operatorWeb.Value;
@@ -58,77 +68,238 @@ internal sealed class FinancialManagementService : IFinancialManagementService
 
     public async Task<OperatorWalletDto> GetOperatorWalletAsync(Guid operatorId, CancellationToken ct)
     {
+        await using var readTransaction = _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct)
+            : null;
         var wallet = await _db.OperatorWallets.AsNoTracking()
             .SingleOrDefaultAsync(item => item.OperatorId == operatorId, ct)
             ?? throw NotFound("OPERATOR_WALLET_NOT_FOUND", "Operator wallet was not found.");
-        var pendingTripIds = _db.OperatorTripSettlements.AsNoTracking()
-            .Where(item => item.OperatorId == operatorId && item.Status == OperatorTripSettlementStatus.PENDING_HOLD)
-            .Select(item => item.TripId);
-        var pending = await _db.OperatorLedgerEntries.AsNoTracking()
-            .Where(item => item.OperatorId == operatorId
-                && item.TripId.HasValue
-                && pendingTripIds.Contains(item.TripId.Value))
-            .SumAsync(item => (long?)item.Amount, ct) ?? 0;
-        var eligible = await _db.OperatorTripSettlements.AsNoTracking()
-            .Where(item => item.OperatorId == operatorId && item.Status == OperatorTripSettlementStatus.ELIGIBLE)
-            .SumAsync(item => (long?)item.NetAmount, ct) ?? 0;
-        return new OperatorWalletDto(operatorId, wallet.Balance.Amount, Math.Max(0, pending), eligible, wallet.UpdatedAt);
+        var projections = await _ledger.GetTripFinancialProjectionsAsync(operatorId, null, ct);
+        var settlements = await _db.OperatorTripSettlements.AsNoTracking()
+            .Where(item => item.OperatorId == operatorId)
+            .ToListAsync(ct);
+        var projectionByTrip = projections.ToDictionary(item => item.TripId);
+        var settlementTripIds = settlements.Select(item => item.TripId).ToHashSet();
+        var awaiting = projections.Where(item => !settlementTripIds.Contains(item.TripId)).ToArray();
+        var pendingRows = settlements
+            .Where(item => item.Status == OperatorTripSettlementStatus.PENDING_HOLD)
+            .ToArray();
+        var eligibleRows = settlements
+            .Where(item => item.Status == OperatorTripSettlementStatus.ELIGIBLE)
+            .ToArray();
+        var settledRows = settlements
+            .Where(item => item.Status == OperatorTripSettlementStatus.SETTLED)
+            .ToArray();
+        var calculatedAt = _clock.UtcNow;
+        var nextScheduledAttempt = pendingRows
+            .Concat(eligibleRows)
+            .Select(item => TripSettlementSchedule.GetNextScheduledAttemptAt(
+                item.Status,
+                item.EligibleAt,
+                calculatedAt))
+            .Where(item => item.HasValue)
+            .Select(item => item!.Value)
+            .DefaultIfEmpty()
+            .Min();
+        var lastSettlement = settledRows
+            .Where(item => item.SettledAt.HasValue)
+            .OrderByDescending(item => item.SettledAt)
+            .FirstOrDefault();
+
+        var result = new OperatorWalletDto(
+            operatorId,
+            wallet.Balance.Amount,
+            SumCurrentEntitlement(pendingRows, projectionByTrip),
+            SumCurrentEntitlement(eligibleRows, projectionByTrip),
+            wallet.UpdatedAt,
+            Currency: "VND",
+            AwaitingTripCompletionAmount: awaiting.Sum(item => item.NetEntitlementAmount),
+            AwaitingTripCompletionCount: awaiting.Length,
+            PendingHoldCount: pendingRows.Length,
+            EligibleCount: eligibleRows.Length,
+            NextEligibleAt: pendingRows.Length == 0 ? null : pendingRows.Min(item => item.EligibleAt),
+            NextScheduledSettlementAttemptAt: nextScheduledAttempt == default ? null : nextScheduledAttempt,
+            LifetimeSettledAmount: settledRows.Sum(item => item.NetAmount),
+            LastSettlement: lastSettlement is null
+                ? null
+                : new LastSettlementDto(
+                    lastSettlement.Id,
+                    lastSettlement.NetAmount,
+                    lastSettlement.SettlementMethod?.ToString() ?? "UNKNOWN",
+                    lastSettlement.SettledAt!.Value),
+            WithdrawalSupported: false,
+            CalculatedAt: calculatedAt);
+        if (readTransaction is not null)
+            await readTransaction.CommitAsync(ct);
+        return result;
     }
 
     public async Task<PagedResult<WalletTransactionDto>> ListOperatorTransactionsAsync(
-        Guid operatorId, PageOptions options, string? type, string? referenceType, CancellationToken ct)
+        Guid operatorId,
+        PageOptions options,
+        string? type,
+        string? referenceType,
+        CancellationToken ct,
+        string? search = null,
+        string? dateField = null)
     {
         ValidatePage(options, ["createdAt", "amount"]);
+        ValidateDateField(dateField, ["createdAt"]);
+        var normalizedSearch = NormalizeSearch(search);
         var query = _db.OperatorWalletTransactions.AsNoTracking().Where(item => item.OperatorId == operatorId);
+        var settlements = _db.OperatorTripSettlements.AsNoTracking()
+            .Where(item => item.OperatorId == operatorId);
+        var ledger = _db.OperatorLedgerEntries.AsNoTracking()
+            .Where(item => item.OperatorId == operatorId);
         if (ParseOptional<OperatorWalletTransactionType>(type) is { } parsedType)
             query = query.Where(item => item.Type == parsedType);
         if (ParseOptional<OperatorWalletTransactionRef>(referenceType) is { } parsedReference)
             query = query.Where(item => item.ReferenceType == parsedReference);
-        query = ApplyDates(query, options);
+        if (normalizedSearch is not null)
+        {
+            if (Guid.TryParse(normalizedSearch, out var id))
+            {
+                query = query.Where(item =>
+                    item.Id == id
+                    || item.ReferenceId == id
+                    || item.ReferenceType == OperatorWalletTransactionRef.TRIP_SETTLEMENT
+                        && settlements.Any(settlement =>
+                            settlement.Id == item.ReferenceId
+                            && settlement.TripId == id));
+            }
+            else
+            {
+                var prefixPattern = EscapeLike(normalizedSearch) + "%";
+                var containsPattern = "%" + EscapeLike(normalizedSearch) + "%";
+                query = query.Where(item =>
+                    item.Note != null && EF.Functions.ILike(item.Note, containsPattern, "\\")
+                    || item.ReferenceType == OperatorWalletTransactionRef.TRIP_SETTLEMENT
+                        && settlements.Any(settlement =>
+                            settlement.Id == item.ReferenceId
+                            && ledger.Any(entry =>
+                                entry.TripId == settlement.TripId
+                                && entry.ReferenceCode != null
+                                && EF.Functions.ILike(entry.ReferenceCode, prefixPattern, "\\"))));
+            }
+        }
+        query = ApplyTransactionDates(query, options);
         var total = await query.LongCountAsync(ct);
         query = (options.SortBy ?? "createdAt", IsAscending(options)) switch
         {
-            ("amount", true) => query.OrderBy(item => item.Amount),
-            ("amount", false) => query.OrderByDescending(item => item.Amount),
-            (_, true) => query.OrderBy(item => item.CreatedAt),
-            _ => query.OrderByDescending(item => item.CreatedAt),
+            ("amount", true) => query.OrderBy(item => item.Amount).ThenBy(item => item.Id),
+            ("amount", false) => query.OrderByDescending(item => item.Amount).ThenByDescending(item => item.Id),
+            (_, true) => query.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id),
+            _ => query.OrderByDescending(item => item.CreatedAt).ThenByDescending(item => item.Id),
         };
         var rows = await query.Skip(Offset(options)).Take(options.PageSize).ToListAsync(ct);
-        var items = rows.Select(item => new WalletTransactionDto(item.Id, item.Type.ToString(), item.Amount.Amount,
-            item.BalanceBefore.Amount, item.BalanceAfter.Amount, item.ReferenceType.ToString(), item.ReferenceId,
-            item.Note, item.CreatedAt)).ToList();
+        var settlementIds = rows
+            .Where(item => item.ReferenceType == OperatorWalletTransactionRef.TRIP_SETTLEMENT && item.ReferenceId.HasValue)
+            .Select(item => item.ReferenceId!.Value)
+            .Distinct()
+            .ToArray();
+        var relatedSettlements = settlementIds.Length == 0
+            ? []
+            : await _db.OperatorTripSettlements.AsNoTracking()
+                .Where(item => item.OperatorId == operatorId && settlementIds.Contains(item.Id))
+                .ToListAsync(ct);
+        var settlementById = relatedSettlements.ToDictionary(item => item.Id);
+        var adjustmentTransactionIds = rows
+            .Where(item => item.ReferenceType == OperatorWalletTransactionRef.ADJUSTMENT)
+            .Select(item => item.Id)
+            .ToArray();
+        var adjustmentEntries = adjustmentTransactionIds.Length == 0
+            ? []
+            : await _db.OperatorLedgerEntries.AsNoTracking()
+                .Where(item => item.OperatorId == operatorId
+                    && adjustmentTransactionIds.Contains(item.ReferenceId)
+                    && item.EntryType == OperatorLedgerEntryType.ADJUSTMENT)
+                .ToListAsync(ct);
+        var adjustmentByTransaction = adjustmentEntries
+            .GroupBy(item => item.ReferenceId)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(item => item.CreatedAt).First());
+        var actorFallbacks = await LoadLedgerActorFallbacksAsync(adjustmentEntries, ct);
+        var settlementActorFallbacks = await LoadSettlementActorFallbacksAsync(relatedSettlements, ct);
+        var items = rows.Select(item => ToWalletTransaction(
+            item,
+            settlementById,
+            adjustmentByTransaction,
+            actorFallbacks,
+            settlementActorFallbacks)).ToList();
         return PagedResult<WalletTransactionDto>.Create(items, options.Page, options.PageSize, total);
     }
 
     public Task<PagedResult<SettlementDto>> ListOperatorSettlementsAsync(
-        Guid operatorId, PageOptions options, string? status, Guid? tripId, CancellationToken ct)
-        => ListSettlementsAsync(options, operatorId, status, tripId, false, null, ct);
+        Guid operatorId,
+        PageOptions options,
+        string? status,
+        Guid? tripId,
+        CancellationToken ct,
+        string? search = null,
+        string? dateField = null)
+        => ListSettlementsAsync(options, operatorId, status, tripId, false, null, ct, search, dateField);
 
     public async Task<PagedResult<LedgerEntryDto>> ListOperatorLedgerAsync(
-        Guid operatorId, PageOptions options, Guid? tripId, string? entryType, string? referenceType, CancellationToken ct)
+        Guid operatorId,
+        PageOptions options,
+        Guid? tripId,
+        string? entryType,
+        string? referenceType,
+        CancellationToken ct,
+        string? search = null,
+        string? dateField = null)
     {
         ValidatePage(options, ["createdAt", "amount"]);
+        var normalizedDateField = ValidateDateField(dateField, ["createdAt", "occurredAt"]);
+        var normalizedSearch = NormalizeSearch(search);
         var query = _db.OperatorLedgerEntries.AsNoTracking().Where(item => item.OperatorId == operatorId);
+        var settlements = _db.OperatorTripSettlements.AsNoTracking()
+            .Where(item => item.OperatorId == operatorId);
         if (tripId.HasValue)
             query = query.Where(item => item.TripId == tripId);
         if (ParseOptional<OperatorLedgerEntryType>(entryType) is { } parsedType)
             query = query.Where(item => item.EntryType == parsedType);
         if (ParseOptional<OperatorLedgerReferenceType>(referenceType) is { } parsedReference)
             query = query.Where(item => item.ReferenceType == parsedReference);
-        query = ApplyDates(query, options);
+        if (normalizedSearch is not null)
+        {
+            if (Guid.TryParse(normalizedSearch, out var id))
+            {
+                query = query.Where(item =>
+                    item.Id == id
+                    || item.ReferenceId == id
+                    || item.TripId == id
+                    || settlements.Any(settlement =>
+                        (settlement.Id == id || settlement.WalletTransactionId == id)
+                        && settlement.TripId == item.TripId));
+            }
+            else
+            {
+                var prefixPattern = EscapeLike(normalizedSearch) + "%";
+                var containsPattern = "%" + EscapeLike(normalizedSearch) + "%";
+                query = query.Where(item =>
+                    item.ReferenceCode != null && EF.Functions.ILike(item.ReferenceCode, prefixPattern, "\\")
+                    || item.Note != null && EF.Functions.ILike(item.Note, containsPattern, "\\"));
+            }
+        }
+        query = ApplyLedgerDates(query, options, normalizedDateField);
         var total = await query.LongCountAsync(ct);
         query = (options.SortBy ?? "createdAt", IsAscending(options)) switch
         {
-            ("amount", true) => query.OrderBy(item => item.Amount),
-            ("amount", false) => query.OrderByDescending(item => item.Amount),
-            (_, true) => query.OrderBy(item => item.CreatedAt),
-            _ => query.OrderByDescending(item => item.CreatedAt),
+            ("amount", true) => query.OrderBy(item => item.Amount).ThenBy(item => item.Id),
+            ("amount", false) => query.OrderByDescending(item => item.Amount).ThenByDescending(item => item.Id),
+            (_, true) => query.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id),
+            _ => query.OrderByDescending(item => item.CreatedAt).ThenByDescending(item => item.Id),
         };
         var rows = await query.Skip(Offset(options)).Take(options.PageSize).ToListAsync(ct);
         var actorFallbacks = await LoadLedgerActorFallbacksAsync(rows, ct);
-        var items = rows.Select(item => new LedgerEntryDto(item.Id, item.TripId, item.EntryType.ToString(), item.Amount,
-            item.ReferenceType.ToString(), item.ReferenceId, item.CreatedAt, item.Note,
-            item.ActorType.ToString(), ToActor(item, actorFallbacks))).ToList();
+        var tripIds = rows.Where(item => item.TripId.HasValue).Select(item => item.TripId!.Value).Distinct().ToArray();
+        var relatedSettlements = tripIds.Length == 0
+            ? []
+            : await _db.OperatorTripSettlements.AsNoTracking()
+                .Where(item => item.OperatorId == operatorId && tripIds.Contains(item.TripId))
+                .ToListAsync(ct);
+        var settlementByTrip = relatedSettlements.ToDictionary(item => item.TripId);
+        var items = rows.Select(item => ToLedgerEntry(item, actorFallbacks, settlementByTrip)).ToList();
         return PagedResult<LedgerEntryDto>.Create(items, options.Page, options.PageSize, total);
     }
 
@@ -265,13 +436,45 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     }
 
     private async Task<PagedResult<SettlementDto>> ListSettlementsAsync(
-        PageOptions options, Guid? operatorId, string? status, Guid? tripId, bool stuckOnly, string? severity, CancellationToken ct)
+        PageOptions options,
+        Guid? operatorId,
+        string? status,
+        Guid? tripId,
+        bool stuckOnly,
+        string? severity,
+        CancellationToken ct,
+        string? search = null,
+        string? dateField = null)
     {
-        var page = await LoadSettlementRowsAsync(options, operatorId, status, tripId, stuckOnly, severity, ct);
+        var page = await LoadSettlementRowsAsync(
+            options,
+            operatorId,
+            status,
+            tripId,
+            stuckOnly,
+            severity,
+            ct,
+            search,
+            dateField);
         var actorFallbacks = await LoadSettlementActorFallbacksAsync(page.Rows, ct);
-        var items = page.Rows.Select(item => new SettlementDto(item.Id, item.TripId,
-            item.Status.ToString(), item.EligibleAt, item.NetAmount, item.SettlementMethod?.ToString(), item.SettledAt,
-            item.CreatedAt, ToActor(item, actorFallbacks))).ToList();
+        var tripIds = page.Rows.Select(item => item.TripId).Distinct().ToArray();
+        var projectionByTrip = page.Projections;
+        if (projectionByTrip is null)
+        {
+            var projections = operatorId.HasValue
+                ? await _ledger.GetTripFinancialProjectionsAsync(operatorId.Value, tripIds, ct)
+                : [];
+            projectionByTrip = projections.ToDictionary(item => item.TripId);
+        }
+        var tripSummaries = await LoadTripSummariesSafeAsync(tripIds, ct);
+        var tripById = tripSummaries.ToDictionary(item => item.TripId);
+        var now = _clock.UtcNow;
+        var items = page.Rows.Select(item => ToSettlement(
+            item,
+            projectionByTrip.GetValueOrDefault(item.TripId),
+            tripById.GetValueOrDefault(item.TripId),
+            ToActor(item, actorFallbacks),
+            now)).ToList();
         return PagedResult<SettlementDto>.Create(items, options.Page, options.PageSize, page.Total);
     }
 
@@ -290,10 +493,265 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         return users.ToDictionary(item => item.UserId);
     }
 
+    private async Task<IReadOnlyList<TripRevenueSummaryItem>> LoadTripSummariesSafeAsync(
+        IReadOnlyList<Guid> tripIds,
+        CancellationToken ct)
+    {
+        if (tripIds.Count == 0)
+            return [];
+
+        try
+        {
+            return await _trips.GetTripSummariesAsync(tripIds, ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                exception,
+                "Trip enrichment is unavailable for {TripCount} operator settlement rows; returning partial financial data.",
+                tripIds.Count);
+            return [];
+        }
+    }
+
+    private static WalletTransactionDto ToWalletTransaction(
+        OperatorWalletTransaction item,
+        IReadOnlyDictionary<Guid, OperatorTripSettlement> settlements,
+        IReadOnlyDictionary<Guid, OperatorLedgerEntry> adjustmentEntries,
+        IReadOnlyDictionary<Guid, IdentityFinancialUser> actorFallbacks,
+        IReadOnlyDictionary<Guid, IdentityFinancialUser> settlementActorFallbacks)
+    {
+        var missing = new List<string>();
+        RelatedSettlementDto? relatedSettlement = null;
+        OperatorTripSettlement? relatedSettlementEntity = null;
+        if (item.ReferenceType == OperatorWalletTransactionRef.TRIP_SETTLEMENT)
+        {
+            if (!item.ReferenceId.HasValue || !settlements.TryGetValue(item.ReferenceId.Value, out var settlement))
+            {
+                missing.Add("relatedSettlement");
+            }
+            else
+            {
+                relatedSettlementEntity = settlement;
+                var method = settlement.SettlementMethod?.ToString();
+                if (method is null)
+                {
+                    method = "UNKNOWN";
+                    missing.Add("relatedSettlement.method");
+                }
+                relatedSettlement = new RelatedSettlementDto(settlement.Id, settlement.TripId, method);
+            }
+        }
+
+        adjustmentEntries.TryGetValue(item.Id, out var adjustment);
+        var actor = adjustment is not null
+            ? ToActor(adjustment, actorFallbacks)
+            : relatedSettlementEntity is not null
+                ? ToActor(relatedSettlementEntity, settlementActorFallbacks)
+                : null;
+        if (item.ReferenceType == OperatorWalletTransactionRef.ADJUSTMENT)
+        {
+            if (adjustment is null)
+                missing.Add("adjustmentLedger");
+            else if (adjustment.ActorType == FinancialActorType.USER && actor is null)
+                missing.Add("actor");
+        }
+        if (relatedSettlementEntity?.SettledByUserId is not null && actor is null)
+            missing.Add("actor");
+
+        return new WalletTransactionDto(
+            item.Id,
+            item.Type.ToString(),
+            item.Amount.Amount,
+            item.BalanceBefore.Amount,
+            item.BalanceAfter.Amount,
+            item.ReferenceType.ToString(),
+            item.ReferenceId,
+            item.Note,
+            item.CreatedAt,
+            SignedAmount: item.Type == OperatorWalletTransactionType.CREDIT
+                ? item.Amount.Amount
+                : -item.Amount.Amount,
+            Currency: "VND",
+            RelatedSettlement: relatedSettlement,
+            ActorType: adjustment?.ActorType.ToString()
+                ?? (relatedSettlementEntity?.SettledByUserId is null
+                    ? FinancialActorType.SYSTEM.ToString()
+                    : FinancialActorType.USER.ToString()),
+            Actor: actor,
+            AdjustmentReason: adjustment?.AdjustmentReason?.ToString(),
+            DataCompleteness: missing.Count == 0 ? "COMPLETE" : "PARTIAL",
+            MissingFields: missing);
+    }
+
+    private static LedgerEntryDto ToLedgerEntry(
+        OperatorLedgerEntry item,
+        IReadOnlyDictionary<Guid, IdentityFinancialUser> actorFallbacks,
+        IReadOnlyDictionary<Guid, OperatorTripSettlement> settlements)
+    {
+        var missing = new List<string>();
+        if (item.ReferenceType is OperatorLedgerReferenceType.BOOKING or OperatorLedgerReferenceType.PARCEL
+            && item.ReferenceCode is null)
+        {
+            missing.Add("referenceCode");
+        }
+        if (!item.OccurredAt.HasValue)
+            missing.Add("occurredAt");
+        if (item.EntryType == OperatorLedgerEntryType.VOUCHER_OPERATOR_FUNDED_AUDIT
+            && !item.OperatorFundedVoucherAmount.HasValue)
+        {
+            missing.Add("operatorFundedVoucherAmount");
+        }
+
+        var actor = ToActor(item, actorFallbacks);
+        if (item.ActorType == FinancialActorType.USER && actor is null)
+            missing.Add("actor");
+        LedgerSettlementDto? settlement = null;
+        if (item.TripId.HasValue && settlements.TryGetValue(item.TripId.Value, out var related))
+        {
+            settlement = new LedgerSettlementDto(
+                related.Id,
+                related.Status.ToString(),
+                related.EligibleAt,
+                related.SettledAt,
+                related.WalletTransactionId);
+        }
+
+        var affectsRevenue = IsCanonicalFinancialEntry(item);
+        return new LedgerEntryDto(
+            item.Id,
+            item.TripId,
+            item.EntryType.ToString(),
+            item.Amount,
+            item.ReferenceType.ToString(),
+            item.ReferenceId,
+            item.CreatedAt,
+            item.Note,
+            item.ActorType.ToString(),
+            actor,
+            ReferenceCode: item.ReferenceCode,
+            OccurredAt: item.OccurredAt ?? item.CreatedAt,
+            OccurredAtSource: item.OccurredAt.HasValue
+                ? "BUSINESS_EVENT"
+                : "LEDGER_CREATED_AT_FALLBACK",
+            OperatorFundedVoucherAmount: item.OperatorFundedVoucherAmount,
+            AdjustmentReason: item.AdjustmentReason?.ToString(),
+            AffectsRevenue: affectsRevenue,
+            AffectsSettlement: affectsRevenue && item.TripId.HasValue,
+            Settlement: settlement,
+            DataCompleteness: missing.Count == 0 ? "COMPLETE" : "PARTIAL",
+            MissingFields: missing);
+    }
+
+    private static SettlementDto ToSettlement(
+        OperatorTripSettlement item,
+        TripFinancialProjection? projection,
+        TripRevenueSummaryItem? trip,
+        FinancialActorDto? actor,
+        DateTimeOffset now)
+    {
+        var financial = projection is null
+            ? new SettlementFinancialBreakdownDto(0, 0, 0, 0, 0, 0, 0)
+            : new SettlementFinancialBreakdownDto(
+                projection.GrossSalesAmount,
+                projection.PassengerPaidAmount,
+                projection.VietRideFundedAmount,
+                projection.OperatorFundedDiscountAmount,
+                projection.RefundAmount,
+                projection.RecognizedAdjustmentAmount,
+                projection.NetEntitlementAmount);
+        var processingState = item.Status switch
+        {
+            OperatorTripSettlementStatus.PENDING_HOLD => "ON_HOLD",
+            OperatorTripSettlementStatus.ELIGIBLE when item.ActiveFailureCode is not null => "RETRY_SCHEDULED",
+            OperatorTripSettlementStatus.ELIGIBLE => "READY_FOR_SETTLEMENT",
+            OperatorTripSettlementStatus.SETTLED => "COMPLETED",
+            OperatorTripSettlementStatus.CANCELLED => "CANCELLED",
+            _ => "ON_HOLD",
+        };
+        var nextScheduledAttempt = TripSettlementSchedule.GetNextScheduledAttemptAt(
+            item.Status,
+            item.EligibleAt,
+            now);
+
+        return new SettlementDto(
+            item.Id,
+            item.TripId,
+            item.Status.ToString(),
+            item.EligibleAt,
+            financial.NetEntitlementAmount,
+            item.SettlementMethod?.ToString(),
+            item.SettledAt,
+            item.CreatedAt,
+            actor,
+            TripTerminalAt: item.TripTerminalAt,
+            WalletTransactionId: item.WalletTransactionId,
+            FinancialBreakdown: financial,
+            ProcessingState: processingState,
+            NextScheduledSettlementAttemptAt: nextScheduledAttempt,
+            DelayReason: item.ActiveFailureCode is null ? null : "SYSTEM_PROCESSING_DELAY",
+            AttemptCount: item.SettlementFailureCount,
+            LastAttemptAt: item.LastSettlementFailureAt,
+            NextRetryAt: item.ActiveFailureCode is null
+                ? null
+                : TripSettlementSchedule.GetNextAutoSettlementAfter(now),
+            CancelReason: item.Status == OperatorTripSettlementStatus.CANCELLED
+                ? "NON_POSITIVE_NET_ENTITLEMENT"
+                : null,
+            Trip: trip is null
+                ? null
+                : new SettlementTripDto(
+                    trip.DepartureAt,
+                    trip.RouteId,
+                    trip.RouteName,
+                    trip.OriginName,
+                    trip.DestinationName),
+            DataCompleteness: trip is not null && projection?.MetadataComplete == true
+                ? "COMPLETE"
+                : "PARTIAL");
+    }
+
+    private static bool IsCanonicalFinancialEntry(OperatorLedgerEntry item)
+    {
+        var isSupportedReference = item.ReferenceType is OperatorLedgerReferenceType.BOOKING
+            or OperatorLedgerReferenceType.PARCEL;
+        if (!isSupportedReference)
+            return false;
+        if (item.EntryType is OperatorLedgerEntryType.BOOKING_REVENUE
+            or OperatorLedgerEntryType.PARCEL_REVENUE
+            or OperatorLedgerEntryType.BOOKING_REFUND
+            or OperatorLedgerEntryType.PARCEL_REFUND
+            or OperatorLedgerEntryType.VOUCHER_VIETRIDE_FUNDED_CREDIT)
+        {
+            return item.ReferenceType == OperatorLedgerReferenceType.BOOKING
+                ? item.EntryType is OperatorLedgerEntryType.BOOKING_REVENUE
+                    or OperatorLedgerEntryType.BOOKING_REFUND
+                    or OperatorLedgerEntryType.VOUCHER_VIETRIDE_FUNDED_CREDIT
+                : item.EntryType is OperatorLedgerEntryType.PARCEL_REVENUE
+                    or OperatorLedgerEntryType.PARCEL_REFUND
+                    or OperatorLedgerEntryType.VOUCHER_VIETRIDE_FUNDED_CREDIT;
+        }
+
+        return item.EntryType == OperatorLedgerEntryType.ADJUSTMENT
+            && item.AdjustmentReason == OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL;
+    }
+
     private async Task<SettlementPageRows> LoadSettlementRowsAsync(
-        PageOptions options, Guid? operatorId, string? status, Guid? tripId, bool stuckOnly, string? severity, CancellationToken ct)
+        PageOptions options,
+        Guid? operatorId,
+        string? status,
+        Guid? tripId,
+        bool stuckOnly,
+        string? severity,
+        CancellationToken ct,
+        string? search = null,
+        string? dateField = null)
     {
         ValidatePage(options, ["createdAt", "eligibleAt", "settledAt", "netAmount"]);
+        var normalizedDateField = ValidateDateField(
+            dateField,
+            ["createdAt", "tripTerminalAt", "eligibleAt", "settledAt"]);
+        var normalizedSearch = NormalizeSearch(search);
         var query = _db.OperatorTripSettlements.AsNoTracking().AsQueryable();
         if (operatorId.HasValue)
             query = query.Where(item => item.OperatorId == operatorId);
@@ -317,18 +775,63 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                 && item.ActiveFailureCode != null
                 && item.SettlementFailureCount < 3
                 && item.EligibleAt >= highBefore);
-        query = ApplyDates(query, options);
+        if (normalizedSearch is not null)
+        {
+            if (Guid.TryParse(normalizedSearch, out var id))
+            {
+                query = query.Where(item => item.Id == id || item.TripId == id);
+            }
+            else
+            {
+                var prefixPattern = EscapeLike(normalizedSearch) + "%";
+                var scopedLedger = _db.OperatorLedgerEntries.AsNoTracking();
+                if (operatorId.HasValue)
+                    scopedLedger = scopedLedger.Where(item => item.OperatorId == operatorId.Value);
+                query = query.Where(item => scopedLedger.Any(entry =>
+                    entry.TripId == item.TripId
+                    && entry.ReferenceCode != null
+                    && EF.Functions.ILike(entry.ReferenceCode, prefixPattern, "\\")));
+            }
+        }
+        query = ApplySettlementDates(query, options, normalizedDateField);
         var total = await query.LongCountAsync(ct);
+        if (operatorId.HasValue && options.SortBy == "netAmount")
+        {
+            var projectionQuery = CanonicalTripFinancialProjectionQuery.ForOperator(_db, operatorId.Value);
+            var rowsWithProjection =
+                from settlement in query
+                join projection in projectionQuery on settlement.TripId equals projection.TripId into projectionGroup
+                from projection in projectionGroup.DefaultIfEmpty()
+                select new { Settlement = settlement, Projection = projection };
+            var orderedQuery = IsAscending(options)
+                ? rowsWithProjection
+                    .OrderBy(item => (long?)item.Projection.NetEntitlementAmount ?? 0)
+                    .ThenBy(item => item.Settlement.Id)
+                : rowsWithProjection
+                    .OrderByDescending(item => (long?)item.Projection.NetEntitlementAmount ?? 0)
+                    .ThenByDescending(item => item.Settlement.Id);
+            var pageRows = await orderedQuery
+                .Skip(Offset(options))
+                .Take(options.PageSize)
+                .ToListAsync(ct);
+            var projectionByTrip = pageRows
+                .Where(item => item.Projection is not null)
+                .ToDictionary(item => item.Settlement.TripId, item => item.Projection!);
+            return new SettlementPageRows(
+                pageRows.Select(item => item.Settlement).ToList(),
+                total,
+                projectionByTrip);
+        }
         query = (options.SortBy ?? "createdAt", IsAscending(options)) switch
         {
-            ("eligibleAt", true) => query.OrderBy(item => item.EligibleAt),
-            ("eligibleAt", false) => query.OrderByDescending(item => item.EligibleAt),
-            ("settledAt", true) => query.OrderBy(item => item.SettledAt),
-            ("settledAt", false) => query.OrderByDescending(item => item.SettledAt),
-            ("netAmount", true) => query.OrderBy(item => item.NetAmount),
-            ("netAmount", false) => query.OrderByDescending(item => item.NetAmount),
-            ("createdAt", true) => query.OrderBy(item => item.CreatedAt),
-            _ => query.OrderByDescending(item => item.CreatedAt),
+            ("eligibleAt", true) => query.OrderBy(item => item.EligibleAt).ThenBy(item => item.Id),
+            ("eligibleAt", false) => query.OrderByDescending(item => item.EligibleAt).ThenByDescending(item => item.Id),
+            ("settledAt", true) => query.OrderBy(item => item.SettledAt).ThenBy(item => item.Id),
+            ("settledAt", false) => query.OrderByDescending(item => item.SettledAt).ThenByDescending(item => item.Id),
+            ("netAmount", true) => query.OrderBy(item => item.NetAmount).ThenBy(item => item.Id),
+            ("netAmount", false) => query.OrderByDescending(item => item.NetAmount).ThenByDescending(item => item.Id),
+            ("createdAt", true) => query.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id),
+            _ => query.OrderByDescending(item => item.CreatedAt).ThenByDescending(item => item.Id),
         };
         var rows = await query.Skip(Offset(options)).Take(options.PageSize).ToListAsync(ct);
         return new SettlementPageRows(rows, total);
@@ -585,7 +1088,8 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             await _db.OperatorLedgerEntries.AddAsync(OperatorLedgerEntry.Create(operatorId, null,
                 OperatorLedgerEntryType.ADJUSTMENT, signedAmount, OperatorLedgerReferenceType.MANUAL,
                 movement.Id, movement.Id, request.Note, actor,
-                OperatorLedgerAdjustmentReason.MANUAL_WALLET_ADJUSTMENT), ct);
+                OperatorLedgerAdjustmentReason.MANUAL_WALLET_ADJUSTMENT,
+                occurredAt: _clock.UtcNow), ct);
             await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             _logger.LogInformation("Operator wallet {OperatorId} adjusted by admin {ActorUserId}; type {Type}, amount {Amount}.", operatorId, actorUserId, type, request.Amount);
@@ -609,6 +1113,94 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     private static AdjustmentResult ToAdjustment(OperatorWalletTransaction item, string note)
         => new(item.Id, item.Type.ToString(), item.Amount.Amount, item.BalanceBefore.Amount, item.BalanceAfter.Amount,
             item.ReferenceType.ToString(), item.ReferenceId, note, item.CreatedAt);
+
+    private static long SumCurrentEntitlement(
+        IReadOnlyCollection<OperatorTripSettlement> settlements,
+        IReadOnlyDictionary<Guid, TripFinancialProjection> projections)
+        => settlements.Sum(item => projections.GetValueOrDefault(item.TripId)?.NetEntitlementAmount ?? 0);
+
+    private static string? NormalizeSearch(string? search)
+    {
+        if (search is null)
+            return null;
+        var normalized = search.Trim();
+        if (normalized.Length is < 2 or > 100)
+            throw new BadRequestException("INVALID_FILTER", "Search must contain between 2 and 100 characters.");
+        return normalized;
+    }
+
+    private static string ValidateDateField(string? dateField, IReadOnlyCollection<string> supported)
+    {
+        var normalized = string.IsNullOrWhiteSpace(dateField) ? "createdAt" : dateField.Trim();
+        if (!supported.Contains(normalized))
+            throw new BadRequestException("INVALID_FILTER", $"Unsupported dateField value '{dateField}'.");
+        return normalized;
+    }
+
+    private static string EscapeLike(string value)
+        => value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
+
+    private static IQueryable<OperatorWalletTransaction> ApplyTransactionDates(
+        IQueryable<OperatorWalletTransaction> query,
+        PageOptions options)
+    {
+        if (options.From.HasValue)
+            query = query.Where(item => item.CreatedAt >= options.From.Value);
+        if (options.To.HasValue)
+            query = query.Where(item => item.CreatedAt <= options.To.Value);
+        return query;
+    }
+
+    private static IQueryable<OperatorLedgerEntry> ApplyLedgerDates(
+        IQueryable<OperatorLedgerEntry> query,
+        PageOptions options,
+        string dateField)
+    {
+        if (options.From.HasValue)
+        {
+            query = dateField == "occurredAt"
+                ? query.Where(item => (item.OccurredAt ?? item.CreatedAt) >= options.From.Value)
+                : query.Where(item => item.CreatedAt >= options.From.Value);
+        }
+        if (options.To.HasValue)
+        {
+            query = dateField == "occurredAt"
+                ? query.Where(item => (item.OccurredAt ?? item.CreatedAt) <= options.To.Value)
+                : query.Where(item => item.CreatedAt <= options.To.Value);
+        }
+        return query;
+    }
+
+    private static IQueryable<OperatorTripSettlement> ApplySettlementDates(
+        IQueryable<OperatorTripSettlement> query,
+        PageOptions options,
+        string dateField)
+    {
+        if (options.From.HasValue)
+        {
+            query = dateField switch
+            {
+                "tripTerminalAt" => query.Where(item => item.TripTerminalAt >= options.From.Value),
+                "eligibleAt" => query.Where(item => item.EligibleAt >= options.From.Value),
+                "settledAt" => query.Where(item => item.SettledAt >= options.From.Value),
+                _ => query.Where(item => item.CreatedAt >= options.From.Value),
+            };
+        }
+        if (options.To.HasValue)
+        {
+            query = dateField switch
+            {
+                "tripTerminalAt" => query.Where(item => item.TripTerminalAt <= options.To.Value),
+                "eligibleAt" => query.Where(item => item.EligibleAt <= options.To.Value),
+                "settledAt" => query.Where(item => item.SettledAt <= options.To.Value),
+                _ => query.Where(item => item.CreatedAt <= options.To.Value),
+            };
+        }
+        return query;
+    }
 
     private static void ValidateAdjustment(AdjustmentRequest request)
     {
@@ -642,7 +1234,10 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     private static bool IsAscending(PageOptions options) => options.SortDir == "asc";
     private static CodedNotFoundException NotFound(string code, string message) => new(code, message);
 
-    private sealed record SettlementPageRows(IReadOnlyList<OperatorTripSettlement> Rows, long Total);
+    private sealed record SettlementPageRows(
+        IReadOnlyList<OperatorTripSettlement> Rows,
+        long Total,
+        IReadOnlyDictionary<Guid, TripFinancialProjection>? Projections = null);
 
     private static IQueryable<T> ApplyDates<T>(IQueryable<T> query, PageOptions options) where T : BaseEntity<Guid>
     {

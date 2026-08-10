@@ -18,6 +18,7 @@ public sealed class RevenueLedgerWriterTests
         var bookingId = Guid.NewGuid();
         var repository = new FakeLedgerRepository();
         var writer = new RevenueLedgerWriter(repository);
+        var occurredAt = new DateTimeOffset(2026, 8, 10, 9, 30, 0, TimeSpan.Zero);
         var context = new PaymentContextV1(1,
         [
             new PaymentAllocationV1(
@@ -27,12 +28,14 @@ public sealed class RevenueLedgerWriterTests
                 tripId,
                 200_000,
                 30_000,
-                20_000),
+                20_000,
+                "VR-20260810-ABCDEFGH"),
         ]);
 
         await writer.RecordPaymentSucceededAsync(
             sourceEventId,
             context,
+            occurredAt,
             CancellationToken.None);
 
         repository.Entries.Should().HaveCount(3);
@@ -45,10 +48,13 @@ public sealed class RevenueLedgerWriterTests
         repository.Entries.Should().ContainSingle(entry =>
             entry.EntryType == OperatorLedgerEntryType.VOUCHER_OPERATOR_FUNDED_AUDIT
             && entry.Amount == 0
-            && entry.Note == "operator-funded-voucher:20000");
+            && entry.Note == "operator-funded-voucher"
+            && entry.OperatorFundedVoucherAmount == 20_000);
         repository.Entries.Should().OnlyContain(entry =>
             entry.SourceEventId == sourceEventId
             && entry.ReferenceId == bookingId
+            && entry.ReferenceCode == "VR-20260810-ABCDEFGH"
+            && entry.OccurredAt == occurredAt
             && entry.OperatorId == operatorId
             && entry.TripId == tripId);
     }

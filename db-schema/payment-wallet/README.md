@@ -128,6 +128,8 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
 ### OperatorLedgerEntry — audit log thuần
 
 - `ADJUSTMENT` bắt buộc có `adjustment_reason`; entry type khác bắt buộc để null. `note` chỉ phục vụ hiển thị/audit và không được dùng làm điều kiện tính tiền.
+- `reference_code` lưu `BookingCode`/`ParcelCode` để đối soát; `occurred_at` lưu thời điểm payment/refund thực tế. Hai field nullable để đọc được JSON và ledger cũ; API dùng `created_at` làm fallback cho `occurred_at` và trả `dataCompleteness=PARTIAL`.
+- `operator_funded_voucher_amount` là metadata dương chỉ dành cho `VOUCHER_OPERATOR_FUNDED_AUDIT`. `amount` của entry này vẫn bằng `0`, không được parse `note` và không làm thay đổi net entitlement lần thứ hai.
 - `VIETRIDE_FUNDED_VOUCHER_REVERSAL`: số âm, reference `BOOKING` hoặc `PARCEL`; đây là adjustment duy nhất được tính vào doanh thu.
 - `GENERIC_BOOKING_REFUND_ENTITLEMENT`: số 0, reference `BOOKING`; marker kỹ thuật, không phải doanh thu.
 - `MANUAL_WALLET_ADJUSTMENT`: số khác 0, reference `MANUAL`; không phải doanh thu.
@@ -181,6 +183,8 @@ Trước đây flow check `OperatorBalance >= refundTotal` + `OPERATOR_INSUFFICI
 | `idx_operator_trip_settlements_operator_status` | `(operator_id, status)` | B-tree | Operator dashboard "pending revenue" tab |
 | `idx_operator_ledger_entries_operator_id_created_at` | `(operator_id, created_at DESC)` | B-tree | Ledger query per operator |
 | `idx_operator_ledger_entries_operator_trip` | `(operator_id, trip_id)` partial | B-tree | **TripSettlement.netAmount SUM** query |
+| `idx_operator_ledger_entries_operator_reference_code` | `(operator_id, reference_code)` partial | B-tree | Tìm mã Booking/Parcel trong phạm vi nhà xe |
+| `idx_operator_ledger_entries_operator_occurred_at` | `(operator_id, occurred_at DESC)` partial | B-tree | Lọc ledger theo thời điểm nghiệp vụ |
 | `idx_operator_ledger_entries_reference` | `(reference_type, reference_id)` | B-tree | Audit per booking/parcel |
 | `uq_operator_ledger_entries_source` | `(source_event_id, entry_type, reference_id)` | unique | Allocation/event replay dedupe |
 | `idx_refund_failure_logs_unresolved` | `last_attempt_at` partial | B-tree | Hangfire retry job |

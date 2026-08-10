@@ -56,6 +56,18 @@ public sealed class ParcelDepositPaymentTests
         result.Status.Should().Be(ParcelStatus.PENDING_PAYMENT.ToString());
         result.DepositPaymentId.Should().Be(paymentId);
         result.PaymentDueAt.Should().Be(Now.AddMinutes(15));
+        await payment.Received(1).ChargeParcelPaymentAsync(
+            "PARCEL",
+            parcel.Id,
+            SenderId,
+            20_000,
+            "VNPAY",
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>(),
+            Arg.Is<PaymentContextSnapshot>(context =>
+                context.Allocations.Count == 1
+                && context.Allocations[0].ReferenceCode == parcel.ParcelCode),
+            Arg.Any<DateTimeOffset?>());
         await trip.Received(1).ReserveCargoAsync(
             TripId,
             parcel.Id,

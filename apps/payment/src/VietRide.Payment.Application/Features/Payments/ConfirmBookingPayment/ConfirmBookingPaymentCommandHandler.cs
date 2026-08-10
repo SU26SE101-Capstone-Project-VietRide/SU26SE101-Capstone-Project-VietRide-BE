@@ -247,6 +247,7 @@ public sealed class ConfirmBookingPaymentCommandHandler
         await _revenueLedger.RecordPaymentSucceededAsync(
             evt.EventId,
             context,
+            payment.SucceededAt!.Value,
             cancellationToken).ConfigureAwait(false);
         var payload = JsonSerializer.Serialize(evt, JsonOptions);
         await _outbox.EnqueueAsync(evt.EventType, payload, cancellationToken).ConfigureAwait(false);

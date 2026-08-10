@@ -414,7 +414,8 @@ public sealed class CreateParcelCommandHandler
                 parcel.TripId,
                 amount,
                 0,
-                0),
+                0,
+                parcel.ParcelCode),
         ]);
 
     private async Task<string> GenerateParcelCodeAsync(CancellationToken cancellationToken)

@@ -17,9 +17,16 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
         _ledger = ledger;
     }
 
+    public Task RecordPaymentSucceededAsync(
+        Guid sourceEventId,
+        PaymentContextV1 context,
+        CancellationToken cancellationToken)
+        => RecordPaymentSucceededAsync(sourceEventId, context, DateTimeOffset.UtcNow, cancellationToken);
+
     public async Task RecordPaymentSucceededAsync(
         Guid sourceEventId,
         PaymentContextV1 context,
+        DateTimeOffset occurredAt,
         CancellationToken cancellationToken)
     {
         foreach (var allocation in context.Allocations)
@@ -45,7 +52,9 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                         paidAmount,
                         referenceType,
                         allocation.ReferenceId,
-                        sourceEventId),
+                        sourceEventId,
+                        referenceCode: allocation.ReferenceCode,
+                        occurredAt: occurredAt),
                     cancellationToken);
             }
 
@@ -59,7 +68,9 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                         allocation.VoucherVietRideFundedAmount,
                         referenceType,
                         allocation.ReferenceId,
-                        sourceEventId),
+                        sourceEventId,
+                        referenceCode: allocation.ReferenceCode,
+                        occurredAt: occurredAt),
                     cancellationToken);
             }
 
@@ -74,17 +85,35 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                         referenceType,
                         allocation.ReferenceId,
                         sourceEventId,
-                        $"operator-funded-voucher:{allocation.VoucherOperatorFundedAmount}"),
+                        "operator-funded-voucher",
+                        referenceCode: allocation.ReferenceCode,
+                        occurredAt: occurredAt,
+                        operatorFundedVoucherAmount: allocation.VoucherOperatorFundedAmount),
                     cancellationToken);
             }
         }
     }
+
+    public Task RecordRefundAsync(
+        Guid sourceEventId,
+        PaymentContextV1 context,
+        Guid allocationReferenceId,
+        long refundAmount,
+        CancellationToken cancellationToken)
+        => RecordRefundAsync(
+            sourceEventId,
+            context,
+            allocationReferenceId,
+            refundAmount,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
 
     public async Task RecordRefundAsync(
         Guid sourceEventId,
         PaymentContextV1 context,
         Guid allocationReferenceId,
         long refundAmount,
+        DateTimeOffset occurredAt,
         CancellationToken cancellationToken)
     {
         if (refundAmount < 0)
@@ -118,7 +147,9 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                     -refundAmount,
                     referenceType,
                     allocation.ReferenceId,
-                    sourceEventId),
+                    sourceEventId,
+                    referenceCode: allocation.ReferenceCode,
+                    occurredAt: occurredAt),
                 cancellationToken);
         }
 
@@ -137,7 +168,9 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                     allocation.ReferenceId,
                     adjustmentSourceEventId,
                     "reverse-vietride-funded-voucher",
-                    adjustmentReason: OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL),
+                    adjustmentReason: OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL,
+                    referenceCode: allocation.ReferenceCode,
+                    occurredAt: occurredAt),
                 cancellationToken);
         }
     }
@@ -151,10 +184,23 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
             allocationReferenceId,
             cancellationToken);
 
+    public Task RecordGenericBookingRefundEntitlementAsync(
+        Guid sourceEventId,
+        PaymentContextV1 context,
+        Guid allocationReferenceId,
+        CancellationToken cancellationToken)
+        => RecordGenericBookingRefundEntitlementAsync(
+            sourceEventId,
+            context,
+            allocationReferenceId,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+
     public async Task RecordGenericBookingRefundEntitlementAsync(
         Guid sourceEventId,
         PaymentContextV1 context,
         Guid allocationReferenceId,
+        DateTimeOffset occurredAt,
         CancellationToken cancellationToken)
     {
         var allocation = context.Allocations.SingleOrDefault(item =>
@@ -178,9 +224,27 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                 allocation.ReferenceId,
                 sourceEventId,
                 "generic-booking-refund-entitlement",
-                adjustmentReason: OperatorLedgerAdjustmentReason.GENERIC_BOOKING_REFUND_ENTITLEMENT),
+                adjustmentReason: OperatorLedgerAdjustmentReason.GENERIC_BOOKING_REFUND_ENTITLEMENT,
+                referenceCode: allocation.ReferenceCode,
+                occurredAt: occurredAt),
             cancellationToken).ConfigureAwait(false);
     }
+
+    public Task RecordCorrelatedBookingRefundAsync(
+        Guid sourceEventId,
+        Guid voucherAdjustmentSourceEventId,
+        PaymentContextV1 context,
+        Guid allocationReferenceId,
+        long refundAmount,
+        CancellationToken cancellationToken)
+        => RecordCorrelatedBookingRefundAsync(
+            sourceEventId,
+            voucherAdjustmentSourceEventId,
+            context,
+            allocationReferenceId,
+            refundAmount,
+            DateTimeOffset.UtcNow,
+            cancellationToken);
 
     public async Task RecordCorrelatedBookingRefundAsync(
         Guid sourceEventId,
@@ -188,6 +252,7 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
         PaymentContextV1 context,
         Guid allocationReferenceId,
         long refundAmount,
+        DateTimeOffset occurredAt,
         CancellationToken cancellationToken)
     {
         if (refundAmount < 0)
@@ -210,7 +275,9 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                     -refundAmount,
                     OperatorLedgerReferenceType.BOOKING,
                     allocation.ReferenceId,
-                    sourceEventId),
+                    sourceEventId,
+                    referenceCode: allocation.ReferenceCode,
+                    occurredAt: occurredAt),
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -230,7 +297,9 @@ public sealed class RevenueLedgerWriter : IRevenueLedgerWriter
                     allocation.ReferenceId,
                     voucherAdjustmentSourceEventId,
                     "reverse-vietride-funded-voucher",
-                    adjustmentReason: OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL),
+                    adjustmentReason: OperatorLedgerAdjustmentReason.VIETRIDE_FUNDED_VOUCHER_REVERSAL,
+                    referenceCode: allocation.ReferenceCode,
+                    occurredAt: occurredAt),
                 cancellationToken).ConfigureAwait(false);
         }
     }

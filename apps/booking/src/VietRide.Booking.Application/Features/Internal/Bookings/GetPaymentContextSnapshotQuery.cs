@@ -22,7 +22,8 @@ public sealed record PaymentAllocationSnapshotDto(
     Guid TripId,
     long GrossAmount,
     long VoucherVietRideFundedAmount,
-    long VoucherOperatorFundedAmount);
+    long VoucherOperatorFundedAmount,
+    string? ReferenceCode = null);
 
 public sealed class GetPaymentContextSnapshotQueryHandler
     : IRequestHandler<GetPaymentContextSnapshotQuery, PaymentContextSnapshotDto>
@@ -57,6 +58,7 @@ public sealed class GetPaymentContextSnapshotQueryHandler
             .Select(booking => new
             {
                 booking.Id,
+                booking.BookingCode,
                 booking.OperatorId,
                 booking.TripId,
                 GrossAmount = booking.TotalAmount.Amount + booking.DiscountAmount.Amount,
@@ -88,6 +90,7 @@ public sealed class GetPaymentContextSnapshotQueryHandler
                 snapshot.TripId,
                 snapshot.GrossAmount,
                 0,
-                0)).ToArray());
+                0,
+                snapshot.BookingCode.Value)).ToArray());
     }
 }

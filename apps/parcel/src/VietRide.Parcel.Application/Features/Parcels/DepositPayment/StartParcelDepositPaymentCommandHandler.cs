@@ -206,7 +206,8 @@ public sealed class StartParcelDepositPaymentCommandHandler
                 parcel.TripId,
                 parcel.DepositRequiredVnd.Amount,
                 0,
-                0),
+                0,
+                parcel.ParcelCode),
         ]);
 
     private static void EnsureCargoReserved(TripCargoOutcome outcome)

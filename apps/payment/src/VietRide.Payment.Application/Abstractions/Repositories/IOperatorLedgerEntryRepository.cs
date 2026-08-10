@@ -1,4 +1,5 @@
 using VietRide.Payment.Application.Features.Admin.PlatformReports;
+using VietRide.Payment.Application.Features.Management;
 using VietRide.Payment.Application.Features.OperatorReports;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Shared.Application.Repositories;
@@ -20,6 +21,11 @@ public interface IOperatorLedgerEntryRepository : IRepository<OperatorLedgerEntr
         CancellationToken ct = default)
         => throw new NotSupportedException("Operator ledger report is not implemented by this repository.");
     Task<long> SumTripNetAmountAsync(Guid operatorId, Guid tripId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<TripFinancialProjection>> GetTripFinancialProjectionsAsync(
+        Guid operatorId,
+        IReadOnlyCollection<Guid>? tripIds,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Trip financial projection is not implemented by this repository.");
     Task<bool> HasSourceEntryAsync(
         Guid sourceEventId,
         Guid referenceId,

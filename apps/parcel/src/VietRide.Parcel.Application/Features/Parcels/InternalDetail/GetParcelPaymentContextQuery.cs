@@ -21,7 +21,8 @@ public sealed record ParcelPaymentAllocationSnapshot(
     Guid TripId,
     long GrossAmount,
     long VoucherVietRideFundedAmount,
-    long VoucherOperatorFundedAmount);
+    long VoucherOperatorFundedAmount,
+    string? ReferenceCode = null);
 
 public sealed class GetParcelPaymentContextQueryHandler
     : IRequestHandler<GetParcelPaymentContextQuery, ParcelPaymentContextSnapshot>
@@ -83,7 +84,8 @@ public sealed class GetParcelPaymentContextQueryHandler
                     parcel.TripId,
                     amount,
                     0,
-                    0),
+                    0,
+                    parcel.ParcelCode),
             ]);
     }
 }

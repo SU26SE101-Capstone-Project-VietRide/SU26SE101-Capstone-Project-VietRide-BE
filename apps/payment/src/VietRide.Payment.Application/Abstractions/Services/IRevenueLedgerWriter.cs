@@ -9,6 +9,13 @@ public interface IRevenueLedgerWriter
         PaymentContextV1 context,
         CancellationToken cancellationToken);
 
+    Task RecordPaymentSucceededAsync(
+        Guid sourceEventId,
+        PaymentContextV1 context,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
+        => RecordPaymentSucceededAsync(sourceEventId, context, cancellationToken);
+
     Task RecordRefundAsync(
         Guid sourceEventId,
         PaymentContextV1 context,
@@ -16,6 +23,15 @@ public interface IRevenueLedgerWriter
         long refundAmount,
         CancellationToken cancellationToken)
         => Task.CompletedTask;
+
+    Task RecordRefundAsync(
+        Guid sourceEventId,
+        PaymentContextV1 context,
+        Guid allocationReferenceId,
+        long refundAmount,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
+        => RecordRefundAsync(sourceEventId, context, allocationReferenceId, refundAmount, cancellationToken);
 
     Task<bool> IsRefundRecordedAsync(
         Guid sourceEventId,
@@ -30,6 +46,18 @@ public interface IRevenueLedgerWriter
         CancellationToken cancellationToken)
         => Task.CompletedTask;
 
+    Task RecordGenericBookingRefundEntitlementAsync(
+        Guid sourceEventId,
+        PaymentContextV1 context,
+        Guid allocationReferenceId,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
+        => RecordGenericBookingRefundEntitlementAsync(
+            sourceEventId,
+            context,
+            allocationReferenceId,
+            cancellationToken);
+
     Task RecordCorrelatedBookingRefundAsync(
         Guid sourceEventId,
         Guid voucherAdjustmentSourceEventId,
@@ -39,6 +67,22 @@ public interface IRevenueLedgerWriter
         CancellationToken cancellationToken)
         => RecordRefundAsync(
             sourceEventId,
+            context,
+            allocationReferenceId,
+            refundAmount,
+            cancellationToken);
+
+    Task RecordCorrelatedBookingRefundAsync(
+        Guid sourceEventId,
+        Guid voucherAdjustmentSourceEventId,
+        PaymentContextV1 context,
+        Guid allocationReferenceId,
+        long refundAmount,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
+        => RecordCorrelatedBookingRefundAsync(
+            sourceEventId,
+            voucherAdjustmentSourceEventId,
             context,
             allocationReferenceId,
             refundAmount,

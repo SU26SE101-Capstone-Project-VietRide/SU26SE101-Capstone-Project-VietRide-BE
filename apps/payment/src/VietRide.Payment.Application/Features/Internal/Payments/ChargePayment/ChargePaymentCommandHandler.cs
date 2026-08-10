@@ -193,6 +193,7 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
         await _revenueLedger.RecordPaymentSucceededAsync(
             evt.EventId,
             context,
+            payment.SucceededAt!.Value,
             cancellationToken).ConfigureAwait(false);
         var payload = JsonSerializer.Serialize(evt, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         await _outbox.EnqueueAsync(evt.EventType, payload, cancellationToken).ConfigureAwait(false);

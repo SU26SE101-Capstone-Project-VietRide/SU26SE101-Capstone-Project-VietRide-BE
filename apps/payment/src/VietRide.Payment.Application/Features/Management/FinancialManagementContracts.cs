@@ -18,7 +18,24 @@ public sealed record OperatorWalletDto(
     long Balance,
     long PendingHoldAmount,
     long EligibleAmount,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string Currency = "VND",
+    long AwaitingTripCompletionAmount = 0,
+    int AwaitingTripCompletionCount = 0,
+    int PendingHoldCount = 0,
+    int EligibleCount = 0,
+    DateTimeOffset? NextEligibleAt = null,
+    DateTimeOffset? NextScheduledSettlementAttemptAt = null,
+    long LifetimeSettledAmount = 0,
+    LastSettlementDto? LastSettlement = null,
+    bool WithdrawalSupported = false,
+    DateTimeOffset CalculatedAt = default);
+
+public sealed record LastSettlementDto(
+    Guid SettlementId,
+    long Amount,
+    string Method,
+    DateTimeOffset SettledAt);
 
 public sealed record WalletTransactionDto(
     Guid TransactionId,
@@ -29,7 +46,20 @@ public sealed record WalletTransactionDto(
     string ReferenceType,
     Guid? ReferenceId,
     string? Note,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    long SignedAmount = 0,
+    string Currency = "VND",
+    RelatedSettlementDto? RelatedSettlement = null,
+    string ActorType = "SYSTEM",
+    FinancialActorDto? Actor = null,
+    string? AdjustmentReason = null,
+    string DataCompleteness = "COMPLETE",
+    IReadOnlyList<string>? MissingFields = null);
+
+public sealed record RelatedSettlementDto(
+    Guid SettlementId,
+    Guid TripId,
+    string Method);
 
 public sealed record SettlementDto(
     Guid SettlementId,
@@ -40,7 +70,35 @@ public sealed record SettlementDto(
     string? SettlementMethod,
     DateTimeOffset? SettledAt,
     DateTimeOffset CreatedAt,
-    FinancialActorDto? SettledBy = null);
+    FinancialActorDto? SettledBy = null,
+    DateTimeOffset TripTerminalAt = default,
+    Guid? WalletTransactionId = null,
+    SettlementFinancialBreakdownDto? FinancialBreakdown = null,
+    string ProcessingState = "ON_HOLD",
+    DateTimeOffset? NextScheduledSettlementAttemptAt = null,
+    string? DelayReason = null,
+    int AttemptCount = 0,
+    DateTimeOffset? LastAttemptAt = null,
+    DateTimeOffset? NextRetryAt = null,
+    string? CancelReason = null,
+    SettlementTripDto? Trip = null,
+    string DataCompleteness = "COMPLETE");
+
+public sealed record SettlementFinancialBreakdownDto(
+    long GrossSalesAmount,
+    long PassengerPaidAmount,
+    long VietRideFundedAmount,
+    long OperatorFundedDiscountAmount,
+    long RefundAmount,
+    long RecognizedAdjustmentAmount,
+    long NetEntitlementAmount);
+
+public sealed record SettlementTripDto(
+    DateTimeOffset DepartureAt,
+    Guid RouteId,
+    string RouteName,
+    string OriginName,
+    string DestinationName);
 
 public sealed record AdminSettlementDto(
     Guid SettlementId,
@@ -93,7 +151,24 @@ public sealed record LedgerEntryDto(
     DateTimeOffset CreatedAt,
     string? Note = null,
     string ActorType = "SYSTEM",
-    FinancialActorDto? Actor = null);
+    FinancialActorDto? Actor = null,
+    string? ReferenceCode = null,
+    DateTimeOffset OccurredAt = default,
+    string OccurredAtSource = "LEDGER_CREATED_AT_FALLBACK",
+    long? OperatorFundedVoucherAmount = null,
+    string? AdjustmentReason = null,
+    bool AffectsRevenue = false,
+    bool AffectsSettlement = false,
+    LedgerSettlementDto? Settlement = null,
+    string DataCompleteness = "COMPLETE",
+    IReadOnlyList<string>? MissingFields = null);
+
+public sealed record LedgerSettlementDto(
+    Guid SettlementId,
+    string Status,
+    DateTimeOffset EligibleAt,
+    DateTimeOffset? SettledAt,
+    Guid? WalletTransactionId);
 
 public sealed record InvoiceListItemDto(
     Guid InvoiceId,
@@ -152,9 +227,9 @@ public sealed record ManualSettlementResult(
 public interface IFinancialManagementService
 {
     Task<OperatorWalletDto> GetOperatorWalletAsync(Guid operatorId, CancellationToken cancellationToken);
-    Task<PagedResult<WalletTransactionDto>> ListOperatorTransactionsAsync(Guid operatorId, PageOptions options, string? type, string? referenceType, CancellationToken cancellationToken);
-    Task<PagedResult<SettlementDto>> ListOperatorSettlementsAsync(Guid operatorId, PageOptions options, string? status, Guid? tripId, CancellationToken cancellationToken);
-    Task<PagedResult<LedgerEntryDto>> ListOperatorLedgerAsync(Guid operatorId, PageOptions options, Guid? tripId, string? entryType, string? referenceType, CancellationToken cancellationToken);
+    Task<PagedResult<WalletTransactionDto>> ListOperatorTransactionsAsync(Guid operatorId, PageOptions options, string? type, string? referenceType, CancellationToken cancellationToken, string? search = null, string? dateField = null);
+    Task<PagedResult<SettlementDto>> ListOperatorSettlementsAsync(Guid operatorId, PageOptions options, string? status, Guid? tripId, CancellationToken cancellationToken, string? search = null, string? dateField = null);
+    Task<PagedResult<LedgerEntryDto>> ListOperatorLedgerAsync(Guid operatorId, PageOptions options, Guid? tripId, string? entryType, string? referenceType, CancellationToken cancellationToken, string? search = null, string? dateField = null);
     Task<PagedResult<InvoiceListItemDto>> ListInvoicesAsync(Guid operatorId, PageOptions options, string? status, CancellationToken cancellationToken);
     Task<InvoiceDetailDto> GetInvoiceAsync(Guid operatorId, Guid invoiceId, CancellationToken cancellationToken);
     Task<PagedResult<AdminSettlementDto>> ListAdminSettlementsAsync(PageOptions options, Guid? operatorId, string? status, Guid? tripId, bool stuckOnly, string? severity, CancellationToken cancellationToken);
@@ -166,9 +241,9 @@ public interface IFinancialManagementService
 }
 
 public sealed record GetOperatorWalletQuery(Guid OperatorId) : IRequest<OperatorWalletDto>;
-public sealed record ListOperatorTransactionsQuery(Guid OperatorId, PageOptions Options, string? Type, string? ReferenceType) : IRequest<PagedResult<WalletTransactionDto>>;
-public sealed record ListOperatorSettlementsQuery(Guid OperatorId, PageOptions Options, string? Status, Guid? TripId) : IRequest<PagedResult<SettlementDto>>;
-public sealed record ListOperatorLedgerQuery(Guid OperatorId, PageOptions Options, Guid? TripId, string? EntryType, string? ReferenceType) : IRequest<PagedResult<LedgerEntryDto>>;
+public sealed record ListOperatorTransactionsQuery(Guid OperatorId, PageOptions Options, string? Type, string? ReferenceType, string? Search = null, string? DateField = null) : IRequest<PagedResult<WalletTransactionDto>>;
+public sealed record ListOperatorSettlementsQuery(Guid OperatorId, PageOptions Options, string? Status, Guid? TripId, string? Search = null, string? DateField = null) : IRequest<PagedResult<SettlementDto>>;
+public sealed record ListOperatorLedgerQuery(Guid OperatorId, PageOptions Options, Guid? TripId, string? EntryType, string? ReferenceType, string? Search = null, string? DateField = null) : IRequest<PagedResult<LedgerEntryDto>>;
 public sealed record ListOperatorInvoicesQuery(Guid OperatorId, PageOptions Options, string? Status) : IRequest<PagedResult<InvoiceListItemDto>>;
 public sealed record GetOperatorInvoiceQuery(Guid OperatorId, Guid InvoiceId) : IRequest<InvoiceDetailDto>;
 public sealed record ListAdminSettlementsQuery(PageOptions Options, Guid? OperatorId, string? Status, Guid? TripId, bool StuckOnly, string? Severity) : IRequest<PagedResult<AdminSettlementDto>>;
@@ -202,9 +277,9 @@ public sealed class FinancialManagementHandlers :
     public FinancialManagementHandlers(IFinancialManagementService service) => _service = service;
 
     public Task<OperatorWalletDto> Handle(GetOperatorWalletQuery request, CancellationToken ct) => _service.GetOperatorWalletAsync(request.OperatorId, ct);
-    public Task<PagedResult<WalletTransactionDto>> Handle(ListOperatorTransactionsQuery request, CancellationToken ct) => _service.ListOperatorTransactionsAsync(request.OperatorId, request.Options, request.Type, request.ReferenceType, ct);
-    public Task<PagedResult<SettlementDto>> Handle(ListOperatorSettlementsQuery request, CancellationToken ct) => _service.ListOperatorSettlementsAsync(request.OperatorId, request.Options, request.Status, request.TripId, ct);
-    public Task<PagedResult<LedgerEntryDto>> Handle(ListOperatorLedgerQuery request, CancellationToken ct) => _service.ListOperatorLedgerAsync(request.OperatorId, request.Options, request.TripId, request.EntryType, request.ReferenceType, ct);
+    public Task<PagedResult<WalletTransactionDto>> Handle(ListOperatorTransactionsQuery request, CancellationToken ct) => _service.ListOperatorTransactionsAsync(request.OperatorId, request.Options, request.Type, request.ReferenceType, ct, request.Search, request.DateField);
+    public Task<PagedResult<SettlementDto>> Handle(ListOperatorSettlementsQuery request, CancellationToken ct) => _service.ListOperatorSettlementsAsync(request.OperatorId, request.Options, request.Status, request.TripId, ct, request.Search, request.DateField);
+    public Task<PagedResult<LedgerEntryDto>> Handle(ListOperatorLedgerQuery request, CancellationToken ct) => _service.ListOperatorLedgerAsync(request.OperatorId, request.Options, request.TripId, request.EntryType, request.ReferenceType, ct, request.Search, request.DateField);
     public Task<PagedResult<InvoiceListItemDto>> Handle(ListOperatorInvoicesQuery request, CancellationToken ct) => _service.ListInvoicesAsync(request.OperatorId, request.Options, request.Status, ct);
     public Task<InvoiceDetailDto> Handle(GetOperatorInvoiceQuery request, CancellationToken ct) => _service.GetInvoiceAsync(request.OperatorId, request.InvoiceId, ct);
     public Task<PagedResult<AdminSettlementDto>> Handle(ListAdminSettlementsQuery request, CancellationToken ct) => _service.ListAdminSettlementsAsync(request.Options, request.OperatorId, request.Status, request.TripId, request.StuckOnly, request.Severity, ct);

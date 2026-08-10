@@ -14,7 +14,8 @@ public sealed record PaymentAllocationV1(
     Guid TripId,
     long GrossAmount,
     long VoucherVietRideFundedAmount,
-    long VoucherOperatorFundedAmount);
+    long VoucherOperatorFundedAmount,
+    string? ReferenceCode = null);
 
 public static class PaymentContextCodec
 {
@@ -40,6 +41,14 @@ public static class PaymentContextCodec
 
             if (allocation.ReferenceType is not ("BOOKING" or "PARCEL" or "PARCEL_ADDITIONAL"))
                 throw Invalid("Payment context allocation referenceType is not supported.");
+
+            if (allocation.ReferenceCode is not null
+                && (string.IsNullOrWhiteSpace(allocation.ReferenceCode)
+                    || allocation.ReferenceCode.Length > 64
+                    || !string.Equals(allocation.ReferenceCode, allocation.ReferenceCode.Trim(), StringComparison.Ordinal)))
+            {
+                throw Invalid("Payment context allocation referenceCode must be trimmed and at most 64 characters.");
+            }
 
             if (allocation.GrossAmount <= 0
                 || allocation.VoucherVietRideFundedAmount < 0

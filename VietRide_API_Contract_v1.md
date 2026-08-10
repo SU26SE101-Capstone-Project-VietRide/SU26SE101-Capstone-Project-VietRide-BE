@@ -5247,6 +5247,13 @@ VNPay gọi canonical `GET|POST /v1/payments/vnpay-ipn`. `returnUrl` chỉ đưa
 
 All list endpoints return the ADR 0004 paged envelope with `items`, `page`, `pageSize`, `totalItems`, `totalPages`, `hasNextPage`, and `hasPreviousPage`. `pageSize` is `1..100`; `sortDir` is `asc|desc`; unsupported `sortBy` returns `400 INVALID_SORT_FIELD`. Operator scope always comes from trusted JWT claims and is never accepted from query/body.
 
+Ba danh sách tài chính của operator (`wallet/transactions`, `trip-settlements`, `ledger`) hỗ trợ
+`search?` sau khi trim, dài `2..100` ký tự, và `dateField?` mặc định `createdAt`. Search luôn
+được áp dụng sau tenant scope. UUID hợp lệ match chính xác transaction/reference/trip/settlement;
+chuỗi thường match chính xác hoặc prefix `referenceCode` không phân biệt hoa thường. Transaction
+và ledger còn cho phép contains trên `note`; ký tự `%`, `_`, `\` được escape và được hiểu như ký
+tự thường. `dateField` hoặc enum filter không hợp lệ trả `400 INVALID_FILTER`.
+
 ### GET `/v1/operator/invoices`
 
 Auth: `OPERATOR_ADMIN`. Query: `page?`, `pageSize?`, `status?`, `from?`, `to?`, `sortBy?` (`issuedAt|createdAt|amount|invoiceNumber`), `sortDir?`.
@@ -5310,25 +5317,65 @@ Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`.
   "data": {
     "operatorId": "uuid",
     "balance": 1250000,
+    "currency": "VND",
+    "awaitingTripCompletionAmount": 1700000,
+    "awaitingTripCompletionCount": 6,
     "pendingHoldAmount": 300000,
+    "pendingHoldCount": 4,
     "eligibleAmount": 450000,
-    "updatedAt": "2026-07-15T17:00:00+07:00"
+    "eligibleCount": 2,
+    "nextEligibleAt": "2026-07-17T10:00:00Z",
+    "nextScheduledSettlementAttemptAt": "2026-07-20T02:00:00Z",
+    "lifetimeSettledAmount": 3500000,
+    "lastSettlement": {
+      "settlementId": "uuid",
+      "amount": 450000,
+      "method": "AUTO_WEEKLY",
+      "settledAt": "2026-07-13T02:00:00Z"
+    },
+    "withdrawalSupported": false,
+    "updatedAt": "2026-07-15T10:00:00Z",
+    "calculatedAt": "2026-07-15T10:00:03Z"
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-07-15T17:00:00+07:00" }
 }
 ```
 
+`balance` là tiền đã được credit vào OperatorWallet sau settlement; tiền khách vừa mua vẫn nằm
+trong PlatformWallet. `awaitingTripCompletionAmount` là net entitlement của trip đã có canonical
+ledger nhưng chưa có settlement marker. `pendingHoldAmount` và `eligibleAmount` đều lấy từ cùng
+projection ledger hiện tại, không trộn với snapshot `OperatorTripSettlement.netAmount`. `updatedAt`
+chỉ đổi khi balance đổi; `calculatedAt` là thời điểm tính các aggregate. `lifetimeSettledAmount`
+chỉ cộng `netAmount` của settlement `SETTLED`, không bao gồm adjustment ví hoặc subscription.
+
 ### GET `/v1/operator/wallet/transactions`
 
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `type?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain `transactionId`, `type`, `amount`, `balanceBefore`, `balanceAfter`, `referenceType`, `referenceId`, `note`, `createdAt`.
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `type?`, `referenceType?`, `from?`, `to?`, `dateField?` (chỉ `createdAt`), `search?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items giữ các field cũ và thêm `signedAmount` (CREDIT dương, DEBIT âm), `currency: "VND"`, nullable `relatedSettlement { settlementId, tripId, method }`, `actorType`, nullable `actor`, nullable `adjustmentReason`, `dataCompleteness`, `missingFields`. `amount` cũ luôn dương. Adjustment liên kết actor qua ledger `referenceId=transactionId`; subscription luôn có `relatedSettlement=null`.
 
 ### GET `/v1/operator/trip-settlements`
 
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `status?`, `tripId?`, `from?`, `to?`, `sortBy?` (`createdAt|eligibleAt|settledAt|netAmount`), `sortDir?`. Items contain the legacy fields `settlementId`, `tripId`, `status`, `eligibleAt`, `netAmount`, `settlementMethod`, `settledAt`, `createdAt`, plus additive nullable `settledBy` (`{ userId, displayName, email, role }` or `null`). `settledBy=null` identifies automatic weekly settlement; a manual admin settlement includes the authenticated admin snapshot when available. Operator identity is omitted because the route is tenant-scoped.
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `status?`, `tripId?`, `from?`, `to?`, `dateField?` (`createdAt|tripTerminalAt|eligibleAt|settledAt`), `search?`, `sortBy?` (`createdAt|eligibleAt|settledAt|netAmount`), `sortDir?`. Items giữ các field cũ và thêm `tripTerminalAt`, `walletTransactionId`, `financialBreakdown { grossSalesAmount, passengerPaidAmount, vietRideFundedAmount, operatorFundedDiscountAmount, refundAmount, recognizedAdjustmentAmount, netEntitlementAmount }`, `processingState`, `nextScheduledSettlementAttemptAt`, nullable `delayReason`, `attemptCount`, nullable `lastAttemptAt`, nullable `nextRetryAt`, nullable `cancelReason`, nullable `trip { departureAt, routeId, routeName, originName, destinationName }`, và `dataCompleteness`. `settledBy=null` xác định auto weekly; manual settlement trả snapshot admin khi có.
+
+`processingState` là `ON_HOLD|READY_FOR_SETTLEMENT|RETRY_SCHEDULED|COMPLETED|CANCELLED`.
+Operator chỉ nhận `delayReason=SYSTEM_PROCESSING_DELAY`; raw
+`PLATFORM_WALLET_INSUFFICIENT_BALANCE` chỉ xuất hiện ở admin API. `netAmount` và breakdown dùng
+canonical ledger hiện tại; settlement write vẫn khóa row và recompute lần cuối trước movement.
+Trip được batch-enrich qua internal Trip API hiện có. Nếu Trip lỗi hoặc thiếu summary, endpoint tài
+chính vẫn trả `200`, `trip=null`, `dataCompleteness=PARTIAL`. Settlement cũng trả `PARTIAL` nếu
+canonical projection thiếu reconciliation metadata của ledger legacy.
 
 ### GET `/v1/operator/ledger`
 
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `tripId?`, `entryType?`, `referenceType?`, `from?`, `to?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items contain the legacy fields `ledgerEntryId`, `tripId`, `entryType`, signed `amount`, `referenceType`, `referenceId`, `createdAt`, plus additive nullable `note`, `actorType` (`USER|SYSTEM`), and `actor` (`{ userId, displayName, email, role }` or `null`). Internal source-event identifiers are not returned. Automated/event-created rows use `actorType=SYSTEM`; admin wallet adjustments use `actorType=USER` and expose the authenticated admin snapshot when available. Historical manual rows whose actor cannot be proven may return `actor=null`.
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `tripId?`, `entryType?`, `referenceType?`, `from?`, `to?`, `dateField?` (`createdAt|occurredAt`), `search?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items giữ các field cũ và thêm nullable `referenceCode`, `occurredAt`, `occurredAtSource` (`BUSINESS_EVENT|LEDGER_CREATED_AT_FALLBACK`), nullable `operatorFundedVoucherAmount`, nullable `adjustmentReason`, `affectsRevenue`, `affectsSettlement`, nullable `settlement { settlementId, status, eligibleAt, settledAt, walletTransactionId }`, `dataCompleteness`, `missingFields`. Internal source-event identifiers không được trả ra. Automated/event rows dùng `actorType=SYSTEM`; admin adjustment dùng `USER` với actor snapshot khi có.
+
+Không được parse `note` để lấy tiền. `VOUCHER_OPERATOR_FUNDED_AUDIT.amount` luôn `0`; số voucher
+nhà xe tài trợ nằm riêng trong `operatorFundedVoucherAmount` và không bị trừ net lần hai. Row cũ
+thiếu `referenceCode`, `occurredAt` hoặc voucher metadata trả nullable và `PARTIAL`; `occurredAt`
+fallback về `createdAt` với source tương ứng nhưng tiền canonical vẫn được tính bình thường.
+
+Payment context `version=1` mở rộng additive mỗi allocation với nullable `referenceCode` tối đa 64
+ký tự đã trim. Booking gửi `BookingCode`, Parcel gửi `ParcelCode`; internal payment-context response
+hiện có trả cùng field. JSON cũ không có field vẫn deserialize hợp lệ.
 
 ### GET `/v1/admin/trip-settlements`
 

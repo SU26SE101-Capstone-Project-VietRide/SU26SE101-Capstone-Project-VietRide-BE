@@ -532,7 +532,8 @@ public sealed class CreateBookingCommandHandler
                 booking.TripId,
                 grossAmount,
                 fundingType == VoucherFundingType.VIETRIDE_FUNDED ? discountAmount : 0,
-                fundingType == VoucherFundingType.OPERATOR_FUNDED ? discountAmount : 0),
+                fundingType == VoucherFundingType.OPERATOR_FUNDED ? discountAmount : 0,
+                booking.BookingCode.Value),
         ]);
 
     // -----------------------------------------------------------------------

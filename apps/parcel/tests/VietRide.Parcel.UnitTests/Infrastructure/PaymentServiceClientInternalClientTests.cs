@@ -36,8 +36,31 @@ public class PaymentServiceClientInternalClientTests
 
         var referenceId = Guid.NewGuid();
         var userId = Guid.NewGuid();
+        var operatorId = Guid.NewGuid();
+        var tripId = Guid.NewGuid();
+        const string referenceCode = "VRP-20260810-CONTEXT01";
+        var context = new PaymentContextSnapshot(
+            1,
+            [
+                new PaymentAllocationSnapshot(
+                    referenceId,
+                    "PARCEL",
+                    operatorId,
+                    tripId,
+                    100_000,
+                    0,
+                    0,
+                    referenceCode),
+            ]);
         await client.ChargeParcelPaymentAsync(
-            "PARCEL", referenceId, userId, 100_000, "WALLET", "idem-charge-1");
+            "PARCEL",
+            referenceId,
+            userId,
+            100_000,
+            "WALLET",
+            "idem-charge-1",
+            CancellationToken.None,
+            context);
 
         _handler.LastRequest.Should().NotBeNull();
         _handler.LastRequest!.RequestUri!.AbsolutePath.Should().Be("/internal/v1/payments/charge");
@@ -52,6 +75,41 @@ public class PaymentServiceClientInternalClientTests
         deserialized.GetProperty("userId").GetGuid().Should().Be(userId);
         deserialized.GetProperty("amount").GetInt64().Should().Be(100_000);
         deserialized.GetProperty("method").GetString().Should().Be("WALLET");
+        var allocation = deserialized
+            .GetProperty("context")
+            .GetProperty("allocations")[0];
+        allocation.GetProperty("referenceCode").GetString().Should().Be(referenceCode);
+    }
+
+    [Fact]
+    public void PaymentContextSnapshot_DeserializesLegacyAllocationWithoutReferenceCode()
+    {
+        var referenceId = Guid.NewGuid();
+        var operatorId = Guid.NewGuid();
+        var tripId = Guid.NewGuid();
+        var legacyJson = JsonSerializer.Serialize(new
+        {
+            version = 1,
+            allocations = new[]
+            {
+                new
+                {
+                    referenceId,
+                    referenceType = "PARCEL",
+                    operatorId,
+                    tripId,
+                    grossAmount = 100_000L,
+                    voucherVietRideFundedAmount = 0L,
+                    voucherOperatorFundedAmount = 0L,
+                },
+            },
+        }, JsonOptions);
+
+        var context = JsonSerializer.Deserialize<PaymentContextSnapshot>(legacyJson, JsonOptions);
+
+        context.Should().NotBeNull();
+        context!.Allocations.Should().ContainSingle();
+        context.Allocations[0].ReferenceCode.Should().BeNull();
     }
 
     [Fact]

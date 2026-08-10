@@ -108,6 +108,7 @@ public sealed class StartParcelFinalPaymentCommandHandler
                 parcel.TripId,
                 balanceDue,
                 0,
-                0),
+                0,
+                parcel.ParcelCode),
         ]);
 }

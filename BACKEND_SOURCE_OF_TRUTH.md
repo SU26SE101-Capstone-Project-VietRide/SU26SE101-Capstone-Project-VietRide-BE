@@ -2739,6 +2739,45 @@ Platform Report dùng `platform-report:v3`; Payment analytics/internal summaries
 Parcel không đặt cache full response thứ hai. `generatedAt` là UTC; support/QA phải chấp nhận độ
 trễ hiển thị tối đa 60 giây sau giao dịch mới.
 
+#### Operator wallet transparency contract (2026-08-10)
+
+Payment tiếp tục là nguồn tài chính chuẩn; revenue, settlement và OperatorWallet balance là ba
+khái niệm riêng. Không có bank withdrawal trong v1. Bốn route operator hiện có được mở rộng
+additive, không thêm route Gateway:
+
+- `GET /v1/operator/wallet`: `balance` chỉ là tiền đã settlement vào ví; `awaitingTripCompletion`
+  là ledger-backed entitlement của trip chưa có settlement marker; `pendingHold` và `eligible`
+  được tính từ cùng canonical live-ledger projection. `lifetimeSettledAmount` chỉ cộng snapshot
+  `net_amount` của row `SETTLED`. `updatedAt` là lúc balance đổi, `calculatedAt` là lúc aggregate.
+- `GET /v1/operator/wallet/transactions`: giữ `amount` dương để tương thích, thêm signed amount,
+  currency, settlement link và actor/reason của adjustment qua ledger `reference_id=transaction_id`.
+- `GET /v1/operator/trip-settlements`: `netAmount` đọc từ canonical projection hiện tại; trả
+  breakdown, processing/retry schedule, wallet transaction và Trip display batch-enrichment.
+  Trip upstream lỗi không làm hỏng API tài chính: trả `trip=null`, `dataCompleteness=PARTIAL`.
+  Operator chỉ thấy `SYSTEM_PROCESSING_DELAY`; raw liquidity code vẫn admin-only.
+- `GET /v1/operator/ledger`: trả reference code, business occurrence time/source, typed adjustment,
+  operator-funded voucher metadata, revenue/settlement effects và settlement link. Legacy metadata
+  thiếu được fallback/null + `PARTIAL`; không parse `note`, không rewrite immutable ledger cũ.
+
+Canonical projection duy nhất theo `(operator_id, trip_id)` trả gross sales, passenger paid,
+VietRide-funded amount, operator-funded discount, refunds, recognized adjustment và net entitlement.
+Net chỉ dùng canonical revenue predicate; `VOUCHER_OPERATOR_FUNDED_AUDIT.amount=0`, còn số audit
+nằm ở `operator_funded_voucher_amount` nên không bị trừ hai lần. Projection này được dùng cho wallet
+summary, operator settlement list và settlement recompute; write path vẫn khóa row và recompute
+trong transaction trước PlatformWallet DEBIT/OperatorWallet CREDIT.
+
+`PaymentAllocationV1.referenceCode` nullable, đã trim, tối đa 64 ký tự. Booking producer gửi
+`BookingCode`, Parcel producer gửi `ParcelCode`, các internal payment-context response hiện có trả
+cùng field. Ledger mới lưu `reference_code`, `occurred_at`,
+`operator_funded_voucher_amount`; JSON/row cũ vẫn đọc được.
+
+List search được áp dụng sau operator tenant scope. Search dài `2..100`: UUID exact-match IDs;
+chuỗi thường exact/prefix reference code không phân biệt hoa thường; transaction/ledger note
+contains với `%`, `_`, `\` escaped. `dateField` mặc định `createdAt`: transaction chỉ `createdAt`,
+settlement thêm `tripTerminalAt|eligibleAt|settledAt`, ledger thêm `occurredAt`. Invalid value dùng
+`INVALID_FILTER`. Schedule helper canonical giữ hold 7 ngày, eligibility `0 19 * * *` UTC và auto
+settlement `0 2 * * 1` UTC; tên response dùng `nextScheduled...`, không cam kết chuyển tiền chắc chắn.
+
 ---
 
 ## 8. Status Machines
@@ -3938,10 +3977,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
-| **1.63.2** | 2026-08-10 | Codex | **PATCH** — Remove the ambiguous legacy three-letter timezone shorthand from code, tests, scripts, schema comments and documentation. The only business timezone identifier is `Asia/Ho_Chi_Minh`; public instants serialize with `+07:00`, while persisted/internal instants remain UTC `Z`. No runtime instant, schema or event contract changes. |
-| **1.63.1** | 2026-08-10 | Codex | **PATCH** — Reconcile §9.4, response examples and job registry with ADR 0005: public JSON/WebSocket uses `Asia/Ho_Chi_Minh +07:00`; internal HTTP, Redis, Outbox and RabbitMQ use UTC `Z`; Hangfire jobs declare UTC explicitly. |
-| **1.63.0** | 2026-08-10 | Codex | **MINOR** — Amend ADR 0005 presentation: persistence, jobs, internal HTTP, Redis/Outbox/RabbitMQ remain UTC `Z`, while every FE-facing JSON HTTP/WebSocket instant is serialized through IANA `Asia/Ho_Chi_Minh` as `+07:00`. Requests still require an explicit offset and normalize UTC; no schema, stored timestamp, cache namespace, job, search range, or event contract changes. |
-| **1.62.0** | 2026-08-09 | Codex | **MINOR** — Accept ADR 0005 and standardize all instants as UTC `Z`, Vietnam calendar values as `Asia/Ho_Chi_Minh`, half-open UTC date ranges, UTC Hangfire/PostgreSQL runtime, additive schedule `timeZone`, strict offset-bearing timestamp input, and Vietnam-formatted human notification text. No timestamp data or schema migration. |
+| **1.62.0** | 2026-08-10 | Codex | **MINOR** — Mở rộng additive bốn operator financial read để tách rõ tiền chờ Trip, hold, eligible, settled và wallet balance; thêm canonical per-trip financial projection, reconciliation metadata/search/date semantics, UTC schedule projection, safe settlement delay, fail-soft Trip enrichment và reversible nullable ledger metadata migration. Booking/Parcel truyền reference code qua payment-context hiện có; không thêm route, dependency, error code hoặc bank withdrawal. |
 | **1.61.0** | 2026-08-09 | Codex | **MINOR** — Add backend-owned intercity ETA for every stop and destination. Trip persists Google Routes versus Route-baseline planned source while exposing only `plannedEtaQuality`; Tracking calculates one ordered batch for all remaining targets, writes 60-second Redis entries atomically, exposes `GET /v1/tracking/trips/{tripId}/etas`, and emits additive `eta:batch:update` while preserving legacy `/eta` and `eta:update`. Adds reversible `planned_eta_source` migration and default 20-minute dwell configuration; no dependency or integration event added. |
 | **1.60.0** | 2026-08-08 | Codex | **MINOR** — Reconcile the current RAG contract with runtime and physical DDL (Cloudinary raw document storage, OpenRouter chat/embedding, canonical `nvidia/llama-nemotron-embed-vl-1b-v2:free`, `halfvec(2048)`, HNSW cosine indexing) and standardize Payment as the financial source of truth for Dashboard/Analytics/Platform Report/export with canonical revenue predicates, typed adjustment taxonomy, separated settlement, Asia/Ho_Chi_Minh half-open ranges, 60-second cache, and fail-closed 503 financial consumers. No physical DDL, migration, dependency, provider secret, or integration-event change. |
 | **1.59.0** | 2026-08-07 | Codex | **MINOR** — Freeze Mobile gap contracts: passenger Trip search exposes only `SCHEDULED`; round-trip route identity and leg-scoped seat conflicts; effective-route geometry/ETag; STOP/STATION ETA and passenger-history tracking targets; atomic notification read-all plus snapshot cursor pagination; System Admin `SUSPENDED -> APPROVED` operator reactivation with ActivityLog and unchanged subscription; RAG 429 documents `RAG_RATE_LIMIT_EXCEEDED`. Adds two UUID-v4-required mutations, raising the executable inventory to 190/173/17. No new dependency or integration event. |
