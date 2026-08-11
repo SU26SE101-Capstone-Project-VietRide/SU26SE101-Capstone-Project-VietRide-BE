@@ -1594,7 +1594,7 @@ metadata nullable, không che Incident.
 | | `SHUTTLE_PICKUP_LOCKED` | 409 | Edit pickup khi Booking còn shuttle intent active |
 | | `SHUTTLE_REQUEST_SET_CHANGED` | 409 | Booking subset đã đổi trạng thái trong lúc operator dispatch |
 | | `SHUTTLE_CAPACITY_EXCEEDED` | 409 | Tổng ticket của subset vượt sức chứa vehicle |
-| | `SHUTTLE_DISTANCE_EXCEEDED` | 422 | Road distance snapshot lớn hơn 5.000 mét; đúng 5.000 mét vẫn hợp lệ |
+| | `SHUTTLE_DISTANCE_EXCEEDED` | 422 | Road distance snapshot lớn hơn 10.000 mét; đúng 10.000 mét vẫn hợp lệ |
 | | `SHUTTLE_DISTANCE_UNAVAILABLE` | 503 | Google Routes thiếu key, timeout, upstream error hoặc response không hợp lệ |
 | | `SHUTTLE_REQUEST_NOT_CANCELLABLE` | 409 | Request đã assign hoặc không còn ở trạng thái chưa assign |
 | | `SHUTTLE_TRIP_INVALID_STATE` | 409 | ShuttleTrip không cho phép lifecycle transition được yêu cầu |
@@ -4002,6 +4002,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.64.3** | 2026-08-11 | Codex | **PATCH** — Increase the platform Shuttle Google Routes road-distance limit from 5 km to 10 km across Booking eligibility, Trip confirmed-event ingestion, dispatch validation, deployment defaults, boundary tests, and API/Postman documentation. No endpoint, payload, error code, schema, migration, dependency, or event change. |
 | **1.64.2** | 2026-08-10 | Codex | **PATCH** — Enrich every public/operator/admin `StopDto` with hierarchy-derived `city` and `ward` display names while retaining canonical `locationId`. List projections batch Location/parent reads without N+1; Stop persistence, schema, dependencies, endpoint paths, events, and error codes remain unchanged. |
 | **1.64.1** | 2026-08-10 | Codex | **PATCH** — Standardize Location, Operator/Admin Station, and Operator/Admin Stop text filters on PostgreSQL `unaccent(...) ILIKE unaccent(...)` contains matching. Passenger Trip Search remains official-code based; names are autocomplete/display only. No schema, dependency, endpoint, event, or error-code change. |
 | **1.64.0** | 2026-08-10 | Codex | **MINOR** — Replace the flat Trip `Location` catalog with the current official two-level hierarchy: `PROVINCE|MUNICIPALITY` roots and `WARD|COMMUNE|SPECIAL_ZONE` leaves linked by restrictive self-FK. Station/Stop writes require an active leaf; Station city/ward are derived snapshots. Public Location reads support root/child autocomplete, and Trip Search replaces legacy location-code mode with required province plus optional ward scopes on each side while preserving exact station-ID precedence and automatic eligible Stop matching. Import Decision 19/2025/QD-TTg catalog with provenance, deterministic leaf IDs, reversible migration, and no legacy aliases, dependency, service, event, or destructive business-data migration. |

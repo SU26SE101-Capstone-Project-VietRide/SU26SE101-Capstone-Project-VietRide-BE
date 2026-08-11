@@ -190,6 +190,144 @@ public sealed class ShuttlePersistenceIntegrationTests
     }
 
     [Fact]
+    public async Task GetPendingAsync_ProjectsRoutePassengersAndCompletePagination()
+    {
+        var databaseName = $"vietride_trip_shuttle_pending_projection_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var seed = await SeedBaseAsync(db, now.AddHours(4));
+            var inboundBookingId = Guid.NewGuid();
+            var outboundBookingId = Guid.NewGuid();
+            var profiledPassengerId = Guid.NewGuid();
+            var missingProfilePassengerId = Guid.NewGuid();
+            var inboundTicketIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
+            var outboundTicketId = Guid.NewGuid();
+
+            db.ShuttlePassengers.AddRange(
+                ShuttlePassenger.Request(
+                    seed.MainTripId,
+                    inboundBookingId,
+                    inboundTicketIds[0],
+                    profiledPassengerId,
+                    "12 Nguyen Hue, District 1",
+                    10.7731m,
+                    106.7032m,
+                    ShuttlePassenger.InboundDirection,
+                    1_000),
+                ShuttlePassenger.Request(
+                    seed.MainTripId,
+                    inboundBookingId,
+                    inboundTicketIds[1],
+                    profiledPassengerId,
+                    "12 Nguyen Hue, District 1",
+                    10.7731m,
+                    106.7032m,
+                    ShuttlePassenger.InboundDirection,
+                    1_000),
+                ShuttlePassenger.Request(
+                    seed.MainTripId,
+                    outboundBookingId,
+                    outboundTicketId,
+                    missingProfilePassengerId,
+                    "45 Le Loi, District 1",
+                    10.7722m,
+                    106.6980m,
+                    ShuttlePassenger.OutboundDirection,
+                    900));
+            await db.SaveChangesAsync();
+
+            var service = CreateDispatchService(
+                db,
+                clock,
+                seed.OperatorId,
+                new HashSet<Guid> { missingProfilePassengerId });
+
+            var firstPage = await service.GetPendingAsync(
+                seed.OperatorId,
+                page: 1,
+                pageSize: 1,
+                CancellationToken.None);
+            var secondPage = await service.GetPendingAsync(
+                seed.OperatorId,
+                page: 2,
+                pageSize: 1,
+                CancellationToken.None);
+
+            firstPage.Items.Should().ContainSingle();
+            firstPage.TotalItems.Should().Be(2);
+            firstPage.TotalPages.Should().Be(2);
+            firstPage.HasNextPage.Should().BeTrue();
+            firstPage.HasPreviousPage.Should().BeFalse();
+            var inbound = firstPage.Items.Single();
+            inbound.RouteName.Should().Be("Shuttle integration route");
+            inbound.Direction.Should().Be(ShuttlePassenger.InboundDirection);
+            inbound.BookingGroups.Should().ContainSingle();
+            var inboundGroup = inbound.BookingGroups.Single();
+            inboundGroup.Passengers.Should().NotBeNull().And.ContainSingle();
+            var profiledPassenger = inboundGroup.Passengers.Single();
+            profiledPassenger.PassengerUserId.Should().Be(profiledPassengerId);
+            profiledPassenger.DisplayName.Should().Be("Shuttle Passenger");
+            profiledPassenger.Phone.Should().Be("0900000000");
+            profiledPassenger.TicketIds.Should().BeEquivalentTo(inboundTicketIds);
+
+            secondPage.Items.Should().ContainSingle();
+            secondPage.TotalItems.Should().Be(2);
+            secondPage.TotalPages.Should().Be(2);
+            secondPage.HasNextPage.Should().BeFalse();
+            secondPage.HasPreviousPage.Should().BeTrue();
+            var outbound = secondPage.Items.Single();
+            outbound.RouteName.Should().Be("Shuttle integration route");
+            outbound.Direction.Should().Be(ShuttlePassenger.OutboundDirection);
+            var missingProfilePassenger = outbound.BookingGroups.Single().Passengers.Single();
+            missingProfilePassenger.PassengerUserId.Should().Be(missingProfilePassengerId);
+            missingProfilePassenger.DisplayName.Should().BeNull();
+            missingProfilePassenger.Phone.Should().BeNull();
+            missingProfilePassenger.TicketIds.Should().Equal(outboundTicketId);
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task GetPendingAsync_EmptyResultReturnsZeroPageMetadataAndEmptyItems()
+    {
+        var databaseName = $"vietride_trip_shuttle_pending_empty_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var seed = await SeedBaseAsync(db, now.AddHours(4));
+            var service = CreateDispatchService(db, clock, seed.OperatorId);
+
+            var result = await service.GetPendingAsync(
+                Guid.NewGuid(),
+                page: 1,
+                pageSize: 20,
+                CancellationToken.None);
+
+            result.Items.Should().BeEmpty();
+            result.TotalItems.Should().Be(0);
+            result.TotalPages.Should().Be(0);
+            result.HasNextPage.Should().BeFalse();
+            result.HasPreviousPage.Should().BeFalse();
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task ConfirmedFanOut_RealInbox_FailureBeforeMarker_RollsBackManifestsAndMarker()
     {
         var databaseName = $"vietride_trip_shuttle_inbox_failure_{Guid.NewGuid():N}";
@@ -740,7 +878,8 @@ public sealed class ShuttlePersistenceIntegrationTests
     private static IShuttleDispatchService CreateDispatchService(
         TripDbContext db,
         IClock clock,
-        Guid operatorId)
+        Guid operatorId,
+        IReadOnlySet<Guid>? missingProfileUserIds = null)
     {
         var type = typeof(TripDbContext).Assembly.GetType(
             "VietRide.Trip.Infrastructure.Services.ShuttleDispatchService",
@@ -751,13 +890,13 @@ public sealed class ShuttlePersistenceIntegrationTests
             binder: null,
             [
                 db,
-                new StubIdentityClient(operatorId),
+                new StubIdentityClient(operatorId, missingProfileUserIds),
                 CreateOutbox(db, clock),
                 clock,
                 new ConfigurationBuilder()
                     .AddInMemoryCollection(new Dictionary<string, string?>
                     {
-                        ["SHUTTLE_MAX_DISTANCE_KM"] = "5",
+                        ["SHUTTLE_MAX_DISTANCE_KM"] = "10",
                     })
                     .Build(),
             ],
@@ -843,10 +982,12 @@ public sealed class ShuttlePersistenceIntegrationTests
     private sealed class StubIdentityClient : IIdentityInternalClient
     {
         private readonly Guid _operatorId;
+        private readonly IReadOnlySet<Guid> _missingProfileUserIds;
 
-        public StubIdentityClient(Guid operatorId)
+        public StubIdentityClient(Guid operatorId, IReadOnlySet<Guid>? missingProfileUserIds = null)
         {
             _operatorId = operatorId;
+            _missingProfileUserIds = missingProfileUserIds ?? new HashSet<Guid>();
         }
 
         public Task<OperatorWriteEligibilityValidation> ValidateOperatorCanWriteAsync(
@@ -867,6 +1008,22 @@ public sealed class ShuttlePersistenceIntegrationTests
             {
                 Phone = "0900000000",
             });
+
+        public Task<IReadOnlyDictionary<Guid, IdentityUserProfile>> GetUsersAsync(
+            IReadOnlyCollection<Guid> userIds,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyDictionary<Guid, IdentityUserProfile>>(userIds
+                .Where(userId => !_missingProfileUserIds.Contains(userId))
+                .ToDictionary(
+                    userId => userId,
+                    userId => new IdentityUserProfile(
+                        userId,
+                        "Shuttle Passenger",
+                        null,
+                        "PASSENGER",
+                        _operatorId,
+                        "ACTIVE",
+                        "0900000000")));
     }
 
     private sealed class StubShuttleDistanceClient : IShuttleDistanceClient
@@ -877,6 +1034,6 @@ public sealed class ShuttlePersistenceIntegrationTests
             decimal destinationLatitude,
             decimal destinationLongitude,
             CancellationToken cancellationToken)
-            => Task.FromResult<ShuttleDistanceOutcome>(new ShuttleDistanceOutcome.Success(1_000));
+            => Task.FromResult<ShuttleDistanceOutcome>(new ShuttleDistanceOutcome.Success(10_000));
     }
 }

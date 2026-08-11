@@ -9,15 +9,15 @@ namespace VietRide.Booking.UnitTests.Features.Bookings;
 public sealed class ShuttleDistancePolicyTests
 {
     [Theory]
-    [InlineData(4_999)]
-    [InlineData(5_000)]
+    [InlineData(9_999)]
+    [InlineData(10_000)]
     public void Allows_distance_at_or_below_limit(int distanceMeters)
         => ShuttleDistancePolicy.Resolve(new ShuttleRoadDistanceOutcome.Success(distanceMeters))
             .Should().Be(distanceMeters);
 
     [Fact]
     public void Rejects_distance_above_limit()
-        => FluentActions.Invoking(() => ShuttleDistancePolicy.Resolve(new ShuttleRoadDistanceOutcome.Success(5_001)))
+        => FluentActions.Invoking(() => ShuttleDistancePolicy.Resolve(new ShuttleRoadDistanceOutcome.Success(10_001)))
             .Should().Throw<CodedValidationException>()
             .Which.ErrorCode.Should().Be("SHUTTLE_DISTANCE_EXCEEDED");
 

@@ -54,8 +54,8 @@ public sealed class OperatorShuttleController : ControllerBase
 
     [HttpGet("shuttle-requests")]
     [Authorize(Roles = "OPERATOR_STAFF,OPERATOR_ADMIN")]
-    [ProducesResponseType(typeof(ApiResponse<ShuttleRequestPage>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<ShuttleRequestPage>> GetRequests(
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ShuttleRequestTripGroup>>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<PagedResult<ShuttleRequestTripGroup>>> GetRequests(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)

@@ -18,7 +18,6 @@ namespace VietRide.Trip.Infrastructure.Services;
 internal sealed class ShuttleDispatchService : IShuttleDispatchService
 {
     private const int ArrivalBufferMinutes = 30;
-    private const int DefaultShuttleMaxDistanceKm = 5;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly TripDbContext _db;
     private readonly IIdentityInternalClient _identity;
@@ -37,11 +36,12 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         _identity = identity;
         _outbox = outbox;
         _clock = clock;
-        var maxDistanceKm = configuration.GetValue<int?>("SHUTTLE_MAX_DISTANCE_KM") ?? DefaultShuttleMaxDistanceKm;
+        var maxDistanceKm = configuration.GetValue<int?>("SHUTTLE_MAX_DISTANCE_KM")
+            ?? ShuttleDistancePolicy.DefaultMaxDistanceKm;
         _maxShuttleDistanceMeters = checked(Math.Max(1, maxDistanceKm) * 1_000);
     }
 
-    public async Task<ShuttleRequestPage> GetPendingAsync(
+    public async Task<PagedResult<ShuttleRequestTripGroup>> GetPendingAsync(
         Guid operatorId,
         int page,
         int pageSize,
@@ -64,7 +64,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             .ToArrayAsync(cancellationToken);
         if (pagedDirections.Length == 0)
         {
-            return new ShuttleRequestPage([], page, pageSize, totalItems);
+            return PagedResult<ShuttleRequestTripGroup>.Create([], page, pageSize, totalItems);
         }
 
         var tripIds = pagedDirections.Select(item => item.Id).Distinct().ToArray();
@@ -151,6 +151,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 .ToArray();
             return new ShuttleRequestTripGroup(
                 trip.Id,
+                route.Name,
                 item.Direction,
                 trip.DepartureDateTime,
                 item.Direction == ShuttleTrip.InboundDirection
@@ -163,7 +164,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 suggested);
         }).ToArray();
 
-        return new ShuttleRequestPage(items, page, pageSize, totalItems);
+        return PagedResult<ShuttleRequestTripGroup>.Create(items, page, pageSize, totalItems);
     }
 
     public async Task<PagedResult<OperatorShuttleTripListItemDto>> GetHistoryAsync(

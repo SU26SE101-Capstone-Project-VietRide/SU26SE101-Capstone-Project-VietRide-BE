@@ -6303,13 +6303,13 @@ Errors are `422 VALIDATION_ERROR`/`422 SHUTTLE_STATION_NOT_SUPPORTED` or
 
 ### GET `/v1/operator/shuttle-requests`
 
-Shuttle được nhóm theo `mainTripId + direction`, trong đó `direction` là `INBOUND_TO_STATION` hoặc `OUTBOUND_FROM_STATION`. Khoảng cách hiển thị là `roadDistanceMeters` snapshot từ Google Routes; không dùng Haversine cho điều kiện đủ điều kiện. Giới hạn toàn nền tảng là 5.000 mét, bao gồm cả điểm đúng 5.000 mét.
+Shuttle được nhóm theo `mainTripId + direction`, trong đó `direction` là `INBOUND_TO_STATION` hoặc `OUTBOUND_FROM_STATION`. Khoảng cách hiển thị là `roadDistanceMeters` snapshot từ Google Routes; không dùng Haversine cho điều kiện đủ điều kiện. Giới hạn toàn nền tảng là 10.000 mét, bao gồm cả điểm đúng 10.000 mét.
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant lấy từ JWT. Query phân trang theo main Trip.
 
-Response trả `mainTripId`, Station theo direction, `direction`, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `roadDistanceMeters`, `requestedAt`) và `suggestedBookingOrder`. Thứ tự gợi ý dùng road-distance snapshot, xa nhất trước, hòa thì `requestedAt ASC`; không dùng Haversine để quyết định eligibility.
+Response là `PagedResult<ShuttleRequestTripGroup>`, trả `mainTripId`, `routeName`, Station theo direction, `direction`, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `roadDistanceMeters`, `requestedAt`) và `suggestedBookingOrder`. Pagination gồm `items`, `page`, `pageSize`, `totalItems`, `totalPages`, `hasNextPage`, `hasPreviousPage`. Thứ tự gợi ý dùng road-distance snapshot, xa nhất trước, hòa thì `requestedAt ASC`; không dùng Haversine để quyết định eligibility.
 
-Pending shuttle `BookingGroup` responses also include nested `passengers[]`. Each item contains
+Pending shuttle `BookingGroup` responses always include non-null nested `passengers[]`. Each item contains
 `passengerUserId`, nullable `displayName` and `phone`, and aggregated `ticketIds[]`. The result
 keeps grouping by `mainTripId + direction`, cutoff/distance fields, and `suggestedBookingOrder`.
 Identity profile transport failure returns `503 UPSTREAM_UNAVAILABLE`; a missing profile returns
@@ -6471,9 +6471,9 @@ Delivered/no-show/start/complete/cancel transitions that do not match the state 
 
 ### Shuttle fields trong Booking
 
-Booking hỗ trợ đồng thời `shuttlePickup` cho inbound và `shuttleDropoff` cho outbound, bao gồm từng leg round-trip. Mỗi booking có tối đa một intent active cho mỗi direction. Trip gọi Google Routes với `travelMode=DRIVE`: `distanceMeters <= 5000` được phép, lớn hơn 5000 trả `422 SHUTTLE_DISTANCE_EXCEEDED`, còn lỗi upstream/timeout/thiếu key/response sai trả `503 SHUTTLE_DISTANCE_UNAVAILABLE`. Event mới dùng `shuttleRequests[]`; consumer vẫn đọc `shuttlePickup` cũ như inbound.
+Booking hỗ trợ đồng thời `shuttlePickup` cho inbound và `shuttleDropoff` cho outbound, bao gồm từng leg round-trip. Mỗi booking có tối đa một intent active cho mỗi direction. Trip gọi Google Routes với `travelMode=DRIVE`: `distanceMeters <= 10000` được phép, lớn hơn 10000 trả `422 SHUTTLE_DISTANCE_EXCEEDED`, còn lỗi upstream/timeout/thiếu key/response sai trả `503 SHUTTLE_DISTANCE_UNAVAILABLE`. Event mới dùng `shuttleRequests[]`; consumer vẫn đọc `shuttlePickup` cũ như inbound.
 
-Trip configuration is `SHUTTLE_MAX_DISTANCE_KM=5`, `GOOGLE_ROUTES_ENABLED=true`,
+Trip configuration is `SHUTTLE_MAX_DISTANCE_KM=10`, `GOOGLE_ROUTES_ENABLED=true`,
 `GOOGLE_ROUTES_API_KEY`, `GOOGLE_ROUTES_BASE_URL=https://routes.googleapis.com`, and
 `TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS=1500`. Missing configuration fails closed.
 
