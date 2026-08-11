@@ -10,14 +10,14 @@ internal sealed class ShuttleDispatchAlertConfiguration : IEntityTypeConfigurati
     {
         builder.ToTable("shuttle_dispatch_alerts", table => table.HasCheckConstraint(
             "chk_shuttle_dispatch_alerts_type",
-            "alert_type IN ('WARNING_120', 'WARNING_60', 'AUTO_CUTOFF')"));
+            "alert_type IN ('WARNING_120', 'WARNING_60', 'AUTO_CUTOFF', 'ASSIGNMENT_START_BLOCKED')"));
         builder.HasKey(x => x.Id).HasName("pk_shuttle_dispatch_alerts");
         builder.Ignore(x => x.RowVersion);
         builder.Ignore(x => x.UpdatedAt);
         builder.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
         builder.Property(x => x.MainTripId).HasColumnName("main_trip_id");
         builder.Property(x => x.OperatorId).HasColumnName("operator_id");
-        builder.Property(x => x.AlertType).HasColumnName("alert_type").HasMaxLength(20);
+        builder.Property(x => x.AlertType).HasColumnName("alert_type").HasMaxLength(32);
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
         builder.HasIndex(x => new { x.MainTripId, x.AlertType }).IsUnique().HasDatabaseName("uq_shuttle_dispatch_alerts_trip_type");
         builder.HasIndex(x => new { x.OperatorId, x.CreatedAt })

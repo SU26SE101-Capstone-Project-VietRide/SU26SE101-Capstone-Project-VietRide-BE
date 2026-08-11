@@ -3,6 +3,7 @@ using System;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using VietRide.Shared.Persistence.Outbox;
@@ -14,9 +15,11 @@ using VietRide.Trip.Infrastructure;
 namespace VietRide.Trip.Infrastructure.Migrations
 {
     [DbContext(typeof(TripDbContext))]
-    partial class TripDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260810190743_AddResourceReservations")]
+    partial class AddResourceReservations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1342,8 +1345,8 @@ namespace VietRide.Trip.Infrastructure.Migrations
 
                     b.Property<string>("AlertType")
                         .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
                         .HasColumnName("alert_type");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -1373,7 +1376,7 @@ namespace VietRide.Trip.Infrastructure.Migrations
 
                     b.ToTable("shuttle_dispatch_alerts", "vietride_trip", t =>
                         {
-                            t.HasCheckConstraint("chk_shuttle_dispatch_alerts_type", "alert_type IN ('WARNING_120', 'WARNING_60', 'AUTO_CUTOFF', 'ASSIGNMENT_START_BLOCKED')");
+                            t.HasCheckConstraint("chk_shuttle_dispatch_alerts_type", "alert_type IN ('WARNING_120', 'WARNING_60', 'AUTO_CUTOFF')");
                         });
                 });
 
