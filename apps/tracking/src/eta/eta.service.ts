@@ -54,7 +54,9 @@ export interface EtaTargetUpdateEvent {
 export interface EtaUpdateEvent {
   tripId: string;
   stopId: string;
-  targetKind?: 'STOP';
+  stationId?: string;
+  stopName?: string | null;
+  targetKind?: 'STOP' | 'STATION';
   etaMinutes: number;
   estimatedArrivalTime: string;
   distanceMeters: number;
@@ -67,6 +69,10 @@ interface EtaState {
   latitude?: number;
   longitude?: number;
   etaMinutes?: number;
+  targetKind?: 'STOP' | 'STATION';
+  targetId?: string;
+  targetSequence?: number;
+  // Read-only rollout compatibility for state written by the previous version.
   stopId?: string;
   stopSequence?: number;
   lastRouteProgressMeters?: number;
@@ -81,6 +87,10 @@ interface BatchProviderCalculation {
   googleFailureCount: number;
   cooldownUntil?: string;
 }
+
+type EtaCalculationTarget = TripStopSnapshot & {
+  targetKind: 'STOP' | 'STATION';
+};
 
 const COMPLETED_STOP_STATUSES = new Set([
   'COMPLETED',
@@ -123,12 +133,44 @@ export class EtaService {
     const stops = await this.tripDataProvider.getRouteStops(gps.tripId);
     if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
     const state = await this.readState(gps.tripId);
-    const remainingStops = this.findRemainingStops(stops, gps, state);
-    const nextStop = remainingStops[0];
-    if (!nextStop) return null;
+    const route = this.routeGeometryProvider.peekCachedRouteGeometry(gps.tripId)
+      ?? await this.routeGeometryProvider.getRouteGeometry(gps.tripId);
+    if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
 
-    const cached = await this.readCachedEta(gps.tripId, nextStop.stopId);
-    if (!this.shouldRecalculate(gps, state, cached, nextStop.stopId)) return null;
+    const remainingStops = this.findRemainingStops(stops, gps, state);
+    const tripStatus = route?.tripStatus?.toUpperCase() ?? 'IN_PROGRESS';
+    const preOrigin = tripStatus === 'SCHEDULED' || tripStatus === 'BOARDING';
+    const targets: EtaCalculationTarget[] = preOrigin
+      ? route?.originStation
+        ? [{
+            stopId: route.originStation.stationId,
+            stopName: route.originStation.name,
+            latitude: route.originStation.latitude,
+            longitude: route.originStation.longitude,
+            sequence: 0,
+            targetKind: 'STATION',
+          }]
+        : []
+      : tripStatus === 'IN_PROGRESS'
+        ? [
+            ...remainingStops.map((stop) => ({ ...stop, targetKind: 'STOP' as const })),
+            ...(route?.destinationStation
+              ? [{
+                  stopId: route.destinationStation.stationId,
+                  stopName: route.destinationStation.name,
+                  latitude: route.destinationStation.latitude,
+                  longitude: route.destinationStation.longitude,
+                  sequence: Number.MAX_SAFE_INTEGER,
+                  targetKind: 'STATION' as const,
+                }]
+              : []),
+          ]
+        : [];
+    const primaryTarget = targets[0];
+    if (!primaryTarget) return null;
+
+    const cached = await this.readCachedEta(gps.tripId, primaryTarget);
+    if (!this.shouldRecalculate(gps, state, cached, primaryTarget)) return null;
     const lockKey = trackingEtaBatchLockKey(gps.tripId);
     const owner = randomUUID();
     const acquired = await this.redis.getClient().set(
@@ -141,26 +183,15 @@ export class EtaService {
     if (acquired !== 'OK') return null;
 
     try {
-      const route = this.routeGeometryProvider.peekCachedRouteGeometry(gps.tripId)
-        ?? await this.routeGeometryProvider.getRouteGeometry(gps.tripId);
-      if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
-      const destination = route?.destinationStation;
-      const targets: TripStopSnapshot[] = [
-        ...remainingStops,
-        ...(destination
-          ? [{
-              stopId: destination.stationId,
-              stopName: destination.name,
-              latitude: destination.latitude,
-              longitude: destination.longitude,
-              sequence: Number.MAX_SAFE_INTEGER,
-            }]
-          : []),
-      ];
-      const calculation = await this.calculateBatchWithProviders(gps, targets, state);
+      const calculation = await this.calculateBatchWithProviders(
+        gps,
+        targets,
+        state,
+        preOrigin,
+      );
       if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
       if (!calculation.results) {
-        await this.writeFailureState(gps, nextStop, state, calculation, routeGeneration);
+        await this.writeFailureState(gps, primaryTarget, state, calculation, routeGeneration);
         return null;
       }
 
@@ -171,13 +202,14 @@ export class EtaService {
       for (const target of targets) {
         const result = resultById.get(target.stopId);
         if (!result) return null;
-        const isDestination = target.sequence === Number.MAX_SAFE_INTEGER;
         events.push({
           tripId: gps.tripId,
-          targetKind: isDestination ? 'STATION' : 'STOP',
-          ...(isDestination ? { stationId: target.stopId } : { stopId: target.stopId }),
+          targetKind: target.targetKind,
+          ...(target.targetKind === 'STATION'
+            ? { stationId: target.stopId }
+            : { stopId: target.stopId }),
           stopName: target.stopName ?? null,
-          ...(!isDestination ? { sequence: target.sequence } : {}),
+          ...(target.targetKind === 'STOP' ? { sequence: target.sequence } : {}),
           etaMinutes: result.etaMinutes,
           estimatedArrivalTime: new Date(
             baseTime + result.etaMinutes * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND,
@@ -188,25 +220,34 @@ export class EtaService {
         });
       }
 
-      const nextEvent = events.find(
-        (event): event is EtaTargetUpdateEvent & { targetKind: 'STOP'; stopId: string } =>
-          event.targetKind === 'STOP' && event.stopId === nextStop.stopId,
-      );
-      if (!nextEvent) return null;
+      const primaryEvent = events[0];
+      if (!primaryEvent) return null;
+      const primaryTargetId = primaryEvent.targetKind === 'STOP'
+        ? primaryEvent.stopId
+        : primaryEvent.stationId;
+      if (!primaryTargetId) return null;
 
-      const routeProgress = route ? projectPointToRoute(gps, route.points)?.progressMeters : undefined;
+      const routeProgress = !preOrigin && route
+        ? projectPointToRoute(gps, route.points)?.progressMeters
+        : undefined;
       const nextProgress = routeProgress === undefined
         ? state?.lastRouteProgressMeters
         : Math.max(routeProgress, state?.lastRouteProgressMeters ?? 0);
       const stateWithoutCooldown: EtaState = { ...(state ?? { googleFailureCount: 0 }) };
       delete stateWithoutCooldown.cooldownUntil;
+      delete stateWithoutCooldown.stopId;
+      delete stateWithoutCooldown.stopSequence;
+      delete stateWithoutCooldown.targetSequence;
       const nextState: EtaState = {
         ...stateWithoutCooldown,
         latitude: gps.latitude,
         longitude: gps.longitude,
-        etaMinutes: nextEvent.etaMinutes,
-        stopId: nextStop.stopId,
-        stopSequence: nextStop.sequence,
+        etaMinutes: primaryEvent.etaMinutes,
+        targetKind: primaryEvent.targetKind,
+        targetId: primaryTargetId,
+        ...(primaryEvent.sequence !== undefined
+          ? { targetSequence: primaryEvent.sequence }
+          : {}),
         ...(nextProgress !== undefined ? { lastRouteProgressMeters: nextProgress } : {}),
         lastProviderCallAt: updatedAt,
         googleFailureCount: calculation.googleFailureCount,
@@ -215,6 +256,14 @@ export class EtaService {
       const etaCacheTtl = this.env.TRACKING_ETA_CACHE_TTL_SECONDS ?? ETA_CACHE_TTL_SECONDS;
       if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
       const transaction = this.redis.getClient().multi();
+      const activeTargetIds = new Set(events.flatMap((event) => {
+        const targetId = event.targetKind === 'STOP' ? event.stopId : event.stationId;
+        return targetId ? [targetId] : [];
+      }));
+      const previousTargetId = state?.targetId ?? state?.stopId;
+      if (previousTargetId && !activeTargetIds.has(previousTargetId)) {
+        transaction.del(trackingEtaKey(gps.tripId, previousTargetId));
+      }
       for (const event of events) {
         const targetId = event.targetKind === 'STOP' ? event.stopId : event.stationId;
         if (targetId) {
@@ -233,9 +282,18 @@ export class EtaService {
         ETA_STATE_TTL_SECONDS,
       );
       await transaction.exec();
-      if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return null;
+      if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) {
+        await this.redis.getClient().del(
+          trackingEtaStateKey(gps.tripId),
+          ...events.flatMap((event) => {
+            const targetId = event.targetKind === 'STOP' ? event.stopId : event.stationId;
+            return targetId ? [trackingEtaKey(gps.tripId, targetId)] : [];
+          }),
+        );
+        return null;
+      }
 
-      return { ...nextEvent, etas: events };
+      return { ...primaryEvent, stopId: primaryTargetId, etas: events };
     } finally {
       try {
         await this.redis.getClient().eval(RELEASE_LOCK_SCRIPT, 1, lockKey, owner);
@@ -247,8 +305,9 @@ export class EtaService {
 
   private async calculateBatchWithProviders(
     gps: GpsUpdateEvent,
-    targets: TripStopSnapshot[],
+    targets: EtaCalculationTarget[],
     state: EtaState | null,
+    directLocalFallback: boolean,
   ): Promise<BatchProviderCalculation> {
     const googleEnabled = this.env.GOOGLE_ROUTES_ENABLED === true
       && Boolean(this.env.GOOGLE_ROUTES_API_KEY);
@@ -276,8 +335,10 @@ export class EtaService {
       }
     }
 
-    const localResults = await this.calculateProviderBatch(this.localProvider, gps, targets)
-      ?? this.calculateDirectFallback(gps, targets);
+    const localResults = directLocalFallback
+      ? this.calculateDirectFallback(gps, targets)
+      : await this.calculateProviderBatch(this.localProvider, gps, targets)
+        ?? this.calculateDirectFallback(gps, targets);
     return {
       results: localResults,
       estimateQuality: 'FALLBACK',
@@ -289,7 +350,7 @@ export class EtaService {
   private async calculateProviderBatch(
     provider: EtaProvider,
     gps: GpsUpdateEvent,
-    targets: TripStopSnapshot[],
+    targets: EtaCalculationTarget[],
   ): Promise<EtaBatchTargetResult[] | null> {
     try {
       if (provider.calculateBatch) return await provider.calculateBatch(gps, targets);
@@ -315,7 +376,7 @@ export class EtaService {
 
   private calculateDirectFallback(
     gps: GpsUpdateEvent,
-    targets: TripStopSnapshot[],
+    targets: EtaCalculationTarget[],
   ): EtaBatchTargetResult[] {
     const speedKmh = Math.max(gps.speedKmh ?? ETA_DEFAULT_SPEED_KMH, ETA_MIN_SPEED_KMH);
     const metersPerSecond = speedKmh * METERS_PER_KILOMETER / SECONDS_PER_HOUR;
@@ -358,7 +419,8 @@ export class EtaService {
     );
     return sorted.filter((stop) => {
       if (stop.status && COMPLETED_STOP_STATUSES.has(stop.status)) return false;
-      if (state?.stopSequence !== undefined && stop.sequence < state.stopSequence) return false;
+      const selectedSequence = state?.targetSequence ?? state?.stopSequence;
+      if (selectedSequence !== undefined && stop.sequence < selectedSequence) return false;
       if (calculateDistanceMeters(
         gps.latitude,
         gps.longitude,
@@ -373,20 +435,28 @@ export class EtaService {
 
   private async writeFailureState(
     gps: GpsUpdateEvent,
-    nextStop: TripStopSnapshot,
+    primaryTarget: EtaCalculationTarget,
     state: EtaState | null,
     calculation: BatchProviderCalculation,
     routeGeneration: number,
   ): Promise<void> {
     if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) return;
+    const stateKey = trackingEtaStateKey(gps.tripId);
+    const nextState: EtaState = { ...(state ?? { googleFailureCount: 0 }) };
+    delete nextState.stopId;
+    delete nextState.stopSequence;
+    delete nextState.targetSequence;
     await this.redis.getClient().set(
-      trackingEtaStateKey(gps.tripId),
+      stateKey,
       JSON.stringify({
-        ...state,
+        ...nextState,
         latitude: gps.latitude,
         longitude: gps.longitude,
-        stopId: nextStop.stopId,
-        stopSequence: nextStop.sequence,
+        targetKind: primaryTarget.targetKind,
+        targetId: primaryTarget.stopId,
+        ...(primaryTarget.targetKind === 'STOP'
+          ? { targetSequence: primaryTarget.sequence }
+          : {}),
         lastProviderCallAt: new Date().toISOString(),
         googleFailureCount: calculation.googleFailureCount,
         ...(calculation.cooldownUntil ? { cooldownUntil: calculation.cooldownUntil } : {}),
@@ -394,6 +464,9 @@ export class EtaService {
       'EX',
       ETA_STATE_TTL_SECONDS,
     );
+    if (!this.routeStateGeneration.isCurrent(gps.tripId, routeGeneration)) {
+      await this.redis.getClient().del(stateKey);
+    }
   }
 
   private async readState(tripId: string): Promise<EtaState | null> {
@@ -408,13 +481,18 @@ export class EtaService {
     }
   }
 
-  private async readCachedEta(tripId: string, stopId: string): Promise<EtaUpdateEvent | null> {
-    const payload = await this.redis.getClient().get(trackingEtaKey(tripId, stopId));
+  private async readCachedEta(
+    tripId: string,
+    target: EtaCalculationTarget,
+  ): Promise<EtaTargetUpdateEvent | null> {
+    const payload = await this.redis.getClient().get(trackingEtaKey(tripId, target.stopId));
     if (!payload) return null;
     try {
-      const parsed = JSON.parse(payload) as EtaUpdateEvent;
+      const parsed = JSON.parse(payload) as EtaTargetUpdateEvent;
+      const parsedTargetKind = parsed.targetKind ?? 'STOP';
       return parsed.tripId === tripId
-        && parsed.stopId === stopId
+        && parsedTargetKind === target.targetKind
+        && (parsedTargetKind === 'STOP' ? parsed.stopId : parsed.stationId) === target.stopId
         && Number.isFinite(parsed.etaMinutes)
         ? parsed
         : null;
@@ -426,11 +504,14 @@ export class EtaService {
   private shouldRecalculate(
     gps: GpsUpdateEvent,
     state: EtaState | null,
-    cached: EtaUpdateEvent | null,
-    selectedStopId: string,
+    cached: EtaTargetUpdateEvent | null,
+    selectedTarget: EtaCalculationTarget,
   ): boolean {
     if (!state?.lastProviderCallAt) return true;
-    if (!cached && state.stopId !== selectedStopId) return true;
+    const stateTargetId = state.targetId ?? state.stopId;
+    const stateTargetKind = state.targetKind ?? (state.stopId ? 'STOP' : undefined);
+    if (stateTargetId !== selectedTarget.stopId
+      || stateTargetKind !== selectedTarget.targetKind) return true;
     const interval = this.env.TRACKING_ETA_MIN_INTERVAL_SECONDS ?? ETA_MIN_INTERVAL_SECONDS;
     if (Date.now() - new Date(state.lastProviderCallAt).getTime() < interval * 1_000) return false;
     if (!cached) return true;

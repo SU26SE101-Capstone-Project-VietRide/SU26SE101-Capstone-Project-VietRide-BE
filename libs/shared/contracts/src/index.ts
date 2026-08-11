@@ -3,6 +3,7 @@ export * from './events/booking-created.event';
 export * from './events/booking-cancelled.event';
 export * from './events/booking-disrupted.event';
 export * from './events/trip-completed.event';
+export * from './events/trip-started.event';
 export * from './events/payment-succeeded.event';
 export * from './events/trip-vehicle-swapped.event';
 export * from './events/trip-vehicle-substituted.event';

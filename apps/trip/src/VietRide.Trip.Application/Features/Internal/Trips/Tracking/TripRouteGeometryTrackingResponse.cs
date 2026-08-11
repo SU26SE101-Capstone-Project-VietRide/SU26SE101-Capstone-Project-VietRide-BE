@@ -8,4 +8,5 @@ public sealed record TripRouteGeometryTrackingResponse(
     TripRouteStationTrackingDto? OriginStation = null,
     IReadOnlyList<TripRouteIntermediateStopTrackingDto>? IntermediateStops = null,
     TripRouteStationTrackingDto? DestinationStation = null,
-    Guid? EffectiveRouteId = null);
+    Guid? EffectiveRouteId = null,
+    string? TripStatus = null);
