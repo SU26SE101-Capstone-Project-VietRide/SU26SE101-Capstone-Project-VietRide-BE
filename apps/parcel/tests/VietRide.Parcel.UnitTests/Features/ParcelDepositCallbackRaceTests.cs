@@ -32,6 +32,7 @@ public sealed class ParcelDepositCallbackRaceTests
         var fixture = CreateFixture(parcel);
         fixture.Repository.TryMarkDepositSucceededAsync(
                 ParcelId,
+                PaymentId,
                 2_000,
                 Now,
                 Arg.Any<CancellationToken>())
@@ -83,15 +84,29 @@ public sealed class ParcelDepositCallbackRaceTests
         var fixture = CreateFixture(parcel);
         fixture.Repository.TryMarkDepositExpiredAsync(
                 ParcelId,
+                PaymentId,
                 Now,
                 Arg.Any<CancellationToken>())
             .Returns(Snapshot(ParcelStatus.EXPIRED));
+        fixture.Repository.TryClaimCargoRecoveryReleaseAsync(
+                ParcelId,
+                ParcelId,
+                TripId,
+                "DEPOSIT_PAYMENT_LATE",
+                Now,
+                Arg.Any<CancellationToken>())
+            .Returns(ReleaseOperation());
+        fixture.Repository.TryCompleteCargoRecoveryReleaseAsync(
+                ParcelId,
+                Now,
+                Arg.Any<CancellationToken>())
+            .Returns(true);
         fixture.IdempotentTrip.ReleaseCargoAsync(
                 TripId,
                 ParcelId,
                 Arg.Any<decimal>(),
                 Arg.Any<decimal>(),
-                PaymentId,
+                ParcelId,
                 Arg.Any<CancellationToken>())
             .Returns(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
 
@@ -102,6 +117,7 @@ public sealed class ParcelDepositCallbackRaceTests
         handled.Should().BeTrue();
         await fixture.Repository.DidNotReceive().TryMarkDepositSucceededAsync(
             Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
             Arg.Any<long>(),
             Arg.Any<DateTimeOffset>(),
             Arg.Any<CancellationToken>());
@@ -110,7 +126,7 @@ public sealed class ParcelDepositCallbackRaceTests
             ParcelId,
             Arg.Any<decimal>(),
             Arg.Any<decimal>(),
-            PaymentId,
+            ParcelId,
             Arg.Any<CancellationToken>());
     }
 
@@ -203,6 +219,33 @@ public sealed class ParcelDepositCallbackRaceTests
             SenderUserId,
             ParcelSizeCategory.MEDIUM,
             AdditionalPaymentId: null);
+
+    private static ParcelCargoRecoveryOperationSnapshot ReleaseOperation()
+        => new(
+            ParcelId,
+            ParcelId,
+            "VRP-20260727-DEPOSIT1",
+            OperatorId,
+            SenderUserId,
+            ParcelCargoRecoveryOperationType.RELEASE,
+            ParcelCargoRecoveryOperationStatus.PENDING,
+            TripId,
+            null,
+            null,
+            null,
+            "DEPOSIT_PAYMENT_LATE",
+            0,
+            0,
+            ParcelStatus.EXPIRED,
+            false,
+            Now,
+            null,
+            null,
+            10m,
+            0.001m,
+            ParcelStatus.EXPIRED,
+            TripId,
+            null);
 
     private static TripParcelSnapshot TripSnapshot(string status)
         => new(

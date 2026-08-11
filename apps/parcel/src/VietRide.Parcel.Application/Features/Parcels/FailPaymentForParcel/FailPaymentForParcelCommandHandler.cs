@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
@@ -48,7 +49,7 @@ public sealed class FailPaymentForParcelCommandHandler
                 ? null
                 : await _parcelRepository.GetByIdAsync(request.ReferenceId, cancellationToken);
             var snapshot = await _parcelRepository.TryMarkDepositFailedAsync(
-                request.ReferenceId, _clock.UtcNow, cancellationToken);
+                request.ReferenceId, request.PaymentId, _clock.UtcNow, cancellationToken);
             if (snapshot is null)
             {
                 _logger.LogInformation(
@@ -56,7 +57,7 @@ public sealed class FailPaymentForParcelCommandHandler
                     request.PaymentId, request.ReferenceId);
                 return false;
             }
-            await ReleaseDepositHoldAsync(parcel, request.PaymentId, cancellationToken);
+            await ReleaseDepositHoldAsync(parcel, cancellationToken);
             return true;
         }
 
@@ -98,22 +99,19 @@ public sealed class FailPaymentForParcelCommandHandler
 
     private async Task ReleaseDepositHoldAsync(
         Domain.Entities.Parcel? parcel,
-        Guid paymentId,
         CancellationToken cancellationToken)
     {
         if (_tripClient is null || parcel is null)
             return;
-        var result = await _tripClient.ReleaseCargoAsync(
-            parcel.TripId,
-            parcel.Id,
-            parcel.EstimatedWeightKg,
-            parcel.EstimatedVolumeM3,
-            paymentId,
-            cancellationToken);
-        if (result.Kind != TripCargoOutcomeKind.Success)
+        var released = await new ParcelCargoReleaseRecoveryService(_parcelRepository, _tripClient)
+            .ReleaseOrScheduleAsync(
+                parcel,
+                "DEPOSIT_PAYMENT_FAILED",
+                _clock.UtcNow,
+                cancellationToken);
+        if (!released)
             _logger.LogWarning(
-                "Failed to release deposit cargo hold for parcel {ParcelId}: {Reason}",
-                parcel.Id,
-                result.ErrorMessage);
+                "Scheduled durable cargo release after payment failure for parcel {ParcelId}.",
+                parcel.Id);
     }
 }

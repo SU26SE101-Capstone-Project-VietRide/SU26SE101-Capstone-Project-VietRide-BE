@@ -14,7 +14,7 @@ internal sealed class ParcelCargoRecoveryOperationConfiguration
         {
             table.HasCheckConstraint(
                 "chk_parcel_cargo_recovery_operation_type",
-                "operation_type IN ('TRANSFER', 'RETURN')");
+                "operation_type IN ('TRANSFER', 'RETURN', 'RELEASE')");
             table.HasCheckConstraint(
                 "chk_parcel_cargo_recovery_status",
                 "status IN ('PENDING', 'COMPLETED', 'FAILED')");
@@ -22,7 +22,7 @@ internal sealed class ParcelCargoRecoveryOperationConfiguration
                 "chk_parcel_cargo_recovery_target",
                 """
                 (operation_type = 'TRANSFER' AND target_trip_id IS NOT NULL AND target_state = 'RESERVED')
-                OR (operation_type = 'RETURN' AND target_trip_id IS NULL AND target_state IS NULL)
+                OR (operation_type IN ('RETURN', 'RELEASE') AND target_trip_id IS NULL AND target_state IS NULL)
                 """);
             table.HasCheckConstraint(
                 "chk_parcel_cargo_recovery_amounts",
@@ -74,7 +74,7 @@ internal sealed class ParcelCargoRecoveryOperationConfiguration
         builder.Property(operation => operation.ActorUserId)
             .HasColumnName("actor_user_id")
             .HasColumnType("uuid")
-            .IsRequired();
+            .IsRequired(false);
         builder.Property(operation => operation.Reason)
             .HasColumnName("reason")
             .HasMaxLength(500)

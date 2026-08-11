@@ -85,7 +85,7 @@ public sealed class PaymentEventHandlersTests
         var repo = Substitute.For<IParcelRepository>();
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
-        repo.TryMarkDepositSucceededAsync(ParcelId, 100_000, Now, Arg.Any<CancellationToken>())
+        repo.TryMarkDepositSucceededAsync(ParcelId, PaymentId, 100_000, Now, Arg.Any<CancellationToken>())
             .Returns(MakeSnapshot(ParcelStatus.PENDING));
 
         var handler = new ConfirmPaymentForParcelCommandHandler(repo, Outbox(), Stats(), Trip(), clock,
@@ -103,7 +103,7 @@ public sealed class PaymentEventHandlersTests
         var outbox = new RecordingOutbox();
         var trip = Substitute.For<ITripServiceClient>();
         clock.UtcNow.Returns(Now);
-        repo.TryMarkDepositSucceededAsync(ParcelId, 100_000, Now, Arg.Any<CancellationToken>())
+        repo.TryMarkDepositSucceededAsync(ParcelId, PaymentId, 100_000, Now, Arg.Any<CancellationToken>())
             .Returns(MakeSnapshot(ParcelStatus.PENDING));
         trip.ReserveCargoAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<decimal>(), Arg.Any<CancellationToken>())
             .Returns(new TripCargoOutcome(TripCargoOutcomeKind.TransportError, "Trip service unavailable."));
@@ -150,7 +150,7 @@ public sealed class PaymentEventHandlersTests
         var repo = Substitute.For<IParcelRepository>();
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
-        repo.TryMarkDepositSucceededAsync(ParcelId, 100_000, Now, Arg.Any<CancellationToken>())
+        repo.TryMarkDepositSucceededAsync(ParcelId, PaymentId, 100_000, Now, Arg.Any<CancellationToken>())
             .Returns((ParcelPaymentTransitionSnapshot?)null);
 
         var handler = new ConfirmPaymentForParcelCommandHandler(repo, Outbox(), Stats(), Trip(), clock,
@@ -167,7 +167,7 @@ public sealed class PaymentEventHandlersTests
         var clock = Substitute.For<IClock>();
         var outbox = new RecordingOutbox();
         clock.UtcNow.Returns(Now);
-        repo.TryMarkDepositSucceededAsync(ParcelId, 100_000, Now, Arg.Any<CancellationToken>())
+        repo.TryMarkDepositSucceededAsync(ParcelId, PaymentId, 100_000, Now, Arg.Any<CancellationToken>())
             .Returns((ParcelPaymentTransitionSnapshot?)null);
         repo.GetPaymentTransitionSnapshotAsync(ParcelId, Arg.Any<CancellationToken>())
             .Returns(MakeSnapshot(ParcelStatus.CANCELLED));
@@ -187,7 +187,7 @@ public sealed class PaymentEventHandlersTests
         var clock = Substitute.For<IClock>();
         var outbox = new RecordingOutbox();
         clock.UtcNow.Returns(Now);
-        repo.TryMarkDepositSucceededAsync(ParcelId, 90_000, Now, Arg.Any<CancellationToken>())
+        repo.TryMarkDepositSucceededAsync(ParcelId, PaymentId, 90_000, Now, Arg.Any<CancellationToken>())
             .Returns((ParcelPaymentTransitionSnapshot?)null);
         repo.GetPaymentTransitionSnapshotAsync(ParcelId, Arg.Any<CancellationToken>())
             .Returns(MakeSnapshot(ParcelStatus.CANCELLED, deposit: 100_000));
@@ -206,7 +206,7 @@ public sealed class PaymentEventHandlersTests
         var repo = Substitute.For<IParcelRepository>();
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
-        repo.TryMarkDepositFailedAsync(ParcelId, Now, Arg.Any<CancellationToken>())
+        repo.TryMarkDepositFailedAsync(ParcelId, PaymentId, Now, Arg.Any<CancellationToken>())
             .Returns(MakeSnapshot(ParcelStatus.EXPIRED));
 
         var handler = new FailPaymentForParcelCommandHandler(repo, Identity(), Outbox(), Stats(), clock,
@@ -250,7 +250,7 @@ public sealed class PaymentEventHandlersTests
         var repo = Substitute.For<IParcelRepository>();
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
-        repo.TryMarkDepositExpiredAsync(ParcelId, Now, Arg.Any<CancellationToken>())
+        repo.TryMarkDepositExpiredAsync(ParcelId, PaymentId, Now, Arg.Any<CancellationToken>())
             .Returns(MakeSnapshot(ParcelStatus.EXPIRED));
 
         var handler = new ExpirePaymentForParcelCommandHandler(repo, Identity(), Outbox(), Stats(), clock,
