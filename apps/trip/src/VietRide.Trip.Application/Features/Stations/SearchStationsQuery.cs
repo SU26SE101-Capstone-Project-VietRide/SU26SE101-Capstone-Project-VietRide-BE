@@ -6,4 +6,5 @@ public sealed record SearchStationsQuery(
     string? Q,
     string? City,
     string? Ward,
-    Guid? LocationId) : IRequest<IReadOnlyList<StationSearchResult>>;
+    Guid? LocationId,
+    string? LocationScopeCode = null) : IRequest<IReadOnlyList<StationSearchResult>>;

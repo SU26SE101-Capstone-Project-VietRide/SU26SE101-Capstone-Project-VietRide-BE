@@ -23,6 +23,18 @@ public interface IStationRepository : IRepository<Station, Guid>
         Guid? locationId,
         CancellationToken cancellationToken);
 
+    async Task<IReadOnlyList<Station>> SearchActiveByNameInLocationsAsync(
+        string? q,
+        string? city,
+        string? ward,
+        IReadOnlyCollection<Guid> locationIds,
+        CancellationToken cancellationToken)
+    {
+        var stations = await SearchActiveByNameAsync(q, city, ward, null, cancellationToken);
+        return stations.Where(station =>
+            station.LocationId.HasValue && locationIds.Contains(station.LocationId.Value)).ToList();
+    }
+
     Task<Station?> GetByIdIncludingDeletedAsync(Guid id, CancellationToken cancellationToken = default)
         => GetByIdAsync(id, cancellationToken);
 
