@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.63.2
+> **Phiên bản:** 1.65.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-10
+> **Cập nhật lần cuối:** 2026-08-11
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -85,7 +85,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 |---|---|---|---|---|---|---|
 | 0 | **API Gateway** | NestJS | — (stateless) | — | — | JWT validate (RS256 JWKS), Internal JWT sign (HS256 120s), reverse proxy, rate limit, phone-completion gate |
 | 1 | **Identity & User** | .NET 8 + EF Core 8 | `vietride_identity` | ✓ | — | Auth (OAuth/email/OTP), RBAC, User/Operator profile, refresh token rotation, SubscriptionPlan + OperatorSubscription, ActivityLog, UserDevice (FCM token) |
-| 2 | **Trip-Route-Vehicle** | .NET 8 + EF Core 8 | `vietride_trip` | ✓ | — | Station/Stop/Route/RouteStop, Vehicle + VehicleType, Trip + TripSeat + TripStop + TripStopFare, operator holiday fare surcharge, DriverSchedule + Hangfire generate, AlternativeRoute, RouteChangeProposal snapshots, ShuttleTrip, Incident |
+| 2 | **Trip-Route-Vehicle** | .NET 8 + EF Core 8 | `vietride_trip` | ✓ | — | Station/Stop/Route/RouteStop, Vehicle + VehicleType, Trip + TripSeat + TripStop + TripStopFare, ResourceReservation, operator holiday fare surcharge, DriverSchedule + Hangfire generate, AlternativeRoute, RouteChangeProposal snapshots, ShuttleTrip, Incident |
 | 3 | **Booking** | .NET 8 + EF Core 8 | `vietride_booking` | ✓ | — | Booking order + per-seat Ticket + Passenger boarding record + BookingTransfer, BookingPendingAction, Voucher + VoucherUsage + OperatorVoucherConsent, BookingStats, seat lock TTL (Redis) |
 | 4 | **Payment & Wallet** | .NET 8 + EF Core 8 | `vietride_payment` | ✓ | — | Payment (BOOKING/PARCEL/TOP_UP/SUBSCRIPTION), Wallet + WalletTransaction (passenger), PlatformWallet + OperatorWallet + OperatorLedgerEntry + OperatorTripSettlement, Invoice + PDF, VNPay integration, RefundFailureLog |
 | 5 | **Parcel** | .NET 8 + EF Core 8 | `vietride_parcel` | ✓ | — | Parcel lifecycle, ParcelRouteFare, hashed delivery-token history, transfer/return flows, ParcelStats |
@@ -1078,7 +1078,7 @@ Idempotent: chạy migration 2 lần không lỗi (EF Core / Prisma migrations h
 
 `Location` is the admin-managed public origin/destination catalog used by FE trip search; `Station.locationId` and `Stop.locationId` are nullable links to this catalog.
 
-`Station` · `OperatorStation` · `Stop` · `Route` · `RouteStop` · `RouteStopFareTemplate` · `OperatorFareSurchargeSetting` · `OperatorFareSurchargePeriod` · `AlternativeRoute` · `AlternativeRouteStop` · `RouteChangeProposal` · `RouteChangeProposalStop` · `VehicleType` · `Vehicle` · `Trip` · `TripSeat` · `TripStop` · `TripStopFare` · `DriverSchedule` · `TripGenerationSkipLog` · `TripAuditLog` · `DriverScheduleAuditLog` · `ShuttleTrip` · `ShuttlePassenger` · `Incident` · `OutboxEvent`
+`Station` · `OperatorStation` · `Stop` · `Route` · `RouteStop` · `RouteStopFareTemplate` · `OperatorFareSurchargeSetting` · `OperatorFareSurchargePeriod` · `AlternativeRoute` · `AlternativeRouteStop` · `RouteChangeProposal` · `RouteChangeProposalStop` · `VehicleType` · `Vehicle` · `Trip` · `TripSeat` · `TripStop` · `TripStopFare` · `DriverSchedule` · `ResourceReservation` · `TripGenerationSkipLog` · `TripAuditLog` · `DriverScheduleAuditLog` · `ShuttleTrip` · `ShuttlePassenger` · `ShuttleDispatchAlert` · `Incident` · `OutboxEvent`
 
 #### Booking (`vietride_booking`)
 
@@ -1138,6 +1138,17 @@ Tham chiếu `db-schema/_global/cross-service-references.md` cho danh sách đ�
   `TEMPLATE_SNAPSHOT`. Day 22 creates no new `TEMPLATE_SNAPSHOT` rows; legacy rows remain readable
   only for the omitted-`pricingAt` path and are non-authoritative for explicit `pricingAt`. Only an
   explicit operator per-Trip fare override creates `MANUAL_OVERRIDE`.
+- **Trip resource availability:** `resource_reservations` is the assignment source of truth for
+  Driver, Assistant and Vehicle across main Trip and ShuttleTrip. Each row points to exactly one
+  source, snapshots the planned half-open interval plus both endpoint locations, and is
+  `RESERVED|ACTIVE|RELEASED|CANCELLED`. Every consecutive assignment must satisfy
+  `next.start >= previous.end + 30 minutes + Google Routes DRIVE repositionTravelTime`; the same
+  canonical Station has zero reposition time. Missing coordinates or unavailable routing fails
+  closed with `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`; there is no override. Mutations take sorted
+  PostgreSQL advisory locks in the shared resource namespace, and a GiST exclusion constraint on
+  `(resource_type, resource_id, tstzrange(planned_start_at, planned_end_at, '[)'))` for
+  `RESERVED|ACTIVE` is the final overlap guard. Vehicle-driver ownership is per reservation;
+  `Vehicle` never stores a fixed/current driver.
 
 ### 4.5 Hangfire schema isolation
 
@@ -1267,11 +1278,11 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
-endpoint có behavior-idempotent hay không, trừ đúng 17 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `190 mutation surfaces / 173 required / 17 exempt`;
+endpoint có behavior-idempotent hay không, trừ đúng 20 action có metadata exemption được khóa ở
+bảng sau. Inventory executable phải giữ tổng `210 mutation surfaces / 190 required / 20 exempt`;
 thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
 
-**Canonical 17 exemptions (không yêu cầu `Idempotency-Key`):**
+**Canonical 20 exemptions (không yêu cầu `Idempotency-Key`):**
 
 | # | Endpoint | Lý do |
 |---:|---|---|
@@ -1285,13 +1296,16 @@ thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata v�
 | 8 | `POST /v1/operator/trips/{tripId}/cancel/preview` | Read-only cancellation preview. |
 | 9 | `POST /v1/operator/driver-schedules` | Day-9 create contract; no key, business conflict rules prevent duplicate active schedules. |
 | 10 | `PATCH /v1/operator/driver-schedules/{id}/activate` | Contractually behavior-idempotent activation. |
-| 11 | `POST /internal/v1/vouchers/validate` | Read-only validation; không tạo usage. |
-| 12 | `POST /internal/v1/payments/redirect-sessions/lookup` | Read-only redirect lookup. |
-| 13 | `POST /v1/payments/vnpay-ipn` | Provider HMAC + transaction reference dedupe. |
-| 14 | `POST /v1/payments/vnpay-topup-ipn` | Provider HMAC + transaction reference dedupe. |
-| 15 | `POST /v1/payments/subscription-vnpay-ipn` | Provider HMAC + transaction reference dedupe. |
-| 16 | `POST /v1/assistant/trips/{tripId}/parcels/qr-scan` | Read-only QR resolution. |
-| 17 | `POST /v1/admin/rag-config/reload` | Chỉ invalidates in-memory cache và naturally repeatable. |
+| 11 | `PATCH /v1/operator/driver-schedules/{id}/deactivate` | Contractually behavior-idempotent deactivation. |
+| 12 | `POST /internal/v1/vouchers/validate` | Read-only validation; không tạo usage. |
+| 13 | `POST /internal/v1/payments/redirect-sessions/lookup` | Read-only redirect lookup. |
+| 14 | `POST /v1/payments/vnpay-ipn` | Provider HMAC + transaction reference dedupe. |
+| 15 | `POST /v1/payments/vnpay-topup-ipn` | Provider HMAC + transaction reference dedupe. |
+| 16 | `POST /v1/payments/subscription-vnpay-ipn` | Provider HMAC + transaction reference dedupe. |
+| 17 | `POST /v1/assistant/trips/{tripId}/parcels/qr-scan` | Read-only QR resolution. |
+| 18 | `POST /v1/admin/rag-config/reload` | Chỉ invalidates in-memory cache và naturally repeatable. |
+| 19 | `POST /v1/operator/driver-schedules/availability-check` | Read-only resource availability preview; không tạo reservation. |
+| 20 | `POST /v1/operator/shuttle-trips/availability-check` | Read-only resource availability preview; không tạo reservation. |
 
 Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable là nguồn exhaustive):
 
@@ -1601,8 +1615,8 @@ metadata nullable, không che Incident.
 | | `SHUTTLE_PASSENGER_INVALID_STATE` | 409 | ShuttlePassenger không cho phép lifecycle transition được yêu cầu |
 | | `SHUTTLE_PASSENGERS_INCOMPLETE` | 409 | Nhóm passenger shuttle chưa ở trạng thái phù hợp để hoàn tất hoặc huỷ thao tác |
 | | `SHUTTLE_PASSENGER_NOT_FOUND` | 404 | Không tìm thấy passenger/service order trong ShuttleTrip |
-| | `SHUTTLE_DRIVER_CONFLICT` | 409 | Driver overlap main Trip hoặc ShuttleTrip khác |
-| | `SHUTTLE_VEHICLE_CONFLICT` | 409 | Vehicle overlap main Trip hoặc ShuttleTrip khác |
+| | `SHUTTLE_DRIVER_CONFLICT` | 409 | Driver/Assistant vi phạm interval, turnaround, reposition hoặc còn ACTIVE trên main Trip/ShuttleTrip khác |
+| | `SHUTTLE_VEHICLE_CONFLICT` | 409 | Vehicle vi phạm interval, turnaround, reposition hoặc còn ACTIVE trên main Trip/ShuttleTrip khác |
 | | `DRIVER_NOT_FOUND` | 404 | Driver không active, không cùng operator hoặc thiếu snapshot liên hệ bắt buộc |
 | | `SHUTTLE_TRIP_NOT_FOUND` | 404 | ShuttleTrip không tồn tại |
 | **Voucher** | `VOUCHER_NOT_FOUND` | 404 | |
@@ -1648,8 +1662,9 @@ metadata nullable, không che Incident.
 | | `ROUTE_CHANGE_PROPOSAL_STALE` | 409 | Frozen EXISTING source đã sửa/deactivate, hoặc CUSTOM destination/Stop không còn hợp lệ tại approval |
 | | `INCIDENT_NOT_FOUND` | 404 | Optional proposal `incidentId` không tồn tại/không thuộc cùng Trip, hoặc Operator Incident detail missing/cross-tenant |
 | | `TRIP_ALREADY_TERMINAL` | 409 | Manual complete/fallback/disruption race already produced a terminal state |
-| | `TRIP_VEHICLE_CONFLICT` | 409 | Vehicle trùng giờ trên Trip khác |
-| | `TRIP_DRIVER_CONFLICT` | 409 | Driver trùng giờ |
+| | `TRIP_VEHICLE_CONFLICT` | 409 | Vehicle vi phạm interval, turnaround, reposition hoặc còn ACTIVE trên main Trip/ShuttleTrip khác |
+| | `TRIP_DRIVER_CONFLICT` | 409 | Driver/Assistant vi phạm interval, turnaround, reposition hoặc còn ACTIVE trên main Trip/ShuttleTrip khác |
+| | `RESOURCE_TRAVEL_TIME_UNAVAILABLE` | 503 | Thiếu tọa độ hoặc Google Routes không trả được reposition travel time; fail closed, không ghi reservation một phần |
 | | `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST` | 409 | Route edit has an active `PENDING_PAYMENT\|CONFIRMED` Booking impact |
 | | `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT` | 409 | Vehicle swap would remove/disable/downgrade an HELD seat |
 | | `TRIP_VEHICLE_SWAP_TOO_LATE` | 409 | Vehicle swap has incompatible BOOKED/BOARDING seats after the strict reassignment window |
@@ -2249,6 +2264,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.trip.assigned` | Trip | Notification | `{ tripId, operatorId, driverUserId, assistantUserId?, routeName, vehiclePlateNumber, departureDateTime }` |
 | `trip.trip.crew_changed` | Trip | Notification | `{ tripId, operatorId, oldDriverUserId, oldAssistantUserId?, driverUserId, assistantUserId?, routeName, vehiclePlateNumber?, departureDateTime }` |
 | `trip.trip.started` | Trip | Parcel (block new parcel), Tracking | `{ tripId, actualDepartureTime }` |
+| `trip.assignment.start_blocked` | Trip | Notification (operator) | Exact `{ eventId, occurredAt, tripId, operatorId, resourceRole, resourceId, conflictingSourceType, conflictingSourceId, conflictReason: RESOURCE_ACTIVE, blockingUntil? }`; emitted through Trip Outbox at most once per blocked Trip while any assigned reservation remains `ACTIVE`. Trip state is unchanged and Notification fans out to active operator admins. |
 | `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility) | `{ eventId, occurredAt, tripId, operatorId, terminalAt, completedAt, hasSubstitution }`; `completedAt` equals `terminalAt` and is retained as the Booking compatibility alias |
 | `trip.trip.disrupted` | Trip | Booking, Parcel, Payment | Exact `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution, reason? }`; Booking and Parcel execute disruption recovery only when `hasSubstitution=false`, while Payment records settlement eligibility for either value. The event never carries a Trip-wide traveled ratio. |
 | `trip.trip.cancelled` | Trip | Booking, Parcel | { eventId, occurredAt, tripId, operatorId, cancelledAt, cancelReason } |
@@ -3485,7 +3501,7 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 |---|---|---|---|
 | `GenerateTripsFromScheduleJob` | Recurring | Weekly Sun 23:00 Asia/Ho_Chi_Minh + immediate on DriverSchedule create/activate | Generate Trip theo cửa sổ lăn từ today đến `today + 30` inclusive. Idempotent (driverId + departureDateTime) |
 | `AutoBoardingJob` | Recurring | Every 15 phút | Set SCHEDULED Trips to BOARDING only when `departureDateTime <= now + 30 phút`; publish `trip.trip.boarding_started` |
-| `AutoStartFallbackJob` | Recurring | Every 5 phút | Set BOARDING Trips to IN_PROGRESS only when `departureDateTime < now - 30 phút`; capture `actualDepartureTime`; publish `trip.trip.started` |
+| `AutoStartFallbackJob` | Recurring | Every 5 phút | Set BOARDING Trips to IN_PROGRESS only when `departureDateTime < now - 30 phút` and no assigned resource belongs to another `ACTIVE` reservation; otherwise leave Trip unchanged and persist one deduped alert/`trip.assignment.start_blocked` Outbox event. On success capture `actualDepartureTime`, activate reservations, and publish `trip.trip.started`. |
 | `AutoCompletedFallbackJob` | Recurring | Every 15 phút | Set IN_PROGRESS Trips to COMPLETED only when `estimatedArrivalTime < now - 30 phút`; publish `trip.trip.completed` |
 
 #### Booking
@@ -3682,6 +3698,7 @@ GOOGLE_MAPS_API_KEY=...
 GOOGLE_ROUTES_ENABLED=false
 GOOGLE_ROUTES_API_KEY=...
 TRIP_PLANNED_ETA_TIMEOUT_MS=3000
+RESOURCE_TRAVEL_TIME_TIMEOUT_MS=3000
 TRIP_STOP_DWELL_MINUTES=20
 HANGFIRE_DASHBOARD_USER=admin
 HANGFIRE_DASHBOARD_PASSWORD=...
@@ -4002,6 +4019,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.65.0** | 2026-08-11 | Codex | **MINOR** — Add one shared Driver/Assistant/Vehicle availability engine across DriverSchedule, main Trip and ShuttleTrip. Consecutive assignments require a 30-minute turnaround plus Google Routes DRIVE reposition time; unavailable location/travel input fails closed. Add reservation persistence with sorted advisory locks and a GiST overlap backstop, full schedule/concrete rechecks, lifecycle release/activation, ACTIVE start blocking with deduped operator notification, two read-only preview endpoints, Vehicle current/next assignment projections, canonical conflict fields/errors and reversible Trip migrations. The two preview POSTs raise the executable inventory to 210/190/20; no dependency is added. |
 | **1.64.2** | 2026-08-10 | Codex | **PATCH** — Enrich every public/operator/admin `StopDto` with hierarchy-derived `city` and `ward` display names while retaining canonical `locationId`. List projections batch Location/parent reads without N+1; Stop persistence, schema, dependencies, endpoint paths, events, and error codes remain unchanged. |
 | **1.64.1** | 2026-08-10 | Codex | **PATCH** — Standardize Location, Operator/Admin Station, and Operator/Admin Stop text filters on PostgreSQL `unaccent(...) ILIKE unaccent(...)` contains matching. Passenger Trip Search remains official-code based; names are autocomplete/display only. No schema, dependency, endpoint, event, or error-code change. |
 | **1.64.0** | 2026-08-10 | Codex | **MINOR** — Replace the flat Trip `Location` catalog with the current official two-level hierarchy: `PROVINCE|MUNICIPALITY` roots and `WARD|COMMUNE|SPECIAL_ZONE` leaves linked by restrictive self-FK. Station/Stop writes require an active leaf; Station city/ward are derived snapshots. Public Location reads support root/child autocomplete, and Trip Search replaces legacy location-code mode with required province plus optional ward scopes on each side while preserving exact station-ID precedence and automatic eligible Stop matching. Import Decision 19/2025/QD-TTg catalog with provenance, deterministic leaf IDs, reversible migration, and no legacy aliases, dependency, service, event, or destructive business-data migration. |

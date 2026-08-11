@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-10 (date/time policy reconciliation)
+> **Cập nhật:** 2026-08-11 (resource availability reconciliation)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -4012,6 +4012,19 @@ Edge case — đổi vehicleId trên DriverSchedule sau khi đã có Trip genera
 ```
 
 **Constraints:**
+
+> **Resource availability rule (canonical, supersedes exact-departure checks):** Driver, Assistant,
+> and Vehicle are protected across DriverSchedule, main Trip, and ShuttleTrip by one shared
+> availability engine. For two consecutive assignments,
+> `next.start >= previous.end + 30 minutes + repositionTravelTime`. The engine uses endpoint
+> Station/manifest coordinate snapshots and Google Routes `DRIVE`; the same canonical Station has
+> zero reposition time but still requires the 30-minute turnaround. Missing coordinates, disabled
+> Google Routes, timeout, or an unusable response fail closed with
+> `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`. There is no admin override. Recurring schedules are
+> compared over their complete weekly validity (including overnight occurrences and open-ended
+> validity), while every concrete Trip is rechecked and reserved atomically in the rolling 30-day
+> generation window. A resource reservation still `ACTIVE` blocks the next Trip/Shuttle start.
+> Vehicle-to-driver ownership is assignment-scoped; Vehicle has no fixed/current driver column.
 - Không cho phép 2 DriverSchedule active có cùng `driverId` + cùng `dayOfWeek` overlap + giờ chạy chồng chéo (validate khi tạo)
 - **Vehicle conflict check:** Không cho phép 2 DriverSchedule active có cùng `vehicleId` + cùng `dayOfWeek` + giờ chạy chồng chéo. Một xe không thể chạy 2 tuyến cùng lúc. Validate khi Operator tạo hoặc cập nhật DriverSchedule — return lỗi rõ ràng "Xe [licensePlate] đã được assign cho tuyến [route] vào [dayOfWeek] [time]".
 - Khi `isActive = false` hoặc qua `validUntil`: ngừng generate Trip mới, Trip đã generate vẫn giữ
@@ -4586,6 +4599,12 @@ ShuttlePassenger (manifest entry — link passenger booking with shuttle) {
    - Operator quyết định **thủ công** có tổ chức shuttle hay không cho main Trip đó.
 
 3. **Create ShuttleTrip (fully manual):**
+
+   Resource validation is shared with main Trip and DriverSchedule. Both Driver and Vehicle must
+   satisfy the full interval + 30-minute turnaround + Google Routes reposition rule against the
+   immediately preceding and following main/shuttle assignments. Creation takes the same ordered
+   advisory locks and persists `resource_reservations` in the Shuttle transaction, preventing
+   main-shuttle and shuttle-shuttle races.
    - Operator bấm "Tạo shuttle trip" → form chọn driver shuttle, vehicle nhỏ, scheduledDepartureTime, direction (INBOUND_TO_STATION trước main Trip departure, hoặc OUTBOUND_FROM_STATION sau main Trip arrival).
    - System tạo `ShuttleTrip` record + assign tất cả `ShuttlePassenger` matching (mainTripId + direction) vào ShuttleTrip mới.
    - Validate vehicle conflict (xe shuttle không trùng main Trip cùng thời điểm).
@@ -4928,7 +4947,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **Trip pickup/dropoff control** | KHÔNG có flag `allowAlongRoutePickup` / `allowAlongRouteDropoff` ở Trip. KHÔNG có `defaultAllowAlongRoute*` ở Route. `RouteStop` entries là single source of truth, với **2 flag per entry: `allowPickup` + `allowDropoff` (default cả 2 = true, DB CHECK ít nhất 1 = true)** — phân loại pickup-only / dropoff-only / both. TripStop snapshot 2 flag khi Hangfire generate Trip (immutable). Validation booking + parcel: pickupStopId cần `allowPickup=true`; dropoffStopId cần `allowDropoff=true`. Edge case operational stop defer v2 qua `RouteStop.isPublicVisible`. |
 | **Trip fare** | `Trip.baseFare` = giá vé theo chặng/tuyến (áp dụng từ đầu tuyến hoặc bất kỳ along-route stop nào). Booking capture/reuse một handler-start `pricingAt` và dùng `fareFromThisStop` đã được Trip resolve trong snapshot cho pickup stop; explicit precedence là persisted `TripStopFare` có `source=MANUAL_OVERRIDE` → active `RouteStopFareTemplate` half-open tại `pricingAt` → `Trip.baseFare`. Legacy `TEMPLATE_SNAPSHOT` vẫn readable, non-authoritative khi có `pricingAt`, và chỉ tham gia resolution cho legacy compatibility khi omitted `pricingAt`; Day 22 không tạo snapshot row mới. Dropoff miễn phí tại mọi stop, không ảnh hưởng giá. |
 | **Seat lock along-route** | Ghế lock từ đầu chuyến, không phân theo segment. Chi phí operator chấp nhận. |
-| **DriverSchedule** | `dayOfWeek` JSON array + `departureTime TIME` + `baseFare BIGINT nullable`. Hangfire generate Trip theo cửa sổ lăn 30 ngày, bao gồm `today + 30`, qua 2 trigger: (1) immediate on-create/activate, (2) weekly job CN 23:00. Trip mới snapshot `DriverSchedule.baseFare ?? Route.baseFare`; đổi schedule fare chỉ dùng `FUTURE_ONLY`, không sửa Trip đã generate. Idempotent check (driverId + departureDateTime). Không cho 2 schedule active cùng driverId overlap giờ. Vehicle conflict cũng check. |
+| **DriverSchedule** | `dayOfWeek` JSON array + `departureTime TIME` + `baseFare BIGINT nullable`. Hangfire generate Trip theo cửa sổ lăn 30 ngày, bao gồm `today + 30`, qua 2 trigger: (1) immediate on-create/activate, (2) weekly job CN 23:00. Trip mới snapshot `DriverSchedule.baseFare ?? Route.baseFare`; đổi schedule fare chỉ dùng `FUTURE_ONLY`, không sửa Trip đã generate. Driver, Assistant và Vehicle dùng canonical interval + 30 phút turnaround + Google Routes reposition rule trên toàn validity; Trip concrete luôn recheck/reserve nguyên tử. |
 | **Alternative Route** | Không có hard-cap toàn cục theo Route chính. Stop sequence riêng hoàn toàn — không reuse `RouteStop`. Quan hệ: `Route → AlternativeRoute → AlternativeRouteStop → Stop`; CUSTOM proposal chỉ tạo AlternativeRoute chính thức khi được approve. |
 | **RouteChangeProposal** | Snapshot đề xuất đổi tuyến của Driver/Assistant được phân công. Type `EXISTING|CUSTOM`; status `PENDING|APPROVED|REJECTED|SUPERSEDED|EXPIRED`; có thể liên kết optional Incident cùng Trip. Nhiều pending cùng Trip được phép, approve một proposal supersede các pending khác. |
 | **Stop độc lập** | Một Stop có thể thuộc nhiều Route. Canonical disable là bodyless `DELETE /v1/operator/stops/{stopId}?replacedByStopId=` cho `OPERATOR_ADMIN`, required UUID-v4 `Idempotency-Key`; set `isActive=false`, giữ `deletedAt`, không xóa RouteStop, và publish `trip.stop.disabled`. `replacedByStopId` nullable self-FK phải active/cùng operator/non-self/cycle-free. Retained PATCH là details-update-only, không đổi `isActive`/`deletedAt` và không emit disable event. Async `booking.stop_disabled.affected` là sole impact source; không có synchronous count/warning seam. Auto-suggest geo proximity defer v2. |
@@ -5146,6 +5165,7 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **`TripStop`** — Snapshot từ RouteStop khi generate Trip. Có `estimatedArrivalTime` (static planned baseline; approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING` cascade có thể recompute, GPS/Tracking không update), `actualArrivalTime` (set bởi Assistant), status PENDING | ARRIVED | SKIPPED, copy `distanceFromOriginKm` + 2 allow flags.
 - **`TripStopFare`** — Exception override fare per trip per stop, với `source=TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`; existing rows backfill `TEMPLATE_SNAPSHOT`, nhưng Day 22 không tạo snapshot mới; chỉ explicit operator per-Trip override tạo `MANUAL_OVERRIDE`.
 - **`DriverSchedule`** — Assignment driver/assistant ↔ vehicle ↔ route theo recurring pattern (dayOfWeek + departureTime). Dùng để Hangfire generate Trip.
+- **`ResourceReservation`** — Assignment source of truth cho Driver/Assistant/Vehicle của main Trip và ShuttleTrip. Snapshot planned interval + endpoint Station/coordinates; lifecycle `RESERVED | ACTIVE | RELEASED | CANCELLED`. Exactly one source (`tripId` xor `shuttleTripId`); sorted shared advisory locks plus PostgreSQL range exclusion protect concurrent writes. Vehicle-driver ownership được suy ra theo reservation, không lưu fixed/current driver trên Vehicle.
 - **`DriverScheduleAuditLog`** — Append-only local audit keyed to DriverSchedule; Day-22 action `DRIVER_SCHEDULE_EDITED`, metadata `{changedFields,before,after,requestId}`; actor là logical Identity user, không cross-DB FK.
 - **`TripGenerationSkipLog`** — Log khi Hangfire skip generate Trip (vd vượt `maxTripsPerMonth` của subscription).
 - **`ShuttleTrip`** + **`ShuttlePassenger`** — Xe trung chuyển + manifest passenger. Xem 6.14.
