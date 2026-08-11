@@ -58,6 +58,23 @@ internal sealed class RefreshTokenRepository : IRefreshTokenRepository
         }
     }
 
+    public async Task RevokeActiveByUsersAsync(
+        IReadOnlyCollection<Guid> userIds,
+        RefreshTokenRevokeReason reason,
+        CancellationToken ct = default)
+    {
+        if (userIds.Count == 0)
+            return;
+
+        var revokedAt = _clock.UtcNow;
+        var tokens = await _db.RefreshTokens
+            .Where(token => userIds.Contains(token.UserId) && token.RevokedAt == null)
+            .ToListAsync(ct);
+
+        foreach (var token in tokens)
+            token.Revoke(revokedAt, reason);
+    }
+
     public async Task<RefreshToken> AddAsync(RefreshToken entity, CancellationToken ct)
     {
         await _db.RefreshTokens.AddAsync(entity, ct);

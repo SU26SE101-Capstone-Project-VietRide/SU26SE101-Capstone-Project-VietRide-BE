@@ -1,5 +1,6 @@
 using System.Text.Json;
 using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
 
 namespace VietRide.Identity.Application.Features.Operators;
 
@@ -18,7 +19,9 @@ public sealed record OperatorProfileResponse(
     bool IsActive,
     JsonElement? CancellationPolicy,
     JsonElement ParcelNoShowPolicy,
-    JsonElement LuggagePolicy)
+    JsonElement LuggagePolicy,
+    DateTimeOffset? SuspendedAt = null,
+    string? SuspendReason = null)
 {
     public static OperatorProfileResponse FromOperator(Operator operatorProfile)
     {
@@ -46,6 +49,12 @@ public sealed record OperatorProfileResponse(
                 OperatorProfilePolicyValidator.DefaultParcelNoShowPolicy()),
             OperatorProfilePolicyValidator.ToJsonElement(
                 operatorProfile.LuggagePolicy,
-                OperatorProfilePolicyValidator.DefaultLuggagePolicy()));
+                OperatorProfilePolicyValidator.DefaultLuggagePolicy()),
+            operatorProfile.RegistrationStatus == OperatorRegistrationStatus.SUSPENDED
+                ? operatorProfile.SuspendedAt
+                : null,
+            operatorProfile.RegistrationStatus == OperatorRegistrationStatus.SUSPENDED
+                ? operatorProfile.SuspendReason
+                : null);
     }
 }

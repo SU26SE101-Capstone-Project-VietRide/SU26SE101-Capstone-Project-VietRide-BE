@@ -42,7 +42,9 @@ public sealed class LoginCommandHandlerTests
 
         clock.UtcNow.Returns(FrozenNow);
         hasher.Verify(Arg.Any<string>(), Arg.Any<string>()).Returns(false);
-        accessTokenSvc.IssueToken(Arg.Any<User>()).Returns("jwt.access.token");
+        accessTokenSvc
+            .IssueToken(Arg.Any<User>(), Arg.Any<OperatorRegistrationStatus?>())
+            .Returns("jwt.access.token");
         lockoutCounter.IncrementAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(1L);
 
         var (rawToken, refreshEntity) = (
@@ -100,6 +102,9 @@ public sealed class LoginCommandHandlerTests
         typeof(Operator)
             .GetProperty(nameof(Operator.RegistrationStatus))!
             .SetValue(operatorEntity, status);
+        typeof(Operator)
+            .GetProperty(nameof(Operator.IsActive))!
+            .SetValue(operatorEntity, status is OperatorRegistrationStatus.PENDING or OperatorRegistrationStatus.APPROVED);
         return operatorEntity;
     }
 
@@ -152,20 +157,20 @@ public sealed class LoginCommandHandlerTests
         result.AccessToken.Should().Be("jwt.access.token");
         result.User.Role.Should().Be(role.ToString());
         result.User.OperatorId.Should().Be(operatorId);
+        result.User.OperatorRegistrationStatus.Should().Be(OperatorRegistrationStatus.APPROVED.ToString());
         await lockoutCounter.Received(1).ResetAsync(user.Id, Arg.Any<CancellationToken>());
     }
 
     [Theory]
     [InlineData(UserRole.SYSTEM_ADMIN)]
     [InlineData(UserRole.PASSENGER)]
-    [InlineData(UserRole.DRIVER)]
-    public async Task Handle_NonOperatorAdminOrStaffRoles_DoNotCheckOperatorApproval(UserRole role)
+    public async Task Handle_UsersWithoutOperatorScope_DoNotCheckOperatorApproval(UserRole role)
     {
         var hasher = Substitute.For<IPasswordHasher>();
         var (handler, users, operators, _, _, _, _) = CreateHandler(hasher: hasher);
         hasher.Verify("correct_password", "stored_hash").Returns(true);
-        var operatorId = Guid.NewGuid();
-        var user = MakeOperatorUser(role, operatorId);
+        var user = MakeActiveUser();
+        typeof(User).GetProperty(nameof(User.Role))!.SetValue(user, role);
         users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
         users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
 
@@ -182,10 +187,8 @@ public sealed class LoginCommandHandlerTests
 
     [Theory]
     [InlineData(UserRole.OPERATOR_ADMIN, OperatorRegistrationStatus.PENDING)]
-    [InlineData(UserRole.OPERATOR_ADMIN, OperatorRegistrationStatus.SUSPENDED)]
     [InlineData(UserRole.OPERATOR_ADMIN, OperatorRegistrationStatus.REJECTED)]
     [InlineData(UserRole.OPERATOR_STAFF, OperatorRegistrationStatus.PENDING)]
-    [InlineData(UserRole.OPERATOR_STAFF, OperatorRegistrationStatus.SUSPENDED)]
     [InlineData(UserRole.OPERATOR_STAFF, OperatorRegistrationStatus.REJECTED)]
     public async Task Handle_NonApprovedOperatorAfterValidCredentials_Throws403WithoutLoginSideEffects(
         UserRole role,
@@ -209,11 +212,69 @@ public sealed class LoginCommandHandlerTests
 
         hasher.Received(2).Verify("correct_password", "stored_hash");
         user.LastLoginAt.Should().Be(originalLastLoginAt);
-        accessTokenService.DidNotReceive().IssueToken(Arg.Any<User>());
+        accessTokenService.DidNotReceive().IssueToken(
+            Arg.Any<User>(),
+            Arg.Any<OperatorRegistrationStatus?>());
         await tokens.DidNotReceive().AddAsync(Arg.Any<RefreshToken>(), Arg.Any<CancellationToken>());
         await lockoutCounter.DidNotReceive().ResetAsync(user.Id, Arg.Any<CancellationToken>());
         await lockoutCounter.DidNotReceive().IncrementAsync(user.Id, Arg.Any<CancellationToken>());
-        await failedLoginPersister.DidNotReceive().PersistAsync(user.Id, Arg.Any<CancellationToken>());
+        await failedLoginPersister.DidNotReceive().PersistAsync(
+            user.Id,
+            Arg.Any<CancellationToken>(),
+            Arg.Any<string>());
+    }
+
+    [Theory]
+    [InlineData(UserRole.OPERATOR_STAFF)]
+    [InlineData(UserRole.DRIVER)]
+    [InlineData(UserRole.ASSISTANT)]
+    public async Task Handle_SuspendedNonAdminOperatorRole_ThrowsOperatorSuspended(UserRole role)
+    {
+        var hasher = Substitute.For<IPasswordHasher>();
+        var (handler, users, operators, tokens, accessTokenService, _, lockoutCounter) =
+            CreateHandler(hasher: hasher);
+        hasher.Verify("correct_password", "stored_hash").Returns(true);
+        var operatorId = Guid.NewGuid();
+        var user = MakeOperatorUser(role, operatorId);
+        users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+        users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        operators.GetByIdAsync(operatorId, Arg.Any<CancellationToken>())
+            .Returns(MakeOperator(OperatorRegistrationStatus.SUSPENDED));
+
+        var act = () => handler.Handle(
+            new LoginCommand("user@example.com", "correct_password"),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<ForbiddenException>()
+            .Where(e => e.ErrorCode == "OPERATOR_SUSPENDED");
+        accessTokenService.DidNotReceive().IssueToken(
+            Arg.Any<User>(),
+            Arg.Any<OperatorRegistrationStatus?>());
+        await tokens.DidNotReceive().AddAsync(Arg.Any<RefreshToken>(), Arg.Any<CancellationToken>());
+        await lockoutCounter.DidNotReceive().ResetAsync(user.Id, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_SuspendedOperatorAdmin_ReturnsRestrictedTokenBundle()
+    {
+        var hasher = Substitute.For<IPasswordHasher>();
+        var (handler, users, operators, _, accessTokenService, _, lockoutCounter) =
+            CreateHandler(hasher: hasher);
+        hasher.Verify("correct_password", "stored_hash").Returns(true);
+        var operatorId = Guid.NewGuid();
+        var user = MakeOperatorUser(UserRole.OPERATOR_ADMIN, operatorId);
+        users.GetByEmailAsync("user@example.com", Arg.Any<CancellationToken>()).Returns(user);
+        users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        operators.GetByIdAsync(operatorId, Arg.Any<CancellationToken>())
+            .Returns(MakeOperator(OperatorRegistrationStatus.SUSPENDED));
+
+        var result = await handler.Handle(
+            new LoginCommand("user@example.com", "correct_password"),
+            CancellationToken.None);
+
+        result.User.OperatorRegistrationStatus.Should().Be(OperatorRegistrationStatus.SUSPENDED.ToString());
+        accessTokenService.Received(1).IssueToken(user, OperatorRegistrationStatus.SUSPENDED);
+        await lockoutCounter.Received(1).ResetAsync(user.Id, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -230,7 +291,10 @@ public sealed class LoginCommandHandlerTests
             .Where(e => e.ErrorCode == "AUTH_INVALID_CREDENTIALS");
 
         await lockoutCounter.DidNotReceive().IncrementAsync(user.Id, Arg.Any<CancellationToken>());
-        await failedLoginPersister.Received(1).PersistAsync(user.Id, Arg.Any<CancellationToken>());
+        await failedLoginPersister.Received(1).PersistAsync(
+            user.Id,
+            Arg.Any<CancellationToken>(),
+            "UNKNOWN");
     }
 
     [Fact]
@@ -245,7 +309,10 @@ public sealed class LoginCommandHandlerTests
         await act.Should().ThrowAsync<UnauthorizedException>()
             .Where(e => e.ErrorCode == "AUTH_INVALID_CREDENTIALS");
 
-        await failedLoginPersister.Received(1).PersistAsync(user.Id, Arg.Any<CancellationToken>());
+        await failedLoginPersister.Received(1).PersistAsync(
+            user.Id,
+            Arg.Any<CancellationToken>(),
+            "UNKNOWN");
     }
 
     [Fact]
@@ -280,7 +347,10 @@ public sealed class LoginCommandHandlerTests
             .Where(e => e.ErrorCode == "AUTH_INVALID_CREDENTIALS");
 
         await lockoutCounter.DidNotReceive().IncrementAsync(user.Id, Arg.Any<CancellationToken>());
-        await failedLoginPersister.Received(1).PersistAsync(user.Id, Arg.Any<CancellationToken>());
+        await failedLoginPersister.Received(1).PersistAsync(
+            user.Id,
+            Arg.Any<CancellationToken>(),
+            "UNKNOWN");
     }
 
     [Fact]

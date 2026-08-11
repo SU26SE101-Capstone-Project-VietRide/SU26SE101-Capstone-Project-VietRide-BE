@@ -1,4 +1,6 @@
 using MediatR;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Entities;
@@ -21,6 +23,7 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
     private readonly IFailedLoginPersister _failedLoginPersister;
     private readonly ILoginLockoutCounter _loginLockoutCounter;
     private readonly IClock _clock;
+    private readonly ILogger<LoginCommandHandler> _logger;
 
     public LoginCommandHandler(
         IUserRepository users,
@@ -31,7 +34,8 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
         IRefreshTokenFactory refreshTokenFactory,
         IFailedLoginPersister failedLoginPersister,
         ILoginLockoutCounter loginLockoutCounter,
-        IClock clock)
+        IClock clock,
+        ILogger<LoginCommandHandler>? logger = null)
     {
         _users = users;
         _operators = operators;
@@ -42,6 +46,7 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
         _failedLoginPersister = failedLoginPersister;
         _loginLockoutCounter = loginLockoutCounter;
         _clock = clock;
+        _logger = logger ?? NullLogger<LoginCommandHandler>.Instance;
     }
 
     public async Task<TokenBundleDto> Handle(
@@ -53,7 +58,14 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
 
         // 1. Check if account is locked (403 — before credential check to avoid timing info leak).
         if (user?.Status == UserStatus.LOCKED)
+        {
+            _logger.LogWarning(
+                "AuthAccountLocked: login rejected for locked user {UserId} with role {Role}; ClientKind={ClientKind}",
+                user.Id,
+                user.Role,
+                request.ClientKind);
             throw new ForbiddenException("AUTH_ACCOUNT_LOCKED", "Account is locked. Please contact support.");
+        }
 
         // 2. Passenger mobile may enter the app before email verification; FE restricts features via user.status.
         if (user?.Status == UserStatus.PENDING_EMAIL_VERIFICATION && user.Role != UserRole.PASSENGER)
@@ -76,7 +88,15 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
             {
                 await _failedLoginPersister.PersistAsync(
                     user.Id,
-                    cancellationToken);
+                    cancellationToken,
+                    request.ClientKind);
+            }
+
+            if (user is null)
+            {
+                _logger.LogWarning(
+                    "AuthLoginFailed: credential validation failed for an unknown user; UserKnown=false; ClientKind={ClientKind}",
+                    request.ClientKind);
             }
 
             throw new UnauthorizedException("AUTH_INVALID_CREDENTIALS", "Invalid email or password.");
@@ -93,26 +113,30 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
             throw new UnauthorizedException("AUTH_INVALID_CREDENTIALS", "Invalid email or password.");
         }
 
-        // 5. Operator dashboard login is allowed only after the operator is approved.
-        if (RequiresApprovedOperator(authenticatedUser))
-        {
-            var operatorEntity = await _operators.GetByIdAsync(authenticatedUser.OperatorId!.Value, cancellationToken);
-            if (operatorEntity?.RegistrationStatus != OperatorRegistrationStatus.APPROVED)
-                throw new ForbiddenException("FORBIDDEN", "Operator registration is not approved.");
-        }
+        // 5. Operator suspension is tenant state, independent from User LOCKED.
+        var operatorStatus = await ResolveOperatorSessionAsync(
+            authenticatedUser,
+            request.ClientKind,
+            cancellationToken);
 
         // 6. Successful login — reset DB tracking and clear the Redis lockout window.
         authenticatedUser.RecordSuccessfulLogin(_clock);
         await _loginLockoutCounter.ResetAsync(authenticatedUser.Id, cancellationToken);
 
         // 7. Issue tokens.
-        var accessToken = _accessTokenService.IssueToken(authenticatedUser);
+        var accessToken = _accessTokenService.IssueToken(authenticatedUser, operatorStatus);
         var (rawRefresh, refreshEntity) = _refreshTokenFactory.Create(
             userId: authenticatedUser.Id,
             parentTokenId: null,
             familyId: null);
 
         await _refreshTokens.AddAsync(refreshEntity, cancellationToken);
+
+        _logger.LogInformation(
+            "AuthLoginSucceeded: user {UserId} authenticated with operator status {OperatorStatus}; ClientKind={ClientKind}",
+            authenticatedUser.Id,
+            operatorStatus?.ToString() ?? "NONE",
+            request.ClientKind);
 
         return new TokenBundleDto(
             AccessToken: accessToken,
@@ -126,12 +150,41 @@ public sealed class LoginCommandHandler : IRequestHandler<LoginCommand, TokenBun
                 Role: authenticatedUser.Role.ToString(),
                 OperatorId: authenticatedUser.OperatorId,
                 Status: authenticatedUser.Status.ToString(),
+                OperatorRegistrationStatus: operatorStatus?.ToString(),
                 AvatarUrl: authenticatedUser.AvatarUrl));
     }
 
-    private static bool RequiresApprovedOperator(User user)
-        => user.OperatorId.HasValue
-            && (user.Role == UserRole.OPERATOR_ADMIN || user.Role == UserRole.OPERATOR_STAFF);
+    private async Task<OperatorRegistrationStatus?> ResolveOperatorSessionAsync(
+        User user,
+        string clientKind,
+        CancellationToken cancellationToken)
+    {
+        if (!user.OperatorId.HasValue)
+            return null;
+
+        var operatorEntity = await _operators.GetByIdAsync(user.OperatorId.Value, cancellationToken);
+        if (operatorEntity?.RegistrationStatus == OperatorRegistrationStatus.APPROVED && operatorEntity.IsActive)
+            return OperatorRegistrationStatus.APPROVED;
+
+        if (operatorEntity?.RegistrationStatus == OperatorRegistrationStatus.SUSPENDED)
+        {
+            if (user.Role == UserRole.OPERATOR_ADMIN)
+            {
+                _logger.LogWarning(
+                    "OperatorRestrictedLogin: user {UserId} entered a restricted session for suspended operator {OperatorId}; ClientKind={ClientKind}",
+                    user.Id,
+                    operatorEntity.Id,
+                    clientKind);
+                return OperatorRegistrationStatus.SUSPENDED;
+            }
+
+            throw new ForbiddenException(
+                "OPERATOR_SUSPENDED",
+                "The operator is suspended. Only its administrator may access the suspension status page.");
+        }
+
+        throw new ForbiddenException("FORBIDDEN", "Operator registration is not approved.");
+    }
 
     private static void EnsureCanPasswordLogin(User user)
     {

@@ -221,6 +221,27 @@ public sealed class RsaAccessTokenServiceTests
             because: "PASSENGER users have no operator; claim must be omitted, not set to empty");
     }
 
+    [Theory]
+    [InlineData(OperatorRegistrationStatus.APPROVED)]
+    [InlineData(OperatorRegistrationStatus.SUSPENDED)]
+    public void IssueToken_OperatorToken_ContainsCurrentOperatorStatus(
+        OperatorRegistrationStatus operatorStatus)
+    {
+        var service = CreateService();
+        var user = MakeActivePassenger();
+        var operatorId = Guid.NewGuid();
+        typeof(User).GetProperty(nameof(User.Role))!.SetValue(user, UserRole.OPERATOR_ADMIN);
+        typeof(User).GetProperty(nameof(User.OperatorId))!.SetValue(user, operatorId);
+
+        var token = service.IssueToken(user, operatorStatus);
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+        jwt.Claims.Should().ContainSingle(claim => claim.Type == "operatorId")
+            .Which.Value.Should().Be(operatorId.ToString());
+        jwt.Claims.Should().ContainSingle(claim => claim.Type == "operatorStatus")
+            .Which.Value.Should().Be(operatorStatus.ToString());
+    }
+
     [Fact]
     public void JwksProvider_ReturnsJsonWithCorrectShape()
     {

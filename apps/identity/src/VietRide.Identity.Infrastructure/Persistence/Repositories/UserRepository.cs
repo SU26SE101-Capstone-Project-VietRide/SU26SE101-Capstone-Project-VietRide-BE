@@ -160,8 +160,13 @@ internal sealed class UserRepository : IUserRepository
         Guid operatorId,
         CancellationToken ct = default)
         => await _db.Users
+            .IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(u => u.OperatorId == operatorId)
+            .Where(u => u.OperatorId == operatorId
+                && (u.Role == UserRole.OPERATOR_ADMIN
+                    || u.Role == UserRole.OPERATOR_STAFF
+                    || u.Role == UserRole.DRIVER
+                    || u.Role == UserRole.ASSISTANT))
             .OrderBy(u => u.Id)
             .Select(u => u.Id)
             .ToListAsync(ct);

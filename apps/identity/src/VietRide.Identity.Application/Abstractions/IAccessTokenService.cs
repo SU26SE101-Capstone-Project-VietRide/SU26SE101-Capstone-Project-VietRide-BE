@@ -1,4 +1,5 @@
 using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
 
 namespace VietRide.Identity.Application.Abstractions;
 
@@ -12,5 +13,5 @@ public interface IAccessTokenService
     /// Issues a signed RS256 JWT for the given user.
     /// Claims: iss, sub, role, operatorId, email, iat, exp, kid.
     /// </summary>
-    string IssueToken(User user);
+    string IssueToken(User user, OperatorRegistrationStatus? operatorStatus = null);
 }

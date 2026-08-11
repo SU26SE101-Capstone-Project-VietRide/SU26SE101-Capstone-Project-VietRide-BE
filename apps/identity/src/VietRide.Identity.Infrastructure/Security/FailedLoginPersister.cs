@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
@@ -13,16 +14,21 @@ namespace VietRide.Identity.Infrastructure.Security;
 internal sealed class FailedLoginPersister : IFailedLoginPersister
 {
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger<FailedLoginPersister> _logger;
 
-    public FailedLoginPersister(IServiceScopeFactory scopeFactory)
+    public FailedLoginPersister(
+        IServiceScopeFactory scopeFactory,
+        ILogger<FailedLoginPersister> logger)
     {
         _scopeFactory = scopeFactory;
+        _logger = logger;
     }
 
     /// <inheritdoc />
     public async Task PersistAsync(
         Guid userId,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string clientKind = "UNKNOWN")
     {
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
@@ -49,5 +55,20 @@ internal sealed class FailedLoginPersister : IFailedLoginPersister
         user.RecordFailedLogin(clock, failedAttemptsInWindow);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+
+        _logger.LogWarning(
+            "AuthLoginFailed: user {UserId} has {FailedAttempts} failed attempts in the 15-minute window; Locked={Locked}; ClientKind={ClientKind}",
+            user.Id,
+            user.FailedLoginAttempts,
+            user.Status == UserStatus.LOCKED,
+            clientKind);
+
+        if (user.Status == UserStatus.LOCKED)
+        {
+            _logger.LogWarning(
+                "AuthAccountLocked: user {UserId} was locked because the failed-login limit was reached; ClientKind={ClientKind}",
+                user.Id,
+                clientKind);
+        }
     }
 }

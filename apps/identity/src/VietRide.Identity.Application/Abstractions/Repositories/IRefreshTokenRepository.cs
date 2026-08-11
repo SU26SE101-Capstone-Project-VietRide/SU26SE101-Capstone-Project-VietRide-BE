@@ -27,4 +27,10 @@ public interface IRefreshTokenRepository : IRepository<RefreshToken, Guid>
     /// Used after password reset so all existing sessions must authenticate again.
     /// </summary>
     Task RevokeActiveByUserAsync(Guid userId, RefreshTokenRevokeReason reason, CancellationToken ct = default);
+
+    /// <summary>Revokes all active refresh tokens owned by the supplied users.</summary>
+    Task RevokeActiveByUsersAsync(
+        IReadOnlyCollection<Guid> userIds,
+        RefreshTokenRevokeReason reason,
+        CancellationToken ct = default);
 }

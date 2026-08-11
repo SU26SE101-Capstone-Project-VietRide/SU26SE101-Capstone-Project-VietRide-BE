@@ -1,5 +1,7 @@
 using System.Text.Json;
 using MediatR;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Events;
@@ -25,6 +27,8 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
     private readonly ILoginLockoutCounter _loginLockoutCounter;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
+    private readonly IOperatorRepository _operators;
+    private readonly ILogger<GoogleLoginCommandHandler> _logger;
 
     public GoogleLoginCommandHandler(
         IGoogleIdTokenVerifier googleIdTokenVerifier,
@@ -35,7 +39,9 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
         IRefreshTokenFactory refreshTokenFactory,
         ILoginLockoutCounter loginLockoutCounter,
         IIntegrationEventOutbox outbox,
-        IClock clock)
+        IClock clock,
+        IOperatorRepository operators,
+        ILogger<GoogleLoginCommandHandler>? logger = null)
     {
         _googleIdTokenVerifier = googleIdTokenVerifier;
         _oauthIdentities = oauthIdentities;
@@ -46,6 +52,8 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
         _loginLockoutCounter = loginLockoutCounter;
         _outbox = outbox;
         _clock = clock;
+        _operators = operators;
+        _logger = logger ?? NullLogger<GoogleLoginCommandHandler>.Instance;
     }
 
     public async Task<TokenBundleDto> Handle(
@@ -86,6 +94,13 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
         {
             user = await _users.GetByIdForUpdateAsync(userHint.Id, cancellationToken)
                 ?? throw new ForbiddenException("FORBIDDEN", "Account is not active.");
+            if (user.Status == UserStatus.LOCKED)
+            {
+                _logger.LogWarning(
+                    "AuthAccountLocked: Google login rejected for locked user {UserId}; ClientKind={ClientKind}",
+                    user.Id,
+                    request.ClientKind);
+            }
             EnsureCanLogin(user);
             await _loginLockoutCounter.ResetAsync(user.Id, cancellationToken);
         }
@@ -117,13 +132,20 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
 
         user.RecordSuccessfulLogin(_clock);
 
-        var accessToken = _accessTokenService.IssueToken(user);
+        var operatorStatus = await ResolveOperatorSessionAsync(user, request.ClientKind, cancellationToken);
+        var accessToken = _accessTokenService.IssueToken(user, operatorStatus);
         var (rawRefresh, refreshEntity) = _refreshTokenFactory.Create(
             userId: user.Id,
             parentTokenId: null,
             familyId: null);
 
         await _refreshTokens.AddAsync(refreshEntity, cancellationToken);
+
+        _logger.LogInformation(
+            "AuthLoginSucceeded: Google user {UserId} authenticated with operator status {OperatorStatus}; ClientKind={ClientKind}",
+            user.Id,
+            operatorStatus?.ToString() ?? "NONE",
+            request.ClientKind);
 
         return new TokenBundleDto(
             AccessToken: accessToken,
@@ -137,13 +159,48 @@ public sealed class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginComma
                 Role: user.Role.ToString(),
                 OperatorId: user.OperatorId,
                 Status: user.Status.ToString(),
+                OperatorRegistrationStatus: operatorStatus?.ToString(),
                 AvatarUrl: user.AvatarUrl));
+    }
+
+    private async Task<OperatorRegistrationStatus?> ResolveOperatorSessionAsync(
+        User user,
+        string clientKind,
+        CancellationToken cancellationToken)
+    {
+        if (!user.OperatorId.HasValue)
+            return null;
+
+        var operatorEntity = await _operators.GetByIdAsync(user.OperatorId.Value, cancellationToken);
+        if (operatorEntity?.RegistrationStatus == OperatorRegistrationStatus.APPROVED && operatorEntity.IsActive)
+            return OperatorRegistrationStatus.APPROVED;
+
+        if (operatorEntity?.RegistrationStatus == OperatorRegistrationStatus.SUSPENDED)
+        {
+            if (user.Role == UserRole.OPERATOR_ADMIN)
+            {
+                _logger.LogWarning(
+                    "OperatorRestrictedLogin: Google user {UserId} entered a restricted session for suspended operator {OperatorId}; ClientKind={ClientKind}",
+                    user.Id,
+                    operatorEntity.Id,
+                    clientKind);
+                return OperatorRegistrationStatus.SUSPENDED;
+            }
+
+            throw new ForbiddenException(
+                "OPERATOR_SUSPENDED",
+                "The operator is suspended. Only its administrator may access the suspension status page.");
+        }
+
+        throw new ForbiddenException("FORBIDDEN", "Operator registration is not approved.");
     }
 
     private static void EnsureCanLogin(User user)
     {
         if (user.Status == UserStatus.LOCKED)
+        {
             throw new ForbiddenException("AUTH_ACCOUNT_LOCKED", "Account is locked. Please contact support.");
+        }
 
         if (user.Status == UserStatus.PENDING_EMAIL_VERIFICATION)
             throw new ForbiddenException("AUTH_EMAIL_NOT_VERIFIED", "Email address has not been verified.");

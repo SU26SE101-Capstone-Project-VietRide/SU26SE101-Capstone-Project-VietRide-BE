@@ -1,5 +1,7 @@
 using System.Text.Json;
 using MediatR;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Entities;
@@ -13,15 +15,18 @@ public sealed class UnlockUserCommandHandler : IRequestHandler<UnlockUserCommand
     private readonly IUserRepository _users;
     private readonly ILoginLockoutCounter _lockoutCounter;
     private readonly IActivityLogRepository _activityLogs;
+    private readonly ILogger<UnlockUserCommandHandler> _logger;
 
     public UnlockUserCommandHandler(
         IUserRepository users,
         ILoginLockoutCounter lockoutCounter,
-        IActivityLogRepository activityLogs)
+        IActivityLogRepository activityLogs,
+        ILogger<UnlockUserCommandHandler>? logger = null)
     {
         _users = users;
         _lockoutCounter = lockoutCounter;
         _activityLogs = activityLogs;
+        _logger = logger ?? NullLogger<UnlockUserCommandHandler>.Instance;
     }
 
     public async Task<UnlockUserResponseDto> Handle(
@@ -52,6 +57,13 @@ public sealed class UnlockUserCommandHandler : IRequestHandler<UnlockUserCommand
                 request.IpAddress,
                 request.UserAgent),
             cancellationToken);
+
+        _logger.LogInformation(
+            "AuthAccountUnlocked: user {UserId} was unlocked by actor {ActorUserId}; status restored from {PreviousStatus} to {NewStatus}",
+            user.Id,
+            request.CallerUserId,
+            previousStatus,
+            restoredStatus);
 
         return new UnlockUserResponseDto(user.Id, restoredStatus.ToString(), true);
     }

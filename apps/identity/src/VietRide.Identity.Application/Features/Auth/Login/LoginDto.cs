@@ -18,4 +18,6 @@ public sealed record UserSummaryDto(
     Guid? OperatorId,
     string Status,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? OperatorRegistrationStatus = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? AvatarUrl = null);

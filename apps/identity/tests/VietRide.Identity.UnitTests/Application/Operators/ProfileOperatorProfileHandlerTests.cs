@@ -47,10 +47,30 @@ public sealed class ProfileOperatorProfileHandlerTests
         Assert.Equal("+84907654321", response.RepresentativePhone);
         Assert.Equal("APPROVED", response.RegistrationStatus);
         Assert.True(response.IsActive);
+        Assert.Null(response.SuspendedAt);
+        Assert.Null(response.SuspendReason);
         Assert.Null(response.CancellationPolicy);
         Assert.Equal(0, response.ParcelNoShowPolicy.GetProperty("noShowFeePercent").GetInt32());
         Assert.Equal(30, response.ParcelNoShowPolicy.GetProperty("additionalPaymentTimeoutMinutes").GetInt32());
         Assert.Equal(10, response.LuggagePolicy.GetProperty("defaultLuggageKgPerSeat").GetInt32());
+    }
+
+    [Fact]
+    public async Task GetOperatorProfileAsync_WhenSuspended_ReturnsSuspensionMetadata()
+    {
+        var operatorProfile = CreateApprovedOperator();
+        var suspendedAt = new DateTimeOffset(2026, 8, 11, 0, 0, 0, TimeSpan.Zero);
+        operatorProfile.Suspend("Policy violation", suspendedAt);
+        var handler = new GetOperatorProfileHandler(new FakeOperatorRepository(operatorProfile));
+
+        var response = await handler.Handle(
+            new GetOperatorProfileQuery(operatorProfile.Id),
+            CancellationToken.None);
+
+        Assert.Equal(OperatorRegistrationStatus.SUSPENDED.ToString(), response.RegistrationStatus);
+        Assert.False(response.IsActive);
+        Assert.Equal(suspendedAt, response.SuspendedAt);
+        Assert.Equal("Policy violation", response.SuspendReason);
     }
 
     [Fact]

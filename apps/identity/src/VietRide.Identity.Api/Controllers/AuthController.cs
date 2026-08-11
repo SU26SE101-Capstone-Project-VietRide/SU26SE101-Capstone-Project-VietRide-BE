@@ -180,7 +180,12 @@ public sealed class AuthController : ControllerBase
         [FromBody] LoginRequest request,
         CancellationToken ct)
     {
-        var result = await _sender.Send(new LoginCommand(request.Email, request.Password), ct);
+        var result = await _sender.Send(
+            new LoginCommand(
+                request.Email,
+                request.Password,
+                ClientKindClassifier.Classify(Request.Headers.UserAgent.ToString())),
+            ct);
         return Ok(result);
     }
 
@@ -198,7 +203,11 @@ public sealed class AuthController : ControllerBase
         [FromBody] GoogleLoginRequest request,
         CancellationToken ct)
     {
-        var result = await _sender.Send(new GoogleLoginCommand(request.IdToken), ct);
+        var result = await _sender.Send(
+            new GoogleLoginCommand(
+                request.IdToken,
+                ClientKindClassifier.Classify(Request.Headers.UserAgent.ToString())),
+            ct);
         return Ok(result);
     }
 

@@ -27,6 +27,7 @@ public sealed class GoogleLoginCommandHandlerTests
     private readonly IGoogleIdTokenVerifier _googleIdTokenVerifier = Substitute.For<IGoogleIdTokenVerifier>();
     private readonly IOAuthIdentityRepository _oauthIdentities = Substitute.For<IOAuthIdentityRepository>();
     private readonly IUserRepository _users = Substitute.For<IUserRepository>();
+    private readonly IOperatorRepository _operators = Substitute.For<IOperatorRepository>();
     private readonly IRefreshTokenRepository _refreshTokens = Substitute.For<IRefreshTokenRepository>();
     private readonly IAccessTokenService _accessTokenService = Substitute.For<IAccessTokenService>();
     private readonly ILoginLockoutCounter _loginLockoutCounter = Substitute.For<ILoginLockoutCounter>();
@@ -36,7 +37,9 @@ public sealed class GoogleLoginCommandHandlerTests
     public GoogleLoginCommandHandlerTests()
     {
         _clock.UtcNow.Returns(FrozenNow);
-        _accessTokenService.IssueToken(Arg.Any<User>()).Returns("access-token");
+        _accessTokenService
+            .IssueToken(Arg.Any<User>(), Arg.Any<OperatorRegistrationStatus?>())
+            .Returns("access-token");
         _oauthIdentities.AddAsync(Arg.Any<OAuthIdentity>(), Arg.Any<CancellationToken>())
             .Returns(call => Task.FromResult(call.Arg<OAuthIdentity>()));
         _users.AddAsync(Arg.Any<User>(), Arg.Any<CancellationToken>())
@@ -237,6 +240,57 @@ public sealed class GoogleLoginCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_WhenSuspendedOperatorAdminUsesGoogle_ReturnsRestrictedSession()
+    {
+        var operatorEntity = MakeSuspendedOperator();
+        var user = MakeOperatorUser("admin@example.com", UserRole.OPERATOR_ADMIN, operatorEntity.Id);
+        var googleUser = MakeGoogleUser("google-sub-admin", user.Email);
+        var handler = CreateHandler();
+        _googleIdTokenVerifier.VerifyAsync("id-token", Arg.Any<CancellationToken>()).Returns(googleUser);
+        _oauthIdentities.GetUserByProviderSubjectAsync(
+                OAuthProvider.GOOGLE,
+                googleUser.Subject,
+                Arg.Any<CancellationToken>())
+            .Returns(user);
+        _users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        _operators.GetByIdAsync(operatorEntity.Id, Arg.Any<CancellationToken>()).Returns(operatorEntity);
+
+        var result = await handler.Handle(new GoogleLoginCommand("id-token"), CancellationToken.None);
+
+        result.User.OperatorRegistrationStatus.Should().Be(OperatorRegistrationStatus.SUSPENDED.ToString());
+        _accessTokenService.Received(1).IssueToken(user, OperatorRegistrationStatus.SUSPENDED);
+    }
+
+    [Theory]
+    [InlineData(UserRole.OPERATOR_STAFF)]
+    [InlineData(UserRole.DRIVER)]
+    [InlineData(UserRole.ASSISTANT)]
+    public async Task Handle_WhenSuspendedNonAdminUsesGoogle_ThrowsOperatorSuspended(UserRole role)
+    {
+        var operatorEntity = MakeSuspendedOperator();
+        var user = MakeOperatorUser("staff@example.com", role, operatorEntity.Id);
+        var googleUser = MakeGoogleUser("google-sub-staff", user.Email);
+        var handler = CreateHandler();
+        _googleIdTokenVerifier.VerifyAsync("id-token", Arg.Any<CancellationToken>()).Returns(googleUser);
+        _oauthIdentities.GetUserByProviderSubjectAsync(
+                OAuthProvider.GOOGLE,
+                googleUser.Subject,
+                Arg.Any<CancellationToken>())
+            .Returns(user);
+        _users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        _operators.GetByIdAsync(operatorEntity.Id, Arg.Any<CancellationToken>()).Returns(operatorEntity);
+
+        var act = () => handler.Handle(new GoogleLoginCommand("id-token"), CancellationToken.None);
+
+        await act.Should().ThrowAsync<ForbiddenException>()
+            .Where(exception => exception.ErrorCode == "OPERATOR_SUSPENDED");
+        _accessTokenService.DidNotReceive().IssueToken(
+            Arg.Any<User>(),
+            Arg.Any<OperatorRegistrationStatus?>());
+        await _refreshTokens.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
+    }
+
+    [Fact]
     public async Task Handle_WhenGoogleTokenIsInvalid_ThrowsUnauthorizedWithGoogleCode()
     {
         var handler = CreateHandler();
@@ -281,7 +335,8 @@ public sealed class GoogleLoginCommandHandlerTests
             new RefreshTokenFactory(_clock),
             _loginLockoutCounter,
             _outbox,
-            _clock);
+            _clock,
+            _operators);
     }
 
     private static GoogleIdTokenVerificationResult MakeGoogleUser(
@@ -306,5 +361,27 @@ public sealed class GoogleLoginCommandHandlerTests
 
         user.VerifyEmail();
         return user;
+    }
+
+    private static User MakeOperatorUser(string email, UserRole role, Guid operatorId)
+    {
+        var user = MakeActivePassenger(email);
+        typeof(User).GetProperty(nameof(User.Role))!.SetValue(user, role);
+        typeof(User).GetProperty(nameof(User.OperatorId))!.SetValue(user, operatorId);
+        return user;
+    }
+
+    private static Operator MakeSuspendedOperator()
+    {
+        var operatorEntity = Operator.CreateApproved(
+            "Suspended Operator",
+            $"BRN-{Guid.NewGuid():N}",
+            $"TAX-{Guid.NewGuid():N}",
+            $"operator-{Guid.NewGuid():N}@example.com",
+            "+84901234567",
+            Guid.NewGuid(),
+            FrozenNow.AddDays(-10));
+        operatorEntity.Suspend("Policy violation", FrozenNow.AddDays(-1));
+        return operatorEntity;
     }
 }
