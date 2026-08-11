@@ -32,6 +32,7 @@ public sealed class TripGenerationService
     private readonly ITripEtaPlanner? tripEtaPlanner;
     private readonly IIntegrationEventOutbox? outbox;
     private readonly ISubscriptionQuotaClient? quotaClient;
+    private readonly IResourceAvailabilityService? resourceAvailability;
     private readonly List<(Guid OperatorId, Guid AllocationId)> persistedQuotaAllocations = [];
 
     public TripGenerationService(
@@ -50,7 +51,8 @@ public sealed class TripGenerationService
         ISubscriptionQuotaClient? quotaClient = null,
         IStationRepository? stationRepository = null,
         IStopRepository? stopRepository = null,
-        ITripEtaPlanner? tripEtaPlanner = null)
+        ITripEtaPlanner? tripEtaPlanner = null,
+        IResourceAvailabilityService? resourceAvailability = null)
     {
         this.clock = clock;
         this.driverScheduleRepository = driverScheduleRepository;
@@ -66,6 +68,7 @@ public sealed class TripGenerationService
         this.stationRepository = stationRepository;
         this.stopRepository = stopRepository;
         this.tripEtaPlanner = tripEtaPlanner;
+        this.resourceAvailability = resourceAvailability;
     }
 
     public async Task<GenerateTripsForScheduleResult> GenerateAsync(
@@ -236,6 +239,28 @@ public sealed class TripGenerationService
 
                 try
                 {
+                    if (resourceAvailability is not null)
+                    {
+                        try
+                        {
+                            await resourceAvailability.ReserveTripAsync(trip, cancellationToken);
+                        }
+                        catch (CodedConflictException exception)
+                            when (exception.ErrorCode is "TRIP_DRIVER_CONFLICT" or "TRIP_VEHICLE_CONFLICT")
+                        {
+                            await ReleaseQuotaAllocationAsync(schedule.OperatorId, quotaAllocationId, cancellationToken);
+                            skippedCount += await LogSkipAsync(
+                                schedule,
+                                serviceDate,
+                                exception.ErrorCode == "TRIP_VEHICLE_CONFLICT"
+                                    ? TripGenerationSkipReason.VEHICLE_CONFLICT
+                                    : TripGenerationSkipReason.DRIVER_CONFLICT,
+                                exception.Message,
+                                cancellationToken);
+                            continue;
+                        }
+                    }
+
                     await tripRepository.AddAsync(trip, cancellationToken);
                     existingScheduleDates.Add(serviceDate);
                     existingDriverDepartures.Add((schedule.DriverUserId, departureDateTime));

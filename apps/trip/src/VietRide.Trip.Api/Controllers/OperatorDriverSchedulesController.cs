@@ -7,7 +7,9 @@ using VietRide.Shared.Web.Idempotency;
 using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.DriverSchedules;
+using VietRide.Trip.Application.Features.ResourceAvailability;
 
 namespace VietRide.Trip.Api.Controllers;
 
@@ -66,6 +68,31 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
             cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    [HttpPost("availability-check")]
+    [SkipIdempotency("Availability preview is read-only and never creates a reservation.")]
+    [ProducesResponseType(typeof(ApiResponse<ResourceAvailabilityResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ResourceAvailabilityResult>> CheckAvailability(
+        [FromBody] CheckDriverScheduleAvailabilityRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage driver schedules.");
+        return Ok(await sender.Send(
+            new CheckDriverScheduleAvailabilityQuery(
+                operatorId,
+                request.RouteId,
+                request.VehicleId,
+                request.DriverUserId,
+                request.AssistantUserId,
+                request.DayOfWeek,
+                request.DepartureTime,
+                request.ValidFrom,
+                request.ValidUntil),
+            cancellationToken));
     }
 
     [HttpPatch("{id:guid}/activate")]
