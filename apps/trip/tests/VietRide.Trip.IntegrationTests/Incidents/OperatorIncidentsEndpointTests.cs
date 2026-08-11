@@ -1,11 +1,15 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
+using System.Net.Http.Json;
+using System.Reflection;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using MediatR;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,7 +17,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Trip.Api.Controllers;
+using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.Incidents.OperatorIncidents;
+using VietRide.Trip.Application.Features.Incidents.ResolveIncident;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.IntegrationTests.Incidents;
@@ -71,6 +78,71 @@ public sealed class OperatorIncidentsEndpointTests
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         document.RootElement.GetProperty("error").GetProperty("code").GetString()
             .Should().Be("INCIDENT_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task Resolve_AdminWithIdempotencyKey_DispatchesActorAndReturnsResolvedIncident()
+    {
+        var operatorId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var incident = CreateDto() with
+        {
+            Status = "RESOLVED",
+            ResolvedAt = DateTimeOffset.Parse("2026-08-11T06:00:00Z"),
+            ResolvedByUserId = actorId,
+            ResolutionNote = "Detoured safely",
+        };
+        var mediator = new StubMediator(_ => incident);
+        var controller = new OperatorIncidentsController(mediator)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity([
+                        new Claim("sub", actorId.ToString()),
+                        new Claim(ClaimTypes.Role, "OPERATOR_ADMIN"),
+                        new Claim("operatorId", operatorId.ToString()),
+                    ], "TestAuth")),
+                },
+            },
+        };
+
+        var response = await controller.ResolveAsync(
+            incident.IncidentId,
+            new("Detoured safely"),
+            CancellationToken.None);
+
+        response.Result.Should().BeOfType<OkObjectResult>();
+        var command = mediator.LastRequest.Should().BeOfType<ResolveIncidentCommand>().Subject;
+        command.OperatorId.Should().Be(operatorId);
+        command.ActorUserId.Should().Be(actorId);
+        command.IncidentId.Should().Be(incident.IncidentId);
+        command.ResolutionNote.Should().Be("Detoured safely");
+        typeof(OperatorIncidentsController)
+            .GetMethod(nameof(OperatorIncidentsController.ResolveAsync), BindingFlags.Public | BindingFlags.Instance)!
+            .GetCustomAttribute<RequireIdempotencyKeyAttribute>()
+            .Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Resolve_Staff_IsForbiddenBeforeDispatch()
+    {
+        var mediator = new StubMediator(_ => throw new InvalidOperationException("Must not dispatch."));
+        using var factory = new EndpointFactory(mediator);
+        using var client = factory.CreateClient();
+        using var request = CreateRequest(
+            HttpMethod.Patch,
+            $"/v1/operator/incidents/{Guid.NewGuid():D}/resolve",
+            "OPERATOR_STAFF",
+            Guid.NewGuid());
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("D"));
+        request.Content = JsonContent.Create(new { resolutionNote = "Resolved" });
+
+        using var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        mediator.LastRequest.Should().BeNull();
     }
 
     [Fact]
@@ -157,14 +229,21 @@ public sealed class OperatorIncidentsEndpointTests
                     new OperatorIncidentStationDto(Guid.NewGuid(), "Da Lat"))),
             new OperatorIncidentReporterDto(Guid.NewGuid(), "Driver A", "DRIVER"));
 
-    private static HttpRequestMessage CreateRequest(HttpMethod method, string path, string role, Guid operatorId)
+    private static HttpRequestMessage CreateRequest(
+        HttpMethod method,
+        string path,
+        string role,
+        Guid operatorId,
+        Guid? actorUserId = null)
     {
         var request = new HttpRequestMessage(method, path);
-        request.Headers.TryAddWithoutValidation("X-Internal-Auth", "Bearer " + CreateJwt(role, operatorId));
+        request.Headers.TryAddWithoutValidation(
+            "X-Internal-Auth",
+            "Bearer " + CreateJwt(role, operatorId, actorUserId));
         return request;
     }
 
-    private static string CreateJwt(string role, Guid operatorId)
+    private static string CreateJwt(string role, Guid operatorId, Guid? actorUserId = null)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TestSecret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -172,7 +251,7 @@ public sealed class OperatorIncidentsEndpointTests
             "vietride-gateway",
             "vietride-internal",
             [
-                new Claim("sub", Guid.NewGuid().ToString()),
+                new Claim("sub", (actorUserId ?? Guid.NewGuid()).ToString()),
                 new Claim(ClaimTypes.Role, role),
                 new Claim("operatorId", operatorId.ToString()),
             ],

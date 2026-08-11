@@ -24,4 +24,10 @@ public interface IIncidentRepository : IRepository<Incident, Guid>
         Guid incidentId,
         CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Operator Incident detail is not implemented by this repository.");
+
+    Task<Incident?> AcquireOperatorIncidentAsync(
+        Guid operatorId,
+        Guid incidentId,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Operator Incident locking is not implemented by this repository.");
 }
