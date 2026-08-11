@@ -1,9 +1,12 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.Security;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
+using VietRide.Parcel.Application.Features.Parcels.Quotes;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Parcel.Application.Features.Parcels.AvailableTrips;
@@ -13,19 +16,21 @@ public sealed class AvailableTripsQueryHandler
 {
     private readonly ITripServiceClient _tripClient;
     private readonly IIdentityServiceClient _identityClient;
-    private readonly IParcelRouteFareRepository _fareRepository;
-    private readonly IParcelPricingPolicyRepository? _policyRepository;
+    private readonly ParcelQuoteService _quoteService;
+    private readonly IClock _clock;
 
     public AvailableTripsQueryHandler(
         ITripServiceClient tripClient,
         IIdentityServiceClient identityClient,
         IParcelRouteFareRepository fareRepository,
-        IParcelPricingPolicyRepository? policyRepository = null)
+        IParcelPricingPolicyRepository? policyRepository = null,
+        IParcelQuoteTokenService? quoteTokenService = null,
+        IClock? clock = null)
     {
         _tripClient = tripClient;
         _identityClient = identityClient;
-        _fareRepository = fareRepository;
-        _policyRepository = policyRepository;
+        _quoteService = new ParcelQuoteService(fareRepository, policyRepository, quoteTokenService);
+        _clock = clock ?? new SystemClock();
     }
 
     public async Task<PagedResult<AvailableTripResponse>> Handle(
@@ -37,14 +42,8 @@ public sealed class AvailableTripsQueryHandler
         if (request.PageSize is < 1 or > 100)
             throw new CodedValidationException("VALIDATION_ERROR", "PageSize must be between 1 and 100.");
 
-        var now = DateTimeOffset.UtcNow;
-        var dimFactor = _policyRepository is null
-            ? ParcelCargoCalculator.DefaultDimWeightFactor
-            : await _policyRepository.GetSystemDecimalAsync(
-                "DIM_WEIGHT_FACTOR",
-                ParcelCargoCalculator.DefaultDimWeightFactor,
-                now,
-                cancellationToken);
+        var now = _clock.UtcNow;
+        var dimFactor = await _quoteService.GetDimWeightFactorAsync(now, cancellationToken);
         var estimate = ParcelCargoCalculator.Calculate(
             request.LengthCm,
             request.WidthCm,
@@ -53,26 +52,30 @@ public sealed class AvailableTripsQueryHandler
             dimFactor);
         var sizeCategory = ParcelCargoCalculator.DeriveSizeCategory(estimate.ChargeableWeightKg);
 
-        var searchOutcome = _policyRepository is null
-            ? await _tripClient.SearchAvailableParcelTripsAsync(
-                request.OriginStationId,
-                request.DestinationStationId,
-                request.DepartureDate,
-                estimate.WeightKg,
-                sizeCategory,
+        var eligibleRouteIds = await _quoteService.ListEligibleRouteIdsAsync(
+            sizeCategory,
+            now,
+            cancellationToken);
+        if (eligibleRouteIds.Count == 0)
+        {
+            return PagedResult<AvailableTripResponse>.Create(
+                [],
                 request.Page,
                 request.PageSize,
-                cancellationToken)
-            : await _tripClient.SearchAvailableParcelTripsAsync(
-                request.OriginStationId,
-                request.DestinationStationId,
-                request.DepartureDate,
-                estimate.WeightKg,
-                estimate.VolumeM3,
-                sizeCategory,
-                request.Page,
-                request.PageSize,
-                cancellationToken);
+                0);
+        }
+
+        var searchOutcome = await _tripClient.SearchAvailableParcelTripsForRoutesAsync(
+            request.OriginStationId,
+            request.DestinationStationId,
+            request.DepartureDate,
+            estimate.WeightKg,
+            estimate.VolumeM3,
+            sizeCategory,
+            eligibleRouteIds,
+            request.Page,
+            request.PageSize,
+            cancellationToken);
 
         if (searchOutcome.Kind == ParcelTripSearchOutcomeKind.TransportError)
         {
@@ -81,13 +84,20 @@ public sealed class AvailableTripsQueryHandler
                 searchOutcome.ErrorMessage ?? "Trip search service returned transport error.");
         }
 
+        var trips = searchOutcome.Trips ?? [];
+        var fares = await _quoteService.LoadActiveFaresAsync(
+            trips.Select(trip => trip.RouteId).Distinct().ToArray(),
+            sizeCategory,
+            now,
+            cancellationToken);
         var responseItems = new List<AvailableTripResponse>();
-        foreach (var trip in searchOutcome.Trips ?? [])
+        foreach (var trip in trips)
         {
-            var fare = await _fareRepository.FindByCompositeAsync(trip.RouteId, sizeCategory, cancellationToken);
-            if (fare is null)
+            if (!fares.TryGetValue(trip.RouteId, out var fare))
             {
-                continue;
+                throw new ParcelDependencyUnavailableException(
+                    "TRIP_SEARCH_UNAVAILABLE",
+                    "Trip search returned a route outside the fare-eligible filter.");
             }
 
             var operatorName = trip.OperatorName;
@@ -108,28 +118,16 @@ public sealed class AvailableTripsQueryHandler
                 }
             }
 
-            var totalPrice = _policyRepository is null
-                ? fare.PriceVnd
-                : ParcelCargoCalculator.CalculateTotalPrice(
-                    estimate.ChargeableWeightKg,
-                    fare.PricePerChargeableKgVnd.Amount > 0 ? fare.PricePerChargeableKgVnd : fare.PriceVnd,
-                    fare.MinimumPriceVnd);
-            var defaultDepositPercent = _policyRepository is null
-                ? ParcelCargoCalculator.DefaultDepositPercent
-                : await _policyRepository.GetSystemDecimalAsync(
-                    "DEFAULT_DEPOSIT_PERCENT",
-                    ParcelCargoCalculator.DefaultDepositPercent,
-                    now,
-                    cancellationToken);
-            var depositPercent = _policyRepository is null
-                ? defaultDepositPercent
-                : await _policyRepository.GetDepositPercentAsync(
-                    trip.OperatorId,
-                    trip.RouteId,
-                    defaultDepositPercent,
-                    now,
-                    cancellationToken);
-            var depositAmount = ParcelCargoCalculator.CalculatePercent(totalPrice, depositPercent);
+            var quote = _quoteService.Calculate(estimate, fare, 0, dimFactor);
+            var issuedQuote = _quoteService.IssueToken(
+                quote,
+                request.SenderUserId,
+                trip.TripId,
+                trip.RouteId,
+                trip.OperatorId,
+                trip.OriginStation.Id,
+                trip.DestinationStation.Id,
+                now);
 
             responseItems.Add(new AvailableTripResponse(
                 trip.TripId,
@@ -141,9 +139,14 @@ public sealed class AvailableTripsQueryHandler
                 trip.DestinationStation,
                 trip.DepartureDateTime,
                 trip.EstimatedArrivalTime,
-                totalPrice.Amount,
-                depositPercent,
-                depositAmount.Amount)
+                quote.EstimatedTotalPriceVnd,
+                quote.DepositPercent,
+                quote.EstimatedDepositVnd,
+                issuedQuote?.Token,
+                issuedQuote?.ExpiresAt,
+                quote.SizeCategory.ToString(),
+                quote.EstimatedGrossPriceVnd,
+                quote.EstimatedDiscountVnd)
             {
                 AvailableCargoWeightKg = trip.AvailableCargoWeightKg,
                 AvailableCargoVolumeM3 = trip.AvailableCargoVolumeM3,

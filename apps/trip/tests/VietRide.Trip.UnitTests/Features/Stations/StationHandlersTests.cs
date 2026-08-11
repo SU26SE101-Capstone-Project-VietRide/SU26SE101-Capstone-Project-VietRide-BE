@@ -63,6 +63,66 @@ public sealed class StationHandlersTests
     }
 
     [Fact]
+    public async Task SearchStations_RootScope_ReturnsLegacyRootAndActiveLeafStations()
+    {
+        var root = Location.Create("79", "Ho Chi Minh City", Location.MunicipalityType, 1);
+        var activeLeaf = Location.Create("26734", "Thu Duc", Location.WardType, root.Id, 1);
+        var inactiveLeaf = Location.Create("26735", "Inactive", Location.WardType, root.Id, 2);
+        inactiveLeaf.Deactivate();
+        var rootStation = Station.Create("Legacy root", "legacy-root", "Ho Chi Minh City", "Legacy", locationId: root.Id);
+        var leafStation = Station.Create("Leaf station", "leaf-station", "Ho Chi Minh City", "Thu Duc", locationId: activeLeaf.Id);
+        var inactiveLeafStation = Station.Create("Inactive leaf station", "inactive-leaf", "Ho Chi Minh City", "Inactive", locationId: inactiveLeaf.Id);
+        var handler = new SearchStationsQueryHandler(
+            new FakeStationRepository([rootStation, leafStation, inactiveLeafStation]),
+            TestLocationRepository.From(root, activeLeaf, inactiveLeaf));
+
+        var result = await handler.Handle(
+            new SearchStationsQuery(null, null, null, null, root.Code),
+            CancellationToken.None);
+
+        result.Select(station => station.Id).Should().BeEquivalentTo([rootStation.Id, leafStation.Id]);
+    }
+
+    [Fact]
+    public async Task SearchStations_LeafScope_IsExact()
+    {
+        var root = Location.Create("79", "Ho Chi Minh City", Location.MunicipalityType, 1);
+        var selectedLeaf = Location.Create("26734", "Thu Duc", Location.WardType, root.Id, 1);
+        var otherLeaf = Location.Create("26735", "Other", Location.WardType, root.Id, 2);
+        var selected = Station.Create("Selected", "selected", "Ho Chi Minh City", "Selected", locationId: selectedLeaf.Id);
+        var other = Station.Create("Other", "other", "Ho Chi Minh City", "Other", locationId: otherLeaf.Id);
+        var handler = new SearchStationsQueryHandler(
+            new FakeStationRepository([selected, other]),
+            TestLocationRepository.From(root, selectedLeaf, otherLeaf));
+
+        var result = await handler.Handle(
+            new SearchStationsQuery(null, null, null, null, selectedLeaf.Code),
+            CancellationToken.None);
+
+        result.Should().ContainSingle().Which.Id.Should().Be(selected.Id);
+    }
+
+    [Fact]
+    public async Task SearchStations_UnknownOrInactiveScope_ThrowsValidationError()
+    {
+        var locations = TestLocationRepository.Create();
+        locations.Leaf.Deactivate();
+        var handler = new SearchStationsQueryHandler(new FakeStationRepository([]), locations);
+
+        var inactive = () => handler.Handle(
+            new SearchStationsQuery(null, null, null, null, locations.Leaf.Code),
+            CancellationToken.None);
+        var unknown = () => handler.Handle(
+            new SearchStationsQuery(null, null, null, null, "99999"),
+            CancellationToken.None);
+
+        (await inactive.Should().ThrowAsync<ValidationException>()).Which.Errors
+            .Should().Contain(error => error.Field == nameof(SearchStationsQuery.LocationScopeCode));
+        (await unknown.Should().ThrowAsync<ValidationException>()).Which.Errors
+            .Should().Contain(error => error.Field == nameof(SearchStationsQuery.LocationScopeCode));
+    }
+
+    [Fact]
     public async Task GetStationById_ReturnsCanonicalRawDto_WhenStationExists()
     {
         var station = Station.Create("Bến xe Miền Tây", "ben-xe-mien-tay", "Ho Chi Minh City", "Ho Chi Minh", latitude: 10.7212345m, longitude: 106.6267890m);
@@ -151,6 +211,25 @@ public sealed class StationHandlersTests
             CancellationToken.None);
 
         result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SearchStations_RejectsConflictingOrMalformedLocationScope()
+    {
+        var behavior = new ValidationBehavior<SearchStationsQuery, IReadOnlyList<StationSearchResult>>(
+            [new SearchStationsQueryValidator()]);
+
+        var conflicting = () => behavior.Handle(
+            new SearchStationsQuery(null, null, null, Guid.NewGuid(), "79"),
+            () => Task.FromResult<IReadOnlyList<StationSearchResult>>([]),
+            CancellationToken.None);
+        var malformed = () => behavior.Handle(
+            new SearchStationsQuery(null, null, null, null, "7A"),
+            () => Task.FromResult<IReadOnlyList<StationSearchResult>>([]),
+            CancellationToken.None);
+
+        await conflicting.Should().ThrowAsync<ValidationException>();
+        await malformed.Should().ThrowAsync<ValidationException>();
     }
 
     [Fact]

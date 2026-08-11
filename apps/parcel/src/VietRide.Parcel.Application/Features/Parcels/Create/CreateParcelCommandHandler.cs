@@ -1,8 +1,10 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.Security;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
+using VietRide.Parcel.Application.Features.Parcels.Quotes;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Parcel.Domain.Helpers;
 using VietRide.Shared.Application.Exceptions;
@@ -22,8 +24,7 @@ public sealed class CreateParcelCommandHandler
     private readonly ITripServiceClient _tripClient;
     private readonly IPaymentServiceClient _paymentClient;
     private readonly IParcelRepository _parcelRepository;
-    private readonly IParcelRouteFareRepository _fareRepository;
-    private readonly IParcelPricingPolicyRepository? _policyRepository;
+    private readonly ParcelQuoteService _quoteService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
@@ -42,15 +43,15 @@ public sealed class CreateParcelCommandHandler
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository,
         ILogger<CreateParcelCommandHandler> logger,
-        IClock clock)
+        IClock clock,
+        IParcelQuoteTokenService? quoteTokenService = null)
     {
         _identityClient = identityClient;
         _bookingClient = bookingClient;
         _tripClient = tripClient;
         _paymentClient = paymentClient;
         _parcelRepository = parcelRepository;
-        _fareRepository = fareRepository;
-        _policyRepository = policyRepository;
+        _quoteService = new ParcelQuoteService(fareRepository, policyRepository, quoteTokenService);
         _unitOfWork = unitOfWork;
         _outbox = outbox;
         _statsRepository = statsRepository;
@@ -81,7 +82,8 @@ public sealed class CreateParcelCommandHandler
             outbox,
             statsRepository,
             logger,
-            new SystemClock())
+            new SystemClock(),
+            null)
     {
     }
 
@@ -111,6 +113,35 @@ public sealed class CreateParcelCommandHandler
             throw new ForbiddenException("USER_NOT_PASSENGER", "Only passengers can create parcels.");
         if (user.Status != "ACTIVE")
             throw new ForbiddenException("USER_INACTIVE", "User account is not active.");
+
+        var normalizedRecipientEmail = string.IsNullOrWhiteSpace(command.RecipientEmail)
+            ? null
+            : command.RecipientEmail.Trim().ToLowerInvariant();
+        Guid? recipientUserId = null;
+        if (normalizedRecipientEmail is not null)
+        {
+            var recipientOutcome = await _identityClient.FindUserByEmailAsync(
+                normalizedRecipientEmail,
+                cancellationToken);
+            if (recipientOutcome is null || recipientOutcome.Kind == RecipientUserLookupOutcomeKind.TransportError)
+            {
+                throw new ParcelDependencyUnavailableException(
+                    "UPSTREAM_UNAVAILABLE",
+                    recipientOutcome?.ErrorMessage ?? "Identity recipient lookup returned an invalid response.");
+            }
+
+            if (recipientOutcome.Kind == RecipientUserLookupOutcomeKind.Success)
+            {
+                if (!recipientOutcome.UserId.HasValue || recipientOutcome.UserId.Value == Guid.Empty)
+                {
+                    throw new ParcelDependencyUnavailableException(
+                        "UPSTREAM_UNAVAILABLE",
+                        "Identity recipient lookup returned an invalid user id.");
+                }
+
+                recipientUserId = recipientOutcome.UserId.Value;
+            }
+        }
 
         if (command.BookingId.HasValue)
         {
@@ -207,42 +238,60 @@ public sealed class CreateParcelCommandHandler
         var recipientPhone = PhoneNumber.Normalize(command.RecipientPhone);
 
         var now = _clock.UtcNow;
-        var dimFactor = _policyRepository is null
-            ? ParcelCargoCalculator.DefaultDimWeightFactor
-            : await _policyRepository.GetSystemDecimalAsync(
-                "DIM_WEIGHT_FACTOR",
-                ParcelCargoCalculator.DefaultDimWeightFactor,
+        if (!string.IsNullOrWhiteSpace(command.QuoteToken))
+        {
+            if (!Enum.TryParse<ParcelSizeCategory>(command.SizeCategory, ignoreCase: true, out var requestedSizeCategory)
+                || !Enum.IsDefined(requestedSizeCategory))
+            {
+                throw new CodedValidationException(
+                    "INVALID_SIZE_CATEGORY",
+                    $"'{command.SizeCategory}' is not a valid ParcelSizeCategory.");
+            }
+
+            await _quoteService.ValidateTokenAsync(
+                command.QuoteToken,
+                new ParcelQuoteTokenExpectation(
+                    command.SenderUserId,
+                    command.TripId,
+                    trip.RouteId,
+                    trip.OperatorId,
+                    trip.OriginStation.Id,
+                    trip.DestinationStation.Id,
+                    command.LengthCm,
+                    command.WidthCm,
+                    command.HeightCm,
+                    command.EstimatedWeightKg,
+                    requestedSizeCategory),
                 now,
                 cancellationToken);
+        }
+
+        var dimFactor = await _quoteService.GetDimWeightFactorAsync(now, cancellationToken);
         var cargoEstimate = ParcelCargoCalculator.Calculate(
             command.LengthCm,
             command.WidthCm,
             command.HeightCm,
             command.EstimatedWeightKg,
             dimFactor);
-        var sizeCategory = _policyRepository is null
-            && Enum.TryParse<ParcelSizeCategory>(command.SizeCategory, ignoreCase: true, out var legacySizeCategory)
-                ? legacySizeCategory
-                : ParcelCargoCalculator.DeriveSizeCategory(cargoEstimate.ChargeableWeightKg);
+        var sizeCategory = ParcelCargoCalculator.DeriveSizeCategory(cargoEstimate.ChargeableWeightKg);
         var deadlines = ParcelCargoCalculator.CalculateSettlementDeadlines(trip.DepartureDateTime);
         if (now >= deadlines.LatestCheckInAt)
             throw new CodedConflictException(
                 "PARCEL_CHECK_IN_CLOSED",
                 "The trip no longer has enough time for parcel check-in and final settlement.");
 
-        var fare = await _fareRepository.FindByCompositeAsync(trip.RouteId, sizeCategory, cancellationToken);
+        var fare = await _quoteService.FindActiveFareAsync(
+            trip.RouteId,
+            sizeCategory,
+            now,
+            cancellationToken);
         if (fare is null)
             throw new CodedValidationException(
                 "FARE_NOT_CONFIGURED",
                 $"No fare configured for route '{trip.RouteId}' and size category '{sizeCategory}'.");
 
-        var estimatedGrossPrice = _policyRepository is null
-            ? fare.PriceVnd
-            : ParcelCargoCalculator.CalculateTotalPrice(
-                cargoEstimate.ChargeableWeightKg,
-                fare.PricePerChargeableKgVnd.Amount > 0 ? fare.PricePerChargeableKgVnd : fare.PriceVnd,
-                fare.MinimumPriceVnd);
-        var depositPercent = ParcelCargoCalculator.DefaultDepositPercent;
+        var baseQuote = _quoteService.Calculate(cargoEstimate, fare, 0, dimFactor);
+        var estimatedGrossPrice = Money.FromRaw(baseQuote.EstimatedGrossPriceVnd);
         var discountAmount = Money.Zero;
 
         if (!string.IsNullOrWhiteSpace(command.VoucherCode))
@@ -269,12 +318,12 @@ public sealed class CreateParcelCommandHandler
             discountAmount = Money.FromRaw(voucherOutcome.DiscountAmount);
         }
 
-        var estimatedTotalPrice = ParcelCargoCalculator.CalculateDiscountedTotal(
-            estimatedGrossPrice,
-            discountAmount);
-        var depositRequired = ParcelCargoCalculator.CalculatePercent(
-            estimatedTotalPrice,
-            depositPercent);
+        var quote = _quoteService.Calculate(cargoEstimate, fare, discountAmount.Amount, dimFactor);
+        estimatedGrossPrice = Money.FromRaw(quote.EstimatedGrossPriceVnd);
+        discountAmount = Money.FromRaw(quote.EstimatedDiscountVnd);
+        var estimatedTotalPrice = Money.FromRaw(quote.EstimatedTotalPriceVnd);
+        var depositPercent = quote.DepositPercent;
+        var depositRequired = Money.FromRaw(quote.EstimatedDepositVnd);
 
         var summaryOutcome = await _tripClient.GetTripSummariesAsync(
             [command.TripId],
@@ -304,10 +353,10 @@ public sealed class CreateParcelCommandHandler
         var parcel = ParcelEntity.CreatePendingPayment(
             parcelCode,
             command.SenderUserId,
-            command.RecipientUserId,
+            recipientUserId,
             command.RecipientName,
             recipientPhone,
-            command.RecipientEmail,
+            normalizedRecipientEmail,
             trip.OperatorId,
             command.TripId,
             command.DropoffStopId,

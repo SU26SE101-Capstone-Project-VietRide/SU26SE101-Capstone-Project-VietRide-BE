@@ -319,6 +319,8 @@ services:
       Notification__BaseUrl: http://notification:3002
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:5173}
       FIREBASE_STORAGE_BUCKET: ${FIREBASE_STORAGE_BUCKET:-}
+      PARCEL_QUOTE_TOKEN_SECRET: ${PARCEL_QUOTE_TOKEN_SECRET:-vietride-local-parcel-quote-secret-change-me}
+      PARCEL_QUOTE_TTL_SECONDS: ${PARCEL_QUOTE_TTL_SECONDS:-600}
       RabbitMq__HostName: rabbitmq
       RabbitMq__Port: '5672'
       RabbitMq__UserName: ${RABBITMQ_USER:-vietride}

@@ -2,6 +2,7 @@ using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
+using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
@@ -59,6 +60,11 @@ public sealed class StartParcelDepositPaymentCommandHandler
         var operationId = Guid.TryParse(command.IdempotencyKey, out var parsedOperationId)
             ? parsedOperationId
             : parcel.Id;
+        var releaseRecovery = new ParcelCargoReleaseRecoveryService(_parcels, _trips);
+        await releaseRecovery.EnsurePendingReleaseCompletedAsync(
+            parcel.Id,
+            now,
+            cancellationToken);
         var reserve = await _trips.ReserveCargoAsync(
             parcel.TripId,
             parcel.Id,
@@ -68,9 +74,10 @@ public sealed class StartParcelDepositPaymentCommandHandler
             cancellationToken);
         EnsureCargoReserved(reserve);
 
-        if (parcel.DepositRequiredVnd.Amount == 0)
+        var retainCargoHold = false;
+        try
         {
-            try
+            if (parcel.DepositRequiredVnd.Amount == 0)
             {
                 if (voucherId.HasValue)
                 {
@@ -90,6 +97,7 @@ public sealed class StartParcelDepositPaymentCommandHandler
 
                 var activated = await _parcels.TryActivateZeroDepositAsync(parcel.Id, now, cancellationToken)
                     ?? throw new CodedConflictException("RACE_LOST", "Parcel status changed during deposit activation.");
+                retainCargoHold = true;
                 return new ParcelDepositPaymentResponse(
                     parcel.Id,
                     activated.Status.ToString(),
@@ -99,82 +107,100 @@ public sealed class StartParcelDepositPaymentCommandHandler
                     null,
                     null);
             }
+
+            var dueAt = Min(
+                now.AddMinutes(ParcelCargoCalculator.DepositPaymentTimeoutMinutes),
+                parcel.LatestCheckInAt.Value);
+            var outcome = await _payments.ChargeParcelPaymentAsync(
+                "PARCEL",
+                parcel.Id,
+                parcel.SenderUserId,
+                parcel.DepositRequiredVnd.Amount,
+                command.PaymentMethod,
+                command.IdempotencyKey,
+                cancellationToken,
+                CreatePaymentContext(parcel),
+                dueAt,
+                command.PaymentReturnMode);
+
+            if (outcome.Kind == ChargeOutcomeKind.InsufficientFunds)
+            {
+                throw new CodedValidationException(
+                    "INSUFFICIENT_FUNDS",
+                    outcome.ErrorMessage ?? "Insufficient wallet balance.");
+            }
+
+            if (outcome.Kind != ChargeOutcomeKind.Success || outcome.Result is null)
+            {
+                if (outcome.ErrorStatusCode == 503
+                    && string.Equals(outcome.ErrorCode, "VNPAY_MOBILE_SDK_DISABLED", StringComparison.Ordinal))
+                {
+                    throw new ParcelPaymentReturnModeException(
+                        503,
+                        "VNPAY_MOBILE_SDK_DISABLED",
+                        outcome.ErrorMessage ?? "VNPay Mobile SDK is disabled.");
+                }
+
+                throw new ParcelDependencyUnavailableException(
+                    "PAYMENT_SERVICE_ERROR",
+                    outcome.ErrorMessage ?? "Payment service unavailable.");
+            }
+
+            var assigned = await _parcels.TryAssignDepositPaymentIdAsync(
+                parcel.Id,
+                outcome.Result.PaymentId,
+                now,
+                cancellationToken);
+            if (!assigned)
+            {
+                retainCargoHold = await _parcels.ShouldRetainDepositCargoHoldAsync(
+                    parcel.Id,
+                    cancellationToken);
+                throw new CodedConflictException("RACE_LOST", "Parcel status changed while starting deposit payment.");
+            }
+
+            retainCargoHold = true;
+            return new ParcelDepositPaymentResponse(
+                parcel.Id,
+                ParcelStatus.PENDING_PAYMENT.ToString(),
+                outcome.Result.PaymentId,
+                parcel.DepositRequiredVnd.Amount,
+                0,
+                outcome.Result.DueAt ?? dueAt,
+                outcome.Result.PaymentRedirectUrl,
+                outcome.Result.PaymentReturnMode,
+                outcome.Result.VnPaySdk);
+        }
+        catch
+        {
+            try
+            {
+                // Compensation must survive an aborted HTTP request. The Trip client has its
+                // own timeout, while the durable operation guarantees later retry on failure.
+                if (!retainCargoHold)
+                {
+                    retainCargoHold = await _parcels.ShouldRetainDepositCargoHoldAsync(
+                        parcel.Id,
+                        CancellationToken.None);
+                }
+
+                if (!retainCargoHold)
+                {
+                    await releaseRecovery.ReleaseOrScheduleAsync(
+                        parcel,
+                        "DEPOSIT_PAYMENT_START_FAILED",
+                        _clock.UtcNow,
+                        CancellationToken.None);
+                }
+            }
             catch
             {
-                await _trips.ReleaseCargoAsync(
-                    parcel.TripId,
-                    parcel.Id,
-                    parcel.EstimatedWeightKg,
-                    parcel.EstimatedVolumeM3,
-                    operationId,
-                    cancellationToken);
-                throw;
-            }
-        }
-
-        var dueAt = Min(
-            now.AddMinutes(ParcelCargoCalculator.DepositPaymentTimeoutMinutes),
-            parcel.LatestCheckInAt.Value);
-        var outcome = await _payments.ChargeParcelPaymentAsync(
-            "PARCEL",
-            parcel.Id,
-            parcel.SenderUserId,
-            parcel.DepositRequiredVnd.Amount,
-            command.PaymentMethod,
-            command.IdempotencyKey,
-            cancellationToken,
-            CreatePaymentContext(parcel),
-            dueAt,
-            command.PaymentReturnMode);
-
-        if (outcome.Kind == ChargeOutcomeKind.InsufficientFunds)
-        {
-            await _trips.ReleaseCargoAsync(
-                parcel.TripId,
-                parcel.Id,
-                parcel.EstimatedWeightKg,
-                parcel.EstimatedVolumeM3,
-                operationId,
-                cancellationToken);
-            throw new CodedValidationException(
-                "INSUFFICIENT_FUNDS",
-                outcome.ErrorMessage ?? "Insufficient wallet balance.");
-        }
-
-        if (outcome.Kind != ChargeOutcomeKind.Success || outcome.Result is null)
-        {
-            if (outcome.ErrorStatusCode == 503
-                && string.Equals(outcome.ErrorCode, "VNPAY_MOBILE_SDK_DISABLED", StringComparison.Ordinal))
-            {
-                throw new ParcelPaymentReturnModeException(
-                    503,
-                    "VNPAY_MOBILE_SDK_DISABLED",
-                    outcome.ErrorMessage ?? "VNPay Mobile SDK is disabled.");
+                // Never replace the original payment/start failure with a compensation error.
+                // A previously claimed RELEASE remains visible to the recovery worker.
             }
 
-            throw new ParcelDependencyUnavailableException(
-                "PAYMENT_SERVICE_ERROR",
-                outcome.ErrorMessage ?? "Payment service unavailable.");
+            throw;
         }
-
-        var assigned = await _parcels.TryAssignDepositPaymentIdAsync(
-            parcel.Id,
-            outcome.Result.PaymentId,
-            now,
-            cancellationToken);
-        if (!assigned)
-            throw new CodedConflictException("RACE_LOST", "Parcel status changed while starting deposit payment.");
-
-        return new ParcelDepositPaymentResponse(
-            parcel.Id,
-            ParcelStatus.PENDING_PAYMENT.ToString(),
-            outcome.Result.PaymentId,
-            parcel.DepositRequiredVnd.Amount,
-            0,
-            outcome.Result.DueAt ?? dueAt,
-            outcome.Result.PaymentRedirectUrl,
-            outcome.Result.PaymentReturnMode,
-            outcome.Result.VnPaySdk);
     }
 
     private async Task<Guid?> ValidateVoucherAsync(

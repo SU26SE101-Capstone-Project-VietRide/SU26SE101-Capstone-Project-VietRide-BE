@@ -33,8 +33,11 @@ public sealed class StationsController : ControllerBase
         [FromQuery] string? city,
         [FromQuery] string? ward,
         [FromQuery] Guid? locationId,
+        [FromQuery] string? locationScopeCode,
         CancellationToken cancellationToken)
     {
-        return Ok(await mediator.Send(new SearchStationsQuery(q, city, ward, locationId), cancellationToken));
+        return Ok(await mediator.Send(
+            new SearchStationsQuery(q, city, ward, locationId, locationScopeCode),
+            cancellationToken));
     }
 }

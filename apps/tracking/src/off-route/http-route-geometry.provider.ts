@@ -38,6 +38,7 @@ const routeGeometryIntermediateStopSchema = z.object({
 const routeGeometryDataSchema = z.object({
   tripId: z.string().uuid(),
   effectiveRouteId: z.string().uuid().optional(),
+  tripStatus: z.string().min(1).optional(),
   points: z.array(routeGeometryPointSchema),
   alertRecipientUserIds: z.array(z.string()).nullish(),
   geometrySource: z.enum(['ROUTE_POLYLINE', 'STOPS_ONLY']).optional(),
@@ -165,6 +166,7 @@ export class HttpRouteGeometryProvider implements DetailedRouteGeometryProvider 
         ...(parsed.data.effectiveRouteId
           ? { effectiveRouteId: parsed.data.effectiveRouteId }
           : {}),
+        ...(parsed.data.tripStatus ? { tripStatus: parsed.data.tripStatus } : {}),
         points,
         ...(parsed.data.geometrySource ? { geometrySource: parsed.data.geometrySource } : {}),
         ...(parsed.data.originStation !== undefined

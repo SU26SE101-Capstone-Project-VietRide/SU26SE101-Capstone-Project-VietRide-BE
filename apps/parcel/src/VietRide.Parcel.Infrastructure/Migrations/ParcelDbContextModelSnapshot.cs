@@ -708,7 +708,7 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<Guid>("ActorUserId")
+                    b.Property<Guid?>("ActorUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("actor_user_id");
 
@@ -818,11 +818,11 @@ namespace VietRide.Parcel.Infrastructure.Migrations
 
                             t.HasCheckConstraint("chk_parcel_cargo_recovery_completion", "(status = 'PENDING' AND completed_at IS NULL AND failure_code IS NULL)\r\nOR (status = 'COMPLETED' AND completed_at IS NOT NULL AND failure_code IS NULL)\r\nOR (status = 'FAILED' AND completed_at IS NOT NULL AND failure_code IS NOT NULL)");
 
-                            t.HasCheckConstraint("chk_parcel_cargo_recovery_operation_type", "operation_type IN ('TRANSFER', 'RETURN')");
+                            t.HasCheckConstraint("chk_parcel_cargo_recovery_operation_type", "operation_type IN ('TRANSFER', 'RETURN', 'RELEASE')");
 
                             t.HasCheckConstraint("chk_parcel_cargo_recovery_status", "status IN ('PENDING', 'COMPLETED', 'FAILED')");
 
-                            t.HasCheckConstraint("chk_parcel_cargo_recovery_target", "(operation_type = 'TRANSFER' AND target_trip_id IS NOT NULL AND target_state = 'RESERVED')\r\nOR (operation_type = 'RETURN' AND target_trip_id IS NULL AND target_state IS NULL)");
+                            t.HasCheckConstraint("chk_parcel_cargo_recovery_target", "(operation_type = 'TRANSFER' AND target_trip_id IS NOT NULL AND target_state = 'RESERVED')\nOR (operation_type IN ('RETURN', 'RELEASE') AND target_trip_id IS NULL AND target_state IS NULL)");
                         });
                 });
 
@@ -1313,16 +1313,6 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                     b.ToTable("outbox_events", "vietride_parcel");
                 });
 
-            modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelStatusHistory", b =>
-                {
-                    b.HasOne("VietRide.Parcel.Domain.Entities.Parcel", null)
-                        .WithMany()
-                        .HasForeignKey("ParcelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_parcel_status_history_parcels_parcel_id");
-                });
-
             modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelCargoRecoveryOperation", b =>
                 {
                     b.HasOne("VietRide.Parcel.Domain.Entities.Parcel", null)
@@ -1341,6 +1331,16 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_parcel_delivery_tokens_parcels_parcel_id");
+                });
+
+            modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelStatusHistory", b =>
+                {
+                    b.HasOne("VietRide.Parcel.Domain.Entities.Parcel", null)
+                        .WithMany()
+                        .HasForeignKey("ParcelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_parcel_status_history_parcels_parcel_id");
                 });
 #pragma warning restore 612, 618
         }

@@ -4,4 +4,5 @@ public enum ParcelCargoRecoveryOperationType
 {
     TRANSFER,
     RETURN,
+    RELEASE,
 }

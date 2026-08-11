@@ -53,11 +53,27 @@ public sealed class SearchParcelAvailableTripsQueryHandler
         var pageSize = Math.Clamp(request.PageSize, 1, 100);
         var range = BusinessTime.GetUtcDayRange(request.DepartureDate);
 
-        var routes = await _routeRepository.QueryNoTracking()
+        if (request.EligibleRouteIds is { Count: 0 })
+        {
+            return PagedResult<ParcelTripAvailabilityItemDto>.Create([], page, pageSize, 0);
+        }
+
+        var eligibleRouteIds = request.EligibleRouteIds?
+            .Where(routeId => routeId != Guid.Empty)
+            .Distinct()
+            .ToArray();
+
+        var routeQuery = _routeRepository.QueryNoTracking()
             .Where(route => route.OriginStationId == request.OriginStationId
                 && route.DestinationStationId == request.DestinationStationId
                 && route.DeletedAt == null
-                && route.IsActive)
+                && route.IsActive);
+        if (eligibleRouteIds is not null)
+        {
+            routeQuery = routeQuery.Where(route => eligibleRouteIds.Contains(route.Id));
+        }
+
+        var routes = await routeQuery
             .ToDictionaryAsync(route => route.Id, cancellationToken)
             .ConfigureAwait(false);
 

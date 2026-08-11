@@ -65,6 +65,8 @@ public sealed class ResumeCargoRecoveryOperationCommandHandler
                 => await ExecuteTransferAsync(operation, cancellationToken),
             ParcelCargoRecoveryOperationType.RETURN
                 => await ExecuteReturnAsync(operation, cancellationToken),
+            ParcelCargoRecoveryOperationType.RELEASE
+                => await ExecuteReleaseAsync(operation, cancellationToken),
             _ => throw new InvalidOperationException(
                 $"Unsupported cargo recovery operation '{operation.OperationType}'."),
         };
@@ -163,6 +165,46 @@ public sealed class ResumeCargoRecoveryOperationCommandHandler
                 ? "TRIP_SERVICE_UNAVAILABLE"
                 : "TRIP_CARGO_TRANSFER_CONFLICT",
             outcome.ErrorMessage ?? "Trip cargo release was rejected.");
+    }
+
+    private async Task<OperationalParcelResponse> ExecuteReleaseAsync(
+        ParcelCargoRecoveryOperationSnapshot operation,
+        CancellationToken cancellationToken)
+    {
+        var outcome = await _tripClient.ReleaseCargoAsync(
+            operation.SourceTripId,
+            operation.ParcelId,
+            Positive(operation.WeightKg),
+            Positive(operation.VolumeM3),
+            operation.Id,
+            cancellationToken);
+        if (outcome.Kind != TripCargoOutcomeKind.Success)
+        {
+            throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                outcome.ErrorMessage ?? "Trip cargo release remains pending.");
+        }
+
+        var completed = await _parcelRepository.TryCompleteCargoRecoveryReleaseAsync(
+            operation.Id,
+            _clock.UtcNow,
+            cancellationToken);
+        if (!completed)
+        {
+            var replay = await _parcelRepository.GetCargoRecoveryOperationAsync(
+                operation.Id,
+                cancellationToken);
+            if (replay?.OperationStatus != ParcelCargoRecoveryOperationStatus.COMPLETED)
+            {
+                throw new CodedConflictException(
+                    "TRIP_CARGO_TRANSFER_CONFLICT",
+                    "Parcel cargo release completion lost a concurrent mutation.");
+            }
+
+            operation = replay;
+        }
+
+        return ToCompletedResponse(operation);
     }
 
     private async Task<OperationalParcelResponse> CompleteTransferAsync(
@@ -392,20 +434,29 @@ public sealed class ResumeCargoRecoveryOperationCommandHandler
 
     private static OperationalParcelResponse ToCompletedResponse(
         ParcelCargoRecoveryOperationSnapshot operation)
-        => operation.OperationType == ParcelCargoRecoveryOperationType.TRANSFER
-            ? new OperationalParcelResponse(
+        => operation.OperationType switch
+        {
+            ParcelCargoRecoveryOperationType.TRANSFER => new OperationalParcelResponse(
                 operation.ParcelId,
                 operation.ParcelCode,
                 operation.ParcelStatus.ToString(),
-                TripId: operation.ParcelTripId)
-            : new OperationalParcelResponse(
+                TripId: operation.ParcelTripId),
+            ParcelCargoRecoveryOperationType.RETURN => new OperationalParcelResponse(
                 operation.ParcelId,
                 operation.ParcelCode,
                 operation.ParcelStatus.ToString(),
                 TripId: operation.ParcelTripId,
                 ReturnReason: operation.Reason,
                 ReturnedAt: operation.ReturnedAt,
-                RefundAmount: operation.RefundAmountVnd);
+                RefundAmount: operation.RefundAmountVnd),
+            ParcelCargoRecoveryOperationType.RELEASE => new OperationalParcelResponse(
+                operation.ParcelId,
+                operation.ParcelCode,
+                operation.ParcelStatus.ToString(),
+                TripId: operation.ParcelTripId),
+            _ => throw new InvalidOperationException(
+                $"Unsupported cargo recovery operation '{operation.OperationType}'."),
+        };
 
     private static decimal Positive(decimal value)
         => value > 0 ? value : 0.0001m;

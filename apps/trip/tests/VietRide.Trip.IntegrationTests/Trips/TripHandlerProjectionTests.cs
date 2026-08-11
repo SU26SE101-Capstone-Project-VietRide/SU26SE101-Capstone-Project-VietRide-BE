@@ -68,10 +68,11 @@ public sealed class TripHandlerProjectionTests
         result.DestinationStation.Should().NotBeNull();
         result.DestinationStation!.StationId.Should().Be(destination.Id);
         result.EffectiveRouteId.Should().Be(route.Id);
+        result.TripStatus.Should().Be("SCHEDULED");
     }
 
     [Fact]
-    public async Task TrackingRouteGeometry_AssignedAlternativeUsesItsPolylineStopsAndDestination()
+    public async Task TrackingRouteGeometry_AssignedAlternativeUsesTripStopSnapshotAndEffectiveDestination()
     {
         var operatorId = Guid.NewGuid();
         var origin = Station.Create("Main origin", "main-origin", "HCM", "HCM", latitude: 10.7m, longitude: 106.6m);
@@ -85,13 +86,13 @@ public sealed class TripHandlerProjectionTests
         var alternativeRouteStop = AlternativeRouteStop.Create(alternative.Id, alternativeStop.Id, 1, 45, null);
         var trip = CreateTrip(operatorId, route.Id, DateTimeOffset.UtcNow.AddDays(1));
         trip.ChangeAlternativeRoute(alternative.Id);
-        var staleMainStop = Stop.Create(operatorId, "Stale main stop", 10.5m, 106.2m);
-        var tripStop = TripStop.Create(trip.Id, staleMainStop.Id, 1, trip.DepartureDateTime.AddMinutes(30), true, true, 50m);
+        var assignedSnapshotStop = Stop.Create(operatorId, "Assigned snapshot stop", 10.5m, 106.2m);
+        var tripStop = TripStop.Create(trip.Id, assignedSnapshotStop.Id, 1, trip.DepartureDateTime.AddMinutes(30), true, true, 50m);
         var handler = new GetTripRouteGeometryTrackingHandler(
             new InMemoryTripRepository([trip]),
             new InMemoryRouteRepository([route]),
             new InMemoryTripStopRepository([tripStop]),
-            new InMemoryStopRepository([alternativeStop, staleMainStop]),
+            new InMemoryStopRepository([alternativeStop, assignedSnapshotStop]),
             new InMemoryStationRepository([origin, mainDestination, alternativeDestination]),
             new InMemoryAlternativeRouteRepository([alternative], [alternativeRouteStop]));
 
@@ -99,8 +100,8 @@ public sealed class TripHandlerProjectionTests
 
         result.EffectiveRouteId.Should().Be(alternative.Id);
         result.GeometrySource.Should().Be("ROUTE_POLYLINE");
-        result.IntermediateStops.Should().ContainSingle().Which.StopId.Should().Be(alternativeStop.Id);
-        result.IntermediateStops.Should().NotContain(stop => stop.StopId == staleMainStop.Id);
+        result.IntermediateStops.Should().ContainSingle().Which.StopId.Should().Be(assignedSnapshotStop.Id);
+        result.IntermediateStops.Should().NotContain(stop => stop.StopId == alternativeStop.Id);
         result.DestinationStation!.StationId.Should().Be(alternativeDestination.Id);
     }
 
@@ -129,8 +130,35 @@ public sealed class TripHandlerProjectionTests
         var result = await handler.Handle(new GetTripRouteGeometryTrackingQuery(trip.Id), CancellationToken.None);
 
         result.GeometrySource.Should().Be("STOPS_ONLY");
-        result.Points.Should().Equal(new RouteGeometryPointDto(11.2, 107.2));
+        result.Points.Should().BeEmpty();
+        result.IntermediateStops.Should().BeEmpty();
         result.DestinationStation!.StationId.Should().Be(alternativeDestination.Id);
+    }
+
+    [Fact]
+    public async Task TrackingRouteGeometry_MissingAssignedAlternativeDoesNotFallbackToBaseRoute()
+    {
+        var operatorId = Guid.NewGuid();
+        var origin = Station.Create("Origin", "missing-alt-origin", "HCM", "HCM", latitude: 10.7m, longitude: 106.6m);
+        var destination = Station.Create("Destination", "missing-alt-destination", "Can Tho", "Can Tho", latitude: 10.0m, longitude: 105.7m);
+        var route = Route.Create(operatorId, "Base route", origin.Id, destination.Id, Money.FromRaw(100_000), 100m, 120);
+        route.SetPathGeometry("_p~iF~ps|U_ulLnnqC_mqNvxq`@");
+        var trip = CreateTrip(operatorId, route.Id, DateTimeOffset.UtcNow.AddDays(1));
+        trip.ChangeAlternativeRoute(Guid.NewGuid());
+        var handler = new GetTripRouteGeometryTrackingHandler(
+            new InMemoryTripRepository([trip]),
+            new InMemoryRouteRepository([route]),
+            new InMemoryTripStopRepository([]),
+            new InMemoryStopRepository([]),
+            new InMemoryStationRepository([origin, destination]),
+            new InMemoryAlternativeRouteRepository([], []));
+
+        var act = () => handler.Handle(
+            new GetTripRouteGeometryTrackingQuery(trip.Id),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<CodedNotFoundException>()
+            .Where(exception => exception.ErrorCode == "TRIP_NOT_FOUND");
     }
 
     [Theory]
@@ -337,6 +365,58 @@ public sealed class TripHandlerProjectionTests
 
         result.Items.Should().ContainSingle()
             .Which.TripId.Should().Be(trip.Id);
+    }
+
+    [Fact]
+    public async Task Search_ByProvinceCodes_IncludesLegacyStationsAttachedDirectlyToRoot()
+    {
+        var fixture = SearchFixture.Create();
+        fixture.OriginStation.UpdateProfile(
+            fixture.OriginStation.Name,
+            fixture.OriginStation.Slug,
+            fixture.OriginStation.City,
+            fixture.OriginStation.Ward,
+            fixture.OriginStation.AddressStreet,
+            fixture.OriginProvince.Id,
+            fixture.OriginStation.Latitude,
+            fixture.OriginStation.Longitude,
+            fixture.OriginStation.ContactPhone,
+            fixture.OriginStation.ContactEmail,
+            fixture.OriginStation.OperatingHours,
+            fixture.OriginStation.Facilities,
+            fixture.OriginStation.SupportsShuttle);
+        fixture.DestinationStation.UpdateProfile(
+            fixture.DestinationStation.Name,
+            fixture.DestinationStation.Slug,
+            fixture.DestinationStation.City,
+            fixture.DestinationStation.Ward,
+            fixture.DestinationStation.AddressStreet,
+            fixture.DestinationProvince.Id,
+            fixture.DestinationStation.Latitude,
+            fixture.DestinationStation.Longitude,
+            fixture.DestinationStation.ContactPhone,
+            fixture.DestinationStation.ContactEmail,
+            fixture.DestinationStation.OperatingHours,
+            fixture.DestinationStation.Facilities,
+            fixture.DestinationStation.SupportsShuttle);
+        var trip = CreateTrip(fixture.OperatorId, fixture.Route.Id, DateTimeOffset.Parse("2026-05-18T08:00:00+07:00"));
+        fixture.Trips.Add(trip);
+        fixture.Seats.Add(TripSeat.Create(trip.Id, "A01"));
+
+        var result = await fixture.Handler.Handle(
+            new SearchTripsQuery(
+                null,
+                null,
+                new DateOnly(2026, 5, 18),
+                1,
+                false,
+                fixture.OriginProvince.Code,
+                null,
+                fixture.DestinationProvince.Code,
+                null),
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle().Which.TripId.Should().Be(trip.Id);
     }
 
     [Theory]

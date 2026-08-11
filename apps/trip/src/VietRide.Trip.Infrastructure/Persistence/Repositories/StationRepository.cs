@@ -105,6 +105,24 @@ internal sealed class StationRepository : IStationRepository
         CancellationToken cancellationToken)
         => await BuildSearchActiveByNameQuery(q, city, ward, locationId).ToListAsync(cancellationToken);
 
+    public async Task<IReadOnlyList<Station>> SearchActiveByNameInLocationsAsync(
+        string? q,
+        string? city,
+        string? ward,
+        IReadOnlyCollection<Guid> locationIds,
+        CancellationToken cancellationToken)
+    {
+        var filters = locationIds.Distinct().ToArray();
+        if (filters.Length == 0)
+        {
+            return [];
+        }
+
+        return await BuildSearchActiveByNameQuery(q, city, ward, null)
+            .Where(station => station.LocationId.HasValue && filters.Contains(station.LocationId.Value))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<Station>> GetForMergeAsync(
         Guid primaryStationId,
         Guid duplicateStationId,

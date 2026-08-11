@@ -7,14 +7,21 @@ describe('setupTrackingSwagger', () => {
     jest.restoreAllMocks();
   });
 
-  it('does not expose Swagger when TRACKING_SWAGGER_ENABLED is false', () => {
+  it('keeps the raw document available when TRACKING_SWAGGER_ENABLED is false', () => {
+    const document = {} as OpenAPIObject;
     const createDocument = jest.spyOn(SwaggerModule, 'createDocument');
     const setup = jest.spyOn(SwaggerModule, 'setup');
+    createDocument.mockReturnValue(document);
+    setup.mockImplementation(() => undefined);
+    const app = {} as INestApplication;
 
-    setupTrackingSwagger({} as INestApplication, false);
+    setupTrackingSwagger(app, false);
 
-    expect(createDocument).not.toHaveBeenCalled();
-    expect(setup).not.toHaveBeenCalled();
+    expect(createDocument).toHaveBeenCalledWith(app, expect.any(Object));
+    expect(setup).toHaveBeenCalledWith('docs', app, document, {
+      ui: false,
+      raw: ['json'],
+    });
   });
 
   it('sets up the Tracking Swagger document when enabled', () => {
@@ -26,6 +33,9 @@ describe('setupTrackingSwagger', () => {
     setupTrackingSwagger(app, true);
 
     expect(createDocument).toHaveBeenCalledWith(app, expect.any(Object));
-    expect(setup).toHaveBeenCalledWith('docs', app, document);
+    expect(setup).toHaveBeenCalledWith('docs', app, document, {
+      ui: true,
+      raw: ['json'],
+    });
   });
 });

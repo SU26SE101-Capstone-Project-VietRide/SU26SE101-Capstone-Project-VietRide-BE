@@ -92,6 +92,34 @@ internal sealed class IncidentRepository : IIncidentRepository
         return projection is null ? null : MapReadRow(projection);
     }
 
+    public Task<Incident?> AcquireOperatorIncidentAsync(
+        Guid operatorId,
+        Guid incidentId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_dbContext.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException("A transaction is required to resolve an Incident.");
+        }
+
+        var tracked = _dbContext.Incidents.Local.FirstOrDefault(incident => incident.Id == incidentId);
+        if (tracked is not null)
+        {
+            _dbContext.Entry(tracked).State = EntityState.Detached;
+        }
+
+        return _dbContext.Incidents
+            .FromSqlInterpolated($"""
+                SELECT incident.*
+                FROM vietride_trip.incidents AS incident
+                INNER JOIN vietride_trip.trips AS trip ON trip.id = incident.trip_id
+                WHERE incident.id = {incidentId}
+                  AND trip.operator_id = {operatorId}
+                FOR UPDATE OF incident
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     private IQueryable<OperatorIncidentProjection> BuildOperatorProjectionQuery(Guid operatorId)
         => from incident in _dbContext.Incidents.AsNoTracking()
            join trip in _dbContext.Trips.AsNoTracking() on incident.TripId equals trip.Id

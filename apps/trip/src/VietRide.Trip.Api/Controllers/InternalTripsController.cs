@@ -139,6 +139,31 @@ public sealed class InternalTripsController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("parcel-availability/search")]
+    [SkipIdempotency("Parcel availability search is a read-only query exposed as POST for bounded route filtering.")]
+    [ProducesResponseType(typeof(PagedResult<ParcelTripAvailabilityItemDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<PagedResult<ParcelTripAvailabilityItemDto>>> SearchParcelAvailabilityAsync(
+        [FromBody] SearchParcelAvailabilityRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await mediator.Send(
+            new SearchParcelAvailableTripsQuery(
+                request.OriginStationId,
+                request.DestinationStationId,
+                request.DepartureDate,
+                request.EstimatedWeightKg,
+                request.EstimatedVolumeM3,
+                request.SizeCategory,
+                request.Page,
+                request.PageSize,
+                request.EligibleRouteIds),
+            cancellationToken);
+
+        return Ok(result);
+    }
+
     [HttpGet("{tripId:guid}/tracking-authorization")]
     [ProducesResponseType(typeof(ApiResponse<TrackingAuthorizationResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]

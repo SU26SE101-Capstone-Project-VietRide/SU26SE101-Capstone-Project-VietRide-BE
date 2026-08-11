@@ -32,6 +32,7 @@ const ids = Object.freeze({
   driver: crypto.randomUUID(),
   assistant: crypto.randomUUID(),
   passenger: crypto.randomUUID(),
+  recipient: crypto.randomUUID(),
   originStation: crypto.randomUUID(),
   destinationStation: crypto.randomUUID(),
   vehicleType: crypto.randomUUID(),
@@ -145,6 +146,8 @@ async function mintToken(subject, role, operatorId = null) {
   if (operatorId) {
     claims.operatorId = operatorId;
     claims.operator_id = operatorId;
+    claims.operatorStatus = 'APPROVED';
+    claims.operator_status = 'APPROVED';
   }
   return new SignJWT(claims)
     .setProtectedHeader({
@@ -357,7 +360,8 @@ function seedFixtures() {
       ('${ids.operatorAdmin}','admin-${runTag}@parcel-settlement.test','+84910000002','Operator Admin ${runTag}','OPERATOR_ADMIN','ACTIVE','${ids.operator}'),
       ('${ids.driver}','driver-${runTag}@parcel-settlement.test','+84910000003','Driver ${runTag}','DRIVER','ACTIVE','${ids.operator}'),
       ('${ids.assistant}','assistant-${runTag}@parcel-settlement.test','+84910000004','Assistant ${runTag}','ASSISTANT','ACTIVE','${ids.operator}'),
-      ('${ids.passenger}','passenger-${runTag}@parcel-settlement.test','+84910000005','Passenger ${runTag}','PASSENGER','ACTIVE',NULL);
+      ('${ids.passenger}','passenger-${runTag}@parcel-settlement.test','+84910000005','Passenger ${runTag}','PASSENGER','ACTIVE',NULL),
+      ('${ids.recipient}','recipient-${runTag}@parcel-settlement.test','+84910000006','Recipient ${runTag}','PASSENGER','ACTIVE',NULL);
     INSERT INTO operator_subscriptions
       (id,operator_id,active_plan_id,status,started_at,expires_at,current_vehicles,
        current_routes,current_trips_this_month,last_reset_at)
@@ -367,10 +371,10 @@ function seedFixtures() {
   `);
 
   tripSql(`
-    INSERT INTO stations (id,name,slug,city,province,is_active)
+    INSERT INTO stations (id,name,slug,city,is_active)
     VALUES
-      ('${ids.originStation}','Bến đi ${runTag}','parcel-settlement-origin-${runTag.toLowerCase()}','Hồ Chí Minh','Hồ Chí Minh',true),
-      ('${ids.destinationStation}','Bến đến ${runTag}','parcel-settlement-destination-${runTag.toLowerCase()}','Đà Nẵng','Đà Nẵng',true);
+      ('${ids.originStation}','Bến đi ${runTag}','parcel-settlement-origin-${runTag.toLowerCase()}','Hồ Chí Minh',true),
+      ('${ids.destinationStation}','Bến đến ${runTag}','parcel-settlement-destination-${runTag.toLowerCase()}','Đà Nẵng',true);
     INSERT INTO vehicle_types
       (id,code,display_name,default_seat_count,is_system_defined,is_active)
     VALUES
@@ -396,14 +400,16 @@ function seedFixtures() {
        departure_date_time,estimated_arrival_time,status,source,base_fare,
        max_cargo_weight_kg,max_cargo_volume_m3,estimated_passenger_luggage_kg,
        reserved_parcel_weight_kg,reserved_parcel_volume_m3,
-       total_loaded_weight_kg,total_loaded_volume_m3)
+       total_loaded_weight_kg,total_loaded_volume_m3,seat_layout_snapshot_json)
     VALUES
       ('${ids.trip}','${ids.operator}','${ids.route}','${ids.vehicle}','${ids.driver}','${ids.assistant}',
        '${departureDateTime}','${estimatedArrivalTime}','SCHEDULED','MANUAL',150000,
-       100,10,0,0,0,0,0),
+       100,10,0,0,0,0,0,
+       '{"version":1,"totalSeats":20,"rows":5,"cols":4,"decks":1,"aisles":[],"seats":[]}'),
       ('${ids.fullTrip}','${ids.operator}','${ids.route}','${ids.fullVehicle}','${ids.driver}','${ids.assistant}',
        '${fullTripDepartureTime}','${fullTripArrivalTime}','SCHEDULED','MANUAL',150000,
-       3,1,0,3,0.5,0,0);
+       3,1,0,3,0.5,0,0,
+       '{"version":1,"totalSeats":20,"rows":5,"cols":4,"decks":1,"aisles":[],"seats":[]}');
   `);
 
   parcelSql(`
@@ -416,7 +422,7 @@ function seedFixtures() {
     INSERT INTO operator_deposit_policies
       (id,operator_id,route_id,deposit_percent,effective_from,is_active)
     VALUES
-      ('${ids.depositPolicy}','${ids.operator}','${ids.route}',20,now()-interval '1 hour',true);
+      ('${ids.depositPolicy}','${ids.operator}','${ids.route}',65,now()-interval '1 hour',true);
     INSERT INTO system_configs
       (id,key,decimal_value,version,is_active,effective_from)
     VALUES
@@ -467,6 +473,11 @@ async function waitForParcel(parcelId, token, predicate, message, timeoutMs = 12
 }
 
 async function createParcel(token, tripId, estimatedWeightKg, suffix) {
+  const quoteResponse = await api('GET', searchPath({ weightKg: estimatedWeightKg }), { token });
+  const quoteData = assertEnvelope(quoteResponse, 200);
+  const quote = quoteData.items.find((trip) => trip.tripId === tripId);
+  assert(quote?.quoteToken, `Quote token missing for ${suffix}`);
+  assert(quote.quoteExpiresAt, `Quote expiry missing for ${suffix}`);
   const response = await api('POST', '/v1/parcels', {
     token,
     key: crypto.randomUUID(),
@@ -476,7 +487,7 @@ async function createParcel(token, tripId, estimatedWeightKg, suffix) {
       bookingId: null,
       itemName: `Kiện hàng ${suffix}`,
       description: 'Parcel settlement full-stack E2E',
-      sizeCategory: 'MEDIUM',
+      sizeCategory: quote.estimatedSizeCategory,
       lengthCm: 20,
       widthCm: 20,
       heightCm: 20,
@@ -485,14 +496,21 @@ async function createParcel(token, tripId, estimatedWeightKg, suffix) {
       recipient: {
         fullName: `Người nhận ${suffix}`,
         phoneNumber: '0912345678',
-        email: `recipient-${suffix.toLowerCase()}@parcel-settlement.test`,
+        email: `  RECIPIENT-${runTag}@PARCEL-SETTLEMENT.TEST  `,
       },
       deliveryMethod: 'TERMINAL_PICKUP',
       paymentMethod: 'WALLET',
       voucherCode: null,
+      quoteToken: quote.quoteToken,
     },
   });
-  return assertEnvelope(response, 201);
+  const parcel = assertEnvelope(response, 201);
+  assert(
+    scalar(parcelSql(`SELECT recipient_user_id::text FROM parcels WHERE id='${parcel.parcelId}';`))
+      === ids.recipient,
+    `Recipient logical link missing for ${suffix}`,
+  );
+  return parcel;
 }
 
 async function startDeposit(parcel, passengerToken) {

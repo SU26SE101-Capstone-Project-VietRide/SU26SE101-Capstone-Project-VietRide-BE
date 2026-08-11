@@ -44,7 +44,7 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
 
     // Payment deposit transitions (PENDING_PAYMENT)
     Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositSucceededAsync(
-        Guid parcelId, long depositAmount, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId, Guid paymentId, long depositAmount, DateTimeOffset now, CancellationToken ct);
 
     Task<bool> TryAssignDepositPaymentIdAsync(
         Guid parcelId, Guid paymentId, DateTimeOffset now, CancellationToken ct);
@@ -80,10 +80,13 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
         CancellationToken ct);
 
     Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositFailedAsync(
-        Guid parcelId, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId, Guid paymentId, DateTimeOffset now, CancellationToken ct);
 
     Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositExpiredAsync(
-        Guid parcelId, DateTimeOffset now, CancellationToken ct);
+        Guid parcelId, Guid paymentId, DateTimeOffset now, CancellationToken ct);
+
+    Task<bool> ShouldRetainDepositCargoHoldAsync(Guid parcelId, CancellationToken ct)
+        => Task.FromResult(false);
 
     // Additional payment transitions (PENDING_ADDITIONAL_PAYMENT)
     Task<ParcelPaymentTransitionSnapshot?> TryMarkAdditionalSucceededAsync(
@@ -377,6 +380,15 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
         DateTimeOffset now,
         CancellationToken ct);
 
+    Task<ParcelCargoRecoveryOperationSnapshot?> TryClaimCargoRecoveryReleaseAsync(
+        Guid operationId,
+        Guid parcelId,
+        Guid sourceTripId,
+        string reason,
+        DateTimeOffset now,
+        CancellationToken ct)
+        => Task.FromResult<ParcelCargoRecoveryOperationSnapshot?>(null);
+
     Task<ParcelPaymentTransitionSnapshot?> TryCompleteCargoRecoveryTransferAsync(
         Guid operationId,
         DateTimeOffset now,
@@ -386,6 +398,12 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
         Guid operationId,
         DateTimeOffset now,
         CancellationToken ct);
+
+    Task<bool> TryCompleteCargoRecoveryReleaseAsync(
+        Guid operationId,
+        DateTimeOffset now,
+        CancellationToken ct)
+        => Task.FromResult(false);
 
     Task<bool> TryFailCargoRecoveryOperationAsync(
         Guid operationId,

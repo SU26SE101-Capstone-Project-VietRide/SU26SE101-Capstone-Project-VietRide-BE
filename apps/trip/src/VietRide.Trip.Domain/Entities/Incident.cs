@@ -53,6 +53,27 @@ public sealed class Incident : BaseEntity<Guid>
         };
     }
 
+    public void Resolve(Guid resolvedByUserId, string resolutionNote, DateTimeOffset resolvedAt)
+    {
+        ValidateGuid(resolvedByUserId, nameof(resolvedByUserId));
+        if (ResolvedAt.HasValue)
+        {
+            throw new InvalidOperationException("Incident is already resolved.");
+        }
+
+        var normalizedNote = resolutionNote?.Trim();
+        if (string.IsNullOrEmpty(normalizedNote) || normalizedNote.Length > 1000)
+        {
+            throw new ArgumentException(
+                "Resolution note is required and cannot exceed 1000 characters.",
+                nameof(resolutionNote));
+        }
+
+        ResolvedAt = resolvedAt;
+        ResolvedByUserId = resolvedByUserId;
+        ResolutionNote = normalizedNote;
+    }
+
     private static IReadOnlyCollection<string>? NormalizePhotoUrls(IReadOnlyCollection<string>? photoUrls)
     {
         if (photoUrls is null || photoUrls.Count == 0)

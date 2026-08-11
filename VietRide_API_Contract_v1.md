@@ -2678,8 +2678,7 @@ Auth: assigned `DRIVER` or `ASSISTANT`. Idempotency: required UUID-v4 `Idempoten
 The existing request contains `category=TRAFFIC_JAM|VEHICLE_BREAKDOWN|ACCIDENT|WEATHER|OTHER`,
 optional trimmed `description` up to 500 characters, at most three owned Firebase HTTPS
 `photoUrls`, and optional `latitude`/`longitude` supplied together. The Trip must be
-`IN_PROGRESS`. Response `201` returns the created incident identity/timestamp; reporting remains
-the only Incident mutation in this contract.
+`IN_PROGRESS`. Response `201` returns the created incident identity/timestamp.
 
 #### GET `/v1/operator/incidents`
 
@@ -2734,6 +2733,22 @@ pagination return `422 VALIDATION_ERROR`.
 Auth and DTO are identical to the list endpoint. Missing and cross-tenant Incident IDs both return
 `404 INCIDENT_NOT_FOUND`; malformed/empty UUID returns `422 VALIDATION_ERROR`. This endpoint is
 read-only and does not resolve an Incident or publish an event.
+
+#### PATCH `/v1/operator/incidents/{incidentId}/resolve`
+
+Auth: `OPERATOR_ADMIN`; tenant scope comes only from JWT `operatorId`. A UUID-v4
+`Idempotency-Key` is required. Request body is `{ "resolutionNote": "..." }`; the note is trimmed
+and must contain 1..1000 characters.
+
+The server atomically transitions an open Incident to resolved, setting `resolvedAt` from the
+server clock, `resolvedByUserId` from JWT `sub`, and the trimmed `resolutionNote`. Response `200`
+returns the updated `OperatorIncidentDto`. Replaying the same Idempotency-Key returns the same
+response. Resolving an already resolved Incident with another key returns
+`409 INCIDENT_ALREADY_RESOLVED`; missing and cross-tenant IDs are masked as
+`404 INCIDENT_NOT_FOUND`. Invalid IDs or notes return `422 VALIDATION_ERROR`.
+
+Changing a Route or replacing a Vehicle never auto-resolves an Incident. Resolve does not publish
+an integration event.
 
 ### Driver/Assistant Route-Change Proposals
 
@@ -3265,7 +3280,11 @@ Auth: `PASSENGER`.
 Query: `originStationId`, `destinationStationId`, `departureDate`, `lengthCm`, `widthCm`, `heightCm`, `estimatedWeightKg`; legacy `sizeCategory` is optional and non-authoritative.
 
 Backend calculates `volumeM3`, `dimWeightKg`, and `chargeableWeightKg = max(estimatedWeightKg, dimWeightKg)`.
-Customer response must not expose raw remaining cargo capacity. Trips that cannot accept both estimated volume and estimated weight are filtered out.
+It first resolves the derived size to Routes with an active fare, then asks Trip to apply those
+eligible Route IDs before count and pagination. Ordering is stable by `departureDateTime`, then
+`tripId`; all paging metadata therefore describes only fare-eligible Trips. Customer response must
+not expose raw remaining cargo capacity. Trips that cannot accept both estimated volume and
+estimated weight are filtered out.
 
 Response `200`:
 ```json
@@ -3284,6 +3303,11 @@ Response `200`:
         "destinationStation": { "id": "uuid", "name": "Bến đến" },
         "departureDateTime": "2026-05-18T08:00:00+07:00",
         "estimatedArrivalTime": "2026-05-18T16:00:00+07:00",
+        "quoteToken": "base64url-payload.base64url-signature",
+        "quoteExpiresAt": "2026-05-18T07:10:00+07:00",
+        "estimatedSizeCategory": "MEDIUM",
+        "estimatedGrossPriceVnd": 160000,
+        "estimatedDiscountVnd": 10000,
         "estimatedPriceVnd": 150000,
         "depositPercent": 20,
         "estimatedDepositVnd": 30000
@@ -3300,8 +3324,15 @@ Response `200`:
 }
 ```
 
-`depositPercent` is `20` under settlement policy v2 and is snapshotted on creation. The public item does not serialize `availableCargoWeightKg`,
-`availableCargoVolumeM3`, or the internal `priceVnd` alias.
+`estimatedPriceVnd` is the estimated total after the clamped discount. `depositPercent` is `20`
+under settlement policy v2 and is snapshotted on creation. The public item does not serialize
+`availableCargoWeightKg`, `availableCargoVolumeM3`, or the internal `priceVnd` alias.
+
+Parcel obtains this page through internal
+`POST /internal/v1/trips/parcel-availability/search`. The read-only POST accepts the existing
+availability filters plus `eligibleRouteIds`; Trip applies that filter before count/pagination and
+returns the existing raw `PagedResult<ParcelTripAvailabilityItemDto>`. The legacy internal GET
+`/internal/v1/trips/parcel-availability` remains available during rollout.
 
 ### POST `/v1/parcels`
 
@@ -3326,7 +3357,8 @@ Request:
     "email": "recipient@example.com"
   },
   "deliveryMethod": "TERMINAL_PICKUP",
-  "voucherCode": null
+  "voucherCode": null,
+  "quoteToken": "base64url-payload.base64url-signature"
 }
 ```
 
@@ -3361,7 +3393,35 @@ Response `201`:
 }
 ```
 
-The server derives `estimatedSizeCategory`; old clients may still send `sizeCategory`, but it does not override calculated size or price. Every size, including `EXTRA_LARGE`, returns `PENDING_PAYMENT`. A fare for the derived route/size is required; otherwise the server returns `422 FARE_NOT_CONFIGURED` without writes. Create does not reserve cargo or create a payment. Capacity is enforced when the deposit soft hold starts and again when the Assistant records actual measurements.
+The server derives `estimatedSizeCategory`; old clients may still send `sizeCategory`, but it does
+not override calculated size or price. Every size, including `EXTRA_LARGE`, returns
+`PENDING_PAYMENT`. A fare for the derived route/size is required; otherwise the server returns
+`422 FARE_NOT_CONFIGURED` without writes. Create does not reserve cargo or create a payment.
+Capacity is enforced when the deposit soft hold starts and again when the Assistant records actual
+measurements.
+
+`quoteToken` is optional during the BE-first rollout. It is a stateless HMAC-SHA256 signed quote
+with a default 600-second TTL and binds the sender, Trip/Route/operator, station pair, normalized
+dimensions/weight, chargeable weight/category, fare identity/version, DIM and settlement-policy
+versions, gross/discount/deposit, timestamps and a random `jti`. When present, client-supplied
+category, amount, dimensions or weight cannot reinterpret the signed quote. Signature, expiry,
+policy/fare drift and request mismatch return `409 PARCEL_QUOTE_INVALID`,
+`PARCEL_QUOTE_EXPIRED`, `PARCEL_QUOTE_STALE`, and `PARCEL_QUOTE_MISMATCH`, respectively. Legacy
+requests without a token remain supported.
+
+When `recipient.email` is present, Parcel trims/lowercases it and calls Identity's exact,
+non-deleted user lookup. A match is saved as the logical `recipientUserId` in the create
+transaction; `404 RESOURCE_NOT_FOUND` saves null. Transport, 5xx, or malformed Identity responses
+return `503 UPSTREAM_UNAVAILABLE` without a partial Parcel. Public requests never accept or trust a
+recipient user ID.
+
+### GET `/v1/parcels/vouchers/available`
+
+Auth: `PASSENGER`. Query keeps the legacy `tripId`, `sizeCategory`, `paymentMethod?`, and
+`orderAmount?` parameters and adds optional `quoteToken`. When a token is supplied, signed quote
+values are authoritative and conflicting legacy query values return `409 PARCEL_QUOTE_MISMATCH`.
+All derived categories, including `EXTRA_LARGE`, are supported. Token validation uses the same
+invalid/expired/stale errors as Parcel creation.
 
 ### POST `/v1/parcels/{parcelId}/deposit-payment`
 
@@ -3370,9 +3430,20 @@ Auth: owning `PASSENGER`. Idempotency: required.
 Request: `{ "paymentMethod": "WALLET|VNPAY", "paymentReturnMode": "MOBILE_SDK|null" }`.
 `paymentReturnMode` is required and must be `MOBILE_SDK` for VNPay.
 
-The mutation first creates an idempotent soft cargo hold using estimated weight/volume, then creates a Payment whose `dueAt = min(paymentStartedAt + 15 minutes, latestCheckInAt)`. If no positive payment window remains, it does not create a Payment or hold. A zero deposit consumes the validated voucher, keeps the reservation, and moves directly to `RESERVED` without creating a zero-value Payment.
+The mutation first resumes any pending cargo `RELEASE`, then creates an idempotent soft cargo hold
+using estimated weight/volume and creates a Payment whose
+`dueAt = min(paymentStartedAt + 15 minutes, latestCheckInAt)`. If no positive payment window
+remains, it does not create a Payment or hold. A zero deposit consumes the validated voucher, keeps
+the reservation, and moves directly to `RESERVED` without creating a zero-value Payment.
 
-Response `200` data contains `parcelId`, `status`, `depositPaymentId?`, `depositRequiredVnd`, `depositPaidVnd`, `paymentDueAt?`, `paymentRedirectUrl?`, `paymentReturnMode?`, and `vnpaySdk?`. Payment success is valid only when authoritative `paidAt < paymentDueAt`; fail/expiry moves the Parcel to `EXPIRED`, releases cargo, and does not consume the voucher.
+Response `200` data contains `parcelId`, `status`, `depositPaymentId?`, `depositRequiredVnd`,
+`depositPaidVnd`, `paymentDueAt?`, `paymentRedirectUrl?`, `paymentReturnMode?`, and `vnpaySdk?`.
+Payment success is valid only when authoritative `paidAt < paymentDueAt`; failure, expiry, timeout,
+or a post-reserve Payment error moves the Parcel to its terminal recovery state and releases cargo.
+If Trip is temporarily unavailable, Parcel persists one idempotent `RELEASE` recovery operation
+whose operation ID is reused as the Trip Idempotency-Key. Duplicate sweeps/events resume the same
+logical release and never decrement capacity twice. The expiry sweep only claims
+`PENDING_PAYMENT` rows whose `depositPaymentId` is null.
 
 ### POST `/v1/parcels/{parcelId}/final-payment`
 
@@ -4746,8 +4817,11 @@ io("wss://api.vietride.app", {
 
 Client emit:
 ```ts
-socket.emit("joinTripTracking", { tripId }, ack)
+socket.emit("joinTripTracking", { tripId, includeRouteSnapshot?: false }, ack)
 ```
+
+`includeRouteSnapshot` defaults to `false`, preserving the legacy payload and latency. When it is
+`true`, Tracking obtains the current effective Route context before joining the room.
 
 Success ack:
 ```json
@@ -4755,9 +4829,15 @@ Success ack:
   "success": true,
   "tripId": "uuid",
   "room": "trip:uuid",
-  "scope": "PARCEL_RECIPIENT"
+  "scope": "PARCEL_RECIPIENT",
+  "routeContext": { "tripId": "uuid", "geometry": null, "intermediateStops": [] },
+  "routeVersion": "\"strong-etag-value\""
 }
 ```
+
+`routeContext` and `routeVersion` are present only for the opt-in request. `routeVersion` is the
+same strong ETag used by REST route context. If the snapshot cannot be loaded, ack returns
+`TRACKING_ROUTE_CONTEXT_UNAVAILABLE` and the socket is not joined to `trip:{tripId}`.
 
 Error ack:
 ```json
@@ -4831,8 +4911,10 @@ Tracking Phase 10 invariants (legacy fields remain compatible; delay fields belo
   fingerprints and off-route detection.
 - A geometry cache miss emits raw GPS immediately and warms Trip geometry asynchronously with
   in-flight request deduplication; the live GPS acknowledgement never waits for Trip HTTP.
-- ETA uses cumulative route distance and monotonic stop sequence/progress guards. One calculation
-  covers all remaining `PENDING` stops plus the destination station. Google Routes is primary only
+- ETA uses cumulative route distance and monotonic stop sequence/progress guards. For
+  `SCHEDULED|BOARDING`, one calculation targets the origin `STATION`; for `IN_PROGRESS`, it covers
+  all remaining `PENDING` stops plus the destination `STATION`. Express Trips and Trips past their
+  last intermediate stop therefore still target the destination. Google Routes is primary only
   when `GOOGLE_ROUTES_ENABLED=true`; Local Route ETA/direct route projection is the fallback.
   Provider calls are throttled to 60 seconds, require the next stop to change, more than 500 m
   movement, or a next-stop ETA under 15 minutes, and use one per-Trip Redis lock, atomic 60-second
@@ -4845,7 +4927,8 @@ Tracking Phase 10 invariants (legacy fields remain compatible; delay fields belo
   `estimateQuality=TRAFFIC_AWARE|FALLBACK`; provider names, snap metadata and traffic metadata
   remain internal.
 
-`eta:update` keeps the legacy boolean `delayed` and adds the following fields:
+`eta:update` remains a STOP-only legacy event, keeps the legacy boolean `delayed`, and adds the
+following fields. Station targets are emitted only through `eta:batch:update`:
 
 ```json
 {
@@ -4862,8 +4945,8 @@ Tracking Phase 10 invariants (legacy fields remain compatible; delay fields belo
 }
 ```
 
-`eta:batch:update` is emitted after the same atomic cache write and contains the ordered remaining
-targets. `targetKind=STOP` uses `stopId`; the terminal target uses `targetKind=STATION` and
+`eta:batch:update` is emitted after the same atomic cache write and contains the ordered physical
+targets. `targetKind=STOP` uses `stopId`; origin/destination targets use `targetKind=STATION` and
 `stationId`:
 
 ```json
@@ -4917,7 +5000,11 @@ never sent over Socket.IO.
 ### GET `/v1/tracking/trips/{tripId}/eta`
 
 Auth: Identity User Access Token and the same Tracking authorization used by the trip socket.
-Query: `stopId=<uuid>`.
+Query: legacy `stopId=<uuid>`, or the explicit pair
+`targetKind=STOP&stopId=<uuid>` / `targetKind=STATION&stationId=<uuid>`. A station target must be
+the effective origin or destination. When no target is supplied, Tracking walks the current
+status-aware target chain and returns its first cached ETA. It does not call an ETA provider
+synchronously.
 
 Response `200` uses the ADR 0004 envelope with `data.eta`. A cache hit preserves the existing ETA
 fields and adds:
@@ -4949,8 +5036,9 @@ to restore the latest known state instead of waiting for another socket event.
 Auth: Identity User Access Token and the same Tracking authorization used by the trip socket and
 legacy `/eta` endpoint.
 
-Response `200` uses the ADR 0004 envelope with `data.etas`, ordered by stop sequence followed by
-the destination station. Each item contains `targetKind`, `stopId?`, `stationId?`, `stopName`,
+Response `200` uses the ADR 0004 envelope with `data.etas`, ordered by the current physical target
+chain: origin only for `SCHEDULED|BOARDING`, or remaining stop sequence followed by destination for
+`IN_PROGRESS`. Each item contains `targetKind`, `stopId?`, `stationId?`, `stopName`,
 `sequence?`, `etaMinutes`, `estimatedArrivalTime`, `distanceMeters`, `updatedAt`, and
 `estimateQuality`. Finalized `ARRIVED|SKIPPED` stops are omitted. A cold/expired cache returns
 `{"etas":[]}`; this request never invokes Google synchronously.
@@ -5028,6 +5116,7 @@ Response `200` dùng ADR 0004 envelope với `data`:
 ```json
 {
   "tripId": "uuid",
+  "tripStatus": "IN_PROGRESS",
   "geometry": {
     "source": "ROUTE_POLYLINE",
     "points": [{ "latitude": 10.0, "longitude": 106.0 }]
@@ -5061,6 +5150,12 @@ Response `200` dùng ADR 0004 envelope với `data`:
   Tracking chỉ cache fallback `STOPS_ONLY` trong 30 giây để polyline được Operator bổ sung qua
   `PUT /v1/operator/routes/{id}/geometry` xuất hiện trong Tracking mà không cần API mới.
 - `originStation` và `destinationStation` nullable khi station chưa có tọa độ hợp lệ.
+- `tripStatus` is the authoritative Trip lifecycle status used to select the ETA target chain.
+- `intermediateStops` always comes from the ordered `TripStop` snapshot assigned to this Trip.
+  With an AlternativeRoute, only polyline and destination are read from that effective Route; live
+  AlternativeRoute stop edits never rewrite the Trip snapshot. A missing assigned AlternativeRoute
+  returns `404 TRIP_NOT_FOUND` and never falls back to the base Route. Invalid/missing alternative
+  polyline may use `STOPS_ONLY` for that same effective snapshot, never base-route geometry.
 - Geometry loại tọa độ ngoài range/trùng liên tiếp, giản lược deterministic tối đa 1.000 điểm và
   luôn giữ điểm đầu/cuối. Public payload không chứa `alertRecipientUserIds`.
 - Response đặt `Cache-Control: private, max-age=600` khi có geometry `ROUTE_POLYLINE`; fallback
@@ -6272,6 +6367,17 @@ No match returns HTTP 404 using the standardized internal ADR 0004 error envelop
 
 Booking maps only the exact Identity 404 `RESOURCE_NOT_FOUND` response to no user and an HTTP-200 empty operator-booking page. Caller-request cancellation propagates unchanged. Identity 401/403, any other 4xx (including a 404 with another or malformed code), 5xx, timeout, circuit-open, transport, or response-deserialization failure becomes the existing FE-facing `502 UPSTREAM_UNAVAILABLE` ADR 0004 error. Retry only transient 5xx/network failures under BSOT §7.6, never 4xx. No phone snapshot or PII duplication is authorized in Booking.
 
+### GET `/internal/v1/users/by-email?email={normalizedEmail}`
+
+Auth: Internal JWT via `X-Internal-Auth`. Caller: Parcel Service. Never exposed through Gateway.
+The caller trims/lowercases and URI-escapes the email. Identity performs an exact normalized-email
+lookup against non-soft-deleted users and returns raw `{ "userId": "uuid" }` without PII. No match
+returns `404 RESOURCE_NOT_FOUND`; malformed input returns `422 VALIDATION_ERROR`.
+
+Parcel maps only the exact 404 to `recipientUserId=null`. Identity 5xx, transport/timeout, or a
+malformed success/error body becomes FE-facing `503 UPSTREAM_UNAVAILABLE`; Parcel creation remains
+atomic and does not persist a partial row.
+
 ### GET `/internal/v1/operators/{operatorId}`
 
 Auth: Internal JWT via `X-Internal-Auth`. Not exposed through Gateway. Success response is raw DTO (no `ApiResponse` wrapper); errors use the standard ADR 0004 error envelope.
@@ -6587,11 +6693,16 @@ Auth: public.
 
 Purpose: passenger/FE station autocomplete. Mutation endpoints remain operator/admin-only.
 
-Query: `q`, `city?`, `ward?`, `locationId?`.
+Query: `q`, `city?`, `ward?`, `locationId?`, `locationScopeCode?`.
 
 `q` is required. Blank or empty `q` is invalid and returns `422 VALIDATION_ERROR`.
 
 Matching: accent-insensitive contains via `unaccent(name) ILIKE unaccent('%' || q || '%')`.
+
+`locationId` keeps its exact Station-location semantics. `locationScopeCode` accepts either a
+two-digit root code (active root plus active direct leaves) or a five-digit active leaf code
+(exact). The parameters are mutually exclusive. Unknown, inactive, malformed, or unsupported
+codes return `422 VALIDATION_ERROR`; `q`, `city`, and `ward` continue narrowing the selected scope.
 
 Day-7 exception: this endpoint intentionally uses `q` (not BSOT §5.8 `search`) because `technical_context_v7` line 523 is higher-priority for the OperatorStation Management flow.
 
@@ -9522,7 +9633,10 @@ This section supersedes older field and endpoint descriptions where they conflic
 - `city` is the province or centrally governed municipality; `ward` is the commune, ward or
   special zone. New Station create/update requests require both values, while migrated legacy
   Stations may return `ward=null` until an administrator completes the address.
-- Search is `GET /v1/stations/search?q=&city=&ward=&locationId=`.
+- Search is `GET /v1/stations/search?q=&city=&ward=&locationId=&locationScopeCode=`. `locationId`
+  keeps exact matching. A two-digit root code includes the active root plus active direct leaves;
+  a five-digit leaf code is exact. The two location parameters conflict, and unknown/inactive or
+  invalid codes return `422 VALIDATION_ERROR`. `q`, `city`, and `ward` continue narrowing results.
 
 ### Route map and composite writes
 
@@ -9549,10 +9663,10 @@ This section supersedes older field and endpoint descriptions where they conflic
 - `GET /v1/tracking/operator/fleet-latest?status=` returns latest GPS items for the caller's
   operator only: `{ tripId, latitude, longitude, speedKmh?, headingDeg?, recordedAt, status }`.
   Trips without GPS are omitted.
-- ETA accepts an optional `stopId`. Its envelope always keeps `data.eta`; `stopName` is added. If
-  no stop is supplied, the next pending stop is inferred from latest GPS and Route progress. No
-  GPS or no remaining stop returns `{ eta: null }`; `stopName` is present only inside a non-null
-  ETA object.
+- ETA accepts legacy `stopId` or an explicit stop/station target. If no target is supplied, it
+  returns the first cached target from the status-aware origin → stops → destination chain. Cold
+  cache returns `{ eta: null }`; GET never invokes the provider synchronously. `stopName` is
+  present only inside a non-null ETA object.
 - Operator sockets support `joinOperatorFleet`; only an operator principal can join its own fleet
   room. GPS produces `fleet:gps:update`; proposal events produce `routeProposal:created` and
   `routeProposal:resolved` in that room.
@@ -9583,16 +9697,18 @@ This section supersedes older endpoint descriptions where they conflict.
   before any seat hold or payment. `409 BOOKING_SEAT_UNAVAILABLE` identifies conflicts using
   `outbound.seatNumbers` and `return.seatNumbers`; one-way booking keeps `seatNumbers`.
 - Public Trip route geometry follows the effective Route. An assigned AlternativeRoute supplies
-  its polyline, ordered stops and destination station. Its public ETag changes when the effective
-  Route assignment changes; `effectiveRouteId` exists only on the internal Trip response.
+  its polyline and destination while ordered stops always come from the Trip's assigned
+  `TripStop` snapshot. Its public ETag changes when the effective Route assignment changes;
+  `effectiveRouteId` and `tripStatus` exist on the internal Trip response.
 - `GET /v1/tracking/trips/{tripId}/eta` keeps legacy `stopId`. New callers send either
   `targetKind=STOP&stopId=<uuid>` or `targetKind=STATION&stationId=<uuid>`. Invalid kind/id pairs
   return `400 VALIDATION_FAILED`. A non-null response discriminates the target with `targetKind`
   and the matching `stopId` or `stationId`; cold cache remains `{eta:null}`.
 - `GET /v1/tracking/trips/{tripId}/etas` is the preferred display read for intercity Trips. It
-  returns only cached remaining targets in route order and never triggers a synchronous provider
-  call; cold cache is `{etas:[]}`. FE falls back to Trip detail planned timestamps and never
-  computes route distance or ETA locally.
+  returns only cached current targets in route order: origin for pre-departure, then remaining
+  stops and destination while in progress. It never triggers a synchronous provider call; cold
+  cache is `{etas:[]}`. FE falls back to Trip detail planned timestamps and never computes route
+  distance or ETA locally.
 - Passenger history items add nullable root `trackingTarget`: `{kind:"STOP",stopId}` for an
   along-route drop-off, `{kind:"STATION",stationId}` for a destination terminal, otherwise null.
 - `POST /v1/notifications/read-all` requires User JWT and UUID-v4 `Idempotency-Key`, has an empty

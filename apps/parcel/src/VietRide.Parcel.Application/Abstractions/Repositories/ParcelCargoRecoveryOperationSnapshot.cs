@@ -13,7 +13,7 @@ public sealed record ParcelCargoRecoveryOperationSnapshot(
     Guid SourceTripId,
     Guid? TargetTripId,
     string? TargetState,
-    Guid ActorUserId,
+    Guid? ActorUserId,
     string Reason,
     long RefundAmountVnd,
     long RefundDueVnd,

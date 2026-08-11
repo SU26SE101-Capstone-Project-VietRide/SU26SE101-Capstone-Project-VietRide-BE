@@ -63,7 +63,7 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | `uq_parcel_delivery_tokens_token_hash` | `token_hash` | unique | Email link lookup bằng SHA-256 hash |
 | `uq_parcel_delivery_tokens_active_parcel` | `parcel_id` partial | unique | Tối đa một token chưa revoke mỗi Parcel |
 | `idx_parcel_delivery_tokens_expires_at_active` | `expires_at` partial | B-tree | Quét re-alert token active đã hết hạn |
-| `uq_parcel_cargo_recovery_operations_active_parcel` | `parcel_id` partial | unique | At most one pending Day-32 recovery operation per Parcel |
+| `uq_parcel_cargo_recovery_operations_active_parcel` | `parcel_id` partial | unique | At most one pending `TRANSFER|RETURN|RELEASE` recovery operation per Parcel |
 | `idx_parcel_cargo_recovery_operations_stale` | `(claimed_at, id)` partial | B-tree | Five-minute replay scan with stable ordering |
 | `idx_parcels_sender_user_id_created_at` | `(sender_user_id, created_at DESC)` | B-tree | "My sent parcels" |
 | `idx_parcels_recipient_user_id_created_at` | `(recipient_user_id, created_at DESC)` partial | B-tree | "My received parcels" |
@@ -87,7 +87,7 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 
 | Column | References | Enforcement |
 |---|---|---|
-| `Parcel.senderUserId/recipientUserId/reviewedByUserId/confirmedByUserId/transferConfirmedByUserId/transferConfirmationClaimedByUserId/returnedByUserId`, `ParcelDeliveryToken.issuedByUserId`, `ParcelCargoRecoveryOperation.actorUserId` | `identity.User.id` | app-layer |
+| `Parcel.senderUserId/recipientUserId/reviewedByUserId/confirmedByUserId/transferConfirmedByUserId/transferConfirmationClaimedByUserId/returnedByUserId`, `ParcelDeliveryToken.issuedByUserId`, nullable `ParcelCargoRecoveryOperation.actorUserId` | `identity.User.id` | app-layer; system `RELEASE` operations have no actor |
 | `Parcel.operatorId`, `ParcelRouteFare.operatorId`, `ParcelStats.operatorId`, `ParcelCargoRecoveryOperation.operatorId` | `identity.Operator.id` | app-layer + tenant filter |
 | `Parcel.tripId`, `Parcel.transferTargetTripId`, `ParcelCargoRecoveryOperation.sourceTripId/targetTripId` | `trip.Trip.id` | app-layer |
 | `Parcel.dropoffStopId` | `trip.Stop.id` | app-layer validate `allowDropoff=true` |

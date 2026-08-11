@@ -268,7 +268,7 @@ CREATE TABLE parcel_cargo_recovery_operations (
     source_trip_id UUID NOT NULL,          -- logical FK trip.trips
     target_trip_id UUID NULL,              -- logical FK trip.trips; TRANSFER only
     target_state VARCHAR(16) NULL,          -- RESERVED for Day-32 TRANSFER
-    actor_user_id UUID NOT NULL,            -- logical FK identity.users
+    actor_user_id UUID NULL,                -- logical FK identity.users; null for system RELEASE recovery
     reason VARCHAR(500) NOT NULL,
     refund_amount_vnd BIGINT NOT NULL DEFAULT 0,
     refund_due_vnd BIGINT NOT NULL DEFAULT 0,
@@ -280,13 +280,13 @@ CREATE TABLE parcel_cargo_recovery_operations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_parcel_cargo_recovery_operation_type
-        CHECK (operation_type IN ('TRANSFER', 'RETURN')),
+        CHECK (operation_type IN ('TRANSFER', 'RETURN', 'RELEASE')),
     CONSTRAINT chk_parcel_cargo_recovery_status
         CHECK (status IN ('PENDING', 'COMPLETED', 'FAILED')),
     CONSTRAINT chk_parcel_cargo_recovery_target
         CHECK (
             (operation_type = 'TRANSFER' AND target_trip_id IS NOT NULL AND target_state = 'RESERVED')
-            OR (operation_type = 'RETURN' AND target_trip_id IS NULL AND target_state IS NULL)
+            OR (operation_type IN ('RETURN', 'RELEASE') AND target_trip_id IS NULL AND target_state IS NULL)
         ),
     CONSTRAINT chk_parcel_cargo_recovery_amounts
         CHECK (refund_amount_vnd >= 0 AND refund_due_vnd >= 0),

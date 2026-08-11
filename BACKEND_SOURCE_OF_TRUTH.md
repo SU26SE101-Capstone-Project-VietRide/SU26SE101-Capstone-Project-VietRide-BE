@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.66.0
+> **Phiên bản:** 1.67.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-08-11
 > **Capstone:** SU26SE101 — SU26
@@ -1278,11 +1278,11 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
-endpoint có behavior-idempotent hay không, trừ đúng 20 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `210 mutation surfaces / 190 required / 20 exempt`;
+endpoint có behavior-idempotent hay không, trừ đúng 21 action có metadata exemption được khóa ở
+bảng sau. Inventory executable phải giữ tổng `212 mutation surfaces / 191 required / 21 exempt`;
 thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
 
-**Canonical 20 exemptions (không yêu cầu `Idempotency-Key`):**
+**Canonical 21 exemptions (không yêu cầu `Idempotency-Key`):**
 
 | # | Endpoint | Lý do |
 |---:|---|---|
@@ -1306,6 +1306,7 @@ thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata v�
 | 18 | `POST /v1/admin/rag-config/reload` | Chỉ invalidates in-memory cache và naturally repeatable. |
 | 19 | `POST /v1/operator/driver-schedules/availability-check` | Read-only resource availability preview; không tạo reservation. |
 | 20 | `POST /v1/operator/shuttle-trips/availability-check` | Read-only resource availability preview; không tạo reservation. |
+| 21 | `POST /internal/v1/trips/parcel-availability/search` | Read-only Parcel availability query; bounded Route filter nằm trong request body. |
 
 Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable là nguồn exhaustive):
 
@@ -1329,6 +1330,7 @@ Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable
 | 5j | `POST /v1/operator/parcels/{id}/return` | Parcel |
 | 5k | `POST /v1/crew/parcels/{id}/confirm-transfer` | Parcel |
 | 5l | `POST /v1/assistant/parcels/{id}/confirm-delivery` · `POST /v1/operator/parcels/{id}/confirm-delivery` (retained manual-confirm aliases) | Parcel |
+| 5m | `PATCH /v1/operator/incidents/{incidentId}/resolve` | Trip |
 | 6 | `POST /internal/v1/trips/{sourceTripId}/cargo/transfer` | Trip |
 | 7 | `POST /v1/payments/wallet-charge` | Payment |
 | 7b | `POST /internal/v1/payments/batch-charge` | Payment |
@@ -1504,6 +1506,10 @@ each intermediate stop. Missing coordinates, timeout/quota, malformed legs, or a
 cumulative Route metrics without failing Trip creation. `trips.planned_eta_source` stores
 `GOOGLE_ROUTES|ROUTE_BASELINE`; public projections expose only
 `plannedEtaQuality=TRAFFIC_AWARE|FALLBACK`.
+Origin planned ETA is exactly `Trip.departureDateTime`, intermediate targets use
+`TripStop.estimatedArrivalTime`, and destination uses `Trip.estimatedArrivalTime`. Generation,
+editable schedule changes and approved effective-route assignment rebuild these timestamps against
+the ordered assigned snapshot.
 
 ### 5.7 Pagination — `PagedResult<T>` + `QueryOptions` (ADR 0004)
 
@@ -1555,6 +1561,10 @@ pickup có `orderIndex` nhỏ hơn dropoff. `allowAlongRoutePickup` chỉ còn l
 không còn bật/tắt stop matching. Mỗi item giữ Route terminal fields và thêm ordered
 `pickupPoints`/`dropoffPoints` (`STATION|STOP`, XOR id, name/address, order, planned time,
 pickup/dropoff flags) thuộc requested Locations và tham gia được vào ít nhất một cặp hợp lệ.
+Province/root scope includes the active root ID itself plus its active direct leaves so legacy
+Stations still attached to the root remain searchable; leaf scope stays exact. Public Station
+search reuses that rule through `locationScopeCode`, while legacy `locationId` remains exact and
+the two parameters conflict.
 
 `GET /v1/operator/incidents` và `GET /v1/operator/incidents/{incidentId}` là read-only,
 `OPERATOR_ADMIN|OPERATOR_STAFF`, tenant scope từ JWT `operatorId`. List hỗ trợ
@@ -1562,6 +1572,13 @@ pickup/dropoff flags) thuộc requested Locations và tham gia được vào ít
 `reportedAt DESC, incidentId`. Missing/cross-tenant detail đều trả `INCIDENT_NOT_FOUND`. DTO trả
 Incident đầy đủ cùng Trip/Route/departure và reporter; Identity profile missing chỉ làm reporter
 metadata nullable, không che Incident.
+
+`PATCH /v1/operator/incidents/{incidentId}/resolve` chỉ cho `OPERATOR_ADMIN`, lấy tenant và actor
+từ JWT, bắt buộc UUID-v4 Idempotency-Key và note sau trim dài 1..1000. Transition atomic ghi
+`resolvedAt`, `resolvedByUserId`, `resolutionNote`; same-key replay giữ response, new-key double
+resolve trả `409 INCIDENT_ALREADY_RESOLVED`, missing/cross-tenant trả masked
+`404 INCIDENT_NOT_FOUND`. Route change/vehicle substitution không tự resolve và action này không
+phát integration event.
 
 ### 5.9 Canonical Error Code Registry
 
@@ -1662,6 +1679,7 @@ metadata nullable, không che Incident.
 | | `ROUTE_CHANGE_PROPOSAL_NOT_PENDING` | 409 | Approve/reject proposal đã rời `PENDING`, hoặc Trip không còn editable và pending proposal vừa được expire |
 | | `ROUTE_CHANGE_PROPOSAL_STALE` | 409 | Frozen EXISTING source đã sửa/deactivate, hoặc CUSTOM destination/Stop không còn hợp lệ tại approval |
 | | `INCIDENT_NOT_FOUND` | 404 | Optional proposal `incidentId` không tồn tại/không thuộc cùng Trip, hoặc Operator Incident detail missing/cross-tenant |
+| | `INCIDENT_ALREADY_RESOLVED` | 409 | Incident đã có `resolved_at`; chỉ same-key replay được trả lại response cũ |
 | | `TRIP_ALREADY_TERMINAL` | 409 | Manual complete/fallback/disruption race already produced a terminal state |
 | | `TRIP_VEHICLE_CONFLICT` | 409 | Vehicle vi phạm interval, turnaround, reposition hoặc còn ACTIVE trên main Trip/ShuttleTrip khác |
 | | `TRIP_DRIVER_CONFLICT` | 409 | Driver/Assistant vi phạm interval, turnaround, reposition hoặc còn ACTIVE trên main Trip/ShuttleTrip khác |
@@ -1682,6 +1700,10 @@ metadata nullable, không che Incident.
 | | `DESTINATION_TERMINAL_NOT_ARRIVED` | 422 | Parcel terminal-bound chưa có destination arrival anchor |
 | | `PARCEL_CAPACITY_EXCEEDED` | 409 | Vượt available cargo capacity |
 | | `PARCEL_PRICING_NOT_CONFIGURED` | 422 | ParcelRouteFare chưa config |
+| | `PARCEL_QUOTE_INVALID` | 409 | Quote token sai shape/chữ ký/version |
+| | `PARCEL_QUOTE_EXPIRED` | 409 | Quote token đã quá `expiresAt` |
+| | `PARCEL_QUOTE_STALE` | 409 | Fare/DIM/settlement-policy version không còn khớp quote |
+| | `PARCEL_QUOTE_MISMATCH` | 409 | Public request fields mâu thuẫn với signed quote |
 | | `PARCEL_DELIVERY_TOKEN_INVALID` | 400 | Token parse/hash không match |
 | | `PARCEL_DELIVERY_TOKEN_EXPIRED` | 400 | Token row quá 48h |
 | | `PARCEL_DELIVERY_TOKEN_REVOKED` | 400 | Token row đã revoke do resend/terminal action |
@@ -1690,7 +1712,7 @@ metadata nullable, không che Incident.
 | | `INVALID_REFUND_CHOICE` | 422 | Parcel manual-cancel refund choice không thuộc `FULL|POLICY|NO` hoặc compatibility aliases |
 | | `TRIP_SERVICE_UNAVAILABLE` | 503 | Parcel không thể hoàn tất cargo mutation vì Trip dependency unavailable |
 | | `PARCEL_NOT_TRANSFERABLE` | 409 | Status sai khi confirm transfer |
-| | `PARCEL_CARGO_RECOVERY_IN_PROGRESS` | 409 | Parcel already has a durable `TRANSFER|RETURN` cargo-recovery operation pending |
+| | `PARCEL_CARGO_RECOVERY_IN_PROGRESS` | 409 | Parcel already has a durable `TRANSFER|RETURN|RELEASE` cargo-recovery operation pending |
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
 | | `PARCEL_REVIEW_TIMEOUT` | 409 | Timeout review 24h cho record legacy `PENDING_OPERATOR_REVIEW` |
 | **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path; cross-tenant DELETE is masked here |
@@ -1741,6 +1763,7 @@ metadata nullable, không che Incident.
 | | `REFUND_RETRY_EXHAUSTED` | 500 | Hangfire job retry 5 lần |
 | **Tracking** | `TRACKING_ACCESS_DENIED` | 403 | joinTripTracking unauthorized |
 | | `TRACKING_TRIP_NOT_ACTIVE` | 409 | Trip chưa IN_PROGRESS |
+| | `TRACKING_ROUTE_CONTEXT_UNAVAILABLE` | 503 | Effective assigned-route snapshot unavailable; socket opt-in fails before room join |
 | **RAG** | `RAG_DOCUMENT_NOT_APPROVED` | 403 | Status ≠ APPROVED |
 | | `RAG_ACCESS_DENIED_FOR_ROLE` | 403 | accessLevel không match role |
 | | `POLICY_NOT_FOUND` | 404 | Generic RAG Policy is missing, soft-deleted, or outside the caller tenant |
@@ -1949,7 +1972,11 @@ role=DRIVER:           socket.join(`driver:${driverId}`)
 role=OPERATOR_*:       socket.join(`operator:${operatorId}`)
 ```
 
-**Trip-specific room:** client emit `joinTripTracking { tripId }` → Tracking Service verify quyền qua HTTP internal call tới Booking/Trip/Parcel Service → join `trip:{tripId}` nếu authorized.
+**Trip-specific room:** client emit `joinTripTracking { tripId, includeRouteSnapshot? }` → Tracking
+Service verify quyền qua HTTP internal call tới Booking/Trip/Parcel Service. Default `false` giữ ack
+cũ. Với `true`, service phải load effective assigned-route snapshot trước khi join và ack thêm
+`routeContext` + `routeVersion` (cùng strong ETag REST); lỗi trả
+`TRACKING_ROUTE_CONTEXT_UNAVAILABLE` và không join room.
 
 **Token expiry trong long-lived connection:** Tracking middleware **chỉ verify JWT tại handshake**, KHÔNG re-verify mid-session. Client responsibility:
 
@@ -2159,7 +2186,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `GET /internal/v1/users/{userId}` | All services | Internal-JWT-only raw user lookup `{ id, displayName, avatarUrl, role, operatorId, status, phone }` for HTTP validate logical FK. Errors use ADR 0004 envelope. Trip DriverSchedule create/activation validates role/operator; Shuttle dispatch còn yêu cầu driver active có display name/phone và snapshot hai field này vào assignment event. |
 | `GET /internal/v1/users?ids=<uuid>&ids=<uuid>` | Booking, Trip, Parcel, RAG | Read-only 1..100 user batch; raw additive display/contact/status DTO, including a redacted representation for requested soft-deleted IDs |
 | `GET /internal/v1/users/by-phone?phone={normalizedE164}` | Booking | Internal-JWT-only exact non-deleted-user phone lookup for the operator booking-monitor filter. Caller URI-escapes a prevalidated canonical E.164 value; raw success is exactly `{ userId }`, no PII. No match is ADR 0004 `404 RESOURCE_NOT_FOUND`. Booking maps only that exact response to an empty result; all other failures map to `502 UPSTREAM_UNAVAILABLE`. |
-| `GET /internal/v1/users/by-email?email=` | Parcel | Lookup recipient user khi tạo parcel |
+| `GET /internal/v1/users/by-email?email=` | Parcel | Internal-JWT-only exact normalized-email lookup against non-deleted users; raw success exactly `{ userId }`, no PII. Caller trim/lowercase + URI-escape. Exact `404 RESOURCE_NOT_FOUND` means no link; transport/5xx/malformed response makes Parcel create fail `503 UPSTREAM_UNAVAILABLE`. |
 | `GET /internal/v1/users/{userId}/device-tokens` | Notification | Lấy FCM tokens active để push |
 | `GET /internal/v1/operators/{operatorId}` | All services | Lookup operator info for logical FK validation (raw success DTO) |
 | `GET /internal/v1/operators/{operatorId}/subscription` | Booking, Trip, Parcel | Raw current subscription + plan limits/module flags + usage counters |
@@ -2178,6 +2205,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves ordinary Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`, then applies the matching active operator holiday surcharge by the Trip departure Asia/Ho_Chi_Minh date. Omitted preserves persisted legacy snapshot semantics and applies no new surcharge. No event/projection is added. |
 | `GET /internal/v1/trips/{tripId}/shuttle-road-distance?direction=&latitude=&longitude=` | Booking | Internal-JWT-only road distance to origin Station (`INBOUND_TO_STATION`) or destination Station (`OUTBOUND_FROM_STATION`). Trip validates Station active/supportsShuttle/coordinates and calls Google Routes `travelMode=DRIVE`; raw success is `{ distanceMeters }`. Google/configuration/timeout/invalid response maps to `503 SHUTTLE_DISTANCE_UNAVAILABLE`; direction/coordinates/station eligibility maps to `422`. |
 | `POST /internal/v1/trips/summaries/batch` | Parcel | Read-only `{ tripIds }`, 1..100 distinct UUIDs; one Trip query returns route/station/vehicle/crew/timing summaries; missing IDs are omitted |
+| `POST /internal/v1/trips/parcel-availability/search` | Parcel | `[SkipIdempotency]` read-only replacement for fare-aware paging. Body keeps current station/date/capacity/category/page filters and adds `eligibleRouteIds`; Trip filters before count/page and orders `departureDateTime,tripId`. Empty eligible list returns a valid empty page. Legacy GET remains during rollout. |
 | `POST /internal/v1/operators/vehicle-counts/batch` | Payment | Read-only `{ operatorIds }`, 1..100 distinct UUIDs; raw current vehicle counts by operator |
 | `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Payment | Raw Asia/Ho_Chi_Minh-month trip/completed-trip aggregates grouped by route for the explicit operator tenant |
 | `POST /internal/v1/trips/{tripId}/lock-seats` | Booking | Lock seats trong checkout (TTL 10 phút Redis) |
@@ -2190,7 +2218,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `GET /internal/v1/trips/{tripId}/cargo/capacity` | Parcel | Lấy available cargo capacity |
 | `POST /internal/v1/trips/{tripId}/cargo/reserve` · `remeasure` · `load` · `release` | Parcel | Idempotent single-Trip cargo-ledger mutation and counter update |
 | `POST /internal/v1/trips/{sourceTripId}/cargo/transfer` | Parcel | Exact `{parcelId,targetTripId,targetState:RESERVED\|LOADED,allowCapacityOverflow}`; lock source/target by ascending UUID and atomically release source plus reserve/load target in one Trip-local transaction. `RESERVED` always enforces capacity; `LOADED` permits explicit overflow only for approved substitution recovery. |
-| `GET /internal/v1/trips/{tripId}/route-geometry` | Tracking | Additive route-map context `{tripId,geometrySource:ROUTE_POLYLINE\|STOPS_ONLY,points,originStation?,intermediateStops,destinationStation?,alertRecipientUserIds?}`. Polyline malformed/null dùng ordered stop fallback; public Tracking chỉ render line cho `ROUTE_POLYLINE`. |
+| `GET /internal/v1/trips/{tripId}/route-geometry` | Tracking | Additive route-map context `{tripId,tripStatus,geometrySource:ROUTE_POLYLINE\|STOPS_ONLY,points,originStation?,intermediateStops,destinationStation?,effectiveRouteId?,alertRecipientUserIds?}`. `intermediateStops` luôn từ ordered `TripStop` assigned snapshot. Effective AlternativeRoute chỉ cấp polyline/destination; missing không fallback base Route, malformed/null chỉ dùng `STOPS_ONLY` của cùng snapshot. |
 | `GET /internal/v1/trips/{tripId}/route-stops` | Tracking | Ordered ETA stops gồm additive `status`; Tracking vẫn chấp nhận thiếu/null status khi rolling deploy. |
 | `GET /internal/v1/shuttle-trips/{shuttleTripId}/tracking-context` | Tracking | Additive `direction`, ShuttleTrip `status`, `isOwnPickup` theo queried `userId` và public station metadata. Passenger allowed khi own manifest là `PENDING\|PICKED_UP`; full stops chỉ là internal input cho Driver/ETA và không được phát public. Outbound Station stop chuyển terminal sau khi ShuttleTrip rời bến để ETA tiến tới passenger đầu tiên. |
 
@@ -3038,6 +3066,37 @@ PENDING_OPERATOR_ACTION ──→ pendingActionResumeStatus | RETURNED
 
 **Settlement v2 invariants:** pricing uses exact decimal chargeable weight and rounds fractional VND to the nearest đồng with `MidpointRounding.AwayFromZero`; it never ceilings kg or floors money to 1,000 VND. Voucher discount is clamped independently against estimated/final gross. Deposit is 20% of estimated total. Every derived size, including `EXTRA_LARGE`, requires a configured fare and starts at `PENDING_PAYMENT`; capacity is enforced at deposit hold and reweigh. `PENDING_OPERATOR_REVIEW` is legacy-only. Only `READY_TO_LOAD` can load. A Payment success is judged by authoritative `paidAt`, not webhook delivery time. If final-payment timeout wins before an on-time callback, the callback cancels forfeiture and restores `READY_TO_LOAD` when the trip can still serve; otherwise the Parcel becomes `CANCELLED` and all collected money is refunded.
 
+**Canonical quote and paging:** one `ParcelQuoteService` owns normalized dimensions, DIM/chargeable
+weight, derived size, half-open active fare (`effectiveFrom <= pricingAt < effectiveUntil`, null end
+is open), voucher clamp, gross/total, and the fixed 20% deposit. Available Trips resolves distinct
+fare-eligible Route IDs before Trip count/paging; Trip orders by departure then ID and Parcel never
+post-filters a returned page. Available, voucher, create, and payment validation share the same
+calculation; after create, Payment uses the persisted quote snapshot and never reprices current
+fare.
+
+Available items issue a stateless HMAC-SHA256 `quoteToken` with default TTL 600 seconds. Payload
+binds sender, Trip/Route/operator, station pair, normalized dimensions/weight, chargeable
+weight/category, fare identity/version, DIM and settlement versions, gross/discount/deposit,
+issued/expiry and random `jti`; verification is constant-time. Optional token rollout preserves
+legacy requests. Signed values are authoritative; invalid/expired/stale/mismatched tokens use the
+four canonical `PARCEL_QUOTE_*` 409 codes. `PARCEL_QUOTE_TOKEN_SECRET` is at least 32 characters;
+no token table or dependency is permitted.
+
+**Recipient logical link:** public create never accepts/trusts `recipientUserId`. For a present
+email, Parcel trims/lowercases and calls Identity exact by-email lookup before persisting. Match is
+saved in the same Parcel transaction; exact `404 RESOURCE_NOT_FOUND` stores null. Dependency
+transport/5xx/malformed response fails create with `503 UPSTREAM_UNAVAILABLE`, leaving no partial
+Parcel. `/received`, tracking authorization, Outbox and Notification consume the persisted link.
+
+**Deposit cargo release recovery:** after reserve, every Payment exception/failure/expiry/timeout
+attempts synchronous Trip release. A transient Trip failure persists or resumes one active
+`ParcelCargoRecoveryOperation` of type `RELEASE`; its operation UUID is the stable Trip
+Idempotency-Key and Trip release remains no-op safe. Deposit retry must finish pending RELEASE
+before reserve. Assign-payment races release only when no Payment owns the hold. Lifecycle sweep
+claims only `PENDING_PAYMENT` with `deposit_payment_id IS NULL` and atomically terminalizes the
+Parcel, writes rejection/Outbox facts, and creates RELEASE. Sweep and Payment events in any order
+converge on one logical release; recovery claim/finalize uses compare-and-swap.
+
 **Canonical two-step delivery (Day 39):**
 
 - `POST /v1/assistant/parcels/{parcelId}/unload` performs a synchronous Internal-JWT read of
@@ -3473,7 +3532,7 @@ Mọi key dùng pattern `<service>:<purpose>:<id>` để namespace per service. 
 | `payment:settlement_insufficient:{settlementId}` | Payment | Insufficient PlatformWallet alert dedupe | 24h |
 | `tracking:latest:{tripId}` | Tracking | Last known GPS position | 5p |
 | `tracking:gps_buffer:{tripId}` | Tracking | GPS trail buffer (list) | đến flush |
-| `tracking:eta:{tripId}:{targetId}` | Tracking | Dynamic ETA per remaining STOP or destination STATION | 60s |
+| `tracking:eta:{tripId}:{targetId}` | Tracking | Dynamic ETA per physical target: pre-origin STATION, remaining STOP, or destination STATION; cached value carries `targetKind` + `targetId` | 60s |
 | `tracking:eta_batch_lock:{tripId}` | Tracking | Owner-safe atomic ETA batch calculation lock | 10s |
 | `tracking:trip_delay_state:{tripId}:{stopId}` | Tracking | Evaluated delay state (`stopId`, `delayStatus`, `delayMinutes`, `evaluatedAt`); reads legacy trip-level key during rolling deploy | 24h |
 | `tracking:trip_delay_lock:{tripId}` | Tracking | Owner-safe delay state evaluation lock | 10s |
@@ -3592,7 +3651,7 @@ permitted.
 | `ParcelSettlementTimeoutJob` | Recurring | Every 5 phút | Xử lý cả `RESERVED → REJECTED` khi quá `latestCheckInAt` và `PENDING_FINAL_PAYMENT → REJECTED` khi `finalPaymentDeadline <= now`; forfeiture toàn bộ cọc + release cargo; callback on-time đến sau phải recovery theo invariant §8.3 |
 | `PendingTransferConfirmEscalationJob` | Scheduled (per Parcel) | `now >= transferRequestedAt + 30 minutes` | CAS `PENDING_TRANSFER_CONFIRM -> TRANSFER_ESCALATED` only when `transfer_confirmation_claim_id IS NULL`. Crew claim is allowed only strictly before deadline. |
 | `PendingTransferClaimRecoveryJob` | Recurring every 5 minutes | `PENDING_TRANSFER_CONFIRM`, non-null claim, `transfer_confirmation_claimed_at <= now - 5 minutes` | Replay Trip cargo transfer with the persisted claim id and persisted target; never mint a new key and never escalate a claimed row. A successful replay CAS-completes Parcel, a domain 4xx clears the claim for operator correction, and unknown/503 retains it for the next scan. |
-| `PendingCargoRecoveryOperationJob` | Recurring every 5 minutes | `parcel_cargo_recovery_operations.status=PENDING`, `claimed_at <= now - 5 minutes` | Replay Day-32 `TRANSFER|RETURN` with the persisted UUID-v4 operation id and frozen payload. Success finalizes Parcel + operation + Outbox/stats in one local transaction; definitive 4xx marks `FAILED`; unknown/503 remains `PENDING`. |
+| `PendingCargoRecoveryOperationJob` | Recurring every 5 minutes | `parcel_cargo_recovery_operations.status=PENDING`, unclaimed/stale claim | Replay `TRANSFER|RETURN|RELEASE` with the persisted UUID-v4 operation id and frozen payload. RELEASE calls Trip no-op-safe release with the same ID; success atomically finalizes the operation, definitive 4xx marks `FAILED`, unknown/503 stays `PENDING`. |
 | `PendingOperatorActionReAlertJob` | Scheduled (per Parcel) | PENDING_OPERATOR_ACTION + 2h | Emit replay-safe `parcel.parcel.pending_operator_action_realerted`; status unchanged |
 | `DeliveryConfirmationReminderJob` | Recurring | Active confirmation token expired at least 7 days | Emit `parcel.parcel.delivery_confirmation_realerted` for the operator; never rotate the token or change Parcel status |
 
@@ -3617,7 +3676,7 @@ permitted.
 |---|---|---|
 | `tracking:gps-batch-write` | Repeatable every 5 minutes | Flush Redis `tracking:gps_buffer:*` → batch INSERT GpsTrail |
 | `tracking:outbox-publisher` | Repeatable every 5s | Read `outbox_events` PENDING → publish RabbitMQ |
-| `tracking:eta-recalculate` | On GPS update event (conditional) | When next stop changes, distance >500m, or next ETA <15p: calculate every remaining PENDING stop plus destination, write all Redis targets atomically, and emit legacy `eta:update` plus `eta:batch:update`. Google partial/error discards the whole provider batch and uses one consistent route/speed fallback. |
+| `tracking:eta-recalculate` | On GPS update event (conditional) | `SCHEDULED|BOARDING` targets origin STATION; `IN_PROGRESS` targets remaining PENDING STOPs then destination STATION, including express/after-last-stop. Write all targets atomically and emit `eta:batch:update` for both kinds; legacy `eta:update`, delay and approach logic run only for a STOP primary target. Google partial/error discards the batch and uses one consistent route/speed fallback; pre-origin fallback uses direct distance to origin. |
 
 #### Notification
 
@@ -3745,6 +3804,8 @@ HANGFIRE_DASHBOARD_USER=admin
 HANGFIRE_DASHBOARD_PASSWORD=...
 IDENTITY_BASE_URL=http://identity:5001
 FIREBASE_WEB_STORAGE_BUCKET=...
+PARCEL_QUOTE_TOKEN_SECRET=...             # required, at least 32 characters
+PARCEL_QUOTE_TTL_SECONDS=600
 ```
 
 #### Payment & Wallet
@@ -4078,6 +4139,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.67.0** | 2026-08-11 | Codex | **MINOR** — Complete Incident resolution, Location root-scope compatibility, canonical Parcel quote/token/fare-aware paging/recipient linking, durable cargo RELEASE recovery, and status-aware origin→stops→destination ETA over assigned TripStop snapshots. Add one required Incident mutation and one read-only internal POST exemption, raising executable idempotency inventory to 212/191/21. Add one reversible Parcel migration; no dependency or integration event. |
 | **1.66.0** | 2026-08-11 | Codex | **MINOR** — Separate User lock from Operator suspension: restricted suspended-admin sessions, tenant refresh/Firebase revocation, `operatorStatus` JWT propagation and Gateway whitelist, additive suspension/profile/login fields, and canonical `OPERATOR_SUSPENDED`. Standardize HTTP/security logging and startup warning fixes. Add AND-composable Location `type` and Trip leaf-code aliases while preserving legacy ward names. No dependency or schema migration. |
 | **1.65.0** | 2026-08-11 | Codex | **MINOR** — Add one shared Driver/Assistant/Vehicle availability engine across DriverSchedule, main Trip and ShuttleTrip. Consecutive assignments require a 30-minute turnaround plus Google Routes DRIVE reposition time; unavailable location/travel input fails closed. Add reservation persistence with sorted advisory locks and a GiST overlap backstop, full schedule/concrete rechecks, lifecycle release/activation, ACTIVE start blocking with deduped operator notification, two read-only preview endpoints, Vehicle current/next assignment projections, canonical conflict fields/errors and reversible Trip migrations. The two preview POSTs raise the executable inventory to 210/190/20; no dependency is added. |
 | **1.64.3** | 2026-08-11 | Codex | **PATCH** — Increase the platform Shuttle Google Routes road-distance limit from 5 km to 10 km across Booking eligibility, Trip confirmed-event ingestion, dispatch validation, deployment defaults, boundary tests, and API/Postman documentation. No endpoint, payload, error code, schema, migration, dependency, or event change. |

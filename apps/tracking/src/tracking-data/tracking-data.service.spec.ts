@@ -138,6 +138,48 @@ describe('TrackingDataService ETA selection', () => {
     })).resolves.toEqual({ eta: null });
   });
 
+  it('selects the cached origin-station ETA while the trip is boarding', async () => {
+    const originStationId = '22222222-2222-4222-8222-222222222222';
+    const stationEta: EtaResponseDto = {
+      ...ETA,
+      targetKind: 'STATION',
+      stopId: undefined,
+      stationId: originStationId,
+      delayStatus: 'UNKNOWN',
+      delayed: null,
+      delayMinutes: null,
+    };
+    const repository = {
+      findEta: jest.fn(async () => stationEta),
+    } as unknown as TrackingDataRepository;
+    const trips = {
+      getRouteStops: jest.fn(async () => []),
+      invalidateRouteStops: jest.fn(),
+    } as TripDataProvider;
+    const routes = {
+      getDetailedRouteGeometry: jest.fn(async () => ({
+        kind: 'ok' as const,
+        snapshot: {
+          tripId: ETA.tripId,
+          tripStatus: 'BOARDING',
+          points: [],
+          originStation: {
+            stationId: originStationId,
+            name: 'Origin',
+            latitude: 10.7,
+            longitude: 106.6,
+          },
+        },
+      })),
+    } as unknown as DetailedRouteGeometryProvider;
+
+    const result = await new TrackingDataService(repository, trips, routes)
+      .getEta(ETA.tripId, {});
+
+    expect(result).toEqual({ eta: { ...stationEta, stopName: 'Origin' } });
+    expect(repository.findEta).toHaveBeenCalledWith(ETA.tripId, originStationId, 'STATION');
+  });
+
   it('returns cached pending stop ETAs in sequence order followed by destination', async () => {
     const firstStopId = '22222222-2222-4222-8222-222222222222';
     const destinationStationId = '44444444-4444-4444-8444-444444444444';

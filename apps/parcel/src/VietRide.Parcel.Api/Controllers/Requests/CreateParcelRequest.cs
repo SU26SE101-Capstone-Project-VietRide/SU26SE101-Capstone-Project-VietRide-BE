@@ -15,4 +15,5 @@ public sealed record CreateParcelRequest(
     RecipientRequest Recipient,
     string DeliveryMethod,
     string PaymentMethod,
-    string? VoucherCode);
+    string? VoucherCode,
+    string? QuoteToken = null);

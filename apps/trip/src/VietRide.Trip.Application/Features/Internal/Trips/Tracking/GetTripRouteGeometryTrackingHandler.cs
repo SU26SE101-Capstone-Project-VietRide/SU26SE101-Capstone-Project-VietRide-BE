@@ -49,24 +49,15 @@ public sealed class GetTripRouteGeometryTrackingHandler
                     cancellationToken)
                 ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip alternative route was not found.")
             : null;
-        IReadOnlyList<Domain.Entities.AlternativeRouteStop> alternativeStops = alternativeRoute is null
-            ? []
-            : await alternativeRouteRepository.ListStopsAsync(alternativeRoute.Id, cancellationToken);
-        IReadOnlyList<Domain.Entities.TripStop> tripStops = alternativeRoute is null
-            ? await tripStopRepository.QueryNoTracking()
-                .Where(stop => stop.TripId == request.TripId)
-                .OrderBy(stop => stop.OrderIndex)
-                .ToArrayAsync(cancellationToken)
-            : [];
-        var stopIds = alternativeRoute is null
-            ? tripStops.Select(stop => stop.StopId).ToArray()
-            : alternativeStops.Select(stop => stop.StopId).ToArray();
+        var tripStops = await tripStopRepository.QueryNoTracking()
+            .Where(stop => stop.TripId == request.TripId)
+            .OrderBy(stop => stop.OrderIndex)
+            .ToArrayAsync(cancellationToken);
+        var stopIds = tripStops.Select(stop => stop.StopId).ToArray();
         var stopsById = await stopRepository.QueryNoTracking()
             .Where(stop => stopIds.Contains(stop.Id))
             .ToDictionaryAsync(stop => stop.Id, cancellationToken);
-        var intermediateStops = (alternativeRoute is null
-            ? tripStops.Select(stop => (stop.StopId, stop.OrderIndex))
-            : alternativeStops.Select(stop => (stop.StopId, stop.OrderIndex))).Select(stop =>
+        var intermediateStops = tripStops.Select(stop => (stop.StopId, stop.OrderIndex)).Select(stop =>
         {
             if (!stopsById.TryGetValue(stop.StopId, out var routeStop))
             {
@@ -119,7 +110,8 @@ public sealed class GetTripRouteGeometryTrackingHandler
             MapStation(stationsById.GetValueOrDefault(route.OriginStationId)),
             intermediateStops,
             MapStation(stationsById.GetValueOrDefault(destinationStationId)),
-            alternativeRoute?.Id ?? route.Id);
+            alternativeRoute?.Id ?? route.Id,
+            trip.Status.ToString());
     }
 
     private static TripRouteStationTrackingDto? MapStation(Domain.Entities.Station? station)

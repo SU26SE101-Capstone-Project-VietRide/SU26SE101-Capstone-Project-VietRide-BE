@@ -1015,17 +1015,31 @@ describe('buildRouteTable', () => {
   });
 
   it('keeps Swagger specs public and mapped to every UI-gap facade owner', () => {
-    const expected = [
+    const dotnetSpecs = [
       ['/api-specs/booking', env.BOOKING_BASE_URL],
       ['/api-specs/parcel', env.PARCEL_BASE_URL],
       ['/api-specs/payment', env.PAYMENT_BASE_URL],
     ] as const;
 
-    expected.forEach(([path, target]) => {
+    dotnetSpecs.forEach(([path, target]) => {
       expect(matchRoute(routes, path)).toMatchObject({
         target,
         authRequired: 'none',
         rewriteTo: '/swagger/v1/swagger.json',
+      });
+    });
+
+    const nestSpecs = [
+      ['/api-specs/tracking', env.TRACKING_BASE_URL],
+      ['/api-specs/notification', env.NOTIFICATION_BASE_URL],
+      ['/api-specs/rag', env.RAG_BASE_URL],
+    ] as const;
+
+    nestSpecs.forEach(([path, target]) => {
+      expect(matchRoute(routes, path)).toMatchObject({
+        target,
+        authRequired: 'none',
+        rewriteTo: '/docs-json',
       });
     });
   });

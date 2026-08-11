@@ -119,6 +119,38 @@ public sealed class InternalUsersEndpointsTests
     }
 
     [Fact]
+    public async Task GetUserByEmail_WithInternalJwt_NormalizesAndReturnsRawUserId()
+    {
+        var user = User.CreateOperatorScopedPendingPassword(
+            "recipient@example.com", PhoneNumber.Parse("+84901234567"), "Recipient", UserRole.DRIVER, Guid.NewGuid());
+        await using var app = await CreateAppAsync([], [user]);
+        using var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Add(InternalJwtAuthenticationExtensions.HeaderName, $"Bearer {CreateInternalJwt()}");
+
+        var response = await client.GetAsync("/internal/v1/users/by-email?email=%20Recipient%40Example.COM%20");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(doc.RootElement.TryGetProperty("success", out _));
+        Assert.Equal(user.Id, doc.RootElement.GetProperty("userId").GetGuid());
+        Assert.Single(doc.RootElement.EnumerateObject());
+    }
+
+    [Fact]
+    public async Task GetUserByEmail_NoMatch_ReturnsResourceNotFoundEnvelope()
+    {
+        await using var app = await CreateAppAsync([]);
+        using var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Add(InternalJwtAuthenticationExtensions.HeaderName, $"Bearer {CreateInternalJwt()}");
+
+        var response = await client.GetAsync("/internal/v1/users/by-email?email=missing%40example.com");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("RESOURCE_NOT_FOUND", doc.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task GetDeviceTokens_WithoutInternalJwt_ReturnsUnauthorizedEnvelope()
     {
         await using var app = await CreateAppAsync(Array.Empty<DeviceRow>());
@@ -210,6 +242,13 @@ public sealed class InternalUsersEndpointsTests
             {
                 var phone = (string)args![0]!;
                 return Task.FromResult(_users.FirstOrDefault(user => user.Phone?.Value == phone));
+            }
+
+            if (targetMethod?.Name == "GetByEmailAsync")
+            {
+                var email = (string)args![0]!;
+                return Task.FromResult(_users.FirstOrDefault(user =>
+                    string.Equals(user.Email, email, StringComparison.OrdinalIgnoreCase)));
             }
 
             if (targetMethod?.ReturnType == typeof(IQueryable<User>))

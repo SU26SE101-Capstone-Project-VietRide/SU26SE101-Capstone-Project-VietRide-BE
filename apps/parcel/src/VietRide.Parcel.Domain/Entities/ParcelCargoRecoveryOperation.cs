@@ -12,7 +12,7 @@ public sealed class ParcelCargoRecoveryOperation : BaseEntity<Guid>
     public Guid SourceTripId { get; private set; }
     public Guid? TargetTripId { get; private set; }
     public string? TargetState { get; private set; }
-    public Guid ActorUserId { get; private set; }
+    public Guid? ActorUserId { get; private set; }
     public string Reason { get; private set; } = null!;
     public long RefundAmountVnd { get; private set; }
     public long RefundDueVnd { get; private set; }

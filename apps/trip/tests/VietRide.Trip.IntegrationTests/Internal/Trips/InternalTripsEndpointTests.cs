@@ -434,7 +434,8 @@ public sealed class InternalTripsEndpointTests
             TripRouteGeometrySources.RoutePolyline,
             new TripRouteStationTrackingDto(Guid.NewGuid(), "Bến đầu", 10.7, 106.6),
             [new TripRouteIntermediateStopTrackingDto(Guid.NewGuid(), "Điểm giữa", 1, 10.75, 106.67)],
-            new TripRouteStationTrackingDto(Guid.NewGuid(), "Bến cuối", 10.8, 106.8)));
+            new TripRouteStationTrackingDto(Guid.NewGuid(), "Bến cuối", 10.8, 106.8),
+            TripStatus: "IN_PROGRESS"));
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
 
@@ -449,6 +450,7 @@ public sealed class InternalTripsEndpointTests
         document.RootElement.GetProperty("data").GetProperty("originStation").GetProperty("name").GetString().Should().Be("Bến đầu");
         document.RootElement.GetProperty("data").GetProperty("intermediateStops").GetArrayLength().Should().Be(1);
         document.RootElement.GetProperty("data").GetProperty("destinationStation").GetProperty("name").GetString().Should().Be("Bến cuối");
+        document.RootElement.GetProperty("data").GetProperty("tripStatus").GetString().Should().Be("IN_PROGRESS");
         mediator.LastRequest.Should().BeOfType<GetTripRouteGeometryTrackingQuery>()
             .Which.TripId.Should().Be(tripId);
     }
