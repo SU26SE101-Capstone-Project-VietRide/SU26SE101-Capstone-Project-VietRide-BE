@@ -131,6 +131,63 @@ public class IdentityServiceClientInternalClientTests
     }
 
     [Fact]
+    public async Task FindUserByEmailAsync_NormalizesEmailAndReturnsUserId()
+    {
+        var body = JsonSerializer.Serialize(new { userId = UserId }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var result = await client.FindUserByEmailAsync(" Recipient@Example.COM ");
+
+        result.Kind.Should().Be(RecipientUserLookupOutcomeKind.Success);
+        result.UserId.Should().Be(UserId);
+        _handler.LastRequest!.RequestUri!.AbsolutePath.Should().Be("/internal/v1/users/by-email");
+        _handler.LastRequest.RequestUri.Query.Should().Be("?email=recipient%40example.com");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, RecipientUserLookupOutcomeKind.TransportError)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, RecipientUserLookupOutcomeKind.TransportError)]
+    public async Task FindUserByEmailAsync_MapsStatus(HttpStatusCode status, RecipientUserLookupOutcomeKind expected)
+    {
+        var client = BuildClient(status, "{}");
+
+        var result = await client.FindUserByEmailAsync("recipient@example.com");
+
+        result.Kind.Should().Be(expected);
+        result.UserId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task FindUserByEmailAsync_MapsOnlyCanonicalResourceNotFoundToNoUser()
+    {
+        var canonical = BuildClient(
+            HttpStatusCode.NotFound,
+            "{\"success\":false,\"statusCode\":404,\"error\":{\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Not found.\"}}");
+        (await canonical.FindUserByEmailAsync("recipient@example.com"))
+            .Kind.Should().Be(RecipientUserLookupOutcomeKind.UserNotFound);
+
+        var unexpected = BuildClient(
+            HttpStatusCode.NotFound,
+            "{\"success\":false,\"statusCode\":404,\"error\":{\"code\":\"USER_NOT_FOUND\",\"message\":\"Not found.\"}}");
+        (await unexpected.FindUserByEmailAsync("recipient@example.com"))
+            .Kind.Should().Be(RecipientUserLookupOutcomeKind.TransportError);
+
+        var malformed = BuildClient(HttpStatusCode.NotFound, "{}");
+        (await malformed.FindUserByEmailAsync("recipient@example.com"))
+            .Kind.Should().Be(RecipientUserLookupOutcomeKind.TransportError);
+    }
+
+    [Fact]
+    public async Task FindUserByEmailAsync_MalformedSuccessIsTransportError()
+    {
+        var client = BuildClient(HttpStatusCode.OK, "{\"userId\":\"not-a-uuid\"}");
+
+        var result = await client.FindUserByEmailAsync("recipient@example.com");
+
+        result.Kind.Should().Be(RecipientUserLookupOutcomeKind.TransportError);
+    }
+
+    [Fact]
     public async Task GetOperatorInfoAsync_Returns_Success_On_200()
     {
         var body = JsonSerializer.Serialize(new

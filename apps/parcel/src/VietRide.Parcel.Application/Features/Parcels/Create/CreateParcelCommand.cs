@@ -24,6 +24,7 @@ public sealed record CreateParcelCommand(
     string DeliveryMethod,
     string PaymentMethod,
     string? VoucherCode = null,
+    string? QuoteToken = null,
     string? IdempotencyKey = null) : IRequest<CreateParcelResponse>
 {
     public CreateParcelCommand(
@@ -63,6 +64,7 @@ public sealed record CreateParcelCommand(
             deliveryMethod,
             paymentMethod,
             voucherCode,
+            null,
             null)
     {
     }

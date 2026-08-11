@@ -7,6 +7,7 @@ using Polly;
 using StackExchange.Redis;
 using VietRide.Parcel.Application.Abstractions.Caching;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.Security;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.History;
 using VietRide.Parcel.Infrastructure.Caching;
@@ -14,6 +15,7 @@ using VietRide.Parcel.Infrastructure.Http;
 using VietRide.Parcel.Infrastructure.Jobs;
 using VietRide.Parcel.Infrastructure.Messaging;
 using VietRide.Parcel.Infrastructure.Persistence.Repositories;
+using VietRide.Parcel.Infrastructure.Security;
 using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Application.Security;
 using VietRide.Shared.Http.Handlers;
@@ -68,6 +70,27 @@ public static class InfrastructureServiceCollectionExtensions
         IHostEnvironment hostEnvironment,
         bool registerConsumers = true)
     {
+        var quoteSecret = configuration["PARCEL_QUOTE_TOKEN_SECRET"]
+            ?? Environment.GetEnvironmentVariable("PARCEL_QUOTE_TOKEN_SECRET");
+        if (string.IsNullOrWhiteSpace(quoteSecret)
+            && (hostEnvironment.IsDevelopment() || hostEnvironment.IsEnvironment("Testing")))
+        {
+            quoteSecret = "vietride-local-parcel-quote-secret-change-me";
+        }
+
+        if (string.IsNullOrWhiteSpace(quoteSecret) || quoteSecret.Length < 32)
+        {
+            throw new InvalidOperationException(
+                "PARCEL_QUOTE_TOKEN_SECRET must be configured with at least 32 characters.");
+        }
+
+        var quoteTtlSeconds = configuration.GetValue("PARCEL_QUOTE_TTL_SECONDS", 600);
+        if (quoteTtlSeconds <= 0)
+            throw new InvalidOperationException("PARCEL_QUOTE_TTL_SECONDS must be greater than zero.");
+
+        services.AddSingleton(new ParcelQuoteTokenOptions(quoteSecret, quoteTtlSeconds));
+        services.AddSingleton<IParcelQuoteTokenService, HmacParcelQuoteTokenService>();
+
         services.AddSingleton<IFirebaseStorageImageUrlValidator>(_ =>
             new FirebaseStorageImageUrlValidator(
                 configuration["FIREBASE_WEB_STORAGE_BUCKET"]

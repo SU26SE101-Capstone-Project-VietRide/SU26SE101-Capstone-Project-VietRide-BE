@@ -44,6 +44,28 @@ public interface ITripServiceClient
         int pageSize,
         CancellationToken cancellationToken = default);
 
+    Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsForRoutesAsync(
+        Guid originStationId,
+        Guid destinationStationId,
+        DateOnly departureDate,
+        decimal estimatedWeightKg,
+        decimal estimatedVolumeM3,
+        ParcelSizeCategory sizeCategory,
+        IReadOnlyCollection<Guid> eligibleRouteIds,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+        => SearchAvailableParcelTripsAsync(
+            originStationId,
+            destinationStationId,
+            departureDate,
+            estimatedWeightKg,
+            estimatedVolumeM3,
+            sizeCategory,
+            page,
+            pageSize,
+            cancellationToken);
+
     Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsAsync(
         Guid originStationId,
         Guid destinationStationId,

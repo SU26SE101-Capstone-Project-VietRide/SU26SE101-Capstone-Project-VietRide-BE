@@ -11,4 +11,5 @@ public sealed record SearchParcelAvailableTripsQuery(
     decimal EstimatedVolumeM3,
     string SizeCategory,
     int Page,
-    int PageSize) : IRequest<PagedResult<ParcelTripAvailabilityItemDto>>;
+    int PageSize,
+    IReadOnlyCollection<Guid>? EligibleRouteIds = null) : IRequest<PagedResult<ParcelTripAvailabilityItemDto>>;

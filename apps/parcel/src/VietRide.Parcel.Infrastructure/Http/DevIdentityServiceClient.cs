@@ -27,6 +27,14 @@ public sealed class DevIdentityServiceClient : IIdentityServiceClient
         return Task.FromResult(new UserLookupOutcome(UserLookupOutcomeKind.Success, userInfo, null));
     }
 
+    public Task<RecipientUserLookupOutcome> FindUserByEmailAsync(
+        string email,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Identity stub for FindUserByEmailAsync({Email}).", email);
+        return Task.FromResult(RecipientUserLookupOutcome.NotFound());
+    }
+
     public Task<IdentityUserBatchOutcome> GetUsersAsync(
         IReadOnlyCollection<Guid> userIds,
         CancellationToken cancellationToken = default)

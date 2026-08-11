@@ -64,6 +64,106 @@ public sealed class CreateParcelTests
     }
 
     [Fact]
+    public async Task Create_ExistingRecipientEmail_PersistsResolvedRecipientUserId()
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
+            userRole: "PASSENGER",
+            userStatus: "ACTIVE",
+            tripStatus: "SCHEDULED",
+            hasBooking: false,
+            hasFare: true);
+        ParcelEntity? captured = null;
+        parcelRepo.AddAsync(Arg.Any<ParcelEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                captured = call.Arg<ParcelEntity>();
+                return Task.FromResult(captured);
+            });
+
+        await CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow)
+            .Handle(BuildCommand(), CancellationToken.None);
+
+        captured!.RecipientUserId.Should().Be(RecipientUserId);
+        await identity.Received(1).FindUserByEmailAsync(
+            RecipientEmail,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Create_RecipientEmailWithOuterWhitespaceAndUppercase_PersistsNormalizedEmail()
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
+            userRole: "PASSENGER",
+            userStatus: "ACTIVE",
+            tripStatus: "SCHEDULED",
+            hasBooking: false,
+            hasFare: true);
+        ParcelEntity? captured = null;
+        parcelRepo.AddAsync(Arg.Any<ParcelEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                captured = call.Arg<ParcelEntity>();
+                return Task.FromResult(captured);
+            });
+
+        await CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow)
+            .Handle(
+                BuildCommand(recipientEmail: "  A@EXAMPLE.COM  "),
+                CancellationToken.None);
+
+        captured!.RecipientEmail.Should().Be(RecipientEmail);
+        captured.RecipientUserId.Should().Be(RecipientUserId);
+        await identity.Received(1).FindUserByEmailAsync(
+            RecipientEmail,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Create_UnknownRecipientEmail_PersistsNullRecipientUserId()
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
+            userRole: "PASSENGER",
+            userStatus: "ACTIVE",
+            tripStatus: "SCHEDULED",
+            hasBooking: false,
+            hasFare: true);
+        identity.FindUserByEmailAsync(RecipientEmail, Arg.Any<CancellationToken>())
+            .Returns(RecipientUserLookupOutcome.NotFound());
+        ParcelEntity? captured = null;
+        parcelRepo.AddAsync(Arg.Any<ParcelEntity>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                captured = call.Arg<ParcelEntity>();
+                return Task.FromResult(captured);
+            });
+
+        await CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow)
+            .Handle(BuildCommand(), CancellationToken.None);
+
+        captured!.RecipientUserId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Create_RecipientLookupUnavailable_FailsBeforePersistence()
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
+            userRole: "PASSENGER",
+            userStatus: "ACTIVE",
+            tripStatus: "SCHEDULED",
+            hasBooking: false,
+            hasFare: true);
+        identity.FindUserByEmailAsync(RecipientEmail, Arg.Any<CancellationToken>())
+            .Returns(RecipientUserLookupOutcome.TransportFailure("identity unavailable"));
+
+        var act = () => CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow)
+            .Handle(BuildCommand(), CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ParcelDependencyUnavailableException>();
+        exception.Which.ErrorCode.Should().Be("UPSTREAM_UNAVAILABLE");
+        await parcelRepo.DidNotReceive().AddAsync(Arg.Any<ParcelEntity>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Create_WhenTripDisplaySummaryUnavailable_FailsBeforePersistence()
     {
         var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
@@ -192,7 +292,10 @@ public sealed class CreateParcelTests
 
         var outbox = Substitute.For<IIntegrationEventOutbox>();
         var handler = CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow, outbox: outbox);
-        var command = BuildCommand(sizeCategory: "EXTRA_LARGE", deliveryMethod: "TERMINAL_PICKUP");
+        var command = BuildCommand(
+            sizeCategory: "EXTRA_LARGE",
+            deliveryMethod: "TERMINAL_PICKUP",
+            estimatedWeightKg: 31m);
 
         var result = await handler.Handle(command, CancellationToken.None);
 
@@ -280,6 +383,8 @@ public sealed class CreateParcelTests
         identity.GetUserInfoAsync(SenderUserId, Arg.Any<CancellationToken>())
             .Returns(new UserLookupOutcome(UserLookupOutcomeKind.Success,
                 new IdentityUserInfo(SenderUserId, "PASSENGER", null, "ACTIVE"), null));
+        identity.FindUserByEmailAsync(RecipientEmail, Arg.Any<CancellationToken>())
+            .Returns(RecipientUserLookupOutcome.Success(RecipientUserId));
 
         booking.GetBookingSnapshotAsync(BookingId, Arg.Any<CancellationToken>())
             .Returns(new BookingLookupOutcome(BookingLookupOutcomeKind.TransportError, null, "booking down"));
@@ -305,6 +410,8 @@ public sealed class CreateParcelTests
         identity.GetUserInfoAsync(SenderUserId, Arg.Any<CancellationToken>())
             .Returns(new UserLookupOutcome(UserLookupOutcomeKind.Success,
                 new IdentityUserInfo(SenderUserId, "PASSENGER", null, "ACTIVE"), null));
+        identity.FindUserByEmailAsync(RecipientEmail, Arg.Any<CancellationToken>())
+            .Returns(RecipientUserLookupOutcome.Success(RecipientUserId));
 
         booking.GetBookingSnapshotAsync(BookingId, Arg.Any<CancellationToken>())
             .Returns(new BookingLookupOutcome(BookingLookupOutcomeKind.BookingNotFound, null, null));
@@ -332,6 +439,8 @@ public sealed class CreateParcelTests
         identity.GetUserInfoAsync(SenderUserId, Arg.Any<CancellationToken>())
             .Returns(new UserLookupOutcome(UserLookupOutcomeKind.Success,
                 new IdentityUserInfo(SenderUserId, "PASSENGER", null, "ACTIVE"), null));
+        identity.FindUserByEmailAsync(RecipientEmail, Arg.Any<CancellationToken>())
+            .Returns(RecipientUserLookupOutcome.Success(RecipientUserId));
 
         booking.GetBookingSnapshotAsync(BookingId, Arg.Any<CancellationToken>())
             .Returns(new BookingLookupOutcome(BookingLookupOutcomeKind.Success,
@@ -522,6 +631,8 @@ public sealed class CreateParcelTests
         identity.GetUserInfoAsync(SenderUserId, Arg.Any<CancellationToken>())
             .Returns(new UserLookupOutcome(UserLookupOutcomeKind.Success,
                 new IdentityUserInfo(SenderUserId, "PASSENGER", null, "ACTIVE"), null));
+        identity.FindUserByEmailAsync(RecipientEmail, Arg.Any<CancellationToken>())
+            .Returns(RecipientUserLookupOutcome.Success(RecipientUserId));
 
         trip.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
             .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success,
@@ -540,9 +651,10 @@ public sealed class CreateParcelTests
                     new TripVehicleSummarySnapshot(VehicleId, "51B-12345", "ACTIVE")),
             ]));
 
-        var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,
+        var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.SMALL, OperatorId,
             Money.FromRaw(150_000), Now);
-        fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
+        fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
+        fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.SMALL, Arg.Any<CancellationToken>())
             .Returns(fare);
 
         var existingParcel = ParcelEntity.CreatePendingPayment(
@@ -577,6 +689,8 @@ public sealed class CreateParcelTests
         identity.GetUserInfoAsync(SenderUserId, Arg.Any<CancellationToken>())
             .Returns(new UserLookupOutcome(UserLookupOutcomeKind.Success,
                 new IdentityUserInfo(SenderUserId, "PASSENGER", null, "ACTIVE"), null));
+        identity.FindUserByEmailAsync(RecipientEmail, Arg.Any<CancellationToken>())
+            .Returns(RecipientUserLookupOutcome.Success(RecipientUserId));
 
         booking.GetBookingSnapshotAsync(BookingId, Arg.Any<CancellationToken>())
             .Returns(new BookingLookupOutcome(BookingLookupOutcomeKind.Success,
@@ -599,9 +713,10 @@ public sealed class CreateParcelTests
                     new TripVehicleSummarySnapshot(VehicleId, "51B-12345", "ACTIVE")),
             ]));
 
-        var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,
+        var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.SMALL, OperatorId,
             Money.FromRaw(150_000), Now);
-        fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
+        fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
+        fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.SMALL, Arg.Any<CancellationToken>())
             .Returns(fare);
 
         parcelRepo.FindByParcelCodeAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -637,14 +752,16 @@ public sealed class CreateParcelTests
         string sizeCategory = "MEDIUM",
         string deliveryMethod = "TERMINAL_PICKUP",
         string paymentMethod = "VNPAY",
-        string? photoUrl = PhotoUrl)
+        string? photoUrl = PhotoUrl,
+        decimal estimatedWeightKg = WeightKg,
+        string? recipientEmail = RecipientEmail)
     {
         return new CreateParcelCommand(
             SenderUserId,
             RecipientUserId,
             RecipientName,
             RecipientPhone,
-            RecipientEmail,
+            recipientEmail,
             TripId,
             DropoffStopId,
             bookingId,
@@ -652,9 +769,15 @@ public sealed class CreateParcelTests
             Description,
             photoUrl,
             sizeCategory,
-            WeightKg,
+            1m,
+            1m,
+            1m,
+            estimatedWeightKg,
             deliveryMethod,
-            paymentMethod);
+            paymentMethod,
+            null,
+            null,
+            null);
     }
 
     private static (IIdentityServiceClient, IBookingServiceClient, ITripServiceClient,
@@ -675,6 +798,8 @@ public sealed class CreateParcelTests
         identity.GetUserInfoAsync(SenderUserId, Arg.Any<CancellationToken>())
             .Returns(new UserLookupOutcome(UserLookupOutcomeKind.Success,
                 new IdentityUserInfo(SenderUserId, userRole, null, userStatus), null));
+        identity.FindUserByEmailAsync(RecipientEmail, Arg.Any<CancellationToken>())
+            .Returns(RecipientUserLookupOutcome.Success(RecipientUserId));
 
         if (tripStatus != null)
         {
@@ -698,10 +823,11 @@ public sealed class CreateParcelTests
 
         if (hasFare)
         {
-            foreach (var category in new[] { ParcelSizeCategory.MEDIUM, ParcelSizeCategory.EXTRA_LARGE })
+            foreach (var category in Enum.GetValues<ParcelSizeCategory>())
             {
                 var fare = ParcelRouteFare.Create(RouteId, category, OperatorId,
                     Money.FromRaw(150_000), Now);
+                fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
                 fareRepo.FindByCompositeAsync(RouteId, category, Arg.Any<CancellationToken>())
                     .Returns(fare);
             }

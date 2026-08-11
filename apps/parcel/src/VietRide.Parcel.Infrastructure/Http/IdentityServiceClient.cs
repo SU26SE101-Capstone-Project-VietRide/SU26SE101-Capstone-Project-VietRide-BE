@@ -78,6 +78,51 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
         }
     }
 
+    public async Task<RecipientUserLookupOutcome> FindUserByEmailAsync(
+        string email,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedEmail = email.Trim().ToLowerInvariant();
+        try
+        {
+            using var response = await _httpClient
+                .GetAsync($"/internal/v1/users/by-email?email={Uri.EscapeDataString(normalizedEmail)}", cancellationToken)
+                .ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return await IsResourceNotFoundAsync(response, cancellationToken)
+                    ? RecipientUserLookupOutcome.NotFound()
+                    : RecipientUserLookupOutcome.TransportFailure(
+                        "Identity recipient lookup returned an unexpected 404 response.");
+            }
+
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                return RecipientUserLookupOutcome.TransportFailure(
+                    $"Identity recipient lookup returned status {(int)response.StatusCode}.");
+            }
+
+            var json = await response.Content
+                .ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            return TryGetGuidProperty(json, "userId", out var userId)
+                ? RecipientUserLookupOutcome.Success(userId)
+                : RecipientUserLookupOutcome.TransportFailure(
+                    "Identity recipient lookup returned an invalid payload.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Identity recipient lookup failed for {Email}.", normalizedEmail);
+            return RecipientUserLookupOutcome.TransportFailure(
+                "Identity recipient lookup transport failure.");
+        }
+    }
+
     public async Task<IdentityUserBatchOutcome> GetUsersAsync(
         IReadOnlyCollection<Guid> userIds,
         CancellationToken cancellationToken = default)
@@ -292,6 +337,28 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
             && property.ValueKind == JsonValueKind.String
             && Guid.TryParse(property.GetString(), out value)
             && value != Guid.Empty;
+    }
+
+    private static async Task<bool> IsResourceNotFoundAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var json = await response.Content
+                .ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            return json.ValueKind == JsonValueKind.Object
+                && json.TryGetProperty("error", out var error)
+                && error.ValueKind == JsonValueKind.Object
+                && error.TryGetProperty("code", out var code)
+                && code.ValueKind == JsonValueKind.String
+                && string.Equals(code.GetString(), "RESOURCE_NOT_FOUND", StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static bool TryGetBooleanProperty(

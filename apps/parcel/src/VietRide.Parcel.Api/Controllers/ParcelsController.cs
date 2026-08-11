@@ -57,7 +57,8 @@ public sealed class ParcelsController : ControllerBase
                 estimatedWeightKg,
                 sizeCategory,
                 page,
-                pageSize),
+                pageSize,
+                CurrentUserClaims.GetUserId(User)),
             cancellationToken);
 
         return Ok(result);
@@ -99,6 +100,7 @@ public sealed class ParcelsController : ControllerBase
                 request.DeliveryMethod,
                 request.PaymentMethod,
                 request.VoucherCode,
+                request.QuoteToken,
                 Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString()),
             cancellationToken);
 
@@ -165,11 +167,12 @@ public sealed class ParcelsController : ControllerBase
         [FromQuery] string sizeCategory,
         [FromQuery] string? paymentMethod,
         [FromQuery] long? orderAmount,
+        [FromQuery] string? quoteToken,
         CancellationToken cancellationToken)
     {
         var userId = CurrentUserClaims.GetUserId(User);
         var result = await _mediator.Send(
-            new GetParcelAvailableVouchersQuery(userId, tripId, sizeCategory, paymentMethod, orderAmount),
+            new GetParcelAvailableVouchersQuery(userId, tripId, sizeCategory, paymentMethod, orderAmount, quoteToken),
             cancellationToken);
         return Ok(result);
     }

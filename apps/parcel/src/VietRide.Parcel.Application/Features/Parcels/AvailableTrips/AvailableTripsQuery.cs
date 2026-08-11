@@ -13,7 +13,8 @@ public sealed record AvailableTripsQuery(
     decimal EstimatedWeightKg,
     string? SizeCategory,
     int Page = 1,
-    int PageSize = 20) : IQuery<PagedResult<AvailableTripResponse>>
+    int PageSize = 20,
+    Guid SenderUserId = default) : IQuery<PagedResult<AvailableTripResponse>>
 {
     public AvailableTripsQuery(
         Guid originStationId,
@@ -33,7 +34,8 @@ public sealed record AvailableTripsQuery(
             estimatedWeightKg,
             sizeCategory,
             page,
-            pageSize)
+            pageSize,
+            Guid.Empty)
     {
     }
 }
