@@ -87,6 +87,8 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<ShuttleDispatchAlert> ShuttleDispatchAlerts => Set<ShuttleDispatchAlert>();
 
+    public DbSet<ResourceReservation> ResourceReservations => Set<ResourceReservation>();
+
     public DbSet<Incident> Incidents => Set<Incident>();
 
     public DbSet<RouteChangeProposal> RouteChangeProposals => Set<RouteChangeProposal>();

@@ -6,6 +6,8 @@ using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
+using VietRide.Trip.Application.Features.ResourceAvailability;
 using VietRide.Trip.Application.Features.Routes;
 using VietRide.Trip.Application.Features.Stops;
 using VietRide.Trip.Application.Features.TripGeneration;
@@ -22,6 +24,7 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
     private readonly ITripGenerationJobScheduler tripGenerationJobScheduler;
     private readonly IUnitOfWork unitOfWork;
     private readonly IVehicleRepository vehicleRepository;
+    private readonly IResourceAvailabilityService? resourceAvailability;
 
     public CreateDriverScheduleHandler(
         IDriverScheduleRepository driverScheduleRepository,
@@ -30,7 +33,8 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
         IRouteStopRepository routeStopRepository,
         IVehicleRepository vehicleRepository,
         ITripGenerationJobScheduler tripGenerationJobScheduler,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IResourceAvailabilityService? resourceAvailability = null)
     {
         this.driverScheduleRepository = driverScheduleRepository;
         this.identityInternalClient = identityInternalClient;
@@ -38,6 +42,7 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
         this.routeStopRepository = routeStopRepository;
         this.vehicleRepository = vehicleRepository;
         this.tripGenerationJobScheduler = tripGenerationJobScheduler;
+        this.resourceAvailability = resourceAvailability;
         this.unitOfWork = unitOfWork;
     }
 
@@ -75,18 +80,31 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
 
         if (request.IsActive)
         {
-            if (await driverScheduleRepository.HasDriverConflictAsync(
-                    request.DriverUserId,
-                    request.DayOfWeek,
-                    request.DepartureTime,
-                    request.ValidFrom,
-                    request.ValidUntil,
-                    cancellationToken: cancellationToken))
+            if (resourceAvailability is null)
             {
-                throw new ConflictException("TRIP_DRIVER_CONFLICT", "Driver has a conflicting active schedule.");
-            }
+                if (await driverScheduleRepository.HasDriverConflictAsync(
+                        request.DriverUserId,
+                        request.DayOfWeek,
+                        request.DepartureTime,
+                        request.ValidFrom,
+                        request.ValidUntil,
+                        cancellationToken: cancellationToken))
+                {
+                    throw new ConflictException("TRIP_DRIVER_CONFLICT", "Driver has a conflicting active schedule.");
+                }
 
-            EnsureRouteCanGenerateTrips(request.RouteId);
+                EnsureRouteCanGenerateTrips(request.RouteId);
+            }
+            else
+            {
+                EnsureRouteCanGenerateTrips(request.RouteId);
+                ResourceAvailabilityConflictGuard.EnsureAvailable(
+                    await resourceAvailability.CheckDriverScheduleAsync(
+                        ToAvailabilityInput(request),
+                        acquireLocks: true,
+                        cancellationToken),
+                    AssignmentSourceType.DRIVER_SCHEDULE);
+            }
         }
 
         var dayOfWeek = JsonSerializer.SerializeToElement(request.DayOfWeek);
@@ -113,6 +131,18 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
 
         return DriverScheduleMapper.ToDto(schedule);
     }
+
+    private static DriverScheduleAvailabilityInput ToAvailabilityInput(CreateDriverScheduleCommand request) =>
+        new(
+            request.OperatorId,
+            request.RouteId,
+            request.VehicleId,
+            request.DriverUserId,
+            request.AssistantUserId,
+            request.DayOfWeek,
+            request.DepartureTime,
+            request.ValidFrom,
+            request.ValidUntil);
 
     private async Task ValidateAssignedUsersAsync(
         Guid operatorId,

@@ -17,6 +17,7 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
     private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
+    private readonly IResourceAvailabilityService? resourceAvailability;
 
     public ChangeTripRouteCommandHandler(
         ITripRepository trips,
@@ -25,7 +26,8 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
         ITripRouteChangeService tripRouteChanges,
         IUnitOfWork unitOfWork,
         IClock clock,
-        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null,
+        IResourceAvailabilityService? resourceAvailability = null)
     {
         this.trips = trips;
         this.alternativeRoutes = alternativeRoutes;
@@ -34,6 +36,7 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
         this.unitOfWork = unitOfWork;
         this.clock = clock;
         this.routeChangeProposals = routeChangeProposals;
+        this.resourceAvailability = resourceAvailability;
     }
 
     public async Task<ChangeTripRouteResponse> Handle(ChangeTripRouteCommand request, CancellationToken cancellationToken)
@@ -79,6 +82,10 @@ public sealed class ChangeTripRouteCommandHandler : IRequestHandler<ChangeTripRo
                 affectedBookingIds,
                 now,
                 cancellationToken);
+            if (resourceAvailability is not null)
+            {
+                await resourceAvailability.RefreshTripAsync(lockedTrip, cancellationToken);
+            }
             return new ChangeTripRouteResponse(
                 result.TripId,
                 result.Status,

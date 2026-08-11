@@ -5,6 +5,8 @@ using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
+using VietRide.Trip.Application.Features.ResourceAvailability;
 using VietRide.Trip.Application.Features.Stops;
 using VietRide.Trip.Application.Features.TripGeneration;
 using VietRide.Trip.Domain.Entities;
@@ -19,6 +21,7 @@ public sealed class ActivateDriverScheduleHandler : IRequestHandler<ActivateDriv
     private readonly IRouteStopRepository routeStopRepository;
     private readonly ITripGenerationJobScheduler tripGenerationJobScheduler;
     private readonly IUnitOfWork unitOfWork;
+    private readonly IResourceAvailabilityService? resourceAvailability;
 
     public ActivateDriverScheduleHandler(
         IDriverScheduleRepository driverScheduleRepository,
@@ -26,13 +29,15 @@ public sealed class ActivateDriverScheduleHandler : IRequestHandler<ActivateDriv
         IRouteRepository routeRepository,
         IRouteStopRepository routeStopRepository,
         ITripGenerationJobScheduler tripGenerationJobScheduler,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IResourceAvailabilityService? resourceAvailability = null)
     {
         this.driverScheduleRepository = driverScheduleRepository;
         this.identityInternalClient = identityInternalClient;
         this.routeRepository = routeRepository;
         this.routeStopRepository = routeStopRepository;
         this.tripGenerationJobScheduler = tripGenerationJobScheduler;
+        this.resourceAvailability = resourceAvailability;
         this.unitOfWork = unitOfWork;
     }
 
@@ -62,19 +67,42 @@ public sealed class ActivateDriverScheduleHandler : IRequestHandler<ActivateDriv
             schedule.AssistantUserId,
             cancellationToken);
 
-        if (await driverScheduleRepository.HasDriverConflictAsync(
-                schedule.DriverUserId,
-                JsonSerializer.Deserialize<int[]>(schedule.DayOfWeek.GetRawText()) ?? [],
-                schedule.DepartureTime,
-                schedule.ValidFrom,
-                schedule.ValidUntil,
-                excludeScheduleId: schedule.Id,
-                cancellationToken: cancellationToken))
-        {
-            throw new ConflictException("TRIP_DRIVER_CONFLICT", "Driver has a conflicting active schedule.");
-        }
-
         EnsureRouteCanGenerateTrips(schedule);
+        var availabilityInput = new DriverScheduleAvailabilityInput(
+            schedule.OperatorId,
+            schedule.RouteId,
+            schedule.VehicleId,
+            schedule.DriverUserId,
+            schedule.AssistantUserId,
+            JsonSerializer.Deserialize<int[]>(schedule.DayOfWeek.GetRawText()) ?? [],
+            schedule.DepartureTime,
+            schedule.ValidFrom,
+            schedule.ValidUntil,
+            schedule.Id,
+            ExcludePendingTripsFromSchedule: true);
+        if (resourceAvailability is null)
+        {
+            if (await driverScheduleRepository.HasDriverConflictAsync(
+                    schedule.DriverUserId,
+                    availabilityInput.DayOfWeek,
+                    schedule.DepartureTime,
+                    schedule.ValidFrom,
+                    schedule.ValidUntil,
+                    excludeScheduleId: schedule.Id,
+                    cancellationToken: cancellationToken))
+            {
+                throw new ConflictException("TRIP_DRIVER_CONFLICT", "Driver has a conflicting active schedule.");
+            }
+        }
+        else
+        {
+            ResourceAvailabilityConflictGuard.EnsureAvailable(
+                await resourceAvailability.CheckDriverScheduleAsync(
+                    availabilityInput,
+                    acquireLocks: true,
+                    cancellationToken),
+                AssignmentSourceType.DRIVER_SCHEDULE);
+        }
 
         schedule.Activate();
         await unitOfWork.SaveChangesAsync(cancellationToken);

@@ -86,12 +86,21 @@ public static class InfrastructureServiceCollectionExtensions
             services.AddScoped<ITripGenerationJobScheduler, DisabledTripGenerationJobScheduler>();
         }
         services.AddScoped<IShuttleDispatchService, ShuttleDispatchService>();
+        services.AddScoped<IResourceAvailabilityService, ResourceAvailabilityService>();
+        services.AddScoped<ITripAssignmentAlertStore, TripAssignmentAlertStore>();
         services.AddHttpClient<IShuttleDistanceClient, GoogleRoutesShuttleDistanceClient>(client =>
             {
                 var baseUrl = configuration["GOOGLE_ROUTES_BASE_URL"] ?? "https://routes.googleapis.com";
                 client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
             });
         services.AddHttpClient<ITripEtaPlanner, GoogleRoutesTripEtaPlanner>(client =>
+            {
+                var baseUrl = configuration["GOOGLE_ROUTES_BASE_URL"] ?? "https://routes.googleapis.com";
+                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+            })
+            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+        services.AddHttpClient<IRepositionTravelTimeClient, GoogleRoutesRepositionTravelTimeClient>(client =>
             {
                 var baseUrl = configuration["GOOGLE_ROUTES_BASE_URL"] ?? "https://routes.googleapis.com";
                 client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);

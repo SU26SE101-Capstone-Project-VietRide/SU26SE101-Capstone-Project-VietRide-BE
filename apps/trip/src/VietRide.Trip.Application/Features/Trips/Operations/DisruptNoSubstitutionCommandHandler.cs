@@ -18,19 +18,22 @@ public sealed class DisruptNoSubstitutionCommandHandler : IRequestHandler<Disrup
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
     private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
+    private readonly IResourceAvailabilityService? resourceAvailability;
 
     public DisruptNoSubstitutionCommandHandler(
         ITripRepository tripRepository,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
         IClock clock,
-        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null,
+        IResourceAvailabilityService? resourceAvailability = null)
     {
         this.tripRepository = tripRepository;
         this.outbox = outbox;
         this.unitOfWork = unitOfWork;
         this.clock = clock;
         this.routeChangeProposals = routeChangeProposals;
+        this.resourceAvailability = resourceAvailability;
     }
 
     public async Task<DisruptNoSubstitutionResponse> Handle(DisruptNoSubstitutionCommand request, CancellationToken cancellationToken)
@@ -60,6 +63,10 @@ public sealed class DisruptNoSubstitutionCommandHandler : IRequestHandler<Disrup
             var now = clock.UtcNow;
             var reason = request.Reason.Trim();
             trip.Disrupt(now, reason);
+            if (resourceAvailability is not null)
+            {
+                await resourceAvailability.ReleaseTripAsync(trip.Id, now, cancellationToken);
+            }
             if (routeChangeProposals is not null)
                 await routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
             trip.MarkSubstitution(false);

@@ -828,16 +828,80 @@ CREATE UNIQUE INDEX uq_shuttle_passengers_booking_ticket_direction
     WHERE booking_id IS NOT NULL AND ticket_id IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
+-- resource_reservations (shared Driver/Assistant/Vehicle assignment timeline)
+-- -----------------------------------------------------------------------------
+CREATE TABLE resource_reservations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    operator_id UUID NOT NULL,
+    resource_type VARCHAR(16) NOT NULL,
+    resource_role VARCHAR(16) NOT NULL,
+    resource_id UUID NOT NULL,
+    trip_id UUID NULL REFERENCES trips (id) ON DELETE CASCADE,
+    shuttle_trip_id UUID NULL REFERENCES shuttle_trips (id) ON DELETE CASCADE,
+    planned_start_at TIMESTAMPTZ NOT NULL,
+    planned_end_at TIMESTAMPTZ NOT NULL,
+    start_station_id UUID NULL REFERENCES stations (id) ON DELETE RESTRICT,
+    end_station_id UUID NULL REFERENCES stations (id) ON DELETE RESTRICT,
+    start_latitude DECIMAL(10,7) NULL,
+    start_longitude DECIMAL(10,7) NULL,
+    end_latitude DECIMAL(10,7) NULL,
+    end_longitude DECIMAL(10,7) NULL,
+    status VARCHAR(16) NOT NULL,
+    activated_at TIMESTAMPTZ NULL,
+    released_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_resource_reservations_source
+        CHECK (num_nonnulls(trip_id, shuttle_trip_id) = 1),
+    CONSTRAINT chk_resource_reservations_period CHECK (planned_end_at > planned_start_at),
+    CONSTRAINT chk_resource_reservations_type CHECK (resource_type IN ('CREW', 'VEHICLE')),
+    CONSTRAINT chk_resource_reservations_role CHECK (resource_role IN ('DRIVER', 'ASSISTANT', 'VEHICLE')),
+    CONSTRAINT chk_resource_reservations_type_role CHECK (
+        (resource_type = 'VEHICLE' AND resource_role = 'VEHICLE')
+        OR (resource_type = 'CREW' AND resource_role IN ('DRIVER', 'ASSISTANT'))
+    ),
+    CONSTRAINT chk_resource_reservations_status
+        CHECK (status IN ('RESERVED', 'ACTIVE', 'RELEASED', 'CANCELLED')),
+    CONSTRAINT chk_resource_reservations_start_coordinates
+        CHECK ((start_latitude IS NULL) = (start_longitude IS NULL)),
+    CONSTRAINT chk_resource_reservations_end_coordinates
+        CHECK ((end_latitude IS NULL) = (end_longitude IS NULL)),
+    CONSTRAINT ex_resource_reservations_no_overlap
+        EXCLUDE USING gist (
+            resource_type WITH =,
+            resource_id WITH =,
+            tstzrange(planned_start_at, planned_end_at, '[)') WITH &&
+        ) WHERE (status IN ('RESERVED', 'ACTIVE'))
+);
+
+CREATE UNIQUE INDEX uq_resource_reservations_trip_role
+    ON resource_reservations (trip_id, resource_role)
+    WHERE trip_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_resource_reservations_shuttle_role
+    ON resource_reservations (shuttle_trip_id, resource_role)
+    WHERE shuttle_trip_id IS NOT NULL;
+CREATE INDEX idx_resource_reservations_resource_start
+    ON resource_reservations (resource_type, resource_id, planned_start_at)
+    WHERE status IN ('RESERVED', 'ACTIVE');
+CREATE INDEX idx_resource_reservations_operator_status
+    ON resource_reservations (operator_id, status);
+
+COMMENT ON TABLE resource_reservations IS
+    'Concrete cross-flow reservations for Driver, Assistant, and Vehicle. Runtime availability adds 30-minute turnaround plus Google Routes reposition time under shared advisory locks.';
+
+-- -----------------------------------------------------------------------------
 -- shuttle_dispatch_alerts (warning/cutoff idempotency markers)
 -- -----------------------------------------------------------------------------
 CREATE TABLE shuttle_dispatch_alerts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     main_trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE RESTRICT,
     operator_id UUID NOT NULL,
-    alert_type VARCHAR(20) NOT NULL,
+    alert_type VARCHAR(32) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT uq_shuttle_dispatch_alerts_trip_type UNIQUE (main_trip_id, alert_type),
-    CONSTRAINT chk_shuttle_dispatch_alerts_type CHECK (alert_type IN ('WARNING_120', 'WARNING_60', 'AUTO_CUTOFF'))
+    CONSTRAINT chk_shuttle_dispatch_alerts_type CHECK (
+        alert_type IN ('WARNING_120', 'WARNING_60', 'AUTO_CUTOFF', 'ASSIGNMENT_START_BLOCKED')
+    )
 );
 
 CREATE INDEX idx_shuttle_dispatch_alerts_operator_created
@@ -1048,6 +1112,8 @@ CREATE TRIGGER trg_trip_stops_updated_at BEFORE UPDATE ON trip_stops
 CREATE TRIGGER trg_shuttle_trips_updated_at BEFORE UPDATE ON shuttle_trips
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_shuttle_passengers_updated_at BEFORE UPDATE ON shuttle_passengers
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_resource_reservations_updated_at BEFORE UPDATE ON resource_reservations
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_incidents_updated_at BEFORE UPDATE ON incidents
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();

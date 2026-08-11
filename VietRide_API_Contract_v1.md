@@ -6358,7 +6358,18 @@ Errors: `402 SUBSCRIPTION_EXPIRED`; `403 FORBIDDEN`; `403 SUBSCRIPTION_MODULE_DI
 SHUTTLE_REQUEST_SET_CHANGED`; `409 SHUTTLE_CAPACITY_EXCEEDED`; `409
 SHUTTLE_DRIVER_CONFLICT`; `409 SHUTTLE_VEHICLE_CONFLICT`; `409
 SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 SHUTTLE_DISTANCE_EXCEEDED`; `422 VALIDATION_ERROR`;
-`503 SHUTTLE_DISTANCE_UNAVAILABLE`; `503 UPSTREAM_UNAVAILABLE`.
+`503 SHUTTLE_DISTANCE_UNAVAILABLE`; `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`; `503 UPSTREAM_UNAVAILABLE`.
+
+Shuttle dispatch also uses the shared Driver/Vehicle interval + turnaround + reposition engine.
+Conflicts retain `SHUTTLE_DRIVER_CONFLICT`/`SHUTTLE_VEHICLE_CONFLICT` and carry the canonical
+`conflictReason` field. Google/missing-coordinate failure returns
+`503 RESOURCE_TRAVEL_TIME_UNAVAILABLE` and writes no ShuttleTrip or partial reservation.
+
+### POST `/v1/operator/shuttle-trips/availability-check`
+
+Auth: `OPERATOR_ADMIN`. Read-only and requires no `Idempotency-Key`. Body equals Shuttle create
+fields except `notes`; `orderedBookingIds` determines the first/last manifest endpoint. The
+response is the same availability shape and 100-conflict cap documented for DriverSchedule.
 
 ### GET `/v1/driver/shuttle-trips`
 
@@ -7325,7 +7336,7 @@ active AlternativeRoute follows the same success contract as any other valid cre
 All public responses use the ADR 0004 `ApiResponse<T>` envelope. Success responses include `{ success, statusCode, data, meta }`; errors include `{ success: false, statusCode, error: { code, message, fields? }, meta }`.
 
 Original Day-9 Vehicle/DriverSchedule create and activate writes do not require
-`Idempotency-Key`. They are two explicit members of the canonical 17-route system-wide exemption
+`Idempotency-Key`. They are two explicit members of the canonical 20-route system-wide exemption
 inventory and carry auditable runtime exemption metadata; callers must not add a key as a hidden
 precondition. The Day-22 full DriverSchedule PATCH and its deprecated `/crew` alias explicitly
 require a UUID-v4 key as documented below.
@@ -7347,9 +7358,25 @@ Vehicle tenant isolation: a missing Vehicle, a soft-deleted Vehicle, or a Vehicl
   "isSystemDefined": true,
   "isActive": true,
   "createdAt": "2026-06-11T17:00:00+07:00",
-  "updatedAt": "2026-06-11T17:00:00+07:00"
+  "updatedAt": "2026-06-11T17:00:00+07:00",
+  "currentAssignment": null,
+  "nextAssignment": {
+    "sourceType": "TRIP",
+    "tripId": "uuid",
+    "shuttleTripId": null,
+    "driverUserId": "uuid",
+    "plannedStartAt": "2026-08-11T08:00:00Z",
+    "plannedEndAt": "2026-08-11T10:00:00Z",
+    "status": "RESERVED",
+    "startStationId": "uuid",
+    "endStationId": "uuid"
+  }
 }
 ```
+
+`currentAssignment` is the Vehicle reservation whose status is `ACTIVE`; `nextAssignment` is the
+nearest future `RESERVED` reservation. Both are nullable and may reference either a main Trip or a
+ShuttleTrip. Vehicle does not persist a fixed/current driver.
 
 The catalog contains the three platform-seeded system types:
 
@@ -7471,9 +7498,26 @@ Either failure returns `422 VALIDATION_ERROR` with `error.fields` identifying `t
   "status": "ACTIVE",
   "isActive": true,
   "createdAt": "2026-06-11T17:00:00+07:00",
-  "updatedAt": "2026-06-11T17:00:00+07:00"
+  "updatedAt": "2026-06-11T17:00:00+07:00",
+  "currentAssignment": {
+    "sourceType": "TRIP",
+    "tripId": "uuid",
+    "shuttleTripId": null,
+    "driverUserId": "uuid",
+    "plannedStartAt": "2026-08-11T08:00:00+07:00",
+    "plannedEndAt": "2026-08-11T10:00:00+07:00",
+    "status": "ACTIVE",
+    "startStationId": "uuid",
+    "endStationId": "uuid"
+  },
+  "nextAssignment": null
 }
 ```
+
+`currentAssignment` is the vehicle's `ACTIVE` reservation; `nextAssignment` is its nearest
+future `RESERVED` reservation. Both are nullable and apply equally to main Trip and ShuttleTrip.
+Driver ownership is assignment-scoped; Vehicle does not expose or persist a fixed
+`currentDriverId`.
 
 ### POST `/v1/operator/vehicles`
 
@@ -7668,10 +7712,45 @@ Validation:
 - `driverUserId` must resolve through Identity `GET /internal/v1/users/{userId}` to a user with `role=DRIVER` under the caller operator. Missing Identity user, wrong role, wrong operator, or upstream logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields.driverUserId`.
 - `assistantUserId`, when present, must resolve through Identity `GET /internal/v1/users/{userId}` to a user with `role=ASSISTANT` under the caller operator. Missing Identity user, wrong role, wrong operator, or upstream logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields.assistantUserId`.
 - An active schedule conflicts when the same `driverUserId` has any intersecting `dayOfWeek`, the same `departureTime` interpreted in `Asia/Ho_Chi_Minh`, and an overlapping `[validFrom, validUntil]` window. Return `409 TRIP_DRIVER_CONFLICT`.
+- Canonical availability supersedes the exact-departure sentence above: Driver, Assistant, and
+  Vehicle must satisfy `next.start >= previous.end + 30 minutes + repositionTravelTime` against
+  both adjacent assignments across main Trip and ShuttleTrip. Reposition uses Google Routes
+  `DRIVE`; unavailable travel-time input returns `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`. Conflict
+  responses retain `TRIP_DRIVER_CONFLICT`/`TRIP_VEHICLE_CONFLICT` and add
+  `error.fields.conflictReason=TIME_OVERLAP|TURNAROUND_REQUIRED|REPOSITION_REQUIRED|RESOURCE_ACTIVE`.
 
 Response `201`: `DriverScheduleDto` in the ADR 0004 success envelope.
 
 Creating a DriverSchedule persists the recurring assignment and, when active, is the Day-11 trigger for Trip generation enqueue after the schedule commit succeeds. Day 9 shipped persistence only; the Day-11 contract closes the deferred driver/assistant role+operator validation carryover.
+
+### POST `/v1/operator/driver-schedules/availability-check`
+
+Auth: `OPERATOR_ADMIN`. Read-only preview; no `Idempotency-Key` and no reservation is created. Body
+contains the DriverSchedule create fields except `baseFare` and `isActive`. Backend derives route
+duration and endpoint Stations. Response `200`:
+
+```json
+{
+  "available": false,
+  "turnaroundMinutes": 30,
+  "hasMore": false,
+  "conflicts": [{
+    "resourceRole": "DRIVER",
+    "resourceId": "uuid",
+    "reason": "REPOSITION_REQUIRED",
+    "conflictingSourceType": "TRIP",
+    "conflictingSourceId": "uuid",
+    "sampleRequestedStartAt": "2026-08-11T10:01:00Z",
+    "blockingUntil": "2026-08-11T13:31:00Z",
+    "earliestFeasibleStartAt": "2026-08-11T13:31:00Z",
+    "requiredTravelMinutes": 181,
+    "turnaroundMinutes": 30
+  }]
+}
+```
+
+At most 100 conflicts are returned in occurrence order; `hasMore=true` means the result was
+truncated. Mutation endpoints always recheck under lock, so preview is never a reservation.
 
 ### PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING`
 

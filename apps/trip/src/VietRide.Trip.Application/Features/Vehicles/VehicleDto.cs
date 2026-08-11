@@ -14,4 +14,17 @@ public sealed record VehicleDto(
     VehicleStatusDto Status,
     bool IsActive,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    VehicleAssignmentDto? CurrentAssignment = null,
+    VehicleAssignmentDto? NextAssignment = null);
+
+public sealed record VehicleAssignmentDto(
+    string SourceType,
+    Guid? TripId,
+    Guid? ShuttleTripId,
+    Guid DriverUserId,
+    DateTimeOffset PlannedStartAt,
+    DateTimeOffset PlannedEndAt,
+    string Status,
+    Guid? StartStationId,
+    Guid? EndStationId);

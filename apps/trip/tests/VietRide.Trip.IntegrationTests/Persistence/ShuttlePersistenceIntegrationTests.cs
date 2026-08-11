@@ -754,6 +754,7 @@ public sealed class ShuttlePersistenceIntegrationTests
                 new StubIdentityClient(operatorId),
                 CreateOutbox(db, clock),
                 clock,
+                CreateResourceAvailability(db, clock),
                 new ConfigurationBuilder()
                     .AddInMemoryCollection(new Dictionary<string, string?>
                     {
@@ -761,6 +762,19 @@ public sealed class ShuttlePersistenceIntegrationTests
                     })
                     .Build(),
             ],
+            culture: null)!;
+    }
+
+    private static IResourceAvailabilityService CreateResourceAvailability(TripDbContext db, IClock clock)
+    {
+        var type = typeof(TripDbContext).Assembly.GetType(
+            "VietRide.Trip.Infrastructure.Services.ResourceAvailabilityService",
+            throwOnError: true)!;
+        return (IResourceAvailabilityService)Activator.CreateInstance(
+            type,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null,
+            [db, new StubRepositionTravelTimeClient(), clock],
             culture: null)!;
     }
 
@@ -878,5 +892,16 @@ public sealed class ShuttlePersistenceIntegrationTests
             decimal destinationLongitude,
             CancellationToken cancellationToken)
             => Task.FromResult<ShuttleDistanceOutcome>(new ShuttleDistanceOutcome.Success(1_000));
+    }
+
+    private sealed class StubRepositionTravelTimeClient : IRepositionTravelTimeClient
+    {
+        public Task<RepositionTravelTimeResult> CalculateAsync(
+            decimal originLatitude,
+            decimal originLongitude,
+            decimal destinationLatitude,
+            decimal destinationLongitude,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(RepositionTravelTimeResult.Success(0, 0));
     }
 }

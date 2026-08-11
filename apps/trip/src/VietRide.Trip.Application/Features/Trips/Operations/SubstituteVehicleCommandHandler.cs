@@ -32,6 +32,7 @@ public sealed class SubstituteVehicleCommandHandler
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
     private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
+    private readonly IResourceAvailabilityService? resourceAvailability;
 
     public SubstituteVehicleCommandHandler(
         ITripRepository trips,
@@ -45,7 +46,8 @@ public sealed class SubstituteVehicleCommandHandler
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
         IClock clock,
-        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null,
+        IResourceAvailabilityService? resourceAvailability = null)
     {
         this.trips = trips;
         this.vehicles = vehicles;
@@ -59,6 +61,7 @@ public sealed class SubstituteVehicleCommandHandler
         this.unitOfWork = unitOfWork;
         this.clock = clock;
         this.routeChangeProposals = routeChangeProposals;
+        this.resourceAvailability = resourceAvailability;
     }
 
     public async Task<SubstituteVehicleResponse> Handle(
@@ -165,6 +168,12 @@ public sealed class SubstituteVehicleCommandHandler
                 seatLayoutSnapshotJson: replacementVehicle.SeatLayoutJson,
                 plannedEtaSource: oldTrip.PlannedEtaSource);
             newTrip.MarkBoarding(disruptedAt);
+            if (resourceAvailability is not null)
+            {
+                await resourceAvailability.ReleaseTripAsync(oldTrip.Id, disruptedAt, cancellationToken);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                await resourceAvailability.ReserveTripAsync(newTrip, cancellationToken);
+            }
             await trips.AddAsync(newTrip, cancellationToken);
 
             var mappings = await CreateSeatsAndMappingsAsync(
