@@ -116,6 +116,11 @@ TRACKING_SHARE_TOKEN_TTL_SECONDS=86400
 TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN=60
 TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN=20
 TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS=60
+
+# Tracking and Notification Socket.IO — explicit browser origins only.
+# Both production frontend origins are allowed; wildcard '*' is forbidden.
+TRACKING_CORS_ORIGIN=https://app.vietride.online,https://vietride.online
+NOTIFICATION_CORS_ORIGIN=https://app.vietride.online,https://vietride.online
 ```
 
 `VNPAY_PAYMENT_TIMEOUT_MINUTES` is the legacy null-`DueAt` fallback. Persisted payment deadlines
@@ -168,10 +173,31 @@ Create an **Environment** named `production` and add:
 ```bash
 cd /opt/vietride/infra/docker
 docker compose -f docker-compose.prod.yml --env-file .env pull
+docker compose -f docker-compose.prod.yml --env-file .env config --quiet
 docker compose -f docker-compose.prod.yml --env-file .env up -d
+docker compose -f docker-compose.prod.yml --env-file .env exec -T nginx nginx -t
 docker compose -f docker-compose.prod.yml ps      # all (healthy)?
 docker compose -f docker-compose.prod.yml logs -f cloudflared   # "Registered tunnel connection"
 ```
+
+### Notification realtime rollout
+
+Set `NOTIFICATION_CORS_ORIGIN` in `/opt/vietride/infra/docker/.env` before starting the new
+Notification image. Deploy Notification and Nginx together, validate the loaded configuration,
+then reload Nginx and run the Phase 12 smoke script through the public origin:
+
+```bash
+cd /opt/vietride/infra/docker
+docker compose -f docker-compose.prod.yml --env-file .env config --quiet
+docker compose -f docker-compose.prod.yml --env-file .env up -d notification nginx
+docker compose -f docker-compose.prod.yml --env-file .env exec -T nginx nginx -t
+docker compose -f docker-compose.prod.yml --env-file .env exec -T nginx nginx -s reload
+```
+
+Run `node scripts/test-notification-phase12-realtime.js` from a trusted checkout with its required
+URL, token and test-ID environment variables. The URL must resolve through public Nginx, not the
+container port. Confirm an authorized connection, `UNAUTHORIZED` for invalid credentials, delivery
+only to the intended user and no `userId` in `notification:created`.
 
 ### Rollback
 Re-run **Deploy (production)** with a previous good tag (e.g. `v0.9.0`). Compose pulls the old
@@ -248,6 +274,13 @@ Remove the email from the Access policy — effective immediately, no server cha
 - Socket guest dùng namespace `/shared`, path `/tracking/socket.io` và đi trực tiếp qua Nginx đến
   Tracking vì Gateway chỉ proxy HTTP. Nginx phải giữ WebSocket upgrade cho `/tracking/socket.io`;
   không route namespace này qua Gateway.
+- Notification realtime dùng namespace mặc định `/`, path `/notification/socket.io` và cũng đi
+  trực tiếp qua Nginx. Gateway không có route WebSocket. Handshake xác thực Identity RS256 access
+  token từ `auth.token`, fallback `Authorization: Bearer`; server tự join room theo `sub` và không
+  nhận `userId` từ client.
+- Phase 12 hiện giả định một Notification replica. Không tăng replica trước khi có Socket.IO Redis
+  adapter; nếu tăng sớm, một notification có thể được persist nhưng socket trên replica khác không
+  nhận event. REST inbox vẫn là nguồn dữ liệu bền vững.
 - Phase 13 hiện giả định một Tracking replica cho room delivery. Không tăng replica trước khi có
   Socket.IO Redis adapter; nếu tăng sớm, viewer có thể không nhận event/revoke từ replica khác.
 - Rotation `TRACKING_SHARE_TOKEN_SECRET` vô hiệu hóa ngay toàn bộ link v1 hiện tại. Triển khai secret
@@ -257,10 +290,8 @@ Remove the email from the Access policy — effective immediately, no server cha
   `tracking-trip-share-cancelled`, `tracking-trip-share-disrupted` đã bind lần lượt với
   `trip.trip.completed`, `trip.trip.cancelled`, `trip.trip.disrupted`; kiểm tra `/ready`, retry/DLQ và
   không xóa queue đang còn message.
-- `tracking`, `notification`, `rag` (NestJS) are **not deployed yet** — their images aren't built
-  by `docker-build.yml`. When ready: add them to that workflow's matrix, uncomment their blocks in
-  `docker-compose.prod.yml`, uncomment the gateway `*_BASE_URL` lines, and the `/tracking/` route
-  in `nginx.prod.conf`.
+- `tracking`, `notification` và `rag` đã nằm trong image build matrix và production compose. Khi
+  đổi Socket.IO route, luôn deploy Nginx cùng service sở hữu route và chạy `nginx -t` trước reload.
 - Postgres/Redis/RabbitMQ have **no published host ports** — reach them via
   `docker compose exec postgres psql ...` when needed.
 - Frontend: when the FE is ready, either add an `frontend` container to the compose and switch the

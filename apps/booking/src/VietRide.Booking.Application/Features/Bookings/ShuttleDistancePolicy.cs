@@ -6,7 +6,7 @@ namespace VietRide.Booking.Application.Features.Bookings;
 
 public static class ShuttleDistancePolicy
 {
-    public const int MaxDistanceMeters = 5_000;
+    public const int MaxDistanceMeters = 10_000;
 
     public static int Resolve(ShuttleRoadDistanceOutcome outcome)
         => outcome switch

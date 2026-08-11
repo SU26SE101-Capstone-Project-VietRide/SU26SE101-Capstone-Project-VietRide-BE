@@ -2,10 +2,17 @@ import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common'
 import { RABBITMQ_CONNECTION, RabbitMqTopologyHealth } from '@vietride/nest-rabbitmq';
 import { RedisService } from '@vietride/nest-redis';
 import type { ChannelModel } from 'amqplib';
-import { ENV_TOKEN } from './tokens';
+import { CHAT_COMPLETION_PROVIDER, ENV_TOKEN } from './tokens';
 import type { Env } from '../config/env.schema';
 import { EmbeddingDimensionProbeService } from '../embedding/embedding-dimension-probe.service';
 import { RagPrismaService } from '../prisma/rag-prisma.service';
+import type { ChatCompletionProvider } from '../providers/chat-completion.provider';
+
+const RAG_INGEST_BACKLOG_MAX_AGE_MS = 15 * 60 * 1_000;
+const RAG_CHAT_READINESS_MESSAGES = [
+  { role: 'system' as const, content: 'Reply with OK.' },
+  { role: 'user' as const, content: 'VietRide readiness probe' },
+];
 
 export interface ReadinessDependencyDto {
   prisma: 'ok';
@@ -13,6 +20,7 @@ export interface ReadinessDependencyDto {
   rabbitmq: 'ok';
   cloudinary: 'ok';
   openrouter: 'ok';
+  ingest: 'ok';
 }
 
 export interface ReadinessDto {
@@ -27,6 +35,7 @@ export class ReadinessService {
     private readonly prisma: RagPrismaService,
     private readonly redis: RedisService,
     private readonly embeddingProbe: EmbeddingDimensionProbeService,
+    @Inject(CHAT_COMPLETION_PROVIDER) private readonly chatProvider: ChatCompletionProvider,
     @Inject(ENV_TOKEN) private readonly env: Env,
     @Inject(RABBITMQ_CONNECTION) private readonly rabbitMqConnection: ChannelModel,
     private readonly topologyHealth: RabbitMqTopologyHealth,
@@ -39,7 +48,8 @@ export class ReadinessService {
         this.checkRedis(),
         this.checkRabbitMq(),
         this.checkCloudinaryConfig(),
-        this.embeddingProbe.probe(),
+        this.checkOpenRouter(),
+        this.checkIngest(),
       ]);
     } catch {
       // Queue and routing key are our own constants, safe to expose; the broker's
@@ -66,6 +76,7 @@ export class ReadinessService {
         rabbitmq: 'ok',
         cloudinary: 'ok',
         openrouter: 'ok',
+        ingest: 'ok',
       },
     };
   }
@@ -99,5 +110,32 @@ export class ReadinessService {
         detail: 'RAG Cloudinary configuration is incomplete',
       });
     }
+  }
+
+  private async checkOpenRouter(): Promise<void> {
+    const [, chatProbe] = await Promise.all([
+      this.embeddingProbe.probe(),
+      this.chatProvider.complete({
+        stream: false,
+        messages: RAG_CHAT_READINESS_MESSAGES,
+      }),
+    ]);
+    if (!chatProbe.trim()) throw new Error('OpenRouter chat probe returned no content');
+  }
+
+  private async checkIngest(): Promise<void> {
+    if (!this.env.RAG_INGEST_WORKER_ENABLED) {
+      throw new Error('RAG ingest worker is disabled');
+    }
+
+    const staleBefore = new Date(Date.now() - RAG_INGEST_BACKLOG_MAX_AGE_MS);
+    const staleDocuments = await this.prisma.knowledgeDocument.count({
+      where: {
+        status: 'APPROVED',
+        ingestStatus: { in: ['PENDING', 'PROCESSING'] },
+        updatedAt: { lt: staleBefore },
+      },
+    });
+    if (staleDocuments > 0) throw new Error('RAG ingest backlog is stale');
   }
 }

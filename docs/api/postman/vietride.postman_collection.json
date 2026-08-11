@@ -5490,7 +5490,7 @@
           }
         },
         {
-          "name": "Reject shuttle road distance above 5 km",
+          "name": "Reject shuttle road distance above 10 km",
           "event": [
             {
               "listen": "test",
@@ -5512,7 +5512,7 @@
               },
               {
                 "key": "Idempotency-Key",
-                "value": "day36-distance-5001-1"
+                "value": "day36-distance-10001-1"
               },
               {
                 "key": "Content-Type",

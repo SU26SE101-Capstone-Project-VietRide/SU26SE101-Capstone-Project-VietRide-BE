@@ -9,6 +9,9 @@ describe('IngestRepository', () => {
       update: jest.Mock;
       updateMany: jest.Mock;
     };
+    knowledgeDocument: {
+      updateMany: jest.Mock;
+    };
   };
   let repository: IngestRepository;
 
@@ -17,6 +20,9 @@ describe('IngestRepository', () => {
       outboxEvent: {
         findMany: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
+      },
+      knowledgeDocument: {
         updateMany: jest.fn(),
       },
     };
@@ -54,5 +60,20 @@ describe('IngestRepository', () => {
         lastError: 'malformed payload',
       },
     });
+  });
+
+  it('reclaims a document left processing after its Redis lease expired', async () => {
+    prisma.knowledgeDocument.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(repository.markDocumentProcessing('document-1')).resolves.toBe(true);
+
+    expect(prisma.knowledgeDocument.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'document-1',
+          ingestStatus: { in: ['PENDING', 'FAILED', 'PROCESSING'] },
+        }),
+      }),
+    );
   });
 });

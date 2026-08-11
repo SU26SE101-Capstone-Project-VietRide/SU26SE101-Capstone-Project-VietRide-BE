@@ -31,6 +31,7 @@ import { OperatorNotificationsController } from './operator-notifications.contro
 import { OperatorAnnouncementService } from './operator-announcement.service';
 import { NotificationRetentionService } from './notification-retention.service';
 import { NotificationsRepository } from './notifications.repository';
+import { NotificationsRealtimeGateway } from './notifications-realtime.gateway';
 import { NotificationsService } from './notifications.service';
 import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 import { ParcelSubscriptionOperatorEventsConsumer } from './parcel-subscription-operator-events.consumer';
@@ -51,6 +52,7 @@ import { RouteChangeProposalEventsConsumer } from './route-change-proposal-event
   controllers: [NotificationsController, OperatorNotificationsController, InternalEmailsController],
   providers: [
     NotificationsService,
+    NotificationsRealtimeGateway,
     NotificationsRepository,
     NotificationRetentionService,
     OperatorAnnouncementService,

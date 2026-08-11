@@ -452,6 +452,43 @@ describe('ChatService', () => {
       }),
     );
   });
+
+  it('preserves a safe provider rate-limit code in the SSE error event', async () => {
+    chatProvider.stream.mockReturnValue(makeFailingStream('RAG_PROVIDER_RATE_LIMITED'));
+    const prepared = await service.prepareChat(
+      { message: 'Tôi cần hỗ trợ' },
+      { sub: USER_ID, role: 'PASSENGER' },
+    );
+
+    const events = [];
+    for await (const event of service.streamPrepared(prepared)) events.push(event);
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'error',
+        data: expect.objectContaining({ code: 'RAG_PROVIDER_RATE_LIMITED' }),
+      }),
+    );
+  });
+
+  it('does not mislabel assistant persistence failures as provider failures', async () => {
+    repository.createAssistantMessage.mockRejectedValue(new Error('database unavailable'));
+    const prepared = await service.prepareChat(
+      { message: 'Tôi cần hỗ trợ' },
+      { sub: USER_ID, role: 'PASSENGER' },
+    );
+
+    const events = [];
+    for await (const event of service.streamPrepared(prepared)) events.push(event);
+
+    expect(events.at(-1)).toEqual({
+      event: 'error',
+      data: {
+        code: 'INTERNAL_ERROR',
+        message: 'RAG response could not be saved',
+      },
+    });
+  });
 });
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
@@ -561,13 +598,13 @@ async function* makeTokenStream(tokens: string[]): AsyncIterable<string> {
   }
 }
 
-function makeFailingStream(): AsyncIterable<string> {
+function makeFailingStream(errorCode = 'RAG_PROVIDER_UNAVAILABLE'): AsyncIterable<string> {
   return {
     [Symbol.asyncIterator]() {
       return {
         async next(): Promise<IteratorResult<string>> {
           throw new ServiceUnavailableException({
-            errorCode: 'RAG_PROVIDER_UNAVAILABLE',
+            errorCode,
             detail: 'Provider unavailable',
           });
         },

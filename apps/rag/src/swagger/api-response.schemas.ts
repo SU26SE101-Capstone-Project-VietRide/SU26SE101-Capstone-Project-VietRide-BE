@@ -54,7 +54,9 @@ export function errorEnvelopeSchema(
                 fields: {
                   type: 'array',
                   items: fieldErrorSchema,
-                  example: [{ field: 'message', message: 'String must contain at least 1 character(s)' }],
+                  example: [
+                    { field: 'message', message: 'String must contain at least 1 character(s)' },
+                  ],
                 },
               }
             : {}),
@@ -82,13 +84,14 @@ export const readinessOkSchema: SchemaObject = {
     service: { type: 'string', example: 'rag' },
     dependencies: {
       type: 'object',
-      required: ['prisma', 'redis', 'rabbitmq', 'cloudinary', 'openrouter'],
+      required: ['prisma', 'redis', 'rabbitmq', 'cloudinary', 'openrouter', 'ingest'],
       properties: {
         prisma: { type: 'string', example: 'ok' },
         redis: { type: 'string', example: 'ok' },
         rabbitmq: { type: 'string', example: 'ok' },
         cloudinary: { type: 'string', example: 'ok' },
         openrouter: { type: 'string', example: 'ok' },
+        ingest: { type: 'string', example: 'ok' },
       },
     },
   },
@@ -96,7 +99,15 @@ export const readinessOkSchema: SchemaObject = {
 
 export const pagedDataSchema: SchemaObject = {
   type: 'object',
-  required: ['items', 'page', 'pageSize', 'totalItems', 'totalPages', 'hasNextPage', 'hasPreviousPage'],
+  required: [
+    'items',
+    'page',
+    'pageSize',
+    'totalItems',
+    'totalPages',
+    'hasNextPage',
+    'hasPreviousPage',
+  ],
   properties: {
     items: { type: 'array', items: {} },
     page: { type: 'integer', example: 1 },

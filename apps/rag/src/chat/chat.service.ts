@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
   Inject,
   Injectable,
   NotFoundException,
@@ -31,13 +32,14 @@ import { ChatSummaryService } from './chat-summary.service';
 import type { RagChatPreparedStream, RagChatSseEvent, RagRetrievedChunk } from './chat.types';
 
 const SYSTEM_ADMIN_ROLE = 'SYSTEM_ADMIN';
-const OPERATOR_SCOPED_ROLES = new Set([
-  'DRIVER',
-  'ASSISTANT',
-  'OPERATOR_STAFF',
-  'OPERATOR_ADMIN',
-]);
+const OPERATOR_SCOPED_ROLES = new Set(['DRIVER', 'ASSISTANT', 'OPERATOR_STAFF', 'OPERATOR_ADMIN']);
 const PASSENGER_ROLE = 'PASSENGER';
+const SAFE_PROVIDER_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  RAG_PROVIDER_RATE_LIMITED: 'RAG chat provider rate limit reached',
+  RAG_PROVIDER_CIRCUIT_OPEN: 'RAG chat provider circuit is open',
+  RAG_PROVIDER_INVALID_RESPONSE: 'RAG chat provider returned an invalid response',
+  RAG_PROVIDER_UNAVAILABLE: 'RAG chat provider is unavailable',
+};
 const logger = pino({ name: 'RagChatService' });
 
 @Injectable()
@@ -56,7 +58,10 @@ export class ChatService {
     private readonly runtimeConfig: RuntimeConfigService,
   ) {}
 
-  async prepareChat(dto: CreateChatDto, user: RagInternalUser | undefined): Promise<RagChatPreparedStream> {
+  async prepareChat(
+    dto: CreateChatDto,
+    user: RagInternalUser | undefined,
+  ): Promise<RagChatPreparedStream> {
     const caller = this.assertCaller(user);
 
     if (dto.operatorId && caller.role !== SYSTEM_ADMIN_ROLE) {
@@ -70,7 +75,9 @@ export class ChatService {
     this.assertMessageLength(dto.message);
     await this.rateLimit.assertAllowed(caller);
     const { conversation, effectiveOperatorId } = await this.resolveConversation(
-      dto.conversationId, caller, caller.role === SYSTEM_ADMIN_ROLE ? dto.operatorId : undefined,
+      dto.conversationId,
+      caller,
+      caller.role === SYSTEM_ADMIN_ROLE ? dto.operatorId : undefined,
     );
     const history = await this.chatRepository.findRecentMessages(
       conversation.id,
@@ -93,7 +100,12 @@ export class ChatService {
     }
 
     const retrievalQuery = this.env.QUERY_REWRITE_ENABLED
-      ? await this.queryRewriteService.rewriteIfNeeded(dto.message, history, conversation.summary, runtimeConfig)
+      ? await this.queryRewriteService.rewriteIfNeeded(
+          dto.message,
+          history,
+          conversation.summary,
+          runtimeConfig,
+        )
       : dto.message;
     const queryEmbedding = await this.resolveQueryEmbedding(retrievalQuery);
     const accessLevels = this.resolveAccessLevels(caller.role);
@@ -103,14 +115,22 @@ export class ChatService {
       accessLevels,
       ...(effectiveOperatorId ? { operatorId: effectiveOperatorId } : {}),
       callerRole: caller.role,
-      limit: this.env.RERANK_ENABLED ? RAG_RERANK_CANDIDATE_LIMIT : this.env.RAG_MAX_RETRIEVED_CHUNKS,
+      limit: this.env.RERANK_ENABLED
+        ? RAG_RERANK_CANDIDATE_LIMIT
+        : this.env.RAG_MAX_RETRIEVED_CHUNKS,
       hybridSearchEnabled: this.env.HYBRID_SEARCH_ENABLED,
     });
     const chunks = this.env.RERANK_ENABLED
       ? await this.rerankService.rerank(retrievalQuery, retrievedChunks, runtimeConfig)
       : retrievedChunks;
     const contextChunks = this.selectContextChunks(chunks);
-    const messages = this.buildProviderMessages(dto.message, history, contextChunks, conversation.summary, runtimeConfig);
+    const messages = this.buildProviderMessages(
+      dto.message,
+      history,
+      contextChunks,
+      conversation.summary,
+      runtimeConfig,
+    );
     const stream = this.chatProvider.stream({ messages, stream: true });
     return {
       conversation,
@@ -131,51 +151,66 @@ export class ChatService {
         assistantContent += token;
         yield { event: 'token', data: { content: token } };
       }
+    } catch (error) {
+      logger.warn(
+        { error: this.toSafeErrorLog(error), conversationId: prepared.conversation.id },
+        'RAG chat provider stream failed',
+      );
+      yield this.toProviderSseError(error);
+      return;
+    }
 
-      const assistantMessage = await this.chatRepository.createAssistantMessage(
+    let assistantMessage: RagMessage;
+    try {
+      assistantMessage = await this.chatRepository.createAssistantMessage(
         prepared.conversation.id,
         assistantContent,
         citedChunkIds,
       );
-      if (prepared.shouldSummarize) {
-        try {
-          await this.summaryService.summarizeIfNeeded(
-            prepared.conversation,
-            assistantMessage.id,
-            prepared.runtimeConfig,
-          );
-        } catch (error) {
-          logger.warn(
-            { error: this.toSafeErrorLog(error), conversationId: prepared.conversation.id },
-            'RAG chat summarization skipped',
-          );
-        }
-      }
-      yield {
-        event: 'done',
-        data: {
-          conversationId: prepared.conversation.id,
-          userMessageId: prepared.userMessage.id,
-          assistantMessageId: assistantMessage.id,
-          citedChunkIds,
-        },
-      };
     } catch (error) {
       logger.warn(
         { error: this.toSafeErrorLog(error), conversationId: prepared.conversation.id },
-        'RAG chat stream failed',
+        'RAG assistant message persistence failed',
       );
       yield {
         event: 'error',
         data: {
-          code: 'RAG_PROVIDER_UNAVAILABLE',
-          message: 'RAG chat provider is unavailable',
+          code: 'INTERNAL_ERROR',
+          message: 'RAG response could not be saved',
         },
       };
+      return;
     }
+
+    if (prepared.shouldSummarize) {
+      try {
+        await this.summaryService.summarizeIfNeeded(
+          prepared.conversation,
+          assistantMessage.id,
+          prepared.runtimeConfig,
+        );
+      } catch (error) {
+        logger.warn(
+          { error: this.toSafeErrorLog(error), conversationId: prepared.conversation.id },
+          'RAG chat summarization skipped',
+        );
+      }
+    }
+
+    yield {
+      event: 'done',
+      data: {
+        conversationId: prepared.conversation.id,
+        userMessageId: prepared.userMessage.id,
+        assistantMessageId: assistantMessage.id,
+        citedChunkIds,
+      },
+    };
   }
 
-  private assertCaller(user: RagInternalUser | undefined): RagInternalUser & { role: RagConversationRole } {
+  private assertCaller(
+    user: RagInternalUser | undefined,
+  ): RagInternalUser & { role: RagConversationRole } {
     if (!user?.role) {
       throw new ForbiddenException({
         errorCode: 'INSUFFICIENT_ROLE',
@@ -283,10 +318,12 @@ export class ChatService {
         role: 'system',
         content: this.buildSystemPrompt(chunks, summary, runtimeConfig),
       },
-      ...history.map((message): ChatMessage => ({
-        role: message.role === 'USER' ? 'user' : 'assistant',
-        content: message.content,
-      })),
+      ...history.map(
+        (message): ChatMessage => ({
+          role: message.role === 'USER' ? 'user' : 'assistant',
+          content: message.content,
+        }),
+      ),
       {
         role: 'user',
         content: currentMessage,
@@ -313,7 +350,10 @@ export class ChatService {
       );
   }
 
-  private buildContextBlock(chunks: RagRetrievedChunk[], runtimeConfig: RuntimeConfigSnapshot): string {
+  private buildContextBlock(
+    chunks: RagRetrievedChunk[],
+    runtimeConfig: RuntimeConfigSnapshot,
+  ): string {
     if (chunks.length === 0) {
       return runtimeConfig.getString(RAG_RUNTIME_CONFIG_KEYS.chatNoContextText);
     }
@@ -343,10 +383,33 @@ export class ChatService {
     return selected;
   }
 
-  private toSafeErrorLog(error: unknown): { name: string; status?: number } {
+  private toProviderSseError(error: unknown): RagChatSseEvent {
+    const candidateCode = this.readHttpErrorCode(error);
+    const code =
+      candidateCode && candidateCode in SAFE_PROVIDER_ERROR_MESSAGES
+        ? candidateCode
+        : 'RAG_PROVIDER_UNAVAILABLE';
+    return {
+      event: 'error',
+      data: {
+        code,
+        message: SAFE_PROVIDER_ERROR_MESSAGES[code] ?? 'RAG chat provider is unavailable',
+      },
+    };
+  }
+
+  private readHttpErrorCode(error: unknown): string | undefined {
+    if (!(error instanceof HttpException)) return undefined;
+    const response = error.getResponse();
+    if (!response || typeof response !== 'object' || !('errorCode' in response)) return undefined;
+    return typeof response.errorCode === 'string' ? response.errorCode : undefined;
+  }
+
+  private toSafeErrorLog(error: unknown): { name: string; status?: number; code?: string } {
     if (error instanceof Error) {
       const status = 'getStatus' in error ? (error.getStatus as () => number)() : undefined;
-      return { name: error.name, ...(status ? { status } : {}) };
+      const code = this.readHttpErrorCode(error);
+      return { name: error.name, ...(status ? { status } : {}), ...(code ? { code } : {}) };
     }
     return { name: 'UnknownError' };
   }

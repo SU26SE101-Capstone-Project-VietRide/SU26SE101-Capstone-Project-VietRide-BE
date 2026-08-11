@@ -12,6 +12,7 @@ import { EmailSendQueue } from './email-send.queue';
 import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
 import { NotificationsController } from './notifications.controller';
+import { NotificationsRealtimeGateway } from './notifications-realtime.gateway';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsService } from './notifications.service';
 
@@ -65,6 +66,7 @@ describe('NotificationsController (e2e)', () => {
         NotificationsRepository,
         { provide: FcmPushQueue, useValue: { enqueue: jest.fn() } },
         { provide: EmailSendQueue, useValue: { enqueue: jest.fn() } },
+        { provide: NotificationsRealtimeGateway, useValue: { publishCreated: jest.fn() } },
         EmailTemplateRenderer,
         { provide: ENV_TOKEN, useValue: createTestEnv(publicKeyPem) },
         { provide: NOTIFICATION_JWT_VERIFIER, useClass: JoseNotificationUserJwtVerifier },
@@ -283,6 +285,7 @@ function createTestEnv(publicKeyPem: string): Env {
     SENDGRID_API_KEY: undefined,
     SENDGRID_FROM_EMAIL: undefined,
     SENDGRID_FROM_NAME: 'VietRide',
+    NOTIFICATION_CORS_ORIGIN: '*',
     NOTIFICATION_RETENTION_DAYS: 90,
     NOTIFICATION_RETENTION_JOB_INTERVAL_MS: 86_400_000,
   };

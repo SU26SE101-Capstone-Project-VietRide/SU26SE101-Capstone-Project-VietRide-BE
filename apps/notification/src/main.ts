@@ -5,12 +5,14 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as Sentry from '@sentry/nestjs';
 import { AppModule } from './app/app.module';
+import { NotificationCorsIoAdapter } from './app/notification-cors-io.adapter';
 import { loadEnv } from './config/env.schema';
 
 async function bootstrap(): Promise<void> {
   const env = loadEnv();
   const app = await NestFactory.create(AppModule);
   app.enableShutdownHooks();
+  app.useWebSocketAdapter(new NotificationCorsIoAdapter(app, env.NOTIFICATION_CORS_ORIGIN));
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('VietRide Notification API')

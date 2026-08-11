@@ -22,6 +22,7 @@ import { EmailSendQueue } from './email-send.queue';
 import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
 import { MessageIdempotencyService } from './message-idempotency.service';
+import type { NotificationsRealtimeGateway } from './notifications-realtime.gateway';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsService } from './notifications.service';
 
@@ -371,6 +372,7 @@ describe('BookingTripChangeEventsConsumer binds the Booking-owned passenger fact
       fcmPushQueue,
       {} as EmailSendQueue,
       {} as EmailTemplateRenderer,
+      { publishCreated: jest.fn() } as unknown as NotificationsRealtimeGateway,
     );
     consumer = new BookingTripChangeEventsConsumer(
       rabbitConsumer,

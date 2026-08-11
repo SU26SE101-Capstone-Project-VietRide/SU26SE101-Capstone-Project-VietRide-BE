@@ -11,6 +11,7 @@ import type { ListNotificationsQueryDto } from './dto/list-notifications-query.d
 import { EmailSendQueue } from './email-send.queue';
 import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
+import { NotificationsRealtimeGateway } from './notifications-realtime.gateway';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsService } from './notifications.service';
 
@@ -21,6 +22,7 @@ describe('NotificationsService', () => {
   let repository: jest.Mocked<NotificationsRepository>;
   let fcmPushQueue: jest.Mocked<FcmPushQueue>;
   let emailSendQueue: jest.Mocked<EmailSendQueue>;
+  let realtimeGateway: jest.Mocked<NotificationsRealtimeGateway>;
   let redis: jest.Mocked<RedisService>;
   let redisClient: { set: jest.Mock };
   let service: NotificationsService;
@@ -40,6 +42,9 @@ describe('NotificationsService', () => {
     emailSendQueue = {
       enqueue: jest.fn(),
     } as unknown as jest.Mocked<EmailSendQueue>;
+    realtimeGateway = {
+      publishCreated: jest.fn(),
+    } as unknown as jest.Mocked<NotificationsRealtimeGateway>;
     redisClient = { set: jest.fn() };
     redis = {
       getClient: jest.fn().mockReturnValue(redisClient),
@@ -50,6 +55,7 @@ describe('NotificationsService', () => {
       fcmPushQueue,
       emailSendQueue,
       new EmailTemplateRenderer(),
+      realtimeGateway,
       redis,
     );
   });
@@ -98,6 +104,9 @@ describe('NotificationsService', () => {
       notificationId: NOTIFICATION_ID,
       userId: OWNER_USER_ID,
     });
+    expect(realtimeGateway.publishCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ id: NOTIFICATION_ID, userId: OWNER_USER_ID }),
+    );
   });
 
   it('re-enqueues any existing notification so a failed first queue write can recover', async () => {
@@ -118,6 +127,26 @@ describe('NotificationsService', () => {
       notificationId: NOTIFICATION_ID,
       userId: OWNER_USER_ID,
     });
+    expect(realtimeGateway.publishCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ id: NOTIFICATION_ID, userId: OWNER_USER_ID }),
+    );
+  });
+
+  it('keeps the durable notification successful when realtime publishing fails', async () => {
+    repository.create.mockResolvedValue({
+      notification: createNotification({ type: NotificationType.BOOKING_CONFIRMED }),
+      created: true,
+    });
+    realtimeGateway.publishCreated.mockImplementationOnce(() => {
+      throw new Error('socket adapter unavailable');
+    });
+
+    await expect(service.createNotification({
+      userId: OWNER_USER_ID,
+      type: NotificationType.BOOKING_CONFIRMED,
+      title: 'Đặt vé thành công',
+      body: 'Vé của bạn đã được xác nhận.',
+    })).resolves.toEqual(expect.objectContaining({ id: NOTIFICATION_ID }));
   });
 
   it('persisted VEHICLE_SUBSTITUTED row survives enqueue failure and redelivery re-enqueues the same deduped notification without creating a second row', async () => {

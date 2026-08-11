@@ -70,7 +70,7 @@ export class IngestService {
     }
 
     try {
-      const outcome = await this.processDocumentWithOutcome(payload.documentId, event.id);
+      const outcome = await this.processDocumentWithOutcome(payload.documentId, payload.documentId);
       if (outcome === 'locked') return false;
       await this.repository.markEventPublished(event.id);
       return true;

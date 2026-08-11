@@ -111,6 +111,26 @@ describe('IngestService', () => {
 
     await expect(service.processPendingOnce(1)).resolves.toBe(1);
 
+    expect(idempotency.begin).toHaveBeenCalledWith(DOCUMENT_ID);
+    expect(repository.markEventPublished).toHaveBeenCalledWith(EVENT_ID);
+  });
+
+  it('recovers a publishing event whose document was left processing', async () => {
+    idempotency.begin.mockResolvedValue({ state: 'acquired', ownerToken: 'owner-recovery' });
+    repository.findDocumentForIngest.mockResolvedValue(
+      makeDocument({ ingestStatus: 'PROCESSING' }),
+    );
+    repository.markDocumentProcessing.mockResolvedValue(true);
+    storageProvider.downloadObject.mockResolvedValue(Buffer.from('Nội dung phục hồi ingest'));
+    embeddingProvider.embed.mockResolvedValue(makeEmbedding());
+
+    await expect(service.processEvent(makeOutboxEvent({ status: 'PUBLISHING' }))).resolves.toBe(
+      true,
+    );
+
+    expect(idempotency.begin).toHaveBeenCalledWith(DOCUMENT_ID);
+    expect(repository.markDocumentProcessing).toHaveBeenCalledWith(DOCUMENT_ID);
+    expect(repository.replaceChunksAndComplete).toHaveBeenCalled();
     expect(repository.markEventPublished).toHaveBeenCalledWith(EVENT_ID);
   });
 

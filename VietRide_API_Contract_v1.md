@@ -10,7 +10,7 @@
 - Idempotent write endpoints require `Idempotency-Key: <uuid>` where noted.
 - Error response: `ApiResponse` envelope `{ success: false, statusCode, error: { code, message, fields? }, meta: { traceId, timestamp } }` — ADR 0004; `error.code` từ BSOT §5.9 registry (UPPER_SNAKE_CASE). `application/problem+json` (RFC 7807) đã DROP.
 - Money fields are VND `number` in JSON, stored as BIGINT in DB.
-- FE-facing `/v1/*` JSON HTTP responses and Tracking WebSocket emissions serialize instant fields as RFC 3339 through IANA `Asia/Ho_Chi_Minh`, ending in the resolved `+07:00` offset. Internal HTTP, Redis/Outbox/RabbitMQ events and persistence serialize the same instant as UTC ending in `Z`. Datetime request values must contain `Z` or an explicit offset and are normalized to UTC; a missing offset returns `422 VALIDATION_ERROR`.
+- FE-facing `/v1/*` JSON HTTP responses and Tracking/Notification WebSocket emissions serialize instant fields as RFC 3339 through IANA `Asia/Ho_Chi_Minh`, ending in the resolved `+07:00` offset. Internal HTTP, Redis/Outbox/RabbitMQ events and persistence serialize the same instant as UTC ending in `Z`. Datetime request values must contain `Z` or an explicit offset and are normalized to UTC; a missing offset returns `422 VALIDATION_ERROR`.
 - Calendar fields (`date`, date-only `from`/`to`, `TimeOnly`, `dayOfWeek`, recurring schedules) use `Asia/Ho_Chi_Minh`. Date-only ranges are inclusive Vietnam dates and are queried as UTC half-open ranges.
 - Public clients receive the Vietnam representation directly and must parse RFC 3339 values instead of comparing raw strings. Example: public `2026-08-10T12:00:00+07:00` and internal `2026-08-10T05:00:00Z` are the same instant.
 - IDs are UUID strings unless explicitly named code fields.
@@ -4687,6 +4687,51 @@ the caller operator.
 `{ announcementId, recipientCount }`. Retrying the same actor and Idempotency-Key returns the
 original response for 24 hours.
 
+### Socket.IO `/notification/socket.io`
+
+Notification realtime uses the default namespace `/` and connects directly through Nginx to
+Notification Service; it is not routed through Gateway.
+
+```ts
+io("wss://api.vietride.app", {
+  path: "/notification/socket.io",
+  auth: { token: "<userAccessToken>" }
+})
+```
+
+Authentication requires an Identity User Access Token (RS256). The server reads
+`socket.handshake.auth.token` first and falls back to `Authorization: Bearer <token>` from the
+handshake headers. After verification, the server owns room assignment and joins
+`notification:user:{sub}` from the verified JWT `sub` claim. Clients cannot provide a `userId`,
+select another room or emit a room-join event. Missing, invalid or expired credentials reject the
+namespace connection with `connect_error.message = "UNAUTHORIZED"`.
+
+Server event `notification:created` carries one raw notification DTO, without an `ApiResponse`
+envelope:
+
+```json
+{
+  "id": "uuid",
+  "type": "BOOKING_CONFIRMED",
+  "title": "Đặt vé thành công",
+  "body": "Vé của bạn đã được xác nhận.",
+  "data": { "bookingId": "uuid" },
+  "action": {
+    "type": "OPEN_BOOKING_DETAIL",
+    "params": { "bookingId": "uuid" }
+  },
+  "readAt": null,
+  "createdAt": "2026-08-11T15:30:00.000+07:00"
+}
+```
+
+The payload intentionally omits `userId` and legacy `deepLink`; `action` follows the same semantic
+resolver as the REST inbox. All instant fields use `Asia/Ho_Chi_Minh` and the resolved `+07:00`
+offset. Notification creation persists the row and enqueues FCM before a best-effort realtime emit.
+An emit failure is logged but never rolls back or fails the durable notification. Delivery is
+at-least-once: replay may emit the same stable notification `id` again, so clients deduplicate by
+`id`. `GET /v1/notifications` remains the durable source of truth after reconnect or missed events.
+
 ## Tracking Service Socket.IO
 
 Connection:
@@ -6349,13 +6394,13 @@ Errors are `422 VALIDATION_ERROR`/`422 SHUTTLE_STATION_NOT_SUPPORTED` or
 
 ### GET `/v1/operator/shuttle-requests`
 
-Shuttle được nhóm theo `mainTripId + direction`, trong đó `direction` là `INBOUND_TO_STATION` hoặc `OUTBOUND_FROM_STATION`. Khoảng cách hiển thị là `roadDistanceMeters` snapshot từ Google Routes; không dùng Haversine cho điều kiện đủ điều kiện. Giới hạn toàn nền tảng là 5.000 mét, bao gồm cả điểm đúng 5.000 mét.
+Shuttle được nhóm theo `mainTripId + direction`, trong đó `direction` là `INBOUND_TO_STATION` hoặc `OUTBOUND_FROM_STATION`. Khoảng cách hiển thị là `roadDistanceMeters` snapshot từ Google Routes; không dùng Haversine cho điều kiện đủ điều kiện. Giới hạn toàn nền tảng là 10.000 mét, bao gồm cả điểm đúng 10.000 mét.
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant lấy từ JWT. Query phân trang theo main Trip.
 
-Response trả `mainTripId`, Station theo direction, `direction`, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `roadDistanceMeters`, `requestedAt`) và `suggestedBookingOrder`. Thứ tự gợi ý dùng road-distance snapshot, xa nhất trước, hòa thì `requestedAt ASC`; không dùng Haversine để quyết định eligibility.
+Response là `PagedResult<ShuttleRequestTripGroup>`, trả `mainTripId`, `routeName`, Station theo direction, `direction`, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `roadDistanceMeters`, `requestedAt`) và `suggestedBookingOrder`. Pagination gồm `items`, `page`, `pageSize`, `totalItems`, `totalPages`, `hasNextPage`, `hasPreviousPage`. Thứ tự gợi ý dùng road-distance snapshot, xa nhất trước, hòa thì `requestedAt ASC`; không dùng Haversine để quyết định eligibility.
 
-Pending shuttle `BookingGroup` responses also include nested `passengers[]`. Each item contains
+Pending shuttle `BookingGroup` responses always include non-null nested `passengers[]`. Each item contains
 `passengerUserId`, nullable `displayName` and `phone`, and aggregated `ticketIds[]`. The result
 keeps grouping by `mainTripId + direction`, cutoff/distance fields, and `suggestedBookingOrder`.
 Identity profile transport failure returns `503 UPSTREAM_UNAVAILABLE`; a missing profile returns
@@ -6528,9 +6573,9 @@ Delivered/no-show/start/complete/cancel transitions that do not match the state 
 
 ### Shuttle fields trong Booking
 
-Booking hỗ trợ đồng thời `shuttlePickup` cho inbound và `shuttleDropoff` cho outbound, bao gồm từng leg round-trip. Mỗi booking có tối đa một intent active cho mỗi direction. Trip gọi Google Routes với `travelMode=DRIVE`: `distanceMeters <= 5000` được phép, lớn hơn 5000 trả `422 SHUTTLE_DISTANCE_EXCEEDED`, còn lỗi upstream/timeout/thiếu key/response sai trả `503 SHUTTLE_DISTANCE_UNAVAILABLE`. Event mới dùng `shuttleRequests[]`; consumer vẫn đọc `shuttlePickup` cũ như inbound.
+Booking hỗ trợ đồng thời `shuttlePickup` cho inbound và `shuttleDropoff` cho outbound, bao gồm từng leg round-trip. Mỗi booking có tối đa một intent active cho mỗi direction. Trip gọi Google Routes với `travelMode=DRIVE`: `distanceMeters <= 10000` được phép, lớn hơn 10000 trả `422 SHUTTLE_DISTANCE_EXCEEDED`, còn lỗi upstream/timeout/thiếu key/response sai trả `503 SHUTTLE_DISTANCE_UNAVAILABLE`. Event mới dùng `shuttleRequests[]`; consumer vẫn đọc `shuttlePickup` cũ như inbound.
 
-Trip configuration is `SHUTTLE_MAX_DISTANCE_KM=5`, `GOOGLE_ROUTES_ENABLED=true`,
+Trip configuration is `SHUTTLE_MAX_DISTANCE_KM=10`, `GOOGLE_ROUTES_ENABLED=true`,
 `GOOGLE_ROUTES_API_KEY`, `GOOGLE_ROUTES_BASE_URL=https://routes.googleapis.com`, and
 `TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS=1500`. Missing configuration fails closed.
 

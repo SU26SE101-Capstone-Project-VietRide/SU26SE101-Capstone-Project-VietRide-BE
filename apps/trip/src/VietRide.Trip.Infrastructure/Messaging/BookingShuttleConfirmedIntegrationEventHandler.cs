@@ -3,6 +3,7 @@ using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Messaging.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Domain.Entities;
+using VietRide.Trip.Infrastructure.Services;
 
 namespace VietRide.Trip.Infrastructure.Messaging;
 
@@ -63,9 +64,10 @@ internal sealed class BookingShuttleConfirmedIntegrationEventHandler
 
                     var roadDistanceMeters = request.RoadDistanceMeters
                         ?? await ResolveLegacyRoadDistanceAsync(integrationEvent.TripId, request, cancellationToken);
-                    if (roadDistanceMeters is < 0 or > 5_000)
+                    if (!ShuttleDistancePolicy.IsWithinDefaultLimit(roadDistanceMeters))
                     {
-                        throw new InvalidOperationException("Shuttle road distance is outside the 5 km limit.");
+                        throw new InvalidOperationException(
+                            $"Shuttle road distance is outside the {ShuttleDistancePolicy.DefaultMaxDistanceKm} km limit.");
                     }
 
                     await _db.Database.ExecuteSqlInterpolatedAsync($"""

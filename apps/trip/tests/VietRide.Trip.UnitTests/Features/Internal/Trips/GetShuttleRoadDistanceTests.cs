@@ -14,9 +14,9 @@ namespace VietRide.Trip.UnitTests.Features.Internal.Trips;
 public sealed class GetShuttleRoadDistanceTests
 {
     [Theory]
-    [InlineData(4_999)]
-    [InlineData(5_000)]
-    public async Task Handle_ReturnsGoogleRoadDistanceAtOrBelowLimit(int distanceMeters)
+    [InlineData(10_000)]
+    [InlineData(10_001)]
+    public async Task Handle_ReturnsRawGoogleRoadDistance(int distanceMeters)
     {
         var fixture = Fixture.Create(new ShuttleDistanceOutcome.Success(distanceMeters));
 

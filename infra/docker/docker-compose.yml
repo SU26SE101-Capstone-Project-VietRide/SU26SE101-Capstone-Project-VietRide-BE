@@ -184,7 +184,7 @@ services:
       Identity__BaseUrl: http://identity:5001
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
       BOOKING_BASE_URL: http://booking:5003
-      SHUTTLE_MAX_DISTANCE_KM: ${SHUTTLE_MAX_DISTANCE_KM:-5}
+      SHUTTLE_MAX_DISTANCE_KM: ${SHUTTLE_MAX_DISTANCE_KM:-10}
       GOOGLE_ROUTES_ENABLED: ${GOOGLE_ROUTES_ENABLED:-false}
       GOOGLE_ROUTES_API_KEY: ${GOOGLE_ROUTES_API_KEY:-}
       GOOGLE_ROUTES_BASE_URL: ${GOOGLE_ROUTES_BASE_URL:-https://routes.googleapis.com}
@@ -469,6 +469,8 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER:-vietride}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-vietride_dev}
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+      # Browser Socket.IO origin allowlist; comma-separated values are supported.
+      NOTIFICATION_CORS_ORIGIN: ${NOTIFICATION_CORS_ORIGIN:-http://localhost:3000}
     depends_on:
       postgres:
         condition: service_healthy

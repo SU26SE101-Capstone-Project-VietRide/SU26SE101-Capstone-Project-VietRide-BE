@@ -18,6 +18,7 @@ import type { ConsumeMessage } from 'amqplib';
 import { ZodError } from 'zod';
 import { EmailTemplateKey, NotificationType } from '../generated/notification-prisma-client';
 import { RABBITMQ_PREFETCH_ONE } from '../notifications/core-events.constants';
+import { formatSubscriptionPeriod } from '../notifications/notification-display';
 import { MessageIdempotencyService } from '../notifications/message-idempotency.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { IdentitySystemAdminRecipientProvider } from '../notifications/identity-system-admin-recipient.provider';
@@ -190,7 +191,7 @@ export class IdentityEventsConsumer implements OnModuleInit {
             userId,
             type: NotificationType.SUBSCRIPTION_USAGE_WARNING,
             title: 'Sắp đạt giới hạn gói dịch vụ',
-            body: `Nhà xe đã sử dụng ${event.used}/${event.limit} hạn mức ${formatSubscriptionResource(event.resource)} trong kỳ ${event.periodKey} (${event.usagePercent}%).`,
+            body: `Nhà xe đã sử dụng ${event.used}/${event.limit} hạn mức ${formatSubscriptionResource(event.resource)}${formatSubscriptionPeriod(event.periodKey)} (${event.usagePercent}%).`,
             data: event,
             dedupeKey: buildNotificationDedupeKey(
               routingKey,

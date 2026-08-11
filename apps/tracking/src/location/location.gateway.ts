@@ -358,12 +358,23 @@ export class LocationGateway implements OnGatewayInit {
   }
 
   private async publishFleetGps(user: TrackingUser, event: GpsUpdateEvent): Promise<void> {
-    if (!user.operatorId || !this.operatorTrips) return;
+    if (!user.operatorId) {
+      this.logger.debug(
+        `Fleet GPS skipped for trip ${event.tripId}: ${user.role} token has no operatorId`,
+      );
+      return;
+    }
+    if (!this.operatorTrips) return;
     try {
       const projection = (await this.operatorTrips.list(user.operatorId)).find(
         (trip) => trip.tripId === event.tripId,
       );
-      if (!projection) return;
+      if (!projection) {
+        this.logger.debug(
+          `Fleet GPS skipped for trip ${event.tripId}: trip is absent from operator projection`,
+        );
+        return;
+      }
       this.server.to(trackingOperatorFleetRoom(user.operatorId)).emit(
         'fleet:gps:update',
         transformFrontendTimestamps({

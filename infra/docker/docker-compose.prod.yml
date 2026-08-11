@@ -162,7 +162,7 @@ services:
       FIREBASE_WEB_STORAGE_BUCKET: ${FIREBASE_WEB_STORAGE_BUCKET:?FIREBASE_WEB_STORAGE_BUCKET is required in production}
       IDENTITY_SERVICE_BASE_URL: http://identity:5001
       BOOKING_BASE_URL: http://booking:5003
-      SHUTTLE_MAX_DISTANCE_KM: ${SHUTTLE_MAX_DISTANCE_KM:-5}
+      SHUTTLE_MAX_DISTANCE_KM: ${SHUTTLE_MAX_DISTANCE_KM:-10}
       GOOGLE_ROUTES_ENABLED: ${GOOGLE_ROUTES_ENABLED:?GOOGLE_ROUTES_ENABLED is required in production}
       GOOGLE_ROUTES_API_KEY: ${GOOGLE_ROUTES_API_KEY:?GOOGLE_ROUTES_API_KEY is required in production}
       GOOGLE_ROUTES_BASE_URL: ${GOOGLE_ROUTES_BASE_URL:-https://routes.googleapis.com}
@@ -409,6 +409,8 @@ services:
       REDIS_PORT: 6379
       RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD}@rabbitmq:5672'
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+      # Required browser Socket.IO allowlist. The Notification production guard rejects '*'.
+      NOTIFICATION_CORS_ORIGIN: ${NOTIFICATION_CORS_ORIGIN:?NOTIFICATION_CORS_ORIGIN is required in production}
       # Optional — push (FCM) + email (SendGrid). Left unset, the service stays healthy
       # but those deliveries are skipped. Add the keys to /opt/vietride/.env to enable.
       FCM_PROJECT_ID: ${FCM_PROJECT_ID:?FCM_PROJECT_ID is required in production}

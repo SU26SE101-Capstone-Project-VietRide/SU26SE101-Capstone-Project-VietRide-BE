@@ -5,7 +5,7 @@ namespace VietRide.Trip.Application.Abstractions.Services;
 
 public interface IShuttleDispatchService
 {
-    Task<ShuttleRequestPage> GetPendingAsync(
+    Task<PagedResult<ShuttleRequestTripGroup>> GetPendingAsync(
         Guid operatorId,
         int page,
         int pageSize,
@@ -103,14 +103,9 @@ public sealed record CreateShuttleTripResult(
     int AssignedPassengerCount,
     int RemainingPassengerCount);
 
-public sealed record ShuttleRequestPage(
-    IReadOnlyList<ShuttleRequestTripGroup> Items,
-    int Page,
-    int PageSize,
-    int TotalItems);
-
 public sealed record ShuttleRequestTripGroup(
     Guid MainTripId,
+    string RouteName,
     string Direction,
     DateTimeOffset DepartureDateTime,
     DateTimeOffset HardCutoffAt,
@@ -128,8 +123,8 @@ public sealed record ShuttleBookingGroup(
     decimal PickupLng,
     int? DistanceToStationMeters,
     DateTimeOffset RequestedAt,
-    int? RoadDistanceMeters = null,
-    IReadOnlyList<ShuttlePassengerProfile> Passengers = null!);
+    int? RoadDistanceMeters,
+    IReadOnlyList<ShuttlePassengerProfile> Passengers);
 
 public sealed record ShuttlePassengerProfile(
     Guid? PassengerUserId,

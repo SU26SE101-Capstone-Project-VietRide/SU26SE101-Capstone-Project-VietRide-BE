@@ -5,7 +5,8 @@
 
 ## Nguyên tắc
 
-- Notification là NestJS consumer-only; không có integration Outbox.
+- Notification không phát integration event và không có integration Outbox; các sự kiện nghiệp vụ
+  đầu vào vẫn được nhận qua RabbitMQ.
 - RabbitMQ vietride.events là biên nhận sự kiện; mọi consumer dùng idempotency, manual ACK, retry và DLQ.
 - PostgreSQL schema vietride_notification lưu lịch sử in-app và trạng thái delivery.
 - BullMQ quản lý retry nội bộ cho FCM và email.
@@ -27,6 +28,7 @@
 - [x] Phase 9 — Reliability, retention và observability nền.
 - [x] Phase 10 — Hoàn thiện coverage v1, Unicode, recipient routing và final acceptance.
 - [x] Phase 11 — Nội dung không lộ UUID và điều hướng ngữ nghĩa cho FE.
+- [x] Phase 12 — Realtime inbox có xác thực qua Socket.IO.
 
 ## Public API hiện hành
 
@@ -34,6 +36,29 @@
 - POST /v1/notifications/{notificationId}/read: owner-only, trả 204.
 - POST /v1/operator/notifications: OPERATOR_ADMIN hoặc OPERATOR_STAFF, tenant-scoped, yêu cầu Idempotency-Key; title/body là nội dung do operator nhập nên không được tự sửa.
 - Các endpoint internal recipient/snapshot không có Gateway route.
+
+## Phase 12 — realtime inbox có xác thực
+
+- Dùng namespace mặc định `/`, path `/notification/socket.io`; Nginx nâng cấp kết nối trực tiếp
+  đến Notification Service. Gateway chỉ proxy HTTP và không có route WebSocket này.
+- Handshake dùng Identity User Access Token RS256. Server đọc `auth.token` trước, sau đó fallback
+  `Authorization: Bearer`; token thiếu, sai hoặc hết hạn trả
+  `connect_error.message = "UNAUTHORIZED"`.
+- Server tự join room `notification:user:{sub}` từ claim `sub` đã xác minh. Client không được gửi
+  `userId`, tự chọn room hoặc emit event join room.
+- Event `notification:created` trả DTO thô gồm `id`, `type`, `title`, `body`, `data`, `action`,
+  `readAt`, `createdAt`; không bọc `ApiResponse`, không chứa `userId` hoặc `deepLink`. Các instant
+  public dùng `Asia/Ho_Chi_Minh` và offset `+07:00`.
+- Thứ tự xử lý là persist notification, enqueue FCM, rồi best-effort emit realtime. Lỗi emit chỉ
+  được log an toàn và không làm fail hoặc rollback notification đã tạo.
+- Delivery có ngữ nghĩa at-least-once: replay có thể phát lại cùng `id`; client deduplicate theo
+  `id`. `GET /v1/notifications` vẫn là nguồn dữ liệu bền vững khi reconnect hoặc bỏ lỡ event.
+- `NOTIFICATION_CORS_ORIGIN` hỗ trợ danh sách origin phân cách bằng dấu phẩy. Local/dev có thể dùng
+  cấu hình mở; production bắt buộc origin cụ thể và từ chối wildcard `*`.
+- Phase này giả định một Notification replica. Socket.IO Redis adapter và scale-out thuộc phạm vi
+  sau v1; không tăng replica trước khi có adapter chia sẻ room.
+- Kiểm thử bắt buộc bao phủ module wiring, token hợp lệ/không hợp lệ/hết hạn, nhiều socket cùng
+  user, cách ly chéo user, payload/timezone, replay cùng ID và failure isolation của realtime emit.
 
 ## Phase 11 — nội dung thân thiện và điều hướng chuẩn
 

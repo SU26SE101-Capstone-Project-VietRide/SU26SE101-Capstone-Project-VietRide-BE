@@ -370,11 +370,14 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 > **Prisma cho Tracking Service (NestJS):**
 > Tracking Service (NestJS) cần write `GpsTrail` vào PostgreSQL. Dùng **Prisma** (native với NestJS via `@nestjs/Prisma`). GpsTrail entity requirements: tripId, lat/lng (decimal precision 10 scale 7 — đủ độ chính xác ~1cm), speed nullable (km/h), timestamp. Tracking Service có **PostgreSQL DB riêng** — chỉ chứa GpsTrail (và OutboxEvent nếu publish event). Redis handle realtime state.
 >
-> **Tracking Service URL exposure:**
-> Tracking Service chạy sau Nginx, **không expose port trực tiếp ra internet**. Nginx route:
-> - `wss://api.vietride.app/tracking/` → proxy_pass tới Tracking Service (với `upgrade` header cho WebSocket)
+> **Realtime service URL exposure:**
+> Tracking và Notification chạy sau Nginx, **không expose port trực tiếp ra internet**. Nginx route:
+> - `wss://api.vietride.app/tracking/socket.io` → proxy_pass tới Tracking Service.
+> - `wss://api.vietride.app/notification/socket.io` → proxy_pass tới Notification Service.
+> - Cả hai route giữ `upgrade` header và đi thẳng từ Nginx, không qua HTTP Gateway.
 > - Rate limit riêng tại Nginx level cho WebSocket connections: `limit_conn` per IP
-> Client (mobile + web) kết nối qua `wss://api.vietride.app/tracking/` — cùng domain với REST API, không cần expose domain/port riêng của Tracking Service.
+> Client (mobile + web) kết nối qua cùng domain REST API, không cần expose domain/port riêng của
+> Tracking hoặc Notification Service.
 
 ### 3.5 Observability — Minimal (team 3–5 người)
 
@@ -1529,7 +1532,9 @@ Khi các service nội bộ gọi nhau (Booking → Trip-Route-Vehicle, Booking 
 - External callback (VNPay redirect, Firebase webhook) **không** có Internal JWT — handle bằng signature verification riêng (VNPay HMAC-SHA512, Firebase signed token)
 - Health check endpoints (`/health`, `/ready`) **không** require Internal JWT
 
-### 5.5 Socket.IO Client Authentication (Tracking Service)
+### 5.5 Socket.IO Client Authentication (Tracking + Notification Services)
+
+#### Tracking
 
 Internal JWT (section 5.4) áp dụng cho service-to-service HTTP call. Tracking Service nhận kết nối **trực tiếp từ Driver App và Passenger App** qua Socket.IO — đây là **client-to-service**, dùng User Access Token, không phải Internal JWT.
 
@@ -1625,6 +1630,23 @@ Parcel recipient có account VietRide:
 > - Tracking Service socket middleware verify token fresh tại mỗi handshake (kể cả reconnect).
 >
 > **Acceptable trade-off:** User có thể thấy tracking "giật" 1–2 giây khi reconnect. Không ảnh hưởng đến GPS accuracy hay booking data. Đơn giản hơn Option B (mid-session reauth event) đáng kể.
+
+#### Notification realtime inbox
+
+Notification dùng namespace mặc định `/`, path `/notification/socket.io` và đi trực tiếp qua
+Nginx. Handshake dùng Identity User Access Token RS256: server ưu tiên
+`socket.handshake.auth.token`, fallback `Authorization: Bearer`; token thiếu, sai hoặc hết hạn trả
+`connect_error.message = "UNAUTHORIZED"`.
+
+Sau khi verify, server tự join `notification:user:{sub}` từ claim `sub`. Client không được truyền
+`userId`, chọn room hoặc emit event join. Server phát `notification:created` dưới dạng DTO thô gồm
+`id`, `type`, `title`, `body`, `data`, `action`, `readAt`, `createdAt`; payload không bọc
+`ApiResponse`, không chứa `userId` hoặc `deepLink`, và instant public kết thúc bằng `+07:00`.
+
+Notification được persist rồi enqueue FCM trước khi best-effort emit. Lỗi emit không làm fail
+durable write. RabbitMQ redelivery có thể phát lại cùng stable notification `id`; client deduplicate
+theo `id`, còn `GET /v1/notifications` luôn là nguồn dữ liệu bền vững sau reconnect. V1 giả định
+một Notification replica; Socket.IO Redis adapter cho scale-out được hoãn sang phase sau.
 
 ---
 
@@ -3523,7 +3545,8 @@ Parcel có tính phí. Operator define bảng giá theo route + size category. C
 
 ### 6.7 Thông báo (Notifications)
 
-Push notification qua Firebase FCM đến mobile app, đồng thời lưu vào notification history in-app.
+Push notification qua Firebase FCM đến mobile app, phát tín hiệu realtime đã xác thực qua Socket.IO
+và đồng thời lưu vào notification history in-app.
 
 **Opt-out scope:**
 - v1: User KHÔNG opt-out được — mọi notification trong system là transactional (booking, payment, tracking, parcel, schedule/route change). Không có notification marketing/promotional cần opt-out.
@@ -3535,7 +3558,8 @@ Push notification qua Firebase FCM đến mobile app, đồng thời lưu vào n
 Inbound: RabbitMQ event consume
   → Notification Service nhận event với at-least-once guarantee từ RabbitMQ
   → INSERT Notification record (in-app history) trong DB transaction
-  → ENQUEUE vào BullMQ `fcm-push` queue → ACK RabbitMQ message
+  → ENQUEUE vào BullMQ `fcm-push` queue
+  → BEST-EFFORT emit `notification:created` tới room của user → ACK RabbitMQ message
 
 Outbound: BullMQ → FCM
   → BullMQ worker pull job → gọi Firebase Admin SDK FCM API
@@ -3547,6 +3571,7 @@ Outbound: BullMQ → FCM
 Trade-off:
   - In-app history luôn được lưu (DB write trước khi enqueue BullMQ)
   - Push FCM = best-effort delivery (DLQ rare, mất 1-2 push chấp nhận được)
+  - Socket.IO = best-effort, at-least-once signal; emit lỗi không rollback history/FCM enqueue
   - User mở app vẫn thấy notification trong list (in-app history) dù miss push
   - KHÔNG cần Outbox cho Notification Service — RabbitMQ at-least-once + BullMQ retry + NotificationDelivery audit đã đủ
 ```

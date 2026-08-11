@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { transformFrontendTimestamps } from '@vietride/nest-common';
 import { RedisService } from '@vietride/nest-redis';
@@ -17,16 +17,19 @@ import { ShuttleEtaService } from '../shuttle/shuttle-eta.service';
 import type { ShuttleEtaEvent } from '../shuttle/shuttle-eta.service';
 import { TripDelayService, type TripDelayEtaUpdate } from '../trip-delay/trip-delay.service';
 import { TripShareRealtimePublisher } from '../trip-sharing/trip-share-realtime.publisher';
+import { OperatorTripProjectionProvider } from '../tracking-data/operator-trip-projection.provider';
 import { LocationGateway } from './location.gateway';
 import {
   TRACKING_SOCKET_PATH,
   trackingGpsIdempotencyKey,
+  trackingOperatorFleetRoom,
 } from './location.constants';
 import { LocationService, type GpsUpdateEvent } from './location.service';
 
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const TEST_USER_ID = '22222222-2222-4222-8222-222222222222';
 const TEST_OPERATOR_ID = '33333333-3333-4333-8333-333333333333';
+const OTHER_OPERATOR_ID = '77777777-7777-4777-8777-777777777777';
 const TEST_SHUTTLE_ID = '55555555-5555-4555-8555-555555555555';
 const CONNECT_TIMEOUT_MS = 2_000;
 const ACK_TIMEOUT_MS = 2_000;
@@ -67,6 +70,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   let sharedPublishGps: jest.Mock;
   let sharedPublishEta: jest.Mock;
   let sharedPublishStatus: jest.Mock;
+  let operatorTripsList: jest.Mock;
   let gateway: LocationGateway;
 
   beforeAll(async () => {
@@ -100,6 +104,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     sharedPublishGps = jest.fn();
     sharedPublishEta = jest.fn();
     sharedPublishStatus = jest.fn();
+    operatorTripsList = jest.fn(async () => []);
     const redisService = {
       getClient: jest.fn(() => ({
         eval: redisEval,
@@ -168,6 +173,10 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
             publishStatus: sharedPublishStatus,
           },
         },
+        {
+          provide: OperatorTripProjectionProvider,
+          useValue: { list: operatorTripsList },
+        },
       ],
     }).compile();
 
@@ -202,6 +211,8 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     sharedPublishGps.mockReset();
     sharedPublishEta.mockReset();
     sharedPublishStatus.mockReset();
+    operatorTripsList.mockReset();
+    operatorTripsList.mockResolvedValue([]);
   });
 
   afterAll(async () => {
@@ -327,6 +338,105 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     }));
     expect(approachingHandleEtaUpdate).not.toHaveBeenCalled();
     socket.disconnect();
+  });
+
+  it('broadcasts fleet GPS only to operators from the driver operator', async () => {
+    operatorTripsList.mockResolvedValue([{ tripId: TEST_TRIP_ID, status: 'IN_PROGRESS' }]);
+    const operator = await connectSocket(
+      await signIdentityToken('OPERATOR_ADMIN', TEST_OPERATOR_ID),
+    );
+    const otherOperator = await connectSocket(
+      await signIdentityToken('OPERATOR_ADMIN', OTHER_OPERATOR_ID),
+    );
+    const driver = await connectSocket(await signIdentityToken('DRIVER', TEST_OPERATOR_ID));
+    const operatorAck = await emitWithAck<JoinTripTrackingAck>(
+      operator,
+      'joinOperatorFleet',
+      {},
+    );
+    const otherOperatorAck = await emitWithAck<JoinTripTrackingAck>(
+      otherOperator,
+      'joinOperatorFleet',
+      {},
+    );
+    const fleetEvent = waitForEvent<Record<string, unknown>>(operator, 'fleet:gps:update');
+    const otherOperatorListener = jest.fn();
+    otherOperator.on('fleet:gps:update', otherOperatorListener);
+    const payload = createGpsPayload();
+
+    const ack = await emitWithAck<GpsUpdateAck>(driver, 'gps:update', payload);
+
+    await expect(fleetEvent).resolves.toEqual(
+      transformFrontendTimestamps({ ...payload, status: 'IN_PROGRESS' }),
+    );
+    expect(ack).toEqual({ success: true });
+    expect(operatorAck).toEqual({
+      success: true,
+      room: trackingOperatorFleetRoom(TEST_OPERATOR_ID),
+      scope: 'OPERATOR',
+    });
+    expect(otherOperatorAck).toEqual({
+      success: true,
+      room: trackingOperatorFleetRoom(OTHER_OPERATOR_ID),
+      scope: 'OPERATOR',
+    });
+    expect(operatorTripsList).toHaveBeenCalledWith(TEST_OPERATOR_ID);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(otherOperatorListener).not.toHaveBeenCalled();
+    driver.disconnect();
+    operator.disconnect();
+    otherOperator.disconnect();
+  });
+
+  it('keeps gps:update successful when the trip is absent from the fleet projection', async () => {
+    const debugSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+    const operator = await connectSocket(
+      await signIdentityToken('OPERATOR_ADMIN', TEST_OPERATOR_ID),
+    );
+    const driver = await connectSocket(await signIdentityToken('DRIVER', TEST_OPERATOR_ID));
+    await expect(
+      emitWithAck<JoinTripTrackingAck>(operator, 'joinOperatorFleet', {}),
+    ).resolves.toEqual({
+      success: true,
+      room: trackingOperatorFleetRoom(TEST_OPERATOR_ID),
+      scope: 'OPERATOR',
+    });
+    const fleetListener = jest.fn();
+    operator.on('fleet:gps:update', fleetListener);
+
+    const ack = await emitWithAck<GpsUpdateAck>(driver, 'gps:update', createGpsPayload());
+
+    expect(ack).toEqual({ success: true });
+    await waitForCondition(() => operatorTripsList.mock.calls.length === 1);
+    await waitForCondition(() =>
+      debugSpy.mock.calls.some(
+        ([message]) =>
+          message ===
+          `Fleet GPS skipped for trip ${TEST_TRIP_ID}: trip is absent from operator projection`,
+      ),
+    );
+    expect(fleetListener).not.toHaveBeenCalled();
+    debugSpy.mockRestore();
+    driver.disconnect();
+    operator.disconnect();
+  });
+
+  it('keeps gps:update successful and logs when the driver token has no operatorId', async () => {
+    const debugSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+    const driver = await connectSocket(await signIdentityToken('DRIVER'));
+
+    const ack = await emitWithAck<GpsUpdateAck>(driver, 'gps:update', createGpsPayload());
+
+    expect(ack).toEqual({ success: true });
+    await waitForCondition(() =>
+      debugSpy.mock.calls.some(
+        ([message]) =>
+          message === `Fleet GPS skipped for trip ${TEST_TRIP_ID}: DRIVER token has no operatorId`,
+      ),
+    );
+    expect(operatorTripsList).not.toHaveBeenCalled();
+    debugSpy.mockRestore();
+    driver.disconnect();
   });
 
   it('returns ack before the detection chain completes', async () => {
