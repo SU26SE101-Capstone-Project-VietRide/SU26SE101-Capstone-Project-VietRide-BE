@@ -608,12 +608,16 @@ public sealed class SubstituteVehicleEndpointTests
                 "Substitution origin",
                 $"sub-origin-{Guid.NewGuid():N}",
                 "HCMC",
-                "HCMC");
+                "HCMC",
+                latitude: 10.7626m,
+                longitude: 106.6602m);
             var destination = Station.Create(
                 "Substitution destination",
                 $"sub-destination-{Guid.NewGuid():N}",
                 "Da Nang",
-                "Da Nang");
+                "Da Nang",
+                latitude: 16.0544m,
+                longitude: 108.2022m);
             var pendingStop = Stop.Create(operatorId, "Pending stop", 10.1m, 106.1m);
             var finalizedStop = Stop.Create(operatorId, "Finalized stop", 10.2m, 106.2m);
             var route = VietRide.Trip.Domain.Entities.Route.Create(
