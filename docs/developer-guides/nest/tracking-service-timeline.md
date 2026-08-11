@@ -418,7 +418,8 @@ Redis state, Google Routes và delay recovery, vẫn giữ toàn bộ field cũ 
   nhất và không phát `DELAY_CLEARED` giả. Client reconnect dùng REST `/eta` để khôi phục trạng thái.
 - Tương thích Trip: chấp nhận và chuẩn hóa `null` cho `alertRecipientUserIds`, `estimatedArrivalTime`
   và các field tùy chọn liên quan; unit test phải dùng JSON envelope thực tế của Trip.
-- Swagger trên production: chỉ đăng ký `/docs` và `/docs-json` khi `TRACKING_SWAGGER_ENABLED=true`.
+- Swagger trên production: luôn đăng ký raw OpenAPI `/docs-json` để Gateway `/docs` tổng hợp spec;
+  UI trực tiếp `/docs` chỉ bật khi `TRACKING_SWAGGER_ENABLED=true`.
   Kiểm thử smoke trên hệ thống thật bằng token thật vẫn là gate vận hành bắt buộc sau deploy.
 - Thêm health/ready rõ hơn:
   - `/health` liveness.
