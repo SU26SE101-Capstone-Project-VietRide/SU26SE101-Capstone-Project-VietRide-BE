@@ -1,7 +1,7 @@
 # BE phản hồi — Realtime WebSocket gaps
 
-**Ngày phản hồi:** 2026-08-11  
-**Báo cáo nguồn:** `FE-REPORT-realtime-websocket-gaps-2026-08-10.md`  
+**Ngày phản hồi:** 2026-08-11
+**Báo cáo nguồn:** `FE-REPORT-realtime-websocket-gaps-2026-08-10.md`
 **Phạm vi:** Operator Web; Notification Socket.IO và các điểm siết chặt Tracking liên quan trong báo cáo.
 
 ## Kết luận
