@@ -33,6 +33,7 @@ export const envSchema = baseEnvSchema
       FCM_DRY_RUN_TOPIC: z.string().trim().min(1).default('vietride-e2e-validation'),
       SENDGRID_FROM_EMAIL: z.string().email().optional(),
       SENDGRID_FROM_NAME: z.string().default('VietRide'),
+      NOTIFICATION_CORS_ORIGIN: z.string().trim().min(1).default('*'),
       NOTIFICATION_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
       NOTIFICATION_RETENTION_JOB_INTERVAL_MS: z.coerce
         .number()
@@ -43,6 +44,14 @@ export const envSchema = baseEnvSchema
   )
   .superRefine((env, ctx) => {
     if (env.NODE_ENV !== 'production') return;
+
+    if (env.NOTIFICATION_CORS_ORIGIN.split(',').some((origin) => origin.trim() === '*')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['NOTIFICATION_CORS_ORIGIN'],
+        message: 'NOTIFICATION_CORS_ORIGIN must be restricted in production',
+      });
+    }
 
     if (!env.SENDGRID_API_KEY) {
       ctx.addIssue({

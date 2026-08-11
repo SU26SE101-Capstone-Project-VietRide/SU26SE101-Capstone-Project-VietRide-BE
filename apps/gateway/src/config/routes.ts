@@ -705,7 +705,8 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       authRequired: 'none',
       rewriteTo: '/docs-json',
     },
-    // /tracking/socket.io/* is NOT routed via Gateway (Nginx direct upgrade).
+    // /tracking/socket.io/* and /notification/socket.io/* are NOT routed via Gateway
+    // (Nginx upgrades both paths directly to their owning services).
   ];
 }
 

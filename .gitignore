@@ -196,8 +196,9 @@ FE-REQUEST-driver-schedule-fare-RESPONSE.md
 FE-REQUEST-operator-wallet-transparency-RESPONSE.md
 FE-REQUEST-notification-phase11-RESPONSE.md
 FE-REQUEST-alternative-route-trip-stops-RESPONSE.md
-
-
+FE-REPORT-shuttle-dispatch-2026-08-10-RESPONSE.md
+vietride-user-chat-knowledge-base.md
+FE-RESPONSE-realtime-websocket-gaps-2026-08-11.md
 IDEMPOTENCY_CLIENT_MIGRATION_GUIDE.md
 # ── Prisma / Generated code ──────────────────────────────────────────────────
 **/src/generated/

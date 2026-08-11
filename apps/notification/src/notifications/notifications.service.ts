@@ -12,11 +12,14 @@ import { EmailSendQueue } from './email-send.queue';
 import { sanitizeEmailTemplateData } from './email-sensitive-data';
 import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
+import { createNotificationLogger } from './notification-logger';
 import {
   resolveNotificationAction,
   type NotificationActionDto,
 } from './notification-action';
 import { NotificationsRepository } from './notifications.repository';
+import { NotificationsRealtimeGateway } from './notifications-realtime.gateway';
+import { normalizeSafeError } from './safe-error';
 
 export interface NotificationItemDto {
   id: string;
@@ -57,6 +60,8 @@ const NotificationCursorSchema = z.object({
   pageIndex: z.number().int().min(2),
 });
 
+const REALTIME_ERROR_MAX_LENGTH = 500;
+
 export interface EmailDeliveryDto {
   id: string;
   toEmail: string;
@@ -67,11 +72,14 @@ export interface EmailDeliveryDto {
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = createNotificationLogger(NotificationsService.name);
+
   constructor(
     private readonly notificationsRepository: NotificationsRepository,
     private readonly fcmPushQueue: FcmPushQueue,
     private readonly emailSendQueue: EmailSendQueue,
     private readonly emailTemplateRenderer: EmailTemplateRenderer,
+    private readonly realtimeGateway: NotificationsRealtimeGateway,
     @Optional() private readonly redis?: RedisService,
   ) {}
 
@@ -83,7 +91,20 @@ export class NotificationsService {
       userId: notification.userId,
     });
 
-    return this.toDto(notification);
+    const response = this.toDto(notification);
+    try {
+      this.realtimeGateway.publishCreated(response);
+    } catch (error) {
+      this.logger.warn(
+        {
+          notificationId: notification.id,
+          error: normalizeSafeError(error, REALTIME_ERROR_MAX_LENGTH),
+        },
+        'Realtime notification publishing failed',
+      );
+    }
+
+    return response;
   }
 
   async listForUser(

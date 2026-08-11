@@ -409,6 +409,8 @@ services:
       REDIS_PORT: 6379
       RABBITMQ_URL: 'amqp://${RABBITMQ_USER:-vietride}:${RABBITMQ_PASSWORD}@rabbitmq:5672'
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+      # Required browser Socket.IO allowlist. The Notification production guard rejects '*'.
+      NOTIFICATION_CORS_ORIGIN: ${NOTIFICATION_CORS_ORIGIN:?NOTIFICATION_CORS_ORIGIN is required in production}
       # Optional — push (FCM) + email (SendGrid). Left unset, the service stays healthy
       # but those deliveries are skipped. Add the keys to /opt/vietride/.env to enable.
       FCM_PROJECT_ID: ${FCM_PROJECT_ID:?FCM_PROJECT_ID is required in production}

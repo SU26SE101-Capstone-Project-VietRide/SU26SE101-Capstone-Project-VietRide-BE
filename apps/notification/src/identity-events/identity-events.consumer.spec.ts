@@ -171,13 +171,37 @@ describe('IdentityEventsConsumer', () => {
       userId: USER_ID,
       type: NotificationType.SUBSCRIPTION_USAGE_WARNING,
       title: 'Sắp đạt giới hạn gói dịch vụ',
-      body: 'Nhà xe đã sử dụng 8/10 hạn mức tài xế trong kỳ 2026-07 (80%).',
+      body: 'Nhà xe đã sử dụng 8/10 hạn mức tài xế trong tháng 07/2026 (80%).',
       data: subscriptionUsageWarningPayload(),
       dedupeKey: `${IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.SUBSCRIPTION_USAGE_WARNING}`,
     });
     expect(idempotency.markProcessed).toHaveBeenCalledWith(
       IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
       MESSAGE_ID,
+    );
+  });
+
+  it('does not expose a subscription UUID reused as a non-monthly period key', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.SUBSCRIPTION_USAGE_WARNING),
+    );
+    const payload = {
+      ...subscriptionUsageWarningPayload(),
+      resource: 'ROUTES',
+      periodKey: 'a373f602-6529-4eb8-a852-36d1f46ae1af',
+      used: 4,
+      limit: 5,
+    };
+
+    await consumer.handleSubscriptionUsageWarning(payload, createMessage(MESSAGE_ID));
+
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: 'Nhà xe đã sử dụng 4/5 hạn mức tuyến đường (80%).',
+        data: payload,
+      }),
     );
   });
 

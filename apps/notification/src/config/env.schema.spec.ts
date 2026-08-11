@@ -23,4 +23,34 @@ describe('notification env schema', () => {
       loadEnv({ ...requiredEnv, FCM_DRY_RUN: 'not-a-boolean' } as NodeJS.ProcessEnv),
     ).toThrow();
   });
+
+  it('defaults Notification Socket.IO CORS to wildcard outside production', () => {
+    expect(loadEnv(requiredEnv as NodeJS.ProcessEnv).NOTIFICATION_CORS_ORIGIN).toBe('*');
+  });
+
+  it('requires a restricted Notification Socket.IO origin in production', () => {
+    const productionEnv = {
+      ...requiredEnv,
+      NODE_ENV: 'production',
+      SENDGRID_API_KEY: 'sendgrid-key',
+      SENDGRID_FROM_EMAIL: 'noreply@vietride.local',
+      FCM_PROJECT_ID: 'project-id',
+      FCM_CLIENT_EMAIL: 'firebase@vietride.local',
+      FCM_PRIVATE_KEY: 'private-key',
+    } as NodeJS.ProcessEnv;
+
+    expect(() => loadEnv({ ...productionEnv, NOTIFICATION_CORS_ORIGIN: '*' })).toThrow(
+      'NOTIFICATION_CORS_ORIGIN must be restricted in production',
+    );
+    expect(() => loadEnv({
+      ...productionEnv,
+      NOTIFICATION_CORS_ORIGIN: 'https://app.vietride.online, *',
+    })).toThrow('NOTIFICATION_CORS_ORIGIN must be restricted in production');
+    expect(loadEnv({
+      ...productionEnv,
+      NOTIFICATION_CORS_ORIGIN: 'https://app.vietride.online,https://vietride.online',
+    }).NOTIFICATION_CORS_ORIGIN).toBe(
+      'https://app.vietride.online,https://vietride.online',
+    );
+  });
 });

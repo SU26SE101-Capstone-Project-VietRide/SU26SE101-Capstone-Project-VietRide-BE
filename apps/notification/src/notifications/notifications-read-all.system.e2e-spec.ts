@@ -6,6 +6,7 @@ import { NotificationPrismaService } from '../prisma/notification-prisma.service
 import type { EmailSendQueue } from './email-send.queue';
 import { EmailTemplateRenderer } from './email-template.renderer';
 import type { FcmPushQueue } from './fcm-push.queue';
+import type { NotificationsRealtimeGateway } from './notifications-realtime.gateway';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsService } from './notifications.service';
 
@@ -30,6 +31,7 @@ describeSystem('Notification read-all and cursor (real PostgreSQL + Redis)', () 
       {} as FcmPushQueue,
       {} as EmailSendQueue,
       new EmailTemplateRenderer(),
+      { publishCreated: jest.fn() } as unknown as NotificationsRealtimeGateway,
       redis,
     );
   });

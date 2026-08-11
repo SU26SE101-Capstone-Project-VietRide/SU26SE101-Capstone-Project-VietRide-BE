@@ -71,7 +71,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
        .NET Core 8 Services    NestJS Services        RabbitMQ
        ────────────────────    ────────────────       (broker)
        Identity & User         Tracking (Socket.IO)
-       Booking                 Notification (FCM)
+       Booking                 Notification (FCM + Socket.IO)
        Trip-Route-Vehicle      RAG AI (LLM SSE)
        Payment & Wallet
        Parcel
@@ -90,7 +90,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | 4 | **Payment & Wallet** | .NET 8 + EF Core 8 | `vietride_payment` | ✓ | — | Payment (BOOKING/PARCEL/TOP_UP/SUBSCRIPTION), Wallet + WalletTransaction (passenger), PlatformWallet + OperatorWallet + OperatorLedgerEntry + OperatorTripSettlement, Invoice + PDF, VNPay integration, RefundFailureLog |
 | 5 | **Parcel** | .NET 8 + EF Core 8 | `vietride_parcel` | ✓ | — | Parcel lifecycle, ParcelRouteFare, hashed delivery-token history, transfer/return flows, ParcelStats |
 | 6 | **Tracking** | NestJS + Prisma | `vietride_tracking` | — | ✓ | Socket.IO GPS streaming (`/tracking`), ETA caching (Redis 60s), off-route detection, batch-write `GpsTrail` từ Redis buffer mỗi 5 phút |
-| 7 | **Notification** | NestJS + Prisma | `vietride_notification` | — | ✓ | Consume RabbitMQ events → enqueue BullMQ → FCM push + in-app `Notification` history + `NotificationDelivery` retry log + Email via SendGrid (OTP + parcel link) |
+| 7 | **Notification** | NestJS + Prisma | `vietride_notification` | — | ✓ | Consume RabbitMQ events → enqueue BullMQ → FCM push + authenticated Socket.IO inbox signal + in-app `Notification` history + `NotificationDelivery` retry log + Email via SendGrid (OTP + parcel link) |
 | 8 | **RAG AI** | NestJS + Prisma | `vietride_rag` | — | ✓ | KnowledgeDocument ingest, KnowledgeChunk + pgvector embed, RagConversation + RagMessage, LLM SSE streaming |
 
 ### 1.3 Container & port map (local dev)
@@ -104,7 +104,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | `payment` | .NET 8 | 5004 | internal + `/v1/payments/vnpay-ipn` (IP whitelist) | VNPay IPN bypass Internal JWT, verify HMAC-SHA512 |
 | `parcel` | .NET 8 | 5005 | internal + delivery link `https://app.vietride.app/parcels/delivery/confirm?token=…` |
 | `tracking` | NestJS | 3001 | `/tracking/socket.io` (WSS upgrade) | Direct client connection (User Access Token RS256) |
-| `notification` | NestJS | 3002 | internal only | Consume RabbitMQ |
+| `notification` | NestJS | 3002 | `/notification/socket.io` (WSS upgrade) + internal HTTP | Direct client Socket.IO uses Identity User Access Token RS256; RabbitMQ remains the event ingress |
 | `rag` | NestJS | 3003 | `/v1/rag/*` | SSE streaming |
 | `postgres` | postgres:16 | 5432 | — | 8 logical DBs |
 | `pgbouncer` | edoburu/pgbouncer | 6432 | — | Transaction pool mode |
@@ -155,7 +155,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | NestJS | 11.x | `package.json` là source-of-truth cho version chính xác |
 | Prisma | 6.x | `package.json` là source-of-truth cho version chính xác |
 | pg | 8.x | |
-| socket.io | 4.x | Tracking |
+| socket.io | 4.x | Tracking, Notification |
 | @nestjs/microservices (RabbitMQ) | 11.x | Consumer pattern |
 | amqplib | 0.10.x | Underlying AMQP client |
 | bullmq | 5.x | Redis-backed queue |
@@ -838,7 +838,7 @@ HTTP request
 | Rate limit | `@nestjs/throttler` HOẶC custom Redis-based middleware | Per IP per route, key `gateway:rate_limit:{ip}:{route}` TTL 1p |
 | Idempotency dedupe | KHÔNG ở Gateway — handled ở từng business service (Section 5.6 + 9.8) | Gateway chỉ forward `Idempotency-Key` header |
 | SSL termination | KHÔNG ở Gateway — **Nginx đứng trước** terminate SSL | Gateway nhận HTTP plain trong Docker network nội bộ |
-| WebSocket upgrade cho Tracking | KHÔNG ở Gateway — **Nginx route trực tiếp** `/tracking/socket.io/` tới Tracking Service | Gateway KHÔNG proxy WebSocket (xem 11.6) |
+| WebSocket upgrade cho Tracking và Notification | KHÔNG ở Gateway — **Nginx route trực tiếp** `/tracking/socket.io/` tới Tracking và `/notification/socket.io/` tới Notification | Gateway KHÔNG proxy WebSocket (xem 11.6) |
 | Request ID propagation | Custom middleware — gen UUID hoặc forward `X-Request-Id` từ client | Inject vào downstream request + log |
 | CORS | NestJS built-in `app.enableCors(...)` | Whitelist origin theo env |
 
@@ -873,7 +873,7 @@ export const ROUTE_TABLE: ProxyRoute[] = [
   { prefix: '/v1/wallet',       target: env.PAYMENT_BASE_URL,      authRequired: true  },
   { prefix: '/v1/notifications',target: env.NOTIFICATION_BASE_URL, authRequired: true  },
   { prefix: '/v1/rag',          target: env.RAG_BASE_URL,          authRequired: true  },
-  // /tracking/socket.io/* → KHÔNG qua Gateway (Nginx route trực tiếp)
+  // /tracking/socket.io/* + /notification/socket.io/* → KHÔNG qua Gateway (Nginx route trực tiếp)
 ];
 ```
 
@@ -1229,7 +1229,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 - **No content:** HTTP 204 — **empty body** (không envelope, xem ADR 0004 Rule 2).
 - **Internal success:** `/internal/v1/*` / `/internal/*` trả raw DTO/list để giữ contract service-to-service đơn giản; không bọc `ApiResponse<T>` trên success.
 - **Money:** number trong JSON (BIGINT VND — JS safe < 2^53). Server-side luôn lưu BIGINT.
-- **Datetime instant:** FE-facing `/v1/*` JSON HTTP response và Tracking WebSocket dùng RFC 3339 qua IANA `Asia/Ho_Chi_Minh`, ví dụ `"2026-05-25T14:30:00+07:00"`. Internal HTTP/event/persistence dùng instant tương ứng `"2026-05-25T07:30:00Z"`. Request datetime bắt buộc có `Z` hoặc offset rõ ràng và được normalize UTC; thiếu offset trả `422 VALIDATION_ERROR`.
+- **Datetime instant:** FE-facing `/v1/*` JSON HTTP response và Tracking/Notification WebSocket dùng RFC 3339 qua IANA `Asia/Ho_Chi_Minh`, ví dụ `"2026-05-25T14:30:00+07:00"`. Internal HTTP/event/persistence dùng instant tương ứng `"2026-05-25T07:30:00Z"`. Request datetime bắt buộc có `Z` hoặc offset rõ ràng và được normalize UTC; thiếu offset trả `422 VALIDATION_ERROR`.
 - **Calendar field:** `date`/`from`/`to` dạng `YYYY-MM-DD`, `TimeOnly`, `dayOfWeek` và recurring schedule dùng `Asia/Ho_Chi_Minh`.
 - **UUID:** string lowercase với dấu gạch ngang chuẩn.
 - **`meta.traceId`:** lấy từ header `X-Request-Id` do Gateway stamp (ADR 0002). `meta.timestamp` dùng `Asia/Ho_Chi_Minh +07:00` trên public `/v1/*`; internal error envelope giữ UTC `Z`.
@@ -1904,7 +1904,9 @@ Booking → Trip:      sign new Internal JWT với callerService="booking" (gi�
 - Public password reset endpoints (`POST /v1/auth/forgot-password`, `POST /v1/auth/reset-password`).
 - JWKS public endpoint.
 
-### 6.5 Socket.IO authentication (Tracking)
+### 6.5 Socket.IO authentication (Tracking + Notification)
+
+#### Tracking
 
 Tracking Service nhận kết nối **trực tiếp từ Driver App + Passenger App** qua Socket.IO — **client-to-service**, dùng User Access Token (KHÔNG Internal JWT).
 
@@ -1938,6 +1940,19 @@ role=OPERATOR_*:       socket.join(`operator:${operatorId}`)
 - Proactive refresh token ~1 phút trước TTL.
 - Trên reconnect, pass token mới qua `auth: { token: newToken }`.
 - `socket.io-client` có built-in exponential backoff reconnect.
+
+#### Notification
+
+Notification realtime dùng namespace mặc định `/`, path `/notification/socket.io` và kết nối
+trực tiếp qua Nginx. Gateway không proxy WebSocket. Handshake nhận Identity User Access Token RS256
+từ `socket.handshake.auth.token`, fallback header `Authorization: Bearer`; token thiếu, sai hoặc hết
+hạn bị từ chối với `connect_error.message = "UNAUTHORIZED"`.
+
+Sau khi verify, server tự join `notification:user:{sub}` từ claim `sub`. Client không được truyền
+`userId` hoặc tự chọn room. Event server `notification:created` là DTO thô, không bọc `ApiResponse`,
+không chứa `userId`; instant public serialize qua `Asia/Ho_Chi_Minh` với `+07:00`. Service persist
+notification và enqueue FCM trước khi best-effort emit. Lỗi emit không làm fail durable write;
+RabbitMQ redelivery có thể phát lại cùng stable `id`, và REST inbox vẫn là nguồn dữ liệu bền vững.
 
 ### 6.6 RBAC Roles
 
@@ -3295,7 +3310,7 @@ const CreateBookingSchema = z.object({
 ### 9.4 Timezone
 
 - **Canonical ADR:** [ADR 0005](docs/adr/0005-utc-instants-vietnam-business-calendar.md).
-- **Instant:** PostgreSQL `TIMESTAMPTZ`, internal HTTP, Redis, Outbox và RabbitMQ event dùng UTC, serialize kết thúc bằng `Z`. FE-facing `/v1/*` JSON HTTP và Tracking WebSocket serialize cùng instant qua IANA `Asia/Ho_Chi_Minh`, kết thúc bằng `+07:00`. Input timestamp bắt buộc có `Z`/offset và normalize UTC.
+- **Instant:** PostgreSQL `TIMESTAMPTZ`, internal HTTP, Redis, Outbox và RabbitMQ event dùng UTC, serialize kết thúc bằng `Z`. FE-facing `/v1/*` JSON HTTP và Tracking/Notification WebSocket serialize cùng instant qua IANA `Asia/Ho_Chi_Minh`, kết thúc bằng `+07:00`. Input timestamp bắt buộc có `Z`/offset và normalize UTC.
 - **Business calendar:** chỉ một IANA timezone `Asia/Ho_Chi_Minh`. `DateOnly`, `TimeOnly`, `dayOfWeek`, search/report date và schedule dùng calendar này. Identifier được khai báo bằng system constant trong code, không thành cột theo từng record; không dùng fixed offset làm timezone identifier.
 - **Date range:** ngày Việt Nam inclusive phải đổi thành UTC half-open `[fromUtc, toUtcExclusive)` và query `>= fromUtc && < toUtcExclusive`. Ví dụ `2026-08-10` → `[2026-08-09T17:00:00Z, 2026-08-10T17:00:00Z)`. Không cast `TIMESTAMPTZ` sang `date` theo session timezone.
 - **`departureTime TIME`:** lưu local `Asia/Ho_Chi_Minh` (không có TZ component), combine với service date + named timezone để derive UTC instant. Schedule response trả additive `timeZone: "Asia/Ho_Chi_Minh"`; không thêm DB column.
@@ -3751,6 +3766,7 @@ PARCEL_BASE_URL=http://parcel:5005
 
 ```
 NOTIFICATION_PORT=3002
+NOTIFICATION_CORS_ORIGIN=http://localhost:3000
 DB_HOST=pgbouncer
 DB_DATABASE=vietride_notification
 FIREBASE_PROJECT_ID=...
@@ -3843,6 +3859,7 @@ volumes:
 ```nginx
 upstream gateway_upstream { server gateway:3000; }
 upstream tracking_upstream { server tracking:3001; }
+upstream notification_upstream { server notification:3002; }
 
 server {
   listen 443 ssl http2;
@@ -3858,10 +3875,26 @@ server {
   location /tracking/socket.io/ {
     proxy_pass http://tracking_upstream;
     proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_read_timeout 86400;
     limit_conn perip 5;
+  }
+
+  location /notification/socket.io/ {
+    proxy_pass http://notification_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 86400;
   }
 
   location / {

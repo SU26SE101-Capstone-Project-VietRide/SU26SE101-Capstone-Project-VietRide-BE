@@ -468,6 +468,8 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER:-vietride}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-vietride_dev}
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-vietride.events}
+      # Browser Socket.IO origin allowlist; comma-separated values are supported.
+      NOTIFICATION_CORS_ORIGIN: ${NOTIFICATION_CORS_ORIGIN:-http://localhost:3000}
     depends_on:
       postgres:
         condition: service_healthy
