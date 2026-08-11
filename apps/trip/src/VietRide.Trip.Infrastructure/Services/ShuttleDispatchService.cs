@@ -8,6 +8,7 @@ using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Services;
+using VietRide.Trip.Application.Features.ResourceAvailability;
 using VietRide.Trip.Application.Features.Stops;
 using VietRide.Trip.Application.Features.Trips.Operations;
 using VietRide.Trip.Application.Features.Vehicles;
@@ -23,6 +24,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
     private readonly IIdentityInternalClient _identity;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
+    private readonly IResourceAvailabilityService _resourceAvailability;
     private readonly int _maxShuttleDistanceMeters;
 
     public ShuttleDispatchService(
@@ -30,12 +32,14 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         IIdentityInternalClient identity,
         IIntegrationEventOutbox outbox,
         IClock clock,
+        IResourceAvailabilityService resourceAvailability,
         IConfiguration configuration)
     {
         _db = db;
         _identity = identity;
         _outbox = outbox;
         _clock = clock;
+        _resourceAvailability = resourceAvailability;
         var maxDistanceKm = configuration.GetValue<int?>("SHUTTLE_MAX_DISTANCE_KM")
             ?? ShuttleDistancePolicy.DefaultMaxDistanceKm;
         _maxShuttleDistanceMeters = checked(Math.Max(1, maxDistanceKm) * 1_000);
@@ -265,9 +269,29 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             throw new CodedValidationException("VALIDATION_ERROR", "orderedBookingIds must be a non-empty distinct list.");
         }
 
+        var availabilityInput = new ShuttleAvailabilityInput(
+            input.OperatorId,
+            input.MainTripId,
+            input.Direction,
+            input.DriverUserId,
+            input.VehicleId,
+            input.ScheduledDepartureTime,
+            input.ScheduledEndTime,
+            input.OrderedBookingIds);
+        ResourceAvailabilityConflictGuard.EnsureAvailable(
+            await _resourceAvailability.CheckShuttleAsync(
+                availabilityInput,
+                acquireLocks: false,
+                cancellationToken),
+            AssignmentSourceType.SHUTTLE_TRIP);
+
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
-        await AcquireLockAsync("driver", input.DriverUserId, cancellationToken);
-        await AcquireLockAsync("vehicle", input.VehicleId, cancellationToken);
+        ResourceAvailabilityConflictGuard.EnsureAvailable(
+            await _resourceAvailability.CheckShuttleAsync(
+                availabilityInput,
+                acquireLocks: true,
+                cancellationToken),
+            AssignmentSourceType.SHUTTLE_TRIP);
 
         var trip = await _db.Trips.SingleOrDefaultAsync(
             x => x.Id == input.MainTripId && x.OperatorId == input.OperatorId,
@@ -320,16 +344,6 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             || string.IsNullOrWhiteSpace(driver.Phone))
         {
             throw new CodedNotFoundException("DRIVER_NOT_FOUND", "An active driver with contact details was not found.");
-        }
-
-        if (await HasDriverConflictAsync(input, cancellationToken))
-        {
-            throw new ConflictException("SHUTTLE_DRIVER_CONFLICT", "Driver has an overlapping trip.");
-        }
-
-        if (await HasVehicleConflictAsync(input, cancellationToken))
-        {
-            throw new ConflictException("SHUTTLE_VEHICLE_CONFLICT", "Vehicle has an overlapping trip.");
         }
 
         var selectedIds = input.OrderedBookingIds.ToArray();
@@ -417,6 +431,11 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 vehicle = new { id = vehicle.Id, licensePlate = vehicle.LicensePlate },
             }), cancellationToken);
         }
+
+        await _resourceAvailability.ReserveShuttleTripAsync(
+            shuttleTrip,
+            input.OrderedBookingIds,
+            cancellationToken);
 
         await _db.SaveChangesAsync(cancellationToken);
         var remaining = await _db.ShuttlePassengers.CountAsync(
@@ -867,6 +886,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         var now = _clock.UtcNow;
         try
         {
+            await _resourceAvailability.ActivateShuttleTripAsync(shuttleTripId, now, cancellationToken);
             shuttleTrip.Start(now);
         }
         catch (InvalidOperationException exception)
@@ -912,6 +932,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
 
         if (transitioned)
         {
+            await _resourceAvailability.ReleaseShuttleTripAsync(shuttleTripId, now, cancellationToken);
             foreach (var manifest in await _db.ShuttlePassengers
                 .Where(x => x.ShuttleTripId == shuttleTripId)
                 .ToArrayAsync(cancellationToken))
@@ -1148,6 +1169,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         {
             return new ShuttleLifecycleResult(shuttleTripId, shuttleTrip.Status, 0, null);
         }
+        await _resourceAvailability.CancelShuttleTripAsync(shuttleTripId, now, cancellationToken);
         var manifests = await _db.ShuttlePassengers
             .Where(x => x.ShuttleTripId == shuttleTripId)
             .ToArrayAsync(cancellationToken);
@@ -1229,25 +1251,5 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         => _db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({resource + ':' + id.ToString("N")}, 0))",
             cancellationToken);
-
-    private async Task<bool> HasDriverConflictAsync(CreateShuttleTripInput input, CancellationToken cancellationToken)
-        => await _db.ShuttleTrips.AnyAsync(x => x.DriverUserId == input.DriverUserId
-                && x.Status != "COMPLETED" && x.Status != "CANCELLED"
-                && x.ScheduledDepartureTime < input.ScheduledEndTime
-                && input.ScheduledDepartureTime < x.ScheduledEndTime, cancellationToken)
-            || await _db.Trips.AnyAsync(x => x.DriverUserId == input.DriverUserId
-                && x.Status != TripStatus.COMPLETED && x.Status != TripStatus.CANCELLED
-                && x.DepartureDateTime < input.ScheduledEndTime
-                && input.ScheduledDepartureTime < x.EstimatedArrivalTime, cancellationToken);
-
-    private async Task<bool> HasVehicleConflictAsync(CreateShuttleTripInput input, CancellationToken cancellationToken)
-        => await _db.ShuttleTrips.AnyAsync(x => x.VehicleId == input.VehicleId
-                && x.Status != "COMPLETED" && x.Status != "CANCELLED"
-                && x.ScheduledDepartureTime < input.ScheduledEndTime
-                && input.ScheduledDepartureTime < x.ScheduledEndTime, cancellationToken)
-            || await _db.Trips.AnyAsync(x => x.VehicleId == input.VehicleId
-                && x.Status != TripStatus.COMPLETED && x.Status != TripStatus.CANCELLED
-                && x.DepartureDateTime < input.ScheduledEndTime
-                && input.ScheduledDepartureTime < x.EstimatedArrivalTime, cancellationToken);
 
 }

@@ -19,19 +19,22 @@ public sealed class AutoCompletedFallbackJob
     private readonly IIntegrationEventOutbox outbox;
     private readonly IClock clock;
     private readonly IRouteChangeProposalService? routeChangeProposals;
+    private readonly IResourceAvailabilityService? resourceAvailability;
 
     public AutoCompletedFallbackJob(
         TripDbContext dbContext,
         ITripRepository tripRepository,
         IIntegrationEventOutbox outbox,
         IClock clock,
-        IRouteChangeProposalService? routeChangeProposals = null)
+        IRouteChangeProposalService? routeChangeProposals = null,
+        IResourceAvailabilityService? resourceAvailability = null)
     {
         this.dbContext = dbContext;
         this.tripRepository = tripRepository;
         this.outbox = outbox;
         this.clock = clock;
         this.routeChangeProposals = routeChangeProposals;
+        this.resourceAvailability = resourceAvailability;
     }
 
     [Queue("trip")]
@@ -60,6 +63,10 @@ public sealed class AutoCompletedFallbackJob
         }
 
         trip.CompleteAutomatically(now);
+        if (resourceAvailability is not null)
+        {
+            await resourceAvailability.ReleaseTripAsync(trip.Id, now, cancellationToken);
+        }
         if (routeChangeProposals is not null)
             await routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
         var integrationEvent = new TripCompletedIntegrationEvent(

@@ -32,8 +32,10 @@ public sealed class TripsController : ControllerBase
         [FromQuery] Guid? destinationStationId,
         [FromQuery] string? originProvinceCode,
         [FromQuery] string? originWardCode,
+        [FromQuery] string? originLocationCode,
         [FromQuery] string? destinationProvinceCode,
         [FromQuery] string? destinationWardCode,
+        [FromQuery] string? destinationLocationCode,
         [FromQuery] DateOnly departureDate,
         [FromQuery] int passengerCount,
         [FromQuery] bool? allowAlongRoutePickup,
@@ -49,7 +51,9 @@ public sealed class TripsController : ControllerBase
                 originProvinceCode,
                 originWardCode,
                 destinationProvinceCode,
-                destinationWardCode),
+                destinationWardCode,
+                originLocationCode,
+                destinationLocationCode),
             cancellationToken));
     }
 

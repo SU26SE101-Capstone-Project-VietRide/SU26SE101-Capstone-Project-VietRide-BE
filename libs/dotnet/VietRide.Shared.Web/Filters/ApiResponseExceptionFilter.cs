@@ -56,9 +56,20 @@ public sealed class ApiResponseExceptionFilter : IExceptionFilter
                 context.HttpContext.Request.Path,
                 traceId);
         }
-        else
+        else if (statusCode is 401 or 403 or 409 or 429)
         {
             _logger.LogWarning(
+                "Handled {ErrorCode}: {ExMessage} | UserId={UserId} | {Method} {Path} | TraceId={TraceId}",
+                errorCode,
+                context.Exception.Message,
+                GetUserId(context),
+                context.HttpContext.Request.Method,
+                context.HttpContext.Request.Path,
+                traceId);
+        }
+        else
+        {
+            _logger.LogInformation(
                 "Handled {ErrorCode}: {ExMessage} | UserId={UserId} | {Method} {Path} | TraceId={TraceId}",
                 errorCode,
                 context.Exception.Message,

@@ -33,7 +33,7 @@ RUN apk add --no-cache icu-libs tzdata
 WORKDIR /app
 COPY --from=build /app/publish .
 
-ENV ASPNETCORE_URLS=http://+:5001 \
+ENV ASPNETCORE_HTTP_PORTS=5001 \
     ASPNETCORE_ENVIRONMENT=Production \
     DOTNET_RUNNING_IN_CONTAINER=true
 

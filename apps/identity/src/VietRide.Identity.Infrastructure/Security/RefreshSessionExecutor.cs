@@ -43,6 +43,14 @@ internal sealed class RefreshSessionExecutor : IRefreshSessionExecutor
             .IgnoreQueryFilters()
             .SingleOrDefaultAsync(ct);
 
+        if (user?.Status == UserStatus.LOCKED)
+        {
+            await transaction.CommitAsync(ct);
+            return RefreshSessionResult.Invalid(
+                "Account is locked. Please contact support.",
+                "AUTH_ACCOUNT_LOCKED");
+        }
+
         if (user is null || user.Status != UserStatus.ACTIVE)
         {
             await transaction.CommitAsync(ct);
@@ -85,6 +93,39 @@ internal sealed class RefreshSessionExecutor : IRefreshSessionExecutor
             return RefreshSessionResult.Invalid("Refresh token has expired.");
         }
 
+        OperatorRegistrationStatus? operatorStatus = null;
+        if (user.OperatorId.HasValue)
+        {
+            var operatorEntity = await db.Operators
+                .AsNoTracking()
+                .SingleOrDefaultAsync(candidate => candidate.Id == user.OperatorId.Value, ct);
+
+            if (operatorEntity?.RegistrationStatus == OperatorRegistrationStatus.APPROVED
+                && operatorEntity.IsActive)
+            {
+                operatorStatus = OperatorRegistrationStatus.APPROVED;
+            }
+            else if (operatorEntity?.RegistrationStatus == OperatorRegistrationStatus.SUSPENDED)
+            {
+                if (user.Role != UserRole.OPERATOR_ADMIN)
+                {
+                    await transaction.CommitAsync(ct);
+                    return RefreshSessionResult.Invalid(
+                        "The operator is suspended.",
+                        "OPERATOR_SUSPENDED");
+                }
+
+                operatorStatus = OperatorRegistrationStatus.SUSPENDED;
+            }
+            else
+            {
+                await transaction.CommitAsync(ct);
+                return RefreshSessionResult.Invalid(
+                    "Operator registration is not approved.",
+                    "FORBIDDEN");
+            }
+        }
+
         existing.Revoke(now, RefreshTokenRevokeReason.NORMAL_ROTATION);
         var (rawRefresh, newRefreshEntity) = tokenFactory.Create(
             user.Id,
@@ -94,6 +135,6 @@ internal sealed class RefreshSessionExecutor : IRefreshSessionExecutor
         await db.RefreshTokens.AddAsync(newRefreshEntity, ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        return RefreshSessionResult.Success(user, rawRefresh);
+        return RefreshSessionResult.Success(user, rawRefresh, operatorStatus);
     }
 }

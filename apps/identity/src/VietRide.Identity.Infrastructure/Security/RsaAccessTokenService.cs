@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.Infrastructure.Security;
@@ -42,7 +43,7 @@ public sealed class RsaAccessTokenService : IAccessTokenService
     }
 
     /// <inheritdoc />
-    public string IssueToken(User user)
+    public string IssueToken(User user, OperatorRegistrationStatus? operatorStatus = null)
     {
         ArgumentNullException.ThrowIfNull(user);
 
@@ -59,7 +60,11 @@ public sealed class RsaAccessTokenService : IAccessTokenService
 
         // operatorId claim is present only for operator-scoped roles; absent = null operator
         if (user.OperatorId.HasValue)
+        {
             claims.Add(new Claim("operatorId", user.OperatorId.Value.ToString()));
+            if (operatorStatus.HasValue)
+                claims.Add(new Claim("operatorStatus", operatorStatus.Value.ToString()));
+        }
 
         var signingCredentials = new SigningCredentials(
             _signingKey,

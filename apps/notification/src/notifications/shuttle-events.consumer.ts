@@ -9,6 +9,8 @@ import {
   TRIP_SHUTTLE_PICKED_UP_ROUTING_KEY,
   TRIP_SHUTTLE_UNFULFILLED_ROUTING_KEY,
   TRIP_SHUTTLE_WARNING_ROUTING_KEY,
+  TRIP_ASSIGNMENT_START_BLOCKED_ROUTING_KEY,
+  TripAssignmentStartBlockedEventSchema,
   TripShuttleAssignedEventSchema,
   TripShuttleLifecycleEventSchema,
   TripShuttleUnfulfilledEventSchema,
@@ -33,6 +35,10 @@ const bindings = [
   { queue: 'notification:shuttle-delivered', routingKey: TRIP_SHUTTLE_DELIVERED_ROUTING_KEY },
   { queue: 'notification:shuttle-no-show', routingKey: TRIP_SHUTTLE_NO_SHOW_ROUTING_KEY },
   { queue: 'notification:shuttle-completed', routingKey: TRIP_SHUTTLE_COMPLETED_ROUTING_KEY },
+  {
+    queue: 'notification:trip-assignment-start-blocked',
+    routingKey: TRIP_ASSIGNMENT_START_BLOCKED_ROUTING_KEY,
+  },
 ] as const;
 
 @Injectable()
@@ -95,6 +101,26 @@ export class ShuttleEventsConsumer implements OnModuleInit {
   }
 
   private async createNotifications(routingKey: string, payload: unknown): Promise<number> {
+    if (routingKey === TRIP_ASSIGNMENT_START_BLOCKED_ROUTING_KEY) {
+      const event = TripAssignmentStartBlockedEventSchema.parse(payload);
+      const userIds = [
+        ...new Set(await this.recipients.resolveOperatorRecipientUserIds(event.operatorId)),
+      ];
+      await Promise.all(
+        userIds.map((userId) =>
+          this.notifications.createNotification({
+            userId,
+            type: NotificationType.TRIP_ASSIGNMENT_START_BLOCKED,
+            title: 'Không thể bắt đầu chuyến',
+            body: `${event.resourceRole} vẫn đang ACTIVE ở một chuyến khác. Vui lòng xử lý assignment trước khi thử lại.`,
+            data: event,
+            dedupeKey: `${routingKey}:${event.tripId}:${userId}`,
+          }),
+        ),
+      );
+      return userIds.length;
+    }
+
     if (routingKey === TRIP_SHUTTLE_ASSIGNED_ROUTING_KEY) {
       const event = TripShuttleAssignedEventSchema.parse(payload);
       const data = {

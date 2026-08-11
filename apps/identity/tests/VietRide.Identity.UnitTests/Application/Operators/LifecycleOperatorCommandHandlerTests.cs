@@ -161,6 +161,10 @@ public sealed class LifecycleOperatorCommandHandlerTests
             Arg.Is<string>(payload => operatorScopedUserIds.Any(userId =>
                 payload.Contains(userId.ToString(), StringComparison.Ordinal))),
             Arg.Any<CancellationToken>());
+        await fixture.RefreshTokens.Received(1).RevokeActiveByUsersAsync(
+            Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(operatorScopedUserIds)),
+            RefreshTokenRevokeReason.ADMIN_REVOKE,
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -288,7 +292,13 @@ public sealed class LifecycleOperatorCommandHandlerTests
                 Outbox,
                 WalletBackfillMarkers);
             RejectHandler = new RejectOperatorCommandHandler(Operators, OperatorSubscriptions, ActivityLogs, Clock);
-            SuspendHandler = new SuspendOperatorCommandHandler(Operators, Users, Clock, Outbox, ActivityLogs);
+            SuspendHandler = new SuspendOperatorCommandHandler(
+                Operators,
+                Users,
+                Clock,
+                Outbox,
+                ActivityLogs,
+                RefreshTokens);
             ReactivateHandler = new ReactivateOperatorCommandHandler(Operators, ActivityLogs);
         }
 
@@ -296,6 +306,7 @@ public sealed class LifecycleOperatorCommandHandlerTests
         public IUserRepository Users { get; } = Substitute.For<IUserRepository>();
         public IOperatorSubscriptionRepository OperatorSubscriptions { get; } = Substitute.For<IOperatorSubscriptionRepository>();
         public IActivityLogRepository ActivityLogs { get; } = Substitute.For<IActivityLogRepository>();
+        public IRefreshTokenRepository RefreshTokens { get; } = Substitute.For<IRefreshTokenRepository>();
         public IOperatorWalletBackfillMarkerRepository WalletBackfillMarkers { get; } = Substitute.For<IOperatorWalletBackfillMarkerRepository>();
         public IClock Clock { get; } = Substitute.For<IClock>();
         public IIntegrationEventOutbox Outbox { get; } = Substitute.For<IIntegrationEventOutbox>();

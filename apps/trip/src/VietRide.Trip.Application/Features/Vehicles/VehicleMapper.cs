@@ -1,11 +1,15 @@
 using System.Text.Json;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Features.Vehicles;
 
 public static class VehicleMapper
 {
-    public static VehicleDto ToDto(Vehicle vehicle)
+    public static VehicleDto ToDto(
+        Vehicle vehicle,
+        VehicleAssignmentProjection? currentAssignment = null,
+        VehicleAssignmentProjection? nextAssignment = null)
     {
         var layout = vehicle.SeatLayoutJson.Deserialize<SeatLayoutDto>()
             ?? throw new InvalidOperationException("Stored vehicle seat layout is invalid.");
@@ -24,6 +28,22 @@ public static class VehicleMapper
             (VehicleStatusDto)vehicle.Status,
             vehicle.IsActive,
             vehicle.CreatedAt,
-            vehicle.UpdatedAt);
+            vehicle.UpdatedAt,
+            ToAssignmentDto(currentAssignment),
+            ToAssignmentDto(nextAssignment));
     }
+
+    private static VehicleAssignmentDto? ToAssignmentDto(VehicleAssignmentProjection? assignment) =>
+        assignment is null
+            ? null
+            : new VehicleAssignmentDto(
+                assignment.SourceType,
+                assignment.SourceType == AssignmentSourceType.TRIP.ToString() ? assignment.SourceId : null,
+                assignment.SourceType == AssignmentSourceType.SHUTTLE_TRIP.ToString() ? assignment.SourceId : null,
+                assignment.DriverUserId,
+                assignment.StartsAt,
+                assignment.EndsAt,
+                assignment.Status,
+                assignment.StartStationId,
+                assignment.EndStationId);
 }

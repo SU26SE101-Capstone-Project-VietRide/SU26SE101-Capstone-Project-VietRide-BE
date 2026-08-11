@@ -20,11 +20,13 @@ public sealed class LocationsController : ControllerBase
     [HttpGet]
     [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<LocationDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<IReadOnlyList<LocationDto>>> GetAsync(
         [FromQuery] string? parentCode,
         [FromQuery] string? search,
+        [FromQuery] string? type,
         CancellationToken cancellationToken)
     {
-        return Ok(await mediator.Send(new ListLocationsQuery(parentCode, search), cancellationToken));
+        return Ok(await mediator.Send(new ListLocationsQuery(parentCode, search, type), cancellationToken));
     }
 }

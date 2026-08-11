@@ -153,7 +153,7 @@ public sealed class RefreshCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_LockedUser_Throws401WithoutRotatingToken()
+    public async Task Handle_LockedUser_Throws403AccountLockedWithoutRotatingToken()
     {
         var user = MakeActiveUser();
         user.Lock();
@@ -185,12 +185,14 @@ public sealed class RefreshCommandHandlerTests
 
         var act = () => handler.Handle(new RefreshCommand("lockedraw"), CancellationToken.None);
 
-        await act.Should().ThrowAsync<UnauthorizedException>()
-            .Where(e => e.ErrorCode == "AUTH_TOKEN_INVALID");
+        await act.Should().ThrowAsync<ForbiddenException>()
+            .Where(e => e.ErrorCode == "AUTH_ACCOUNT_LOCKED");
 
         existingToken.RevokedAt.Should().BeNull();
         await refreshTokens.DidNotReceive().AddAsync(Arg.Any<RefreshToken>(), Arg.Any<CancellationToken>());
-        accessTokenSvc.DidNotReceive().IssueToken(Arg.Any<User>());
+        accessTokenSvc.DidNotReceive().IssueToken(
+            Arg.Any<User>(),
+            Arg.Any<OperatorRegistrationStatus?>());
         refreshFactory.DidNotReceive().Create(Arg.Any<Guid>(), Arg.Any<Guid?>(), Arg.Any<Guid?>());
     }
 
@@ -273,6 +275,48 @@ public sealed class RefreshCommandHandlerTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task Handle_RestrictedSession_RetainsSuspendedOperatorStatus()
+    {
+        var user = MakeActiveUser();
+        var executor = Substitute.For<IRefreshSessionExecutor>();
+        executor.ExecuteAsync("restricted", Arg.Any<CancellationToken>())
+            .Returns(RefreshSessionResult.Success(
+                user,
+                "rotated",
+                OperatorRegistrationStatus.SUSPENDED));
+        var accessTokenService = Substitute.For<IAccessTokenService>();
+        accessTokenService.IssueToken(user, OperatorRegistrationStatus.SUSPENDED)
+            .Returns("restricted-access-token");
+        var handler = new RefreshCommandHandler(executor, accessTokenService);
+
+        var result = await handler.Handle(new RefreshCommand("restricted"), CancellationToken.None);
+
+        result.AccessToken.Should().Be("restricted-access-token");
+        result.RefreshToken.Should().Be("rotated");
+        result.User.OperatorRegistrationStatus.Should().Be(OperatorRegistrationStatus.SUSPENDED.ToString());
+    }
+
+    [Fact]
+    public async Task Handle_SuspendedNonAdminFailure_ThrowsOperatorSuspended()
+    {
+        var executor = Substitute.For<IRefreshSessionExecutor>();
+        executor.ExecuteAsync("blocked", Arg.Any<CancellationToken>())
+            .Returns(RefreshSessionResult.Invalid(
+                "The operator is suspended.",
+                "OPERATOR_SUSPENDED"));
+        var accessTokenService = Substitute.For<IAccessTokenService>();
+        var handler = new RefreshCommandHandler(executor, accessTokenService);
+
+        var act = () => handler.Handle(new RefreshCommand("blocked"), CancellationToken.None);
+
+        await act.Should().ThrowAsync<ForbiddenException>()
+            .Where(exception => exception.ErrorCode == "OPERATOR_SUSPENDED");
+        accessTokenService.DidNotReceive().IssueToken(
+            Arg.Any<User>(),
+            Arg.Any<OperatorRegistrationStatus?>());
+    }
+
     private sealed class LegacyRefreshSessionExecutor : IRefreshSessionExecutor
     {
         private static readonly TimeSpan RotationGracePeriod = TimeSpan.FromSeconds(30);
@@ -321,6 +365,11 @@ public sealed class RefreshCommandHandlerTests
                 return RefreshSessionResult.Invalid("Refresh token has expired.");
 
             var user = await _users.GetByIdAsync(existing.UserId, ct);
+            if (user?.Status == UserStatus.LOCKED)
+                return RefreshSessionResult.Invalid(
+                    "Account is locked. Please contact support.",
+                    "AUTH_ACCOUNT_LOCKED");
+
             if (user is null || user.Status != UserStatus.ACTIVE)
                 return RefreshSessionResult.Invalid("Refresh token is invalid for the current account status.");
 

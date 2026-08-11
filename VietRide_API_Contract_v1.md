@@ -267,6 +267,7 @@ Response `200`:
       "role": "PASSENGER",
       "operatorId": null,
       "status": "ACTIVE",
+      "operatorRegistrationStatus": null,
       "avatarUrl": "https://example.com/avatar.png"
     }
   },
@@ -277,6 +278,8 @@ Response `200`:
 Passenger accounts may receive the same `200` response while `user.status = "PENDING_EMAIL_VERIFICATION"`.
 The mobile FE treats that as a restricted session and prompts email OTP verification from Profile.
 `user.avatarUrl` is the stored profile avatar and is omitted when null.
+`user.operatorRegistrationStatus` is nullable. It is `APPROVED` for a normal operator session,
+`SUSPENDED` for the restricted OPERATOR_ADMIN session, and null for users without operator scope.
 
 Error `401` — invalid credentials:
 ```json
@@ -318,6 +321,18 @@ Error `403` — OPERATOR_ADMIN/OPERATOR_STAFF belongs to an operator that is not
 }
 ```
 
+For operator-scoped roles, `PENDING` and `REJECTED` continue to return `403 FORBIDDEN`.
+When the Operator is `SUSPENDED`, only an `ACTIVE` `OPERATOR_ADMIN` receives a restricted token
+bundle with `user.operatorRegistrationStatus = "SUSPENDED"`. `OPERATOR_STAFF`, `DRIVER`, and
+`ASSISTANT` receive `403 OPERATOR_SUSPENDED`. A `LOCKED` User always receives
+`403 AUTH_ACCOUNT_LOCKED`, even when its Operator is also suspended.
+
+Operator access tokens carry `operatorStatus=APPROVED|SUSPENDED`; the Gateway forwards it in the
+Internal JWT. A suspended OPERATOR_ADMIN token is limited to `GET /v1/operator/profile`,
+`GET /v1/operator/subscription`, `POST /v1/auth/refresh`, and `POST /v1/auth/logout`. Every other
+route returns `403 OPERATOR_SUSPENDED`. After strict rollout, an operator token missing the claim
+returns `401 AUTH_TOKEN_INVALID`.
+
 ### POST `/v1/auth/refresh`
 
 Auth: public.
@@ -340,6 +355,12 @@ Error `401` — invalid or reused refresh token:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
+
+Refresh applies the same User/Operator matrix as password and Google login. A refresh token
+revoked by operator suspension returns `401 AUTH_TOKEN_INVALID`. A newly issued restricted
+OPERATOR_ADMIN refresh token may rotate and preserves `operatorRegistrationStatus=SUSPENDED`.
+`LOCKED` returns `403 AUTH_ACCOUNT_LOCKED`; suspended non-admin roles return
+`403 OPERATOR_SUSPENDED`.
 
 ### POST `/v1/auth/logout`
 
@@ -402,6 +423,7 @@ Response `200`:
       "role": "PASSENGER",
       "operatorId": null,
       "status": "ACTIVE",
+      "operatorRegistrationStatus": null,
       "avatarUrl": "https://example.com/avatar.png"
     }
   },
@@ -412,6 +434,8 @@ Response `200`:
 Google login returns the same stored `UserSummaryDto.avatarUrl` as password login. The provider
 avatar seeds a newly created User only; linking or re-login never overwrites an existing stored
 avatar. The property is omitted when null.
+Google login applies the same independent User lock and Operator suspension matrix as password
+login and returns the same nullable `user.operatorRegistrationStatus` field.
 
 Error `401` — invalid Google ID token:
 ```json
@@ -1984,8 +2008,13 @@ origin/destination selector. FE must not hardcode administrative units.
 Query:
 - Omit `parentCode` to list active `PROVINCE|MUNICIPALITY` roots.
 - Send `parentCode=<official-province-code>` to list its active `WARD|COMMUNE|SPECIAL_ZONE` children.
+- `type?` accepts `PROVINCE|MUNICIPALITY|WARD|COMMUNE|SPECIAL_ZONE`.
 - `search?` filters code/name inside the selected level for autocomplete using case- and
   Vietnamese-accent-insensitive contains matching (`Vung Tau` matches `Vũng Tàu`).
+
+`type`, `parentCode`, and `search` are combined with AND semantics. Omitting `type` preserves the
+combined response. An unsupported type returns `422 VALIDATION_ERROR`; a supported type that is
+not present at the selected level returns `200` with an empty array.
 
 Response `200`: matching active locations sorted by `sortOrder`, then `name`.
 ```json
@@ -2050,6 +2079,11 @@ Query:
 - Administrative hierarchy mode: `originProvinceCode`, `originWardCode?`,
   `destinationProvinceCode`, `destinationWardCode?`, `departureDate`, `passengerCount`,
   `allowAlongRoutePickup?`.
+
+New callers should use `originLocationCode?` and `destinationLocationCode?` in hierarchy mode.
+The legacy `originWardCode?` and `destinationWardCode?` remain supported. Both naming sets accept
+any active leaf type: `WARD`, `COMMUNE`, or `SPECIAL_ZONE`. If both names for one side are supplied,
+their trimmed codes must match or the API returns `422 VALIDATION_ERROR`.
 
 If both station IDs and hierarchy codes are sent, a complete station-ID pair wins because it is the more
 specific filter. Station-ID mode continues to match exact Route origin/destination terminals.
@@ -6011,7 +6045,11 @@ Errors:
 - `404 RESOURCE_NOT_FOUND` — operator does not exist.
 - `422 VALIDATION_ERROR` — missing reason or invalid lifecycle transition.
 
-Notes: suspend writes an ActivityLog with action `SUSPEND_OPERATOR`, actor user ID, operator ID and source. The existing suspension Outbox behavior remains unchanged.
+Notes: suspend writes an ActivityLog with action `SUSPEND_OPERATOR`, actor user ID, operator ID and
+source. It revokes every active refresh token for `OPERATOR_ADMIN`, `OPERATOR_STAFF`, `DRIVER`, and
+`ASSISTANT` users in the tenant with reason `ADMIN_REVOKE`, and requests Firebase session
+revocation for all of them. Existing access tokens expire naturally within 15 minutes; no live
+Redis blacklist is used. Suspend does not change any `User.status` to `LOCKED`.
 
 ### GET `/v1/operator/users`
 
@@ -6105,7 +6143,9 @@ Errors:
 
 ### GET `/v1/operator/profile`
 
-Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. Tenant isolation: operator is resolved from caller `operatorId`. Read is allowed even when the current Operator is non-`APPROVED` so the UI can display current status/policies.
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF` for an approved Operator. For a suspended Operator, only
+`OPERATOR_ADMIN` may read this endpoint through the restricted Gateway session. Tenant isolation:
+operator is resolved from caller `operatorId`.
 
 Response `200`:
 ```json
@@ -6129,6 +6169,8 @@ Response `200`:
     "representativePhone": "+84907654321",
     "registrationStatus": "APPROVED",
     "isActive": true,
+    "suspendedAt": null,
+    "suspendReason": null,
     "cancellationPolicy": [
       { "hoursBeforeDeparture": 24, "feePercent": 10 }
     ],
@@ -6142,6 +6184,10 @@ Response `200`:
 Errors:
 - `403 FORBIDDEN` — caller is not an operator role or has no `operatorId`.
 - `404 RESOURCE_NOT_FOUND` — operator does not exist.
+
+`suspendedAt` and `suspendReason` are non-null only while `registrationStatus=SUSPENDED`.
+Suspended non-admin roles and restricted sessions targeting any non-whitelisted route receive
+`403 OPERATOR_SUSPENDED` at the Gateway.
 
 ### PATCH `/v1/operator/profile`
 
@@ -6403,7 +6449,18 @@ Errors: `402 SUBSCRIPTION_EXPIRED`; `403 FORBIDDEN`; `403 SUBSCRIPTION_MODULE_DI
 SHUTTLE_REQUEST_SET_CHANGED`; `409 SHUTTLE_CAPACITY_EXCEEDED`; `409
 SHUTTLE_DRIVER_CONFLICT`; `409 SHUTTLE_VEHICLE_CONFLICT`; `409
 SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 SHUTTLE_DISTANCE_EXCEEDED`; `422 VALIDATION_ERROR`;
-`503 SHUTTLE_DISTANCE_UNAVAILABLE`; `503 UPSTREAM_UNAVAILABLE`.
+`503 SHUTTLE_DISTANCE_UNAVAILABLE`; `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`; `503 UPSTREAM_UNAVAILABLE`.
+
+Shuttle dispatch also uses the shared Driver/Vehicle interval + turnaround + reposition engine.
+Conflicts retain `SHUTTLE_DRIVER_CONFLICT`/`SHUTTLE_VEHICLE_CONFLICT` and carry the canonical
+`conflictReason` field. Google/missing-coordinate failure returns
+`503 RESOURCE_TRAVEL_TIME_UNAVAILABLE` and writes no ShuttleTrip or partial reservation.
+
+### POST `/v1/operator/shuttle-trips/availability-check`
+
+Auth: `OPERATOR_ADMIN`. Read-only and requires no `Idempotency-Key`. Body equals Shuttle create
+fields except `notes`; `orderedBookingIds` determines the first/last manifest endpoint. The
+response is the same availability shape and 100-conflict cap documented for DriverSchedule.
 
 ### GET `/v1/driver/shuttle-trips`
 
@@ -7370,7 +7427,7 @@ active AlternativeRoute follows the same success contract as any other valid cre
 All public responses use the ADR 0004 `ApiResponse<T>` envelope. Success responses include `{ success, statusCode, data, meta }`; errors include `{ success: false, statusCode, error: { code, message, fields? }, meta }`.
 
 Original Day-9 Vehicle/DriverSchedule create and activate writes do not require
-`Idempotency-Key`. They are two explicit members of the canonical 17-route system-wide exemption
+`Idempotency-Key`. They are two explicit members of the canonical 20-route system-wide exemption
 inventory and carry auditable runtime exemption metadata; callers must not add a key as a hidden
 precondition. The Day-22 full DriverSchedule PATCH and its deprecated `/crew` alias explicitly
 require a UUID-v4 key as documented below.
@@ -7392,9 +7449,25 @@ Vehicle tenant isolation: a missing Vehicle, a soft-deleted Vehicle, or a Vehicl
   "isSystemDefined": true,
   "isActive": true,
   "createdAt": "2026-06-11T17:00:00+07:00",
-  "updatedAt": "2026-06-11T17:00:00+07:00"
+  "updatedAt": "2026-06-11T17:00:00+07:00",
+  "currentAssignment": null,
+  "nextAssignment": {
+    "sourceType": "TRIP",
+    "tripId": "uuid",
+    "shuttleTripId": null,
+    "driverUserId": "uuid",
+    "plannedStartAt": "2026-08-11T08:00:00Z",
+    "plannedEndAt": "2026-08-11T10:00:00Z",
+    "status": "RESERVED",
+    "startStationId": "uuid",
+    "endStationId": "uuid"
+  }
 }
 ```
+
+`currentAssignment` is the Vehicle reservation whose status is `ACTIVE`; `nextAssignment` is the
+nearest future `RESERVED` reservation. Both are nullable and may reference either a main Trip or a
+ShuttleTrip. Vehicle does not persist a fixed/current driver.
 
 The catalog contains the three platform-seeded system types:
 
@@ -7516,9 +7589,26 @@ Either failure returns `422 VALIDATION_ERROR` with `error.fields` identifying `t
   "status": "ACTIVE",
   "isActive": true,
   "createdAt": "2026-06-11T17:00:00+07:00",
-  "updatedAt": "2026-06-11T17:00:00+07:00"
+  "updatedAt": "2026-06-11T17:00:00+07:00",
+  "currentAssignment": {
+    "sourceType": "TRIP",
+    "tripId": "uuid",
+    "shuttleTripId": null,
+    "driverUserId": "uuid",
+    "plannedStartAt": "2026-08-11T08:00:00+07:00",
+    "plannedEndAt": "2026-08-11T10:00:00+07:00",
+    "status": "ACTIVE",
+    "startStationId": "uuid",
+    "endStationId": "uuid"
+  },
+  "nextAssignment": null
 }
 ```
+
+`currentAssignment` is the vehicle's `ACTIVE` reservation; `nextAssignment` is its nearest
+future `RESERVED` reservation. Both are nullable and apply equally to main Trip and ShuttleTrip.
+Driver ownership is assignment-scoped; Vehicle does not expose or persist a fixed
+`currentDriverId`.
 
 ### POST `/v1/operator/vehicles`
 
@@ -7713,10 +7803,45 @@ Validation:
 - `driverUserId` must resolve through Identity `GET /internal/v1/users/{userId}` to a user with `role=DRIVER` under the caller operator. Missing Identity user, wrong role, wrong operator, or upstream logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields.driverUserId`.
 - `assistantUserId`, when present, must resolve through Identity `GET /internal/v1/users/{userId}` to a user with `role=ASSISTANT` under the caller operator. Missing Identity user, wrong role, wrong operator, or upstream logical-FK validation failure returns `422 VALIDATION_ERROR` with `error.fields.assistantUserId`.
 - An active schedule conflicts when the same `driverUserId` has any intersecting `dayOfWeek`, the same `departureTime` interpreted in `Asia/Ho_Chi_Minh`, and an overlapping `[validFrom, validUntil]` window. Return `409 TRIP_DRIVER_CONFLICT`.
+- Canonical availability supersedes the exact-departure sentence above: Driver, Assistant, and
+  Vehicle must satisfy `next.start >= previous.end + 30 minutes + repositionTravelTime` against
+  both adjacent assignments across main Trip and ShuttleTrip. Reposition uses Google Routes
+  `DRIVE`; unavailable travel-time input returns `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`. Conflict
+  responses retain `TRIP_DRIVER_CONFLICT`/`TRIP_VEHICLE_CONFLICT` and add
+  `error.fields.conflictReason=TIME_OVERLAP|TURNAROUND_REQUIRED|REPOSITION_REQUIRED|RESOURCE_ACTIVE`.
 
 Response `201`: `DriverScheduleDto` in the ADR 0004 success envelope.
 
 Creating a DriverSchedule persists the recurring assignment and, when active, is the Day-11 trigger for Trip generation enqueue after the schedule commit succeeds. Day 9 shipped persistence only; the Day-11 contract closes the deferred driver/assistant role+operator validation carryover.
+
+### POST `/v1/operator/driver-schedules/availability-check`
+
+Auth: `OPERATOR_ADMIN`. Read-only preview; no `Idempotency-Key` and no reservation is created. Body
+contains the DriverSchedule create fields except `baseFare` and `isActive`. Backend derives route
+duration and endpoint Stations. Response `200`:
+
+```json
+{
+  "available": false,
+  "turnaroundMinutes": 30,
+  "hasMore": false,
+  "conflicts": [{
+    "resourceRole": "DRIVER",
+    "resourceId": "uuid",
+    "reason": "REPOSITION_REQUIRED",
+    "conflictingSourceType": "TRIP",
+    "conflictingSourceId": "uuid",
+    "sampleRequestedStartAt": "2026-08-11T10:01:00Z",
+    "blockingUntil": "2026-08-11T13:31:00Z",
+    "earliestFeasibleStartAt": "2026-08-11T13:31:00Z",
+    "requiredTravelMinutes": 181,
+    "turnaroundMinutes": 30
+  }]
+}
+```
+
+At most 100 conflicts are returned in occurrence order; `hasMore=true` means the result was
+truncated. Mutation endpoints always recheck under lock, so preview is never a reservation.
 
 ### PATCH `/v1/operator/driver-schedules/{scheduleId}?applyTo=FUTURE_ONLY|ALL_PENDING`
 

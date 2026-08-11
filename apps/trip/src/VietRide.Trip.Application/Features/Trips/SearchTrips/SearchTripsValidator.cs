@@ -32,6 +32,11 @@ public sealed class SearchTripsValidator : AbstractValidator<SearchTripsQuery>
             .MaximumLength(20)
             .Matches("^[0-9]+$")
             .When(query => !HasStationPair(query) && !string.IsNullOrWhiteSpace(query.OriginWardCode));
+        RuleFor(query => query.OriginLocationCode)
+            .Length(5)
+            .MaximumLength(20)
+            .Matches("^[0-9]+$")
+            .When(query => !HasStationPair(query) && !string.IsNullOrWhiteSpace(query.OriginLocationCode));
         RuleFor(query => query.DestinationProvinceCode)
             .Length(2)
             .MaximumLength(20)
@@ -42,6 +47,19 @@ public sealed class SearchTripsValidator : AbstractValidator<SearchTripsQuery>
             .MaximumLength(20)
             .Matches("^[0-9]+$")
             .When(query => !HasStationPair(query) && !string.IsNullOrWhiteSpace(query.DestinationWardCode));
+        RuleFor(query => query.DestinationLocationCode)
+            .Length(5)
+            .MaximumLength(20)
+            .Matches("^[0-9]+$")
+            .When(query => !HasStationPair(query) && !string.IsNullOrWhiteSpace(query.DestinationLocationCode));
+        RuleFor(query => query)
+            .Must(query => CodesMatch(query.OriginWardCode, query.OriginLocationCode))
+            .WithMessage("OriginLocationCode must match OriginWardCode when both are provided.")
+            .When(query => !HasStationPair(query));
+        RuleFor(query => query)
+            .Must(query => CodesMatch(query.DestinationWardCode, query.DestinationLocationCode))
+            .WithMessage("DestinationLocationCode must match DestinationWardCode when both are provided.")
+            .When(query => !HasStationPair(query));
         RuleFor(query => query.DepartureDate).NotEmpty();
         RuleFor(query => query.PassengerCount).GreaterThan(0);
     }
@@ -59,4 +77,9 @@ public sealed class SearchTripsValidator : AbstractValidator<SearchTripsQuery>
 
     private static bool HasStationPair(SearchTripsQuery query)
         => query.OriginStationId.HasValue && query.DestinationStationId.HasValue;
+
+    private static bool CodesMatch(string? legacyCode, string? locationCode)
+        => string.IsNullOrWhiteSpace(legacyCode)
+            || string.IsNullOrWhiteSpace(locationCode)
+            || string.Equals(legacyCode.Trim(), locationCode.Trim(), StringComparison.Ordinal);
 }

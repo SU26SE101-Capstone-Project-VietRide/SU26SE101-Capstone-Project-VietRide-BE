@@ -30,6 +30,7 @@ internal sealed class ActivityLogRepository : IActivityLogRepository
 
     public Task<bool> ExistsBySourceEventIdAsync(Guid sourceEventId, CancellationToken ct = default)
         => _db.ActivityLogs
+            .IgnoreQueryFilters()
             .AsNoTracking()
             .AnyAsync(activityLog => activityLog.SourceEventId == sourceEventId, ct);
 

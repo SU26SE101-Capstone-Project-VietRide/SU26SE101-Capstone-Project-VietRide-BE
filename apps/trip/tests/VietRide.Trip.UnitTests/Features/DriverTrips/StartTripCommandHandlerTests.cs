@@ -5,6 +5,7 @@ using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.DriverTrips.StartTrip;
 using VietRide.Trip.Domain.Entities;
 
@@ -65,6 +66,33 @@ public sealed class StartTripCommandHandlerTests
         fixture.Outbox.Events.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Handle_ResourceStillActive_LeavesTripUnchangedAndEmitsOneDedupedAlert()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var trip = CreateTrip();
+        trip.MarkBoarding(now.AddMinutes(-5));
+        var alerts = new RecordingAlertStore();
+        var fixture = new Fixture(trip, now, new ActiveConflictAvailability(), alerts);
+
+        var first = () => fixture.Handler.Handle(
+            new StartTripCommand(trip.Id, trip.DriverUserId),
+            CancellationToken.None);
+        var second = () => fixture.Handler.Handle(
+            new StartTripCommand(trip.Id, trip.DriverUserId),
+            CancellationToken.None);
+
+        (await first.Should().ThrowAsync<CodedConflictException>())
+            .Which.ErrorCode.Should().Be("TRIP_DRIVER_CONFLICT");
+        (await second.Should().ThrowAsync<CodedConflictException>())
+            .Which.ErrorCode.Should().Be("TRIP_DRIVER_CONFLICT");
+        trip.Status.Should().Be(TripStatus.BOARDING);
+        alerts.AttemptCount.Should().Be(2);
+        fixture.Outbox.Events.Should().ContainSingle();
+        fixture.Outbox.Events[0].EventType.Should().Be("trip.assignment.start_blocked");
+        fixture.Outbox.Events[0].Payload.Should().Contain("RESOURCE_ACTIVE");
+    }
+
     private static VietRide.Trip.Domain.Entities.Trip CreateTrip()
     {
         var departure = DateTimeOffset.UtcNow;
@@ -75,7 +103,11 @@ public sealed class StartTripCommandHandlerTests
 
     private sealed class Fixture
     {
-        public Fixture(VietRide.Trip.Domain.Entities.Trip trip, DateTimeOffset now)
+        public Fixture(
+            VietRide.Trip.Domain.Entities.Trip trip,
+            DateTimeOffset now,
+            IResourceAvailabilityService? resourceAvailability = null,
+            ITripAssignmentAlertStore? assignmentAlerts = null)
         {
             Outbox = new RecordingOutbox();
             UnitOfWork = new RecordingUnitOfWork();
@@ -83,7 +115,9 @@ public sealed class StartTripCommandHandlerTests
                 new LifecycleTripRepository(trip),
                 Outbox,
                 UnitOfWork,
-                new FrozenClock(now));
+                new FrozenClock(now),
+                resourceAvailability,
+                assignmentAlerts);
         }
 
         public RecordingOutbox Outbox { get; }
@@ -123,6 +157,60 @@ public sealed class StartTripCommandHandlerTests
             Events.Add((eventType, payload));
             return Task.CompletedTask;
         }
+
+        public Task EnqueueAsync(
+            Guid eventId,
+            string eventType,
+            string payloadJson,
+            CancellationToken cancellationToken = default) =>
+            EnqueueAsync(eventType, payloadJson, cancellationToken);
+    }
+
+    private sealed class RecordingAlertStore : ITripAssignmentAlertStore
+    {
+        public int AttemptCount { get; private set; }
+
+        public Task<bool> TryAddStartBlockedAsync(
+            Guid tripId,
+            Guid operatorId,
+            CancellationToken cancellationToken = default)
+        {
+            AttemptCount++;
+            return Task.FromResult(AttemptCount == 1);
+        }
+    }
+
+    private sealed class ActiveConflictAvailability : IResourceAvailabilityService
+    {
+        public Task ActivateTripAsync(
+            Guid tripId,
+            DateTimeOffset activatedAt,
+            CancellationToken cancellationToken = default) =>
+            throw new CodedConflictException(
+                "TRIP_DRIVER_CONFLICT",
+                "Driver is still active.",
+                [
+                    new ValidationError("conflictReason", "RESOURCE_ACTIVE"),
+                    new ValidationError("resourceRole", "DRIVER"),
+                    new ValidationError("resourceId", Guid.NewGuid().ToString("D")),
+                    new ValidationError("conflictingSourceType", "SHUTTLE_TRIP"),
+                    new ValidationError("conflictingSourceId", Guid.NewGuid().ToString("D")),
+                    new ValidationError("blockingUntil", activatedAt.AddHours(1).ToString("O")),
+                ]);
+
+        public Task<ResourceAvailabilityResult> CheckDriverScheduleAsync(DriverScheduleAvailabilityInput input, bool acquireLocks, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ResourceAvailabilityResult> CheckShuttleAsync(ShuttleAvailabilityInput input, bool acquireLocks, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ResourceAvailabilityResult> CheckCandidateAsync(ResourceAvailabilityCandidate candidate, bool acquireLocks, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task ReserveTripAsync(VietRide.Trip.Domain.Entities.Trip trip, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task ReserveShuttleTripAsync(ShuttleTrip shuttleTrip, IReadOnlyList<Guid> orderedBookingIds, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task RefreshTripAsync(VietRide.Trip.Domain.Entities.Trip trip, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task RefreshTripsAsync(IReadOnlyCollection<VietRide.Trip.Domain.Entities.Trip> trips, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task ReleaseTripAsync(Guid tripId, DateTimeOffset releasedAt, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task CancelTripAsync(Guid tripId, DateTimeOffset cancelledAt, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task ActivateShuttleTripAsync(Guid shuttleTripId, DateTimeOffset activatedAt, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task ReleaseShuttleTripAsync(Guid shuttleTripId, DateTimeOffset releasedAt, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task CancelShuttleTripAsync(Guid shuttleTripId, DateTimeOffset cancelledAt, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyDictionary<Guid, (VehicleAssignmentProjection? Current, VehicleAssignmentProjection? Next)>> GetVehicleAssignmentsAsync(Guid operatorId, IReadOnlyCollection<Guid> vehicleIds, DateTimeOffset now, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class RecordingUnitOfWork : IUnitOfWork

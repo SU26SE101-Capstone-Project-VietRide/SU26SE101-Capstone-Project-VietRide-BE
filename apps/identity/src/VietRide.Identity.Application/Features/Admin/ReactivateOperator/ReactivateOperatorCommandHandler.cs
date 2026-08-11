@@ -1,5 +1,7 @@
 using System.Text.Json;
 using MediatR;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
@@ -12,13 +14,16 @@ public sealed class ReactivateOperatorCommandHandler
 {
     private readonly IOperatorRepository _operators;
     private readonly IActivityLogRepository _activityLogs;
+    private readonly ILogger<ReactivateOperatorCommandHandler> _logger;
 
     public ReactivateOperatorCommandHandler(
         IOperatorRepository operators,
-        IActivityLogRepository activityLogs)
+        IActivityLogRepository activityLogs,
+        ILogger<ReactivateOperatorCommandHandler>? logger = null)
     {
         _operators = operators;
         _activityLogs = activityLogs;
+        _logger = logger ?? NullLogger<ReactivateOperatorCommandHandler>.Instance;
     }
 
     public async Task<ReactivateOperatorResponseDto> Handle(
@@ -53,6 +58,11 @@ public sealed class ReactivateOperatorCommandHandler
                     source = "SYSTEM_ADMIN_REACTIVATE_OPERATOR",
                 })),
             cancellationToken);
+
+        _logger.LogInformation(
+            "OperatorReactivated: operator {OperatorId} was reactivated by actor {ActorUserId}",
+            operatorEntity.Id,
+            request.CallerUserId);
 
         return new ReactivateOperatorResponseDto(
             operatorEntity.Id,

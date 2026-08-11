@@ -94,4 +94,65 @@ public sealed class SearchTripsHierarchyValidatorTests
 
         validator.Validate(query).IsValid.Should().BeFalse();
     }
+
+    [Fact]
+    public void Validate_NewLocationAliasesWithoutLegacyNames_IsValid()
+    {
+        var query = new SearchTripsQuery(
+            null,
+            null,
+            new DateOnly(2026, 8, 20),
+            1,
+            null,
+            "79",
+            null,
+            "01",
+            null,
+            OriginLocationCode: "26734",
+            DestinationLocationCode: "00004");
+
+        validator.Validate(query).IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_LegacyAndNewLocationCodesMatch_IsValid()
+    {
+        var query = new SearchTripsQuery(
+            null,
+            null,
+            new DateOnly(2026, 8, 20),
+            1,
+            null,
+            "79",
+            "26734",
+            "01",
+            "00004",
+            "26734",
+            "00004");
+
+        validator.Validate(query).IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_LegacyAndNewLocationCodesDiffer_IsInvalid()
+    {
+        var query = new SearchTripsQuery(
+            null,
+            null,
+            new DateOnly(2026, 8, 20),
+            1,
+            null,
+            "79",
+            "26734",
+            "01",
+            "00004",
+            "26735",
+            "00005");
+
+        var result = validator.Validate(query);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(error =>
+            error.ErrorMessage.Contains("must match", StringComparison.Ordinal));
+    }
 }

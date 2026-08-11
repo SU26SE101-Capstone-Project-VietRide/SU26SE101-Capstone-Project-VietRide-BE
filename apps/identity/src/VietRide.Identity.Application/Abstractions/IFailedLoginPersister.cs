@@ -11,5 +11,8 @@ public interface IFailedLoginPersister
     /// applies the fresh counter to the aggregate, and commits immediately.
     /// No-ops when the User no longer exists or is no longer password-login eligible.
     /// </summary>
-    Task PersistAsync(Guid userId, CancellationToken ct = default);
+    Task PersistAsync(
+        Guid userId,
+        CancellationToken ct = default,
+        string clientKind = "UNKNOWN");
 }

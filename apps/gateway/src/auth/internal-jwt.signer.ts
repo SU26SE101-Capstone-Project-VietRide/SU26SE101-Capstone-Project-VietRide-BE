@@ -37,6 +37,8 @@ export interface InternalJwtClaims {
   role?: string;
   /** Operator scope for tenant isolation. */
   operatorId?: string;
+  /** Current Identity-owned operator lifecycle status. */
+  operatorStatus?: string;
   /** Original request id (correlation). */
   reqId: string;
   /**

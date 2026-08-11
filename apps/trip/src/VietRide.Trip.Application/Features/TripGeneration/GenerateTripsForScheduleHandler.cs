@@ -27,6 +27,7 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
     private readonly ITripEtaPlanner? tripEtaPlanner;
     private readonly IIntegrationEventOutbox outbox;
     private readonly ISubscriptionQuotaClient? quotaClient;
+    private readonly IResourceAvailabilityService resourceAvailability;
 
     public GenerateTripsForScheduleHandler(
         IClock clock,
@@ -42,6 +43,7 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
         ITripGenerationSkipLogRepository skipLogRepository,
         IUnitOfWork unitOfWork,
         IIntegrationEventOutbox outbox,
+        IResourceAvailabilityService resourceAvailability,
         ISubscriptionQuotaClient? quotaClient = null,
         IStationRepository? stationRepository = null,
         IStopRepository? stopRepository = null,
@@ -60,6 +62,7 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
         this.skipLogRepository = skipLogRepository;
         this.unitOfWork = unitOfWork;
         this.outbox = outbox;
+        this.resourceAvailability = resourceAvailability;
         this.stationRepository = stationRepository;
         this.stopRepository = stopRepository;
         this.tripEtaPlanner = tripEtaPlanner;
@@ -86,7 +89,8 @@ public sealed class GenerateTripsForScheduleHandler : IRequestHandler<GenerateTr
             quotaClient,
             stationRepository,
             stopRepository,
-            tripEtaPlanner);
+            tripEtaPlanner,
+            resourceAvailability);
 
         try
         {

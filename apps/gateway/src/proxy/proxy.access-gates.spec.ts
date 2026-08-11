@@ -72,7 +72,13 @@ function makeResponse(): TestResponse {
 }
 
 async function makeAuthorizationHeader(payload: JWTPayload): Promise<string> {
-  const token = await new SignJWT(payload)
+  const claims =
+    ['OPERATOR_ADMIN', 'OPERATOR_STAFF', 'DRIVER', 'ASSISTANT'].includes(
+      payload['role'] as string,
+    ) && payload['operatorStatus'] === undefined
+      ? { ...payload, operatorStatus: 'APPROVED' }
+      : payload;
+  const token = await new SignJWT(claims)
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuer(env.JWT_ISSUER)
     .setAudience(env.JWT_AUDIENCE)
@@ -249,6 +255,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
       reqId: 'req-substitute-vehicle',
       role: 'OPERATOR_ADMIN',
       operatorId: 'operator-1',
+      operatorStatus: 'APPROVED',
     });
     expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
       expect.objectContaining({ target: env.TRIP_BASE_URL }),
@@ -310,6 +317,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
       reqId: 'req-generic-trip-staff',
       role: 'OPERATOR_STAFF',
       operatorId: 'operator-1',
+      operatorStatus: 'APPROVED',
     });
     expect(genericReq.headers['idempotency-key']).toBe(idempotencyKey);
     expect(genericUpstreamHandler).toHaveBeenCalledWith(genericReq, genericRes, genericNext);
@@ -395,6 +403,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
         reqId: requestId,
         role,
         operatorId: 'operator-1',
+        operatorStatus: 'APPROVED',
       });
       expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
         expect.objectContaining({ target: env.BOOKING_BASE_URL }),
@@ -552,6 +561,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
       reqId: 'req-operator-pass',
       role: 'OPERATOR_ADMIN',
       operatorId: 'operator-1',
+      operatorStatus: 'APPROVED',
     });
     expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
       expect.objectContaining({ target: env.IDENTITY_BASE_URL }),
@@ -592,6 +602,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
         reqId: `req-profile-${role.toLowerCase()}`,
         role,
         operatorId: 'operator-1',
+        operatorStatus: 'APPROVED',
       });
       expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
         expect.objectContaining({ target: env.IDENTITY_BASE_URL }),
@@ -684,6 +695,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
       reqId: 'req-trip-operator',
       role: 'OPERATOR_ADMIN',
       operatorId: 'operator-1',
+      operatorStatus: 'APPROVED',
     });
     expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
       expect.objectContaining({ target: env.TRIP_BASE_URL }),
@@ -719,6 +731,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
       reqId: 'req-trip-staff',
       role: 'OPERATOR_STAFF',
       operatorId: 'operator-1',
+      operatorStatus: 'APPROVED',
     });
     expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
       expect.objectContaining({ target: env.TRIP_BASE_URL }),
@@ -940,6 +953,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
       reqId: 'req-op-voucher',
       role: 'OPERATOR_ADMIN',
       operatorId: 'operator-1',
+      operatorStatus: 'APPROVED',
     });
     expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
       expect.objectContaining({ target: env.BOOKING_BASE_URL }),
@@ -974,6 +988,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
       reqId: 'req-op-consent',
       role: 'OPERATOR_STAFF',
       operatorId: 'operator-1',
+      operatorStatus: 'APPROVED',
     });
     expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
       expect.objectContaining({ target: env.BOOKING_BASE_URL }),
@@ -1014,6 +1029,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
       reqId: `req-bookings-${role.toLowerCase()}`,
       role,
       operatorId: 'operator-1',
+      operatorStatus: 'APPROVED',
     });
     expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
       expect.objectContaining({ target: env.BOOKING_BASE_URL }),
@@ -1518,6 +1534,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
       reqId: 'req-strip-auth',
       role: 'OPERATOR_ADMIN',
       operatorId: 'operator-1',
+      operatorStatus: 'APPROVED',
     });
     expect(req.headers.authorization).toBeUndefined();
     expect(req.headers['x-internal-auth']).toBe('Bearer internal-token');
@@ -1736,6 +1753,7 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
         reqId: `req-operator-policy-${index}`,
         role: 'OPERATOR_ADMIN',
         operatorId: 'operator-1',
+        operatorStatus: 'APPROVED',
       });
       expect(req.headers.authorization).toBeUndefined();
       expect(req.headers['idempotency-key']).toBe(idempotencyKey);

@@ -2,6 +2,7 @@ using DotNetEnv;
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
+using Serilog.Events;
 using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Infrastructure;
 using VietRide.Identity.Infrastructure.DependencyInjection;
@@ -23,11 +24,23 @@ var builder = WebApplication.CreateBuilder(args);
 var isTesting = builder.Environment.IsEnvironment("Testing");
 
 // Structured logging — overridden via appsettings or env.
-builder.Host.UseSerilog((ctx, _, lc) => lc
-    .ReadFrom.Configuration(ctx.Configuration)
-    .Enrich.FromLogContext()
-    .Enrich.WithProperty("Service", ServiceName)
-    .WriteTo.Console());
+builder.Host.UseSerilog((ctx, _, lc) =>
+{
+    lc.ReadFrom.Configuration(ctx.Configuration)
+        .Enrich.FromLogContext()
+        .Enrich.WithProperty("Service", ServiceName)
+        .WriteTo.Console();
+
+    if (ctx.HostingEnvironment.IsProduction())
+    {
+        lc.MinimumLevel.Override(
+            "Microsoft.AspNetCore.DataProtection.Repositories.EphemeralXmlRepository",
+            LogEventLevel.Error);
+        lc.MinimumLevel.Override(
+            "Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager",
+            LogEventLevel.Error);
+    }
+});
 
 // Shared cross-cutting (Internal JWT auth, Problem+JSON, Swagger, Health, IClock).
 builder.Services.AddVietRideSharedWeb(builder.Configuration, ServiceName);

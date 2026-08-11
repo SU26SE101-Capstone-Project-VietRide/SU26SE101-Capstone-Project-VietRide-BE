@@ -30,7 +30,7 @@ type RequestIdSource = {
 
 type GateRejection = {
   statusCode: number;
-  code: 'FORBIDDEN' | 'AUTH_PHONE_REQUIRED';
+  code: 'FORBIDDEN' | 'AUTH_PHONE_REQUIRED' | 'AUTH_TOKEN_INVALID' | 'OPERATOR_SUSPENDED';
   message: string;
 };
 
@@ -97,6 +97,20 @@ function isPhoneGateWhitelisted(method: string, path: string): boolean {
   );
 }
 
+function isOperatorRole(role: string | undefined): boolean {
+  return ['OPERATOR_ADMIN', 'OPERATOR_STAFF', 'DRIVER', 'ASSISTANT'].includes(role ?? '');
+}
+
+function isSuspendedOperatorWhitelisted(method: string, path: string): boolean {
+  const normalizedMethod = method.toUpperCase();
+  return (
+    (normalizedMethod === 'GET' && path === '/v1/operator/profile') ||
+    (normalizedMethod === 'GET' && path === '/v1/operator/subscription') ||
+    (normalizedMethod === 'POST' && path === '/v1/auth/refresh') ||
+    (normalizedMethod === 'POST' && path === '/v1/auth/logout')
+  );
+}
+
 function validateAccessGates(
   route: ProxyRoute,
   req: Request,
@@ -104,12 +118,38 @@ function validateAccessGates(
 ): GateRejection | undefined {
   const user = (req as RequestWithUser).user;
   const role = user?.['role'] as string | undefined;
+  const operatorStatus = user?.['operatorStatus'] as string | undefined;
 
   if (!hasRequiredRole(route, role)) {
     return {
       statusCode: 403,
       code: 'FORBIDDEN',
       message: 'Access to this resource is forbidden.',
+    };
+  }
+
+
+  if (isOperatorRole(role) && !operatorStatus) {
+    return {
+      statusCode: 401,
+      code: 'AUTH_TOKEN_INVALID',
+      message: 'Operator access token is missing the required operatorStatus claim.',
+    };
+  }
+
+  if (isOperatorRole(role) && operatorStatus === 'SUSPENDED') {
+    if (role !== 'OPERATOR_ADMIN' || !isSuspendedOperatorWhitelisted(req.method, fullPath)) {
+      return {
+        statusCode: 403,
+        code: 'OPERATOR_SUSPENDED',
+        message: 'The operator is suspended. Access is limited to suspension status and subscription details.',
+      };
+    }
+  } else if (isOperatorRole(role) && operatorStatus !== 'APPROVED') {
+    return {
+      statusCode: 403,
+      code: 'FORBIDDEN',
+      message: 'The operator is not approved to access the system.',
     };
   }
 
@@ -279,12 +319,14 @@ export function createProxyHandler(env: Env, signer: InternalJwtSigner): Express
 
     const role = user?.['role'] as string | undefined;
     const operatorId = user?.['operatorId'] as string | undefined;
+    const operatorStatus = user?.['operatorStatus'] as string | undefined;
 
     const internalJwt = await signer.sign({
       sub: (user?.sub as string) ?? 'anonymous',
       reqId,
       ...(role ? { role } : {}),
       ...(operatorId ? { operatorId } : {}),
+      ...(operatorStatus ? { operatorStatus } : {}),
     });
 
     if (!route.forwardUserAuthorization) {

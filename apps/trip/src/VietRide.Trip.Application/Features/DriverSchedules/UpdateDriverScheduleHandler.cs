@@ -12,6 +12,7 @@ using VietRide.Trip.Application.Abstractions.Jobs;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Events;
+using VietRide.Trip.Application.Features.ResourceAvailability;
 using VietRide.Trip.Application.Features.Stops;
 using VietRide.Trip.Application.Features.Vehicles;
 using VietRide.Trip.Domain.Constants;
@@ -45,6 +46,7 @@ public sealed class UpdateDriverScheduleHandler
     private readonly IStationRepository? stations;
     private readonly IStopRepository? stops;
     private readonly ITripEtaPlanner? tripEtaPlanner;
+    private readonly IResourceAvailabilityService? resourceAvailability;
 
     public UpdateDriverScheduleHandler(
         IDriverScheduleRepository schedules,
@@ -66,7 +68,8 @@ public sealed class UpdateDriverScheduleHandler
         IRouteStopRepository? routeStops = null,
         IStationRepository? stations = null,
         IStopRepository? stops = null,
-        ITripEtaPlanner? tripEtaPlanner = null)
+        ITripEtaPlanner? tripEtaPlanner = null,
+        IResourceAvailabilityService? resourceAvailability = null)
     {
         this.schedules = schedules;
         this.scheduleAudits = scheduleAudits;
@@ -88,6 +91,7 @@ public sealed class UpdateDriverScheduleHandler
         this.stations = stations;
         this.stops = stops;
         this.tripEtaPlanner = tripEtaPlanner;
+        this.resourceAvailability = resourceAvailability;
     }
 
     public async Task<DriverScheduleDto> Handle(
@@ -130,7 +134,12 @@ public sealed class UpdateDriverScheduleHandler
             }
         }
 
-        await ValidateOverlapsAsync(schedule.Id, schedule.ValidFrom, effective, cancellationToken);
+        await ValidateOverlapsAsync(
+            schedule,
+            effective,
+            acquireLocks: false,
+            excludePendingTripsFromSchedule: request.ApplyTo == UpdateDriverScheduleCommand.AllPending,
+            cancellationToken);
 
         if (request.ApplyTo == UpdateDriverScheduleCommand.FutureOnly)
         {
@@ -217,7 +226,12 @@ public sealed class UpdateDriverScheduleHandler
                 cancellationToken) ?? throw ScheduleNotFound();
             EnsureUnchanged(before, locked);
             await AcquireOverlapLocksAsync(locked.ValidFrom, effective, cancellationToken);
-            await ValidateOverlapsAsync(locked.Id, locked.ValidFrom, effective, cancellationToken);
+            await ValidateOverlapsAsync(
+                locked,
+                effective,
+                acquireLocks: true,
+                excludePendingTripsFromSchedule: false,
+                cancellationToken);
 
             if (changedFields.Contains("vehicleId") && newVehicle is not null)
             {
@@ -275,7 +289,12 @@ public sealed class UpdateDriverScheduleHandler
                 cancellationToken) ?? throw ScheduleNotFound();
             EnsureUnchanged(before, lockedSchedule);
             await AcquireOverlapLocksAsync(lockedSchedule.ValidFrom, effective, cancellationToken);
-            await ValidateOverlapsAsync(lockedSchedule.Id, lockedSchedule.ValidFrom, effective, cancellationToken);
+            await ValidateOverlapsAsync(
+                lockedSchedule,
+                effective,
+                acquireLocks: true,
+                excludePendingTripsFromSchedule: true,
+                cancellationToken);
 
             var currentPendingTrips = await trips.ListPendingByDriverScheduleAsync(
                 lockedSchedule.Id,
@@ -366,6 +385,15 @@ public sealed class UpdateDriverScheduleHandler
                     cancellationToken);
             }
 
+            if (resourceAvailability is not null
+                && changedFields.Any(field => field is
+                    "departureTime" or "dayOfWeek" or "driverUserId" or "assistantUserId" or "vehicleId"))
+            {
+                await resourceAvailability.RefreshTripsAsync(
+                    lockedTrips.Select(item => item.Trip).ToArray(),
+                    cancellationToken);
+            }
+
             await unitOfWork.CommitAsync(cancellationToken);
         }
         catch
@@ -400,6 +428,10 @@ public sealed class UpdateDriverScheduleHandler
         {
             var previousStatus = trip.Status;
             trip.Cancel(now, request.ActorUserId, TripCancelledIntegrationEvent.DriverScheduleDayRemovedReason);
+            if (resourceAvailability is not null)
+            {
+                await resourceAvailability.CancelTripAsync(trip.Id, now, cancellationToken);
+            }
             if (routeChangeProposals is not null)
                 await routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
             var cancelled = new TripCancelledIntegrationEvent(
@@ -538,6 +570,7 @@ public sealed class UpdateDriverScheduleHandler
                 now,
                 cancellationToken);
         }
+
     }
 
     private async Task<TripEtaPlan?> TryPlanTripEtaAsync(
@@ -681,9 +714,10 @@ public sealed class UpdateDriverScheduleHandler
     }
 
     private async Task ValidateOverlapsAsync(
-        Guid scheduleId,
-        DateOnly validFrom,
+        DriverSchedule schedule,
         ScheduleState effective,
+        bool acquireLocks,
+        bool excludePendingTripsFromSchedule,
         CancellationToken cancellationToken)
     {
         if (!effective.IsActive)
@@ -691,13 +725,35 @@ public sealed class UpdateDriverScheduleHandler
             return;
         }
 
+        if (resourceAvailability is not null)
+        {
+            ResourceAvailabilityConflictGuard.EnsureAvailable(
+                await resourceAvailability.CheckDriverScheduleAsync(
+                    new DriverScheduleAvailabilityInput(
+                        schedule.OperatorId,
+                        schedule.RouteId,
+                        effective.VehicleId,
+                        effective.DriverUserId,
+                        effective.AssistantUserId,
+                        effective.DayOfWeek,
+                        effective.DepartureTime,
+                        schedule.ValidFrom,
+                        effective.ValidUntil,
+                        schedule.Id,
+                        excludePendingTripsFromSchedule),
+                    acquireLocks,
+                    cancellationToken),
+                AssignmentSourceType.DRIVER_SCHEDULE);
+            return;
+        }
+
         if (await schedules.HasDriverConflictAsync(
                 effective.DriverUserId,
                 effective.DayOfWeek,
                 effective.DepartureTime,
-                validFrom,
+                schedule.ValidFrom,
                 effective.ValidUntil,
-                scheduleId,
+                schedule.Id,
                 cancellationToken))
         {
             throw new CodedConflictException("TRIP_DRIVER_CONFLICT", "Driver has a conflicting active schedule.");
@@ -708,9 +764,9 @@ public sealed class UpdateDriverScheduleHandler
                 effective.AssistantUserId.Value,
                 effective.DayOfWeek,
                 effective.DepartureTime,
-                validFrom,
+                schedule.ValidFrom,
                 effective.ValidUntil,
-                scheduleId,
+                schedule.Id,
                 cancellationToken))
         {
             throw new CodedConflictException("TRIP_DRIVER_CONFLICT", "Assistant has a conflicting active schedule.");
@@ -721,9 +777,9 @@ public sealed class UpdateDriverScheduleHandler
                 effective.VehicleId.Value,
                 effective.DayOfWeek,
                 effective.DepartureTime,
-                validFrom,
+                schedule.ValidFrom,
                 effective.ValidUntil,
-                scheduleId,
+                schedule.Id,
                 cancellationToken))
         {
             throw new CodedConflictException("TRIP_VEHICLE_CONFLICT", "Vehicle has a conflicting active schedule.");

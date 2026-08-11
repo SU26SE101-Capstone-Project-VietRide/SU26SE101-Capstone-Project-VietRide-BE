@@ -22,28 +22,45 @@ public sealed class RequestLoggingMiddleware
 
     public async Task InvokeAsync(HttpContext ctx)
     {
-        var requestId = ctx.Request.Headers.TryGetValue(RequestIdHeader, out var v) && !string.IsNullOrWhiteSpace(v.ToString())
-            ? v.ToString()
-            : Guid.NewGuid().ToString("N");
+        var requestId = ctx.Request.Headers.TryGetValue(RequestIdHeader, out var value)
+            && !string.IsNullOrWhiteSpace(value.ToString())
+                ? value.ToString()
+                : Guid.NewGuid().ToString("N");
 
         ctx.Response.Headers[RequestIdHeader] = requestId;
         ctx.Items[RequestIdHeader] = requestId;
 
         using (LogContext.PushProperty("RequestId", requestId))
+        using (LogContext.PushProperty("TraceId", requestId))
         using (LogContext.PushProperty("RequestPath", ctx.Request.Path.ToString()))
         using (LogContext.PushProperty("RequestMethod", ctx.Request.Method))
         {
-            var sw = Stopwatch.StartNew();
+            var stopwatch = Stopwatch.StartNew();
             try
             {
                 await _next(ctx);
             }
             finally
             {
-                sw.Stop();
-                _logger.LogInformation(
-                    "HTTP {Method} {Path} → {StatusCode} in {ElapsedMs}ms",
-                    ctx.Request.Method, ctx.Request.Path, ctx.Response.StatusCode, sw.ElapsedMilliseconds);
+                stopwatch.Stop();
+                if (ctx.Response.StatusCode < 400 && ctx.Request.Path == "/health")
+                {
+                    _logger.LogDebug(
+                        "HTTP {Method} {Path} -> {StatusCode} in {ElapsedMs}ms",
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        ctx.Response.StatusCode,
+                        stopwatch.ElapsedMilliseconds);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "HTTP {Method} {Path} -> {StatusCode} in {ElapsedMs}ms",
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        ctx.Response.StatusCode,
+                        stopwatch.ElapsedMilliseconds);
+                }
             }
         }
     }

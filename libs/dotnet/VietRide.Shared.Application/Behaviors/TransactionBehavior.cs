@@ -48,7 +48,10 @@ public sealed class TransactionBehavior<TRequest, TResponse>
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Rolled back transaction for {RequestName}", requestName);
+            _logger.LogDebug(
+                "Rolled back transaction for {RequestName} because of {ExceptionType}",
+                requestName,
+                ex.GetType().Name);
             throw;
         }
     }

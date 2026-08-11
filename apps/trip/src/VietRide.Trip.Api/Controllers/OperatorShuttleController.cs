@@ -7,6 +7,7 @@ using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Abstractions.Services;
+using VietRide.Trip.Application.Features.ResourceAvailability;
 using VietRide.Trip.Application.Features.Shuttle;
 
 namespace VietRide.Trip.Api.Controllers;
@@ -88,6 +89,27 @@ public sealed class OperatorShuttleController : ControllerBase
             request.Direction ?? string.Empty), cancellationToken);
         return StatusCode(StatusCodes.Status201Created, result);
     }
+
+    [HttpPost("shuttle-trips/availability-check")]
+    [Authorize(Roles = "OPERATOR_ADMIN")]
+    [SkipIdempotency("Availability preview is read-only and never creates a reservation.")]
+    [ProducesResponseType(typeof(ApiResponse<ResourceAvailabilityResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ResourceAvailabilityResult>> CheckAvailability(
+        [FromBody] CheckShuttleAvailabilityRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await _sender.Send(
+            new CheckShuttleAvailabilityQuery(
+                GetOperatorId(),
+                request.MainTripId,
+                request.Direction,
+                request.DriverUserId,
+                request.VehicleId,
+                request.ScheduledDepartureTime,
+                request.ScheduledEndTime,
+                request.OrderedBookingIds),
+            cancellationToken));
 
     [HttpPost("shuttle-requests/{mainTripId:guid}/{bookingId:guid}/cancel")]
     [Authorize(Roles = "OPERATOR_ADMIN,OPERATOR_STAFF")]

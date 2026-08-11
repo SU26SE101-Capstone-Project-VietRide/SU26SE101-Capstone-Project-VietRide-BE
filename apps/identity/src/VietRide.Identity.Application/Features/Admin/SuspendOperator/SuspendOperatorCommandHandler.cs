@@ -1,5 +1,7 @@
 using System.Text.Json;
 using MediatR;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Events;
 using VietRide.Identity.Domain.Entities;
@@ -17,19 +19,25 @@ public sealed class SuspendOperatorCommandHandler : IRequestHandler<SuspendOpera
     private readonly IClock _clock;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IActivityLogRepository _activityLogs;
+    private readonly IRefreshTokenRepository _refreshTokens;
+    private readonly ILogger<SuspendOperatorCommandHandler> _logger;
 
     public SuspendOperatorCommandHandler(
         IOperatorRepository operators,
         IUserRepository users,
         IClock clock,
         IIntegrationEventOutbox outbox,
-        IActivityLogRepository activityLogs)
+        IActivityLogRepository activityLogs,
+        IRefreshTokenRepository refreshTokens,
+        ILogger<SuspendOperatorCommandHandler>? logger = null)
     {
         _operators = operators;
         _users = users;
         _clock = clock;
         _outbox = outbox;
         _activityLogs = activityLogs;
+        _refreshTokens = refreshTokens;
+        _logger = logger ?? NullLogger<SuspendOperatorCommandHandler>.Instance;
     }
 
     public async Task<SuspendOperatorResponseDto> Handle(
@@ -68,6 +76,11 @@ public sealed class SuspendOperatorCommandHandler : IRequestHandler<SuspendOpera
         var operatorUserIds = await _users.ListOperatorScopedUserIdsAsync(
             operatorEntity.Id,
             cancellationToken);
+        await _refreshTokens.RevokeActiveByUsersAsync(
+            operatorUserIds,
+            RefreshTokenRevokeReason.ADMIN_REVOKE,
+            cancellationToken);
+
         foreach (var userId in operatorUserIds)
         {
             var firebaseEvent = new FirebaseSessionRevocationRequestedIntegrationEvent(
@@ -81,6 +94,13 @@ public sealed class SuspendOperatorCommandHandler : IRequestHandler<SuspendOpera
                 JsonSerializer.Serialize(firebaseEvent),
                 cancellationToken);
         }
+
+        _logger.LogWarning(
+            "OperatorSuspended: operator {OperatorId} was suspended by actor {ActorUserId}; Reason={Reason}; {AffectedUserCount} scoped users had sessions revoked",
+            operatorEntity.Id,
+            request.CallerUserId,
+            request.Reason,
+            operatorUserIds.Count);
 
         return new SuspendOperatorResponseDto(operatorEntity.Id, operatorEntity.RegistrationStatus.ToString());
     }

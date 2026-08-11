@@ -38,6 +38,7 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
     private readonly IStationRepository? stations;
     private readonly IStopRepository? stops;
     private readonly ITripEtaPlanner? tripEtaPlanner;
+    private readonly IResourceAvailabilityService? resourceAvailability;
 
     public EditTripCommandHandler(
         ITripRepository trips,
@@ -57,7 +58,8 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
         IRouteChangeProposalLifecycleService? routeChangeProposals = null,
         IStationRepository? stations = null,
         IStopRepository? stops = null,
-        ITripEtaPlanner? tripEtaPlanner = null)
+        ITripEtaPlanner? tripEtaPlanner = null,
+        IResourceAvailabilityService? resourceAvailability = null)
     {
         this.trips = trips;
         this.tripSeats = tripSeats;
@@ -77,6 +79,7 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
         this.stations = stations;
         this.stops = stops;
         this.tripEtaPlanner = tripEtaPlanner;
+        this.resourceAvailability = resourceAvailability;
     }
 
     public async Task<TripDetailDto> Handle(EditTripCommand request, CancellationToken cancellationToken)
@@ -274,6 +277,12 @@ public sealed class EditTripCommandHandler : IRequestHandler<EditTripCommand, Tr
                     lockedImpacts,
                     now,
                     cancellationToken);
+
+                if (resourceAvailability is not null
+                    && lockedChanged.Any(field => field is EditTripField.RouteId or EditTripField.VehicleId))
+                {
+                    await resourceAvailability.RefreshTripAsync(lockedTrip, cancellationToken);
+                }
 
                 await unitOfWork.CommitAsync(cancellationToken);
             }
