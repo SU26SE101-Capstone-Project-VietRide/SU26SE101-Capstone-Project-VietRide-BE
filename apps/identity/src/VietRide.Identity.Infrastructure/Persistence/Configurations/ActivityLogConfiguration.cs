@@ -52,6 +52,8 @@ public sealed class ActivityLogConfiguration : IEntityTypeConfiguration<Activity
             .HasForeignKey(activityLog => activityLog.UserId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasQueryFilter(activityLog => activityLog.Actor.DeletedAt == null);
+
         builder.HasIndex(activityLog => new { activityLog.UserId, activityLog.CreatedAt })
             .HasDatabaseName("idx_activity_logs_user_id_created_at")
             .IsDescending(false, true);

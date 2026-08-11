@@ -49,7 +49,7 @@ public sealed class NotificationEmailService : IEmailService
                 ["expiresAt"] = accountInfo.ExpiresAt,
             });
 
-        await SendAsync(request, "account-created", to, ct).ConfigureAwait(false);
+        await SendAsync(request, "account-created", ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -65,7 +65,6 @@ public sealed class NotificationEmailService : IEmailService
     private async Task SendAsync(
         NotificationEmailRequest request,
         string kind,
-        string to,
         CancellationToken ct)
     {
         try
@@ -78,23 +77,21 @@ public sealed class NotificationEmailService : IEmailService
         }
         catch (NotificationEmailDeliveryException ex)
         {
-            _logger.LogError(
-                ex,
-                "Notification rejected {Kind} email to {Email} (template {TemplateKey}).",
+            _logger.LogDebug(
+                "Notification delivery rejected for {Kind}; TemplateKey={TemplateKey}; ExceptionType={ExceptionType}",
                 kind,
-                to,
-                request.TemplateKey);
+                request.TemplateKey,
+                ex.GetType().Name);
             throw;
         }
         catch (Exception ex)
         {
             // Transport / circuit-breaker / timeout after Polly exhausted retries.
-            _logger.LogError(
-                ex,
-                "Failed to reach Notification for {Kind} email to {Email} (template {TemplateKey}).",
+            _logger.LogDebug(
+                "Notification transport failed for {Kind}; TemplateKey={TemplateKey}; ExceptionType={ExceptionType}",
                 kind,
-                to,
-                request.TemplateKey);
+                request.TemplateKey,
+                ex.GetType().Name);
             throw new NotificationEmailDeliveryException(
                 $"Failed to deliver {kind} email via Notification (template '{request.TemplateKey}').",
                 ex);

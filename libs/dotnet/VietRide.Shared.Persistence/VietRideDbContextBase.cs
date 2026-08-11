@@ -55,6 +55,7 @@ public abstract class VietRideDbContextBase : DbContext
             b.Property(x => x.Status)
                 .HasColumnType(outboxEventStatusTypeName)
                 .HasDefaultValueSql("'PENDING'")
+                .HasSentinel((OutboxEventStatus)(-1))
                 .IsRequired();
             b.Property(x => x.RetryCount).HasDefaultValue(0);
             b.Property(x => x.LastError);

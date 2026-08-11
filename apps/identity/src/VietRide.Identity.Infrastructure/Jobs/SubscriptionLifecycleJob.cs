@@ -237,6 +237,7 @@ public sealed class SubscriptionLifecycleJob
                 && !_attempts.Query().Any(attempt => attempt.SubscriptionId == subscription.Id
                     && (attempt.Status == SubscriptionUpgradeAttemptStatus.INITIATED
                         || attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING)))
+            .OrderBy(subscription => subscription.Id)
             .Take(100)
             .ToListAsync(cancellationToken);
         foreach (var subscription in orphaned)

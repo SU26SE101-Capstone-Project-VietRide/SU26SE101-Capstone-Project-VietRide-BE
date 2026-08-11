@@ -26,27 +26,22 @@ public sealed class LoggingBehavior<TRequest, TResponse>
     {
         var requestName = typeof(TRequest).Name;
 
-        _logger.LogInformation("Handling {RequestName}", requestName);
+        _logger.LogDebug("Handling {RequestName}", requestName);
 
         var sw = Stopwatch.StartNew();
         try
         {
             var response = await next();
             sw.Stop();
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "Handled {RequestName} in {ElapsedMs}ms",
                 requestName,
                 sw.ElapsedMilliseconds);
             return response;
         }
-        catch (Exception ex)
+        catch
         {
             sw.Stop();
-            _logger.LogError(
-                ex,
-                "Error handling {RequestName} after {ElapsedMs}ms",
-                requestName,
-                sw.ElapsedMilliseconds);
             throw;
         }
     }
