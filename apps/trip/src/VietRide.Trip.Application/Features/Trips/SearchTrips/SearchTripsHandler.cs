@@ -333,15 +333,19 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
 
         var originIds = await ResolveLocationScopeAsync(
             request.OriginProvinceCode!,
-            request.OriginWardCode,
+            request.OriginLocationCode ?? request.OriginWardCode,
             nameof(SearchTripsQuery.OriginProvinceCode),
-            nameof(SearchTripsQuery.OriginWardCode),
+            request.OriginLocationCode is null
+                ? nameof(SearchTripsQuery.OriginWardCode)
+                : nameof(SearchTripsQuery.OriginLocationCode),
             cancellationToken);
         var destinationIds = await ResolveLocationScopeAsync(
             request.DestinationProvinceCode!,
-            request.DestinationWardCode,
+            request.DestinationLocationCode ?? request.DestinationWardCode,
             nameof(SearchTripsQuery.DestinationProvinceCode),
-            nameof(SearchTripsQuery.DestinationWardCode),
+            request.DestinationLocationCode is null
+                ? nameof(SearchTripsQuery.DestinationWardCode)
+                : nameof(SearchTripsQuery.DestinationLocationCode),
             cancellationToken);
 
         if (stopRepository is null)

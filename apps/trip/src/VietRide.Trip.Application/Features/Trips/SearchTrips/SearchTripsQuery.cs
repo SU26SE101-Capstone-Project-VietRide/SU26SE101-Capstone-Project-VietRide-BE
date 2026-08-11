@@ -11,5 +11,7 @@ public sealed record SearchTripsQuery(
     string? OriginProvinceCode = null,
     string? OriginWardCode = null,
     string? DestinationProvinceCode = null,
-    string? DestinationWardCode = null)
+    string? DestinationWardCode = null,
+    string? OriginLocationCode = null,
+    string? DestinationLocationCode = null)
     : IRequest<SearchTripsResult>;

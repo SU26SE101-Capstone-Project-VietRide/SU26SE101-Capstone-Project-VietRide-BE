@@ -42,6 +42,54 @@ public sealed class LocationHierarchyTests
         item.ParentName.Should().Be("Thành phố Hồ Chí Minh");
     }
 
+    [Theory]
+    [InlineData(Location.CommuneType, "26734")]
+    [InlineData(Location.SpecialZoneType, "26735")]
+    public async Task ListLocations_TypeAndParentAndSearch_AreCombinedWithAnd(
+        string type,
+        string expectedCode)
+    {
+        var province = Location.Create("79", "Province", Location.MunicipalityType, 1);
+        var commune = Location.Create("26734", "Coastal Area", Location.CommuneType, province.Id, 1);
+        var specialZone = Location.Create("26735", "Coastal Area", Location.SpecialZoneType, province.Id, 2);
+        var ward = Location.Create("26736", "Other Area", Location.WardType, province.Id, 3);
+        var handler = new ListLocationsHandler(
+            TestLocationRepository.From(province, commune, specialZone, ward));
+
+        var result = await handler.Handle(
+            new ListLocationsQuery("79", "Coastal", type),
+            CancellationToken.None);
+
+        result.Should().ContainSingle().Which.Code.Should().Be(expectedCode);
+    }
+
+    [Fact]
+    public async Task ListLocations_LeafTypeWithoutParent_ReturnsEmptyList()
+    {
+        var province = Location.Create("79", "Province", Location.MunicipalityType, 1);
+        var ward = Location.Create("26736", "Ward", Location.WardType, province.Id, 1);
+        var handler = new ListLocationsHandler(TestLocationRepository.From(province, ward));
+
+        var result = await handler.Handle(
+            new ListLocationsQuery(null, null, Location.WardType),
+            CancellationToken.None);
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListLocations_InvalidType_ThrowsValidationExceptionOnType()
+    {
+        var handler = new ListLocationsHandler(TestLocationRepository.Create());
+
+        var act = () => handler.Handle(
+            new ListLocationsQuery(null, null, "DISTRICT"),
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().Contain(error => error.Field == "type");
+    }
+
     [Fact]
     public async Task CreateLocation_LeafRequiresActiveTopLevelParent()
     {
