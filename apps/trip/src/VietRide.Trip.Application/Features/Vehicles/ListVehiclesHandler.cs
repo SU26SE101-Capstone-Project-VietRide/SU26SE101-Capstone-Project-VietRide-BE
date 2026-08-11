@@ -1,7 +1,9 @@
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 
 namespace VietRide.Trip.Application.Features.Vehicles;
 
@@ -21,10 +23,17 @@ public sealed class ListVehiclesHandler : IRequestHandler<ListVehiclesQuery, Pag
     };
 
     private readonly IVehicleRepository vehicleRepository;
+    private readonly IResourceAvailabilityService? resourceAvailability;
+    private readonly IClock? clock;
 
-    public ListVehiclesHandler(IVehicleRepository vehicleRepository)
+    public ListVehiclesHandler(
+        IVehicleRepository vehicleRepository,
+        IResourceAvailabilityService? resourceAvailability = null,
+        IClock? clock = null)
     {
         this.vehicleRepository = vehicleRepository;
+        this.resourceAvailability = resourceAvailability;
+        this.clock = clock;
     }
 
     public async Task<PagedResult<VehicleDto>> Handle(
@@ -44,8 +53,20 @@ public sealed class ListVehiclesHandler : IRequestHandler<ListVehiclesQuery, Pag
             string.IsNullOrWhiteSpace(request.SortDir) ? "desc" : request.SortDir,
             cancellationToken);
 
+        var assignments = resourceAvailability is null
+            ? new Dictionary<Guid, (VehicleAssignmentProjection? Current, VehicleAssignmentProjection? Next)>()
+            : await resourceAvailability.GetVehicleAssignmentsAsync(
+                request.OperatorId,
+                result.Items.Select(item => item.Id).ToArray(),
+                clock?.UtcNow ?? DateTimeOffset.UtcNow,
+                cancellationToken);
+
         return PagedResult<VehicleDto>.Create(
-            result.Items.Select(VehicleMapper.ToDto).ToList(),
+            result.Items.Select(vehicle =>
+            {
+                var assignment = assignments.GetValueOrDefault(vehicle.Id);
+                return VehicleMapper.ToDto(vehicle, assignment.Current, assignment.Next);
+            }).ToList(),
             result.Page,
             result.PageSize,
             result.TotalItems);

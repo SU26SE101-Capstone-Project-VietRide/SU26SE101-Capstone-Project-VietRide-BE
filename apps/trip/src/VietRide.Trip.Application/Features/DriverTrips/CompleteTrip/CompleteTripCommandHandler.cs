@@ -25,6 +25,7 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
     private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
+    private readonly IResourceAvailabilityService? resourceAvailability;
 
     public CompleteTripCommandHandler(
         ITripRepository tripRepository,
@@ -32,7 +33,8 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
         IClock clock,
-        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null,
+        IResourceAvailabilityService? resourceAvailability = null)
     {
         this.tripRepository = tripRepository;
         this.auditLogRepository = auditLogRepository;
@@ -40,6 +42,7 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
         this.unitOfWork = unitOfWork;
         this.clock = clock;
         this.routeChangeProposals = routeChangeProposals;
+        this.resourceAvailability = resourceAvailability;
     }
 
     public async Task<CompleteTripResponse> Handle(CompleteTripCommand request, CancellationToken cancellationToken)
@@ -56,6 +59,10 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
             try
             {
                 trip.CompleteManually(now, request.ActorUserId);
+                if (resourceAvailability is not null)
+                {
+                    await resourceAvailability.ReleaseTripAsync(trip.Id, now, cancellationToken);
+                }
                 if (routeChangeProposals is not null)
                     await routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
             }

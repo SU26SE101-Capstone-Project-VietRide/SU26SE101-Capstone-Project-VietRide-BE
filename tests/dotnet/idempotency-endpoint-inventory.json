@@ -2,9 +2,9 @@
   "version": 3,
   "policy": "system-wide-idempotency-contract",
   "expectedSummary": {
-    "mutationSurfaces": 208,
+    "mutationSurfaces": 210,
     "required": 190,
-    "exemptions": 18
+    "exemptions": 20
   },
   "services": {
     "identity": {
@@ -204,7 +204,7 @@
       "stack": "dotnet",
       "servicePrefix": "trip",
       "requireAllMutations": true,
-      "expectedMutationCount": 79,
+      "expectedMutationCount": 81,
       "endpoints": [
         {
           "method": "POST",
@@ -400,6 +400,12 @@
           "reason": "DriverSchedule creation retains its legacy no-key contract; business conflict guards prevent duplicate active schedules."
         },
         {
+          "method": "POST",
+          "path": "/v1/operator/driver-schedules/availability-check",
+          "policy": "exempt",
+          "reason": "Availability preview is read-only and never creates a reservation."
+        },
+        {
           "method": "PATCH",
           "path": "/v1/operator/driver-schedules/{id:guid}/activate",
           "policy": "exempt",
@@ -520,6 +526,12 @@
           "method": "POST",
           "path": "/v1/operator/shuttle-trips",
           "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/shuttle-trips/availability-check",
+          "policy": "exempt",
+          "reason": "Availability preview is read-only and never creates a reservation."
         },
         {
           "method": "POST",
@@ -1150,8 +1162,8 @@
   ],
   "coverage": {
     "dotnetRabbitMqRegistrations": 45,
-    "notificationRabbitMqSubscriptionCallsites": 16,
-    "notificationRabbitMqRuntimeBindings": 80,
+    "notificationRabbitMqSubscriptionCallsites": 17,
+    "notificationRabbitMqRuntimeBindings": 82,
     "notificationRabbitMqBindingCollections": [
       {
         "file": "apps/notification/src/notifications/booking-trip-change-events.consumer.ts",
@@ -1179,13 +1191,25 @@
         "name": "TRIP_TRACKING_ALERT_QUEUE_BINDINGS"
       }
     ],
-    "dotnetOutboundHttpCallsites": 29,
+    "dotnetOutboundHttpCallsites": 31,
     "dotnetOutboundHttpExemptions": [
       {
         "file": "apps/trip/src/VietRide.Trip.Infrastructure/ExternalClients/GoogleRoutesShuttleDistanceClient.cs",
         "method": "POST",
         "match": "directions/v2:computeRoutes",
         "reason": "Google Routes computes a read-only distance and does not accept the VietRide Idempotency-Key contract."
+      },
+      {
+        "file": "apps/trip/src/VietRide.Trip.Infrastructure/ExternalClients/GoogleRoutesTripEtaPlanner.cs",
+        "method": "POST",
+        "match": "directions/v2:computeRoutes",
+        "reason": "Google Routes computes a read-only ETA and does not accept the VietRide Idempotency-Key contract."
+      },
+      {
+        "file": "apps/trip/src/VietRide.Trip.Infrastructure/ExternalClients/GoogleRoutesRepositionTravelTimeClient.cs",
+        "method": "POST",
+        "match": "directions/v2:computeRoutes",
+        "reason": "Google Routes computes a read-only reposition duration and does not accept the VietRide Idempotency-Key contract."
       },
       {
         "file": "apps/payment/src/VietRide.Payment.Infrastructure/Http/IdentityFinancialProjectionClient.cs",

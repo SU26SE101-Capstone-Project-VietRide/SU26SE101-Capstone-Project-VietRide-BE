@@ -19,19 +19,22 @@ public sealed class CancelTripCommandHandler : IRequestHandler<CancelTripCommand
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
     private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
+    private readonly IResourceAvailabilityService? resourceAvailability;
 
     public CancelTripCommandHandler(
         ITripRepository trips,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
         IClock clock,
-        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null,
+        IResourceAvailabilityService? resourceAvailability = null)
     {
         this.trips = trips;
         this.outbox = outbox;
         this.unitOfWork = unitOfWork;
         this.clock = clock;
         this.routeChangeProposals = routeChangeProposals;
+        this.resourceAvailability = resourceAvailability;
     }
 
     public async Task<CancelTripResponse> Handle(
@@ -47,6 +50,10 @@ public sealed class CancelTripCommandHandler : IRequestHandler<CancelTripCommand
             CancelTripPreviewQueryHandler.EnsureEditable(trip.Status);
             var now = clock.UtcNow;
             trip.Cancel(now, request.ActorUserId, request.Reason);
+            if (resourceAvailability is not null)
+            {
+                await resourceAvailability.CancelTripAsync(trip.Id, now, cancellationToken);
+            }
             if (routeChangeProposals is not null)
                 await routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
 
