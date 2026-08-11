@@ -243,6 +243,7 @@ describe('createProxyHandler auth enforcement', () => {
         sub: 'operator-user-id',
         role: 'OPERATOR_ADMIN',
         operatorId: 'operator-id',
+        operatorStatus: 'APPROVED',
       };
       const res = makeResponse();
       const next = jest.fn() as NextFunction;
@@ -376,6 +377,7 @@ describe('createProxyHandler auth enforcement', () => {
       sub: 'ui23-user-id',
       role,
       operatorId: '11111111-1111-4111-8111-111111111111',
+      operatorStatus: 'APPROVED',
     };
     const res = makeResponse();
     const next = jest.fn() as NextFunction;
@@ -429,6 +431,7 @@ describe('createProxyHandler auth enforcement', () => {
         sub: 'ui23-user-id',
         role,
         operatorId: '11111111-1111-4111-8111-111111111111',
+        operatorStatus: 'APPROVED',
       };
       const res = makeResponse();
       const next = jest.fn() as NextFunction;
@@ -440,5 +443,94 @@ describe('createProxyHandler auth enforcement', () => {
       expect(req.url).toBe(path);
       expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
     }
+  });
+
+  it.each([
+    ['GET', '/v1/operator/profile'],
+    ['GET', '/v1/operator/subscription'],
+    ['POST', '/v1/auth/refresh'],
+    ['POST', '/v1/auth/logout'],
+  ] as const)('allows a suspended OPERATOR_ADMIN to access %s %s', async (method, path) => {
+    const upstreamHandler = jest.fn();
+    createProxyMiddlewareMock.mockReturnValue(
+      upstreamHandler as unknown as ReturnType<typeof createProxyMiddleware>,
+    );
+    const signer = {
+      sign: jest.fn().mockResolvedValue('internal-token'),
+    } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = makeRequest(path, { 'x-request-id': 'req-suspended-whitelist' }, method);
+    (req as RequestWithUser).user = {
+      sub: 'operator-admin-id',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-id',
+      operatorStatus: 'SUSPENDED',
+    };
+    const res = makeResponse();
+    const next = jest.fn() as NextFunction;
+
+    await handler(req, res, next);
+
+    expect(res.status).not.toHaveBeenCalled();
+    expect(signer.sign).toHaveBeenCalledWith({
+      sub: 'operator-admin-id',
+      reqId: 'req-suspended-whitelist',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-id',
+      operatorStatus: 'SUSPENDED',
+    });
+    expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+  });
+
+  it.each([
+    ['OPERATOR_ADMIN', 'GET', '/v1/operator/revenue/analytics'],
+    ['OPERATOR_STAFF', 'GET', '/v1/operator/profile'],
+    ['DRIVER', 'POST', '/v1/auth/logout'],
+    ['ASSISTANT', 'POST', '/v1/auth/refresh'],
+  ] as const)('blocks suspended %s from %s %s', async (role, method, path) => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = makeRequest(path, { 'x-request-id': 'req-suspended-blocked' }, method);
+    (req as RequestWithUser).user = {
+      sub: 'operator-user-id',
+      role,
+      operatorId: 'operator-id',
+      operatorStatus: 'SUSPENDED',
+    };
+    const res = makeResponse();
+
+    await handler(req, res, jest.fn() as NextFunction);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 403,
+      error: { code: 'OPERATOR_SUSPENDED' },
+      meta: { traceId: 'req-suspended-blocked' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an operator token without operatorStatus after strict rollout', async () => {
+    const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
+    const handler = createProxyHandler(env, signer);
+    const req = makeRequest('/v1/operator/profile', { 'x-request-id': 'req-missing-status' }, 'GET');
+    (req as RequestWithUser).user = {
+      sub: 'operator-admin-id',
+      role: 'OPERATOR_ADMIN',
+      operatorId: 'operator-id',
+    };
+    const res = makeResponse();
+
+    await handler(req, res, jest.fn() as NextFunction);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 401,
+      error: { code: 'AUTH_TOKEN_INVALID' },
+    });
+    expect(signer.sign).not.toHaveBeenCalled();
   });
 });
