@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.65.0
+> **Phiên bản:** 1.66.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-08-11
 > **Capstone:** SU26SE101 — SU26
@@ -1575,6 +1575,7 @@ metadata nullable, không che Incident.
 | | `AUTH_GOOGLE_TOKEN_INVALID` | 401 | Google ID token signature/expiry/audience invalid |
 | | `AUTH_EMAIL_NOT_VERIFIED` | 403 | Non-passenger User.status = PENDING_EMAIL_VERIFICATION |
 | | `AUTH_ACCOUNT_LOCKED` | 403 | User.status = LOCKED |
+| | `OPERATOR_SUSPENDED` | 403 | Operator-scoped User is blocked or a restricted suspended session targets a non-whitelisted route |
 | | `AUTH_OTP_INVALID` | 400 | OTP code sai |
 | | `AUTH_OTP_EXPIRED` | 400 | OTP TTL 5 phút hết |
 | | `AUTH_OTP_RATE_LIMIT_EXCEEDED` | 429 | OTP request rate limit (Redis `identity:otp_rate:{email}` max 3/h) exceeded |
@@ -1967,7 +1968,19 @@ role=OPERATOR_*:       socket.join(`operator:${operatorId}`)
 
 **Tenant isolation:** mọi query trong service có entity gắn `operatorId` BẮT BUỘC filter `WHERE operator_id = :claim` từ Internal JWT (trừ SYSTEM_ADMIN — không filter).
 
-**Day-6 Operator status guard (Identity):** OPERATOR_ADMIN/OPERATOR_STAFF login is rejected with HTTP 403 `FORBIDDEN` when the caller's `Operator.registrationStatus != APPROVED`. Because access tokens can outlive a later suspend/reject, Identity application handlers MUST also re-check current Operator status for operator write/action endpoints. In Day 6 this applies to `POST /v1/operator/users`, `POST /v1/operator/users/{userId}/resend-initial-password`, and `PATCH /v1/operator/profile`: require current `Operator.registrationStatus=APPROVED`, otherwise return 403 `FORBIDDEN` with no side effects. `GET /v1/operator/profile` remains readable for OPERATOR_ADMIN/OPERATOR_STAFF even when non-APPROVED so the UI can display current status/policies. No Gateway -> Identity synchronous status hop is added.
+**Operator session guard (Identity + Gateway):** `User.status` and
+`Operator.registrationStatus` are independent. `LOCKED` always wins with
+`AUTH_ACCOUNT_LOCKED`; suspend/reactivate never mutates User lock state. Identity password,
+Google, and refresh flows issue `operatorStatus=APPROVED|SUSPENDED` in operator access tokens and
+return nullable `user.operatorRegistrationStatus`. `PENDING|REJECTED` remains `FORBIDDEN`.
+For `SUSPENDED`, only `OPERATOR_ADMIN` may receive a restricted session; staff, driver, and
+assistant receive `OPERATOR_SUSPENDED`. Gateway forwards `operatorStatus` into Internal JWT and
+limits a suspended admin to profile, subscription, refresh, and logout. An operator token missing
+the claim after strict rollout is `AUTH_TOKEN_INVALID`. Suspend revokes every active tenant refresh
+token using `ADMIN_REVOKE` and requests Firebase revocation for every operator-scoped role; current
+access tokens expire naturally within 15 minutes. Reactivate does not restore revoked tokens.
+Operator write handlers continue to require current `APPROVED` state and have no side effects on
+failure. No Gateway-to-Identity synchronous status hop or Redis access-token blacklist is added.
 
 **Operator lifecycle ActivityLog actor convention (Identity):** for operator onboarding/lifecycle actions, `activity_logs.user_id` stores the actor user id. Authenticated actions use the caller's user id; public operator self-registration uses the newly created OPERATOR_ADMIN user id as the self actor. Metadata is JSONB built via serializer (not string interpolation) and includes `operatorId`, `actorUserId`, `targetUserId` when different from actor, and `source` (for example `SELF_REGISTER`, `SYSTEM_ADMIN_CREATE_OPERATOR`, `OPERATOR_USER_CREATE`). System Admin suspend and reactivate actions use `SUSPEND_OPERATOR` and `REACTIVATE_OPERATOR` respectively and record actor, operator ID and source.
 
@@ -3251,6 +3264,19 @@ Sinks: Console (Docker stdout) + File (rolling `/logs/<service>-yyyymmdd.log` 7-
 
 **Sentry integration:** mọi unhandled exception + log level Error → ship Sentry. Configure DSN per service qua env `SENTRY_DSN_<SERVICE>`.
 
+Operational log policy:
+- MediatR `Handling`/`Handled` and expected transaction rollback diagnostics are `Debug`; they do
+  not repeat exception stacks.
+- `ApiResponseExceptionFilter` is the only HTTP exception logger: `400/404/422` at Information,
+  `401/403/409/429` at Warning, both without stack; `500+` exactly once at Error with the full
+  exception for Sentry.
+- Security events use the stable names `AuthLoginFailed`, `AuthAccountLocked`,
+  `OperatorSuspended`, `OperatorRestrictedLogin`, `AuthAccountUnlocked`, and
+  `OperatorReactivated`. Fields are IDs/status/reason/counter/client kind/trace ID only; never log
+  email, password, token, raw IP, or a full User-Agent.
+- Successful `/health` request completion is `Debug`. DataProtection ephemeral-key warnings may be
+  suppressed only in Production while the service has no cookie/session/antiforgery dependency.
+
 ### 9.2 Exception filter / handler
 
 **.NET:** Global `ExceptionFilter` middleware:
@@ -4019,6 +4045,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.66.0** | 2026-08-11 | Codex | **MINOR** — Separate User lock from Operator suspension: restricted suspended-admin sessions, tenant refresh/Firebase revocation, `operatorStatus` JWT propagation and Gateway whitelist, additive suspension/profile/login fields, and canonical `OPERATOR_SUSPENDED`. Standardize HTTP/security logging and startup warning fixes. Add AND-composable Location `type` and Trip leaf-code aliases while preserving legacy ward names. No dependency or schema migration. |
 | **1.65.0** | 2026-08-11 | Codex | **MINOR** — Add one shared Driver/Assistant/Vehicle availability engine across DriverSchedule, main Trip and ShuttleTrip. Consecutive assignments require a 30-minute turnaround plus Google Routes DRIVE reposition time; unavailable location/travel input fails closed. Add reservation persistence with sorted advisory locks and a GiST overlap backstop, full schedule/concrete rechecks, lifecycle release/activation, ACTIVE start blocking with deduped operator notification, two read-only preview endpoints, Vehicle current/next assignment projections, canonical conflict fields/errors and reversible Trip migrations. The two preview POSTs raise the executable inventory to 210/190/20; no dependency is added. |
 | **1.64.2** | 2026-08-10 | Codex | **PATCH** — Enrich every public/operator/admin `StopDto` with hierarchy-derived `city` and `ward` display names while retaining canonical `locationId`. List projections batch Location/parent reads without N+1; Stop persistence, schema, dependencies, endpoint paths, events, and error codes remain unchanged. |
 | **1.64.1** | 2026-08-10 | Codex | **PATCH** — Standardize Location, Operator/Admin Station, and Operator/Admin Stop text filters on PostgreSQL `unaccent(...) ILIKE unaccent(...)` contains matching. Passenger Trip Search remains official-code based; names are autocomplete/display only. No schema, dependency, endpoint, event, or error-code change. |

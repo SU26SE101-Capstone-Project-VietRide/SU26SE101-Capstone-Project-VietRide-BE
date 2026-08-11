@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-11 (resource availability reconciliation)
+> **Cập nhật:** 2026-08-11 (resource availability, lock/suspend, and location-filter reconciliation)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -1470,7 +1470,11 @@ PENDING | APPROVED | REJECTED | SUSPENDED
 - `PENDING`: operator mới đăng ký/chờ System Admin duyệt.
 - `APPROVED`: operator được phép vận hành, tạo route/trip, quản lý nhân sự.
 - `REJECTED`: hồ sơ bị từ chối. Terminal cho request hiện tại; muốn đăng ký lại thì tạo request/operator record mới hoặc admin reset thủ công.
-- `SUSPENDED`: operator đã từng `APPROVED` nhưng bị System Admin khóa tạm thời. Không tạo/sửa trip mới; Operator Web bị chặn write actions. Không dùng `LOCKED` cho Operator để tránh nhầm với `User.status = LOCKED`.
+- `SUSPENDED`: operator đã từng `APPROVED` nhưng bị System Admin đình chỉ. Trạng thái này độc lập
+  với `User.status=LOCKED`; suspend không lock User và reactivate không unlock User. Chỉ
+  `OPERATOR_ADMIN` còn `ACTIVE` được tạo phiên hạn chế để xem profile/trạng thái đình chỉ và
+  subscription, refresh hoặc logout. `OPERATOR_STAFF`, `DRIVER`, `ASSISTANT` bị chặn bằng
+  `OPERATOR_SUSPENDED`. Không dùng `LOCKED` cho Operator.
 
 ### 5.4 Service-to-service Authentication — Internal JWT
 
@@ -5266,6 +5270,23 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **Parcel delivery tại Stop dọc tuyến** — `Parcel.dropoffStopId` nullable. Sender chọn Stop trong RouteStop của trip; UNLOADED trigger check stop của parcel.
 - **`RouteStop` là single source of truth cho pickup/dropoff control** — bỏ hoàn toàn `Trip.allowAlongRoutePickup`/`Dropoff` và `Route.defaultAllowAlongRoute*`. Operator kiểm soát qua việc thêm/bỏ RouteStop entries.
 - **`RouteStop.allowPickup` + `RouteStop.allowDropoff`** — phân loại stop pickup-only / dropoff-only / both, phản ánh thực tế operator gom khách đầu tuyến và trả khách dần cuối tuyến. Snapshot vào TripStop.
+
+## Điều chỉnh User Lock, Operator Suspend và Location filter — 2026-08-11
+
+- `User.status=LOCKED` và `Operator.registrationStatus=SUSPENDED` là hai trục độc lập. Nếu đồng
+  thời xảy ra, `AUTH_ACCOUNT_LOCKED` được ưu tiên. Unlock User không reactivate Operator và ngược lại.
+- Suspend `APPROVED -> SUSPENDED`, `isActive=false`, revoke refresh token bằng `ADMIN_REVOKE` và
+  Firebase session của toàn bộ user thuộc nhà xe. Access token cũ tự hết hạn tối đa 15 phút; không
+  dùng Redis blacklist. Reactivate không phục hồi refresh token đã revoke.
+- Password login, Google login và refresh chỉ cấp phiên hạn chế cho `ACTIVE OPERATOR_ADMIN` khi
+  nhà xe suspended. Access token và Internal JWT mang `operatorStatus`. Phiên hạn chế chỉ được gọi
+  profile, subscription, refresh và logout; mọi route khác trả `OPERATOR_SUSPENDED`.
+- `GET /v1/locations` nhận `type?=PROVINCE|MUNICIPALITY|WARD|COMMUNE|SPECIAL_ZONE`; `type`,
+  `parentCode`, `search` kết hợp AND. Type sai trả 422; type hợp lệ nhưng không có ở level trả `200 []`.
+- Trip Search dùng tên mới `originLocationCode`/`destinationLocationCode`, giữ tương thích
+  `originWardCode`/`destinationWardCode`. Cả hai nhận mọi leaf `WARD|COMMUNE|SPECIAL_ZONE`; nếu
+  cùng truyền tên mới/cũ nhưng khác mã thì trả 422. Quy tắc này supersede câu “không hỗ trợ alias”
+  trong điều chỉnh 2026-08-05; alias ở đây chỉ là tên query parameter, không phải mã địa giới cũ.
 
 ## Điều chỉnh Mobile contract và phục hồi nhà xe — 2026-08-07
 

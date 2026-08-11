@@ -267,6 +267,7 @@ Response `200`:
       "role": "PASSENGER",
       "operatorId": null,
       "status": "ACTIVE",
+      "operatorRegistrationStatus": null,
       "avatarUrl": "https://example.com/avatar.png"
     }
   },
@@ -277,6 +278,8 @@ Response `200`:
 Passenger accounts may receive the same `200` response while `user.status = "PENDING_EMAIL_VERIFICATION"`.
 The mobile FE treats that as a restricted session and prompts email OTP verification from Profile.
 `user.avatarUrl` is the stored profile avatar and is omitted when null.
+`user.operatorRegistrationStatus` is nullable. It is `APPROVED` for a normal operator session,
+`SUSPENDED` for the restricted OPERATOR_ADMIN session, and null for users without operator scope.
 
 Error `401` — invalid credentials:
 ```json
@@ -318,6 +321,18 @@ Error `403` — OPERATOR_ADMIN/OPERATOR_STAFF belongs to an operator that is not
 }
 ```
 
+For operator-scoped roles, `PENDING` and `REJECTED` continue to return `403 FORBIDDEN`.
+When the Operator is `SUSPENDED`, only an `ACTIVE` `OPERATOR_ADMIN` receives a restricted token
+bundle with `user.operatorRegistrationStatus = "SUSPENDED"`. `OPERATOR_STAFF`, `DRIVER`, and
+`ASSISTANT` receive `403 OPERATOR_SUSPENDED`. A `LOCKED` User always receives
+`403 AUTH_ACCOUNT_LOCKED`, even when its Operator is also suspended.
+
+Operator access tokens carry `operatorStatus=APPROVED|SUSPENDED`; the Gateway forwards it in the
+Internal JWT. A suspended OPERATOR_ADMIN token is limited to `GET /v1/operator/profile`,
+`GET /v1/operator/subscription`, `POST /v1/auth/refresh`, and `POST /v1/auth/logout`. Every other
+route returns `403 OPERATOR_SUSPENDED`. After strict rollout, an operator token missing the claim
+returns `401 AUTH_TOKEN_INVALID`.
+
 ### POST `/v1/auth/refresh`
 
 Auth: public.
@@ -340,6 +355,12 @@ Error `401` — invalid or reused refresh token:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
+
+Refresh applies the same User/Operator matrix as password and Google login. A refresh token
+revoked by operator suspension returns `401 AUTH_TOKEN_INVALID`. A newly issued restricted
+OPERATOR_ADMIN refresh token may rotate and preserves `operatorRegistrationStatus=SUSPENDED`.
+`LOCKED` returns `403 AUTH_ACCOUNT_LOCKED`; suspended non-admin roles return
+`403 OPERATOR_SUSPENDED`.
 
 ### POST `/v1/auth/logout`
 
@@ -402,6 +423,7 @@ Response `200`:
       "role": "PASSENGER",
       "operatorId": null,
       "status": "ACTIVE",
+      "operatorRegistrationStatus": null,
       "avatarUrl": "https://example.com/avatar.png"
     }
   },
@@ -412,6 +434,8 @@ Response `200`:
 Google login returns the same stored `UserSummaryDto.avatarUrl` as password login. The provider
 avatar seeds a newly created User only; linking or re-login never overwrites an existing stored
 avatar. The property is omitted when null.
+Google login applies the same independent User lock and Operator suspension matrix as password
+login and returns the same nullable `user.operatorRegistrationStatus` field.
 
 Error `401` — invalid Google ID token:
 ```json
@@ -1984,8 +2008,13 @@ origin/destination selector. FE must not hardcode administrative units.
 Query:
 - Omit `parentCode` to list active `PROVINCE|MUNICIPALITY` roots.
 - Send `parentCode=<official-province-code>` to list its active `WARD|COMMUNE|SPECIAL_ZONE` children.
+- `type?` accepts `PROVINCE|MUNICIPALITY|WARD|COMMUNE|SPECIAL_ZONE`.
 - `search?` filters code/name inside the selected level for autocomplete using case- and
   Vietnamese-accent-insensitive contains matching (`Vung Tau` matches `Vũng Tàu`).
+
+`type`, `parentCode`, and `search` are combined with AND semantics. Omitting `type` preserves the
+combined response. An unsupported type returns `422 VALIDATION_ERROR`; a supported type that is
+not present at the selected level returns `200` with an empty array.
 
 Response `200`: matching active locations sorted by `sortOrder`, then `name`.
 ```json
@@ -2050,6 +2079,11 @@ Query:
 - Administrative hierarchy mode: `originProvinceCode`, `originWardCode?`,
   `destinationProvinceCode`, `destinationWardCode?`, `departureDate`, `passengerCount`,
   `allowAlongRoutePickup?`.
+
+New callers should use `originLocationCode?` and `destinationLocationCode?` in hierarchy mode.
+The legacy `originWardCode?` and `destinationWardCode?` remain supported. Both naming sets accept
+any active leaf type: `WARD`, `COMMUNE`, or `SPECIAL_ZONE`. If both names for one side are supplied,
+their trimmed codes must match or the API returns `422 VALIDATION_ERROR`.
 
 If both station IDs and hierarchy codes are sent, a complete station-ID pair wins because it is the more
 specific filter. Station-ID mode continues to match exact Route origin/destination terminals.
@@ -5966,7 +6000,11 @@ Errors:
 - `404 RESOURCE_NOT_FOUND` — operator does not exist.
 - `422 VALIDATION_ERROR` — missing reason or invalid lifecycle transition.
 
-Notes: suspend writes an ActivityLog with action `SUSPEND_OPERATOR`, actor user ID, operator ID and source. The existing suspension Outbox behavior remains unchanged.
+Notes: suspend writes an ActivityLog with action `SUSPEND_OPERATOR`, actor user ID, operator ID and
+source. It revokes every active refresh token for `OPERATOR_ADMIN`, `OPERATOR_STAFF`, `DRIVER`, and
+`ASSISTANT` users in the tenant with reason `ADMIN_REVOKE`, and requests Firebase session
+revocation for all of them. Existing access tokens expire naturally within 15 minutes; no live
+Redis blacklist is used. Suspend does not change any `User.status` to `LOCKED`.
 
 ### GET `/v1/operator/users`
 
@@ -6060,7 +6098,9 @@ Errors:
 
 ### GET `/v1/operator/profile`
 
-Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. Tenant isolation: operator is resolved from caller `operatorId`. Read is allowed even when the current Operator is non-`APPROVED` so the UI can display current status/policies.
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF` for an approved Operator. For a suspended Operator, only
+`OPERATOR_ADMIN` may read this endpoint through the restricted Gateway session. Tenant isolation:
+operator is resolved from caller `operatorId`.
 
 Response `200`:
 ```json
@@ -6084,6 +6124,8 @@ Response `200`:
     "representativePhone": "+84907654321",
     "registrationStatus": "APPROVED",
     "isActive": true,
+    "suspendedAt": null,
+    "suspendReason": null,
     "cancellationPolicy": [
       { "hoursBeforeDeparture": 24, "feePercent": 10 }
     ],
@@ -6097,6 +6139,10 @@ Response `200`:
 Errors:
 - `403 FORBIDDEN` — caller is not an operator role or has no `operatorId`.
 - `404 RESOURCE_NOT_FOUND` — operator does not exist.
+
+`suspendedAt` and `suspendReason` are non-null only while `registrationStatus=SUSPENDED`.
+Suspended non-admin roles and restricted sessions targeting any non-whitelisted route receive
+`403 OPERATOR_SUSPENDED` at the Gateway.
 
 ### PATCH `/v1/operator/profile`
 
