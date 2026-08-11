@@ -96,7 +96,7 @@ export class IngestRepository {
         id: documentId,
         status: 'APPROVED',
         ingestStatus: {
-          in: ['PENDING', 'FAILED'],
+          in: ['PENDING', 'FAILED', 'PROCESSING'],
         },
       },
       data: {

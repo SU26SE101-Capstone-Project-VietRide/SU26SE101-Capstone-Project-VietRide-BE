@@ -5,11 +5,16 @@ import type { ChannelModel } from 'amqplib';
 import type { Env } from '../config/env.schema';
 import type { EmbeddingDimensionProbeService } from '../embedding/embedding-dimension-probe.service';
 import type { RagPrismaService } from '../prisma/rag-prisma.service';
+import type { ChatCompletionProvider } from '../providers/chat-completion.provider';
 import { ReadinessService } from './readiness.service';
 
 describe('ReadinessService', () => {
+  const knowledgeDocumentCount = jest.fn();
   const prisma = {
     $queryRaw: jest.fn(),
+    knowledgeDocument: {
+      count: knowledgeDocumentCount,
+    },
   } as unknown as jest.Mocked<RagPrismaService>;
   const redisClient = {
     ping: jest.fn(),
@@ -26,6 +31,10 @@ describe('ReadinessService', () => {
   const embeddingProbe = {
     probe: jest.fn(),
   } as unknown as jest.Mocked<EmbeddingDimensionProbeService>;
+  const chatProvider = {
+    complete: jest.fn(),
+    stream: jest.fn(),
+  } as unknown as jest.Mocked<ChatCompletionProvider>;
 
   let topologyHealth: RabbitMqTopologyHealth;
 
@@ -37,10 +46,20 @@ describe('ReadinessService', () => {
     rabbit.createChannel.mockResolvedValue(channel as never);
     channel.close.mockResolvedValue(undefined);
     embeddingProbe.probe.mockResolvedValue(2048);
+    chatProvider.complete.mockResolvedValue('ok');
+    knowledgeDocumentCount.mockResolvedValue(0);
   });
 
   it('returns ok when all dependencies are ready', async () => {
-    const service = new ReadinessService(prisma, redis, embeddingProbe, makeEnv(), rabbit, topologyHealth);
+    const service = new ReadinessService(
+      prisma,
+      redis,
+      embeddingProbe,
+      chatProvider,
+      makeEnv(),
+      rabbit,
+      topologyHealth,
+    );
 
     await expect(service.check()).resolves.toEqual({
       status: 'ok',
@@ -51,13 +70,66 @@ describe('ReadinessService', () => {
         rabbitmq: 'ok',
         cloudinary: 'ok',
         openrouter: 'ok',
+        ingest: 'ok',
       },
     });
   });
 
   it('returns controlled 503 when a dependency fails', async () => {
     embeddingProbe.probe.mockRejectedValue(new Error('provider down'));
-    const service = new ReadinessService(prisma, redis, embeddingProbe, makeEnv(), rabbit, topologyHealth);
+    const service = new ReadinessService(
+      prisma,
+      redis,
+      embeddingProbe,
+      chatProvider,
+      makeEnv(),
+      rabbit,
+      topologyHealth,
+    );
+
+    await expect(service.check()).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('fails readiness when the chat provider probe fails', async () => {
+    chatProvider.complete.mockRejectedValue(new Error('chat provider down'));
+    const service = new ReadinessService(
+      prisma,
+      redis,
+      embeddingProbe,
+      chatProvider,
+      makeEnv(),
+      rabbit,
+      topologyHealth,
+    );
+
+    await expect(service.check()).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('fails readiness when the ingest worker is disabled', async () => {
+    const service = new ReadinessService(
+      prisma,
+      redis,
+      embeddingProbe,
+      chatProvider,
+      makeEnv({ RAG_INGEST_WORKER_ENABLED: false }),
+      rabbit,
+      topologyHealth,
+    );
+
+    await expect(service.check()).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('fails readiness when stale ingest work is backlogged', async () => {
+    knowledgeDocumentCount.mockResolvedValue(1);
+    const service = new ReadinessService(
+      prisma,
+      redis,
+      embeddingProbe,
+      chatProvider,
+      makeEnv(),
+      rabbit,
+      topologyHealth,
+    );
 
     await expect(service.check()).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
@@ -68,7 +140,15 @@ describe('ReadinessService', () => {
       routingKey: 'rag.document.ingested',
       error: "PRECONDITION_FAILED - inequivalent arg 'x-dead-letter-routing-key'",
     });
-    const service = new ReadinessService(prisma, redis, embeddingProbe, makeEnv(), rabbit, topologyHealth);
+    const service = new ReadinessService(
+      prisma,
+      redis,
+      embeddingProbe,
+      chatProvider,
+      makeEnv(),
+      rabbit,
+      topologyHealth,
+    );
 
     await expect(service.check()).rejects.toMatchObject({
       response: expect.objectContaining({
@@ -80,7 +160,7 @@ describe('ReadinessService', () => {
   });
 });
 
-function makeEnv(): Env {
+function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     NODE_ENV: 'test',
     PORT: 3003,
@@ -111,7 +191,7 @@ function makeEnv(): Env {
     RAG_MAX_RETRIEVED_CHUNKS: 5,
     RAG_USER_RATE_LIMIT_PER_HOUR: 20,
     RAG_OPERATOR_RATE_LIMIT_PER_HOUR: 200,
-    RAG_INGEST_WORKER_ENABLED: false,
+    RAG_INGEST_WORKER_ENABLED: true,
     RAG_OUTBOX_PUBLISH_ENABLED: false,
     INTENT_FILTER_ENABLED: false,
     QUERY_REWRITE_ENABLED: false,
@@ -122,5 +202,6 @@ function makeEnv(): Env {
     CLOUDINARY_API_KEY: 'cloud-key',
     CLOUDINARY_API_SECRET: 'cloud-secret',
     CLOUDINARY_RAG_FOLDER: 'rag/documents',
+    ...overrides,
   };
 }

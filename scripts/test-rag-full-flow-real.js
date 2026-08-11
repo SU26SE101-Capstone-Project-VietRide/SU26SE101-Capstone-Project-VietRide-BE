@@ -1,4 +1,5 @@
 const { execFileSync } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
 const { existsSync, readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 
@@ -132,7 +133,10 @@ async function seedPassengerAccount() {
   if (!userExists) {
     const response = await fetchWithTimeout(REGISTER_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': randomUUID(),
+      },
       body: JSON.stringify({
         email: TEST_EMAIL,
         password: TEST_PASSWORD,
@@ -153,8 +157,8 @@ async function seedPassengerAccount() {
   psqlExec(
     IDENTITY_DB_URL,
     `update ${identityUsersTable}
-       set status = 'ACTIVE'::vietride_identity.user_status,
-           role = 'PASSENGER'::vietride_identity.user_role,
+       set status = 'ACTIVE',
+           role = 'PASSENGER',
            phone = :'phone',
            operator_id = null,
            failed_login_attempts = 0,
@@ -201,6 +205,7 @@ async function testRagChat(accessToken) {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
+      'Idempotency-Key': randomUUID(),
     },
     body: JSON.stringify({ message: TEST_QUESTION }),
   }, CHAT_TIMEOUT_MS);
@@ -307,16 +312,21 @@ function psqlExec(dbUrl, sql, variables = {}, outputArgs = []) {
   for (const [key, value] of Object.entries(variables)) {
     args.push('--variable', `${key}=${value}`);
   }
-  args.push(...outputArgs, '--command', sql);
+  args.push(...outputArgs);
 
   try {
     if (useDockerPsql) {
-      return execFileSync('docker', ['run', '--rm', PSQL_DOCKER_IMAGE, 'psql', ...args], {
+      return execFileSync('docker', ['run', '--rm', '-i', PSQL_DOCKER_IMAGE, 'psql', ...args], {
         encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
+        input: sql,
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
     }
-    return execFileSync(PSQL_BIN, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return execFileSync(PSQL_BIN, args, {
+      encoding: 'utf8',
+      input: sql,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
   } catch (error) {
     const stderr = sanitizeSecret(String(error.stderr ?? error.message ?? error));
     fail(`psql command failed: ${stderr}\nIf DB is only available through Navicat GUI, use DB_MODE=manual and seed the test account manually.`);
