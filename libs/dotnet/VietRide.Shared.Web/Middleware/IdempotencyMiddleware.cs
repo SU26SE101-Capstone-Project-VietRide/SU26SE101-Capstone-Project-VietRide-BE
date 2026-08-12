@@ -327,8 +327,9 @@ public sealed class IdempotencyMiddleware
         }
 
         var capturedBytes = buffer.ToArray();
+        var cachedBytes = NormalizeJsonForCache(capturedBytes, context.Response.ContentType);
         var responseBytes = ApiTimestampPresentation.TransformCachedJsonForResponse(
-            capturedBytes,
+            cachedBytes,
             context.Response.ContentType,
             context);
         if (context.Response.StatusCode >= StatusCodes.Status500InternalServerError)
@@ -346,7 +347,7 @@ public sealed class IdempotencyMiddleware
             fingerprint,
             context.Response.StatusCode,
             context.Response.ContentType,
-            Convert.ToBase64String(NormalizeJsonForCache(capturedBytes, context.Response.ContentType)));
+            Convert.ToBase64String(cachedBytes));
         var responsePayload = JsonSerializer.Serialize(responseEntry, JsonOptions);
         var completed = await CompleteProcessingAsync(
             database,
