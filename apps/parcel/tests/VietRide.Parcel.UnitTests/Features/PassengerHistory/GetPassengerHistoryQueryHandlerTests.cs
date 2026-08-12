@@ -45,7 +45,8 @@ public sealed class GetPassengerHistoryQueryHandlerTests
             "Route",
             [new BookingHistoryTicketDto(Guid.NewGuid(), "VT-20260701-ABCDEFGH", "A01", "ISSUED", 350_000)],
             "https://sandbox.vnpayment.vn/ticket",
-            DropoffStopId: dropoffStopId);
+            DropoffStopId: dropoffStopId,
+            Vehicle: new BookingHistoryVehicleDto("51B-123.45"));
         bookingClient.GetPassengerHistoryAsync(
                 userId,
                 "CONFIRMED",
@@ -70,6 +71,7 @@ public sealed class GetPassengerHistoryQueryHandlerTests
         result.Items[0].Ticket.Should().NotBeNull();
         result.Items[0].Parcel.Should().BeNull();
         result.Items[0].Ticket!.Tickets.Should().ContainSingle();
+        result.Items[0].Ticket!.Vehicle.Should().BeEquivalentTo(new PassengerHistoryVehicleDto("51B-123.45"));
         result.Items[0].PaymentRedirectUrl.Should().Be("https://sandbox.vnpayment.vn/ticket");
         result.Items[0].TrackingTarget.Should().BeEquivalentTo(new
         {
@@ -514,6 +516,21 @@ public sealed class GetPassengerHistoryQueryHandlerTests
         {
             sentJson.RootElement.TryGetProperty(forbidden, out _).Should().BeFalse();
         }
+    }
+
+    [Fact]
+    public void TicketHistoryDetailsAlwaysSerializesNullableVehicle()
+    {
+        var details = new TicketHistoryDetailsDto(null, null, "Route", []);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        };
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(details, options));
+
+        json.RootElement.TryGetProperty("vehicle", out var vehicle).Should().BeTrue();
+        vehicle.ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     [Theory]

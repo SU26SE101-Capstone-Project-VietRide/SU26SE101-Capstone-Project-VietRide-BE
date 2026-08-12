@@ -16,4 +16,5 @@ public sealed record BookingHistoryItemDto(
     IReadOnlyList<BookingHistoryTicketDto> Tickets,
     string? PaymentRedirectUrl = null,
     Guid? DropoffStationId = null,
-    Guid? DropoffStopId = null);
+    Guid? DropoffStopId = null,
+    BookingHistoryVehicleDto? Vehicle = null);
