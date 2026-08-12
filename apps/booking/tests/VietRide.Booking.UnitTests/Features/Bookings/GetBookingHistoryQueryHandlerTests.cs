@@ -60,7 +60,12 @@ public sealed class GetBookingHistoryQueryHandlerTests
                 Arg.Any<CancellationToken>())
             .Returns(PagedResult<BookingEntity>.Create([booking], 1, 20, 1));
         var paymentLookup = Substitute.For<IPaymentRedirectLookupClient>();
-        var handler = new GetBookingHistoryQueryHandler(repository, paymentLookup);
+        var tripClient = Substitute.For<ITripServiceClient>();
+        tripClient.GetHistoryVehicleSummariesAsync(
+                Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(new[] { booking.TripId })),
+                Arg.Any<CancellationToken>())
+            .Returns([new TripHistoryVehicleSummary(booking.TripId, "51B-123.45")]);
+        var handler = new GetBookingHistoryQueryHandler(repository, paymentLookup, tripClient);
 
         var result = await handler.Handle(
             new GetBookingHistoryQuery(
@@ -85,6 +90,7 @@ public sealed class GetBookingHistoryQueryHandlerTests
             "ISSUED",
             350_000));
         item.PaymentRedirectUrl.Should().BeNull();
+        item.Vehicle.Should().BeEquivalentTo(new BookingHistoryVehicleDto("51B-123.45"));
         await paymentLookup.DidNotReceiveWithAnyArgs()
             .LookupAsync(default, default!, default);
     }
@@ -181,7 +187,8 @@ public sealed class GetBookingHistoryQueryHandlerTests
         repository.ListPassengerHistoryAsync(userId, null, null, null, 1, 20, Arg.Any<CancellationToken>())
             .Returns(PagedResult<BookingEntity>.Create([], 1, 20, 0));
         var paymentLookup = Substitute.For<IPaymentRedirectLookupClient>();
-        var handler = new GetBookingHistoryQueryHandler(repository, paymentLookup);
+        var tripClient = Substitute.For<ITripServiceClient>();
+        var handler = new GetBookingHistoryQueryHandler(repository, paymentLookup, tripClient);
 
         var result = await handler.Handle(
             new GetBookingHistoryQuery(userId, null, null, null, 1, 20),
@@ -189,6 +196,8 @@ public sealed class GetBookingHistoryQueryHandlerTests
 
         result.Items.Should().BeEmpty();
         await paymentLookup.DidNotReceiveWithAnyArgs().LookupAsync(default, default!, default);
+        await tripClient.DidNotReceiveWithAnyArgs()
+            .GetHistoryVehicleSummariesAsync(default!, default);
     }
 
     [Fact]
@@ -252,7 +261,7 @@ public sealed class GetBookingHistoryQueryHandlerTests
             null,
             "Route",
             [],
-            url);
+            PaymentRedirectUrl: url);
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -265,10 +274,36 @@ public sealed class GetBookingHistoryQueryHandlerTests
             property.ValueKind.Should().Be(JsonValueKind.Null);
         else
             property.GetString().Should().Be(url);
+        document.RootElement.TryGetProperty("vehicle", out var vehicle).Should().BeTrue();
+        vehicle.ValueKind.Should().Be(JsonValueKind.Null);
         typeof(BookingsController).GetMethod(nameof(BookingsController.GetHistoryAsync))!.ReturnType
             .Should().Be(typeof(Task<ActionResult<PagedResult<BookingHistoryItemDto>>>));
         typeof(InternalBookingsController).GetMethod(nameof(InternalBookingsController.GetHistoryAsync))!.ReturnType
             .Should().Be(typeof(Task<ActionResult<PagedResult<BookingHistoryItemDto>>>));
+    }
+
+    [Fact]
+    public async Task Handle_WhenTripEnrichmentIsCancelledByCaller_PropagatesCancellation()
+    {
+        var userId = Guid.NewGuid();
+        var booking = CreatePendingBooking(userId, 350_000);
+        booking.Confirm(DateTimeOffset.UtcNow);
+        var repository = Substitute.For<IBookingRepository>();
+        repository.ListPassengerHistoryAsync(userId, null, null, null, 1, 20, Arg.Any<CancellationToken>())
+            .Returns(PagedResult<BookingEntity>.Create([booking], 1, 20, 1));
+        var paymentLookup = Substitute.For<IPaymentRedirectLookupClient>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        using var source = new CancellationTokenSource();
+        source.Cancel();
+        tripClient.GetHistoryVehicleSummariesAsync(Arg.Any<IReadOnlyCollection<Guid>>(), source.Token)
+            .Returns<Task<IReadOnlyList<TripHistoryVehicleSummary>>>(_ => throw new OperationCanceledException(source.Token));
+        var handler = new GetBookingHistoryQueryHandler(repository, paymentLookup, tripClient);
+
+        var action = () => handler.Handle(
+            new GetBookingHistoryQuery(userId, null, null, null, 1, 20),
+            source.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]

@@ -25,6 +25,44 @@ public class TripServiceClientTests
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
 
+    [Fact]
+    public async Task GetHistoryVehicleSummariesAsync_SendsDistinctBatchAndReturnsOnlyValidRequestedPlates()
+    {
+        var otherTripId = Guid.NewGuid();
+        var unrequestedTripId = Guid.NewGuid();
+        var body = JsonSerializer.Serialize(new object[]
+        {
+            new { tripId = TripId, vehicle = new { licensePlate = " 51B-123.45 " } },
+            new { tripId = otherTripId, vehicle = new { licensePlate = " " } },
+            new { tripId = unrequestedTripId, vehicle = new { licensePlate = "51B-999.99" } },
+            null!,
+        }, JsonOptions);
+        var handler = new FakeMessageHandler(HttpStatusCode.OK, body);
+        var client = BuildClient(handler);
+
+        var result = await client.GetHistoryVehicleSummariesAsync([TripId, TripId, otherTripId]);
+
+        result.Should().Equal(new TripHistoryVehicleSummary(TripId, "51B-123.45"));
+        handler.LastRequest!.Method.Should().Be(HttpMethod.Post);
+        handler.LastRequest.RequestUri!.AbsolutePath.Should().Be("/internal/v1/trips/summaries/batch");
+        using var request = JsonDocument.Parse(handler.LastBody!);
+        request.RootElement.GetProperty("tripIds").EnumerateArray().Should().HaveCount(2);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "{}")]
+    [InlineData(HttpStatusCode.OK, "not-json")]
+    public async Task GetHistoryVehicleSummariesAsync_WhenUpstreamIsUnavailable_FailsOpen(
+        HttpStatusCode status,
+        string body)
+    {
+        var client = BuildClient(status, body);
+
+        var result = await client.GetHistoryVehicleSummariesAsync([TripId]);
+
+        result.Should().BeEmpty();
+    }
+
     // -----------------------------------------------------------------------
     // GetTripSnapshotAsync
     // -----------------------------------------------------------------------

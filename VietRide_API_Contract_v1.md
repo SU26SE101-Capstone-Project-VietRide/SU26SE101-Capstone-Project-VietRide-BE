@@ -1420,6 +1420,7 @@ Response `200`:
         "bookingGroupId": null,
         "tripDirection": null,
         "routeName": "TP.HCM - Hà Nội",
+        "vehicle": { "licensePlate": "51B-123.45" },
         "tickets": [
           {
             "ticketId": "uuid",
@@ -1445,6 +1446,14 @@ Response `200`:
 
 Validation failures return `422 VALIDATION_ERROR`.
 
+`vehicle` is always serialized and is either `{ "licensePlate": string }` for the Trip's current
+Vehicle or `null`. Booking performs one distinct-ID call to
+`POST /internal/v1/trips/summaries/batch` for each non-empty history page (up to 100 Trips), so a
+vehicle swap is reflected without an N+1 lookup. Missing Trip summaries, blank/malformed plates,
+non-success responses, timeouts, and transport failures leave only the affected enrichment null
+and do not fail the base history response. No vehicle ID, status, type, seat layout, capacity,
+image, or other management field is exposed.
+
 `paymentRedirectUrl` is the final root property of every item and is always serialized. It is
 non-null only for a `PENDING_PAYMENT` Booking whose latest eligible VNPay Payment lookup matches
 the owner, reference, exact amount, trusted VNPay authority, and a persisted future `dueAt`.
@@ -1459,7 +1468,8 @@ Auth: Internal JWT. Caller: Parcel Service. Never exposed through Gateway.
 
 Query: required `userId`, plus the same `status?`, `from?`, `to?`, `page=1`, and `pageSize=20`
 semantics as the public Booking history endpoint. It returns the same paged data DTO, preserving
-Booking ownership, per-Booking pagination, nested Ticket summaries, and deterministic ordering.
+Booking ownership, per-Booking pagination, nested Ticket summaries, nullable current Vehicle
+projection, and deterministic ordering.
 
 ### GET `/internal/v1/bookings/{bookingId}`
 
@@ -3536,6 +3546,7 @@ Response `200` item shape:
     "bookingGroupId": null,
     "tripDirection": null,
     "routeName": "TP.HCM - Hà Nội",
+    "vehicle": { "licensePlate": "51B-123.45" },
     "tickets": [
       {
         "ticketId": "uuid",
@@ -3554,6 +3565,8 @@ Response `200` item shape:
 For `PARCEL`, `ticket` is null and `parcel` is
 `{ bookingId, recipientName, sizeCategory, photoUrl, deliveryMethod }`. Exactly one of `ticket` or
 `parcel` is non-null. Journey fields may be null for legacy data or unavailable Trip enrichment.
+For `TICKET`, `ticket.vehicle` is always serialized as `{ licensePlate }` or `null`; Parcel forwards
+the fail-open Booking history projection and does not call Trip again. Only the plate is public.
 `paymentRedirectUrl` is the final root property and is always serialized. `TICKET` forwards the
 value from Booking history without another Payment call. `PARCEL` returns only the latest eligible
 deposit/final VNPay URL for the exact owner/reference/amount/deadline: deposit requires

@@ -12,13 +12,16 @@ public sealed class GetBookingHistoryQueryHandler
 {
     private readonly IBookingRepository _bookings;
     private readonly IPaymentRedirectLookupClient _paymentRedirectLookup;
+    private readonly ITripServiceClient? _tripServiceClient;
 
     public GetBookingHistoryQueryHandler(
         IBookingRepository bookings,
-        IPaymentRedirectLookupClient paymentRedirectLookup)
+        IPaymentRedirectLookupClient paymentRedirectLookup,
+        ITripServiceClient? tripServiceClient = null)
     {
         _bookings = bookings;
         _paymentRedirectLookup = paymentRedirectLookup;
+        _tripServiceClient = tripServiceClient;
     }
 
     public async Task<PagedResult<BookingHistoryItemDto>> Handle(
@@ -45,6 +48,7 @@ public sealed class GetBookingHistoryQueryHandler
             request.UserId,
             pendingBookings,
             cancellationToken);
+        var vehicles = await GetVehiclesAsync(page.Items, cancellationToken);
 
         var items = page.Items.Select(booking => new BookingHistoryItemDto(
             booking.Id,
@@ -69,9 +73,12 @@ public sealed class GetBookingHistoryQueryHandler
                     ticket.Status.ToString(),
                     ticket.PaidAmount.Amount))
                 .ToList(),
-            paymentRedirectUrls.GetValueOrDefault(booking.Id),
             booking.DropoffStationId,
-            booking.DropoffStopId))
+            booking.DropoffStopId,
+            vehicles.TryGetValue(booking.TripId, out var vehicle)
+                ? new BookingHistoryVehicleDto(vehicle.LicensePlate)
+                : null,
+            paymentRedirectUrls.GetValueOrDefault(booking.Id)))
             .ToList();
 
         return PagedResult<BookingHistoryItemDto>.Create(
@@ -79,6 +86,35 @@ public sealed class GetBookingHistoryQueryHandler
             page.Page,
             page.PageSize,
             page.TotalItems);
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, TripHistoryVehicleSummary>> GetVehiclesAsync(
+        IReadOnlyCollection<BookingEntity> bookings,
+        CancellationToken cancellationToken)
+    {
+        if (_tripServiceClient is null || bookings.Count == 0)
+            return new Dictionary<Guid, TripHistoryVehicleSummary>();
+
+        try
+        {
+            var tripIds = bookings.Select(booking => booking.TripId).Distinct().ToArray();
+            var summaries = await _tripServiceClient.GetHistoryVehicleSummariesAsync(tripIds, cancellationToken);
+            return summaries
+                .Where(summary => summary.TripId != Guid.Empty
+                    && tripIds.Contains(summary.TripId)
+                    && !string.IsNullOrWhiteSpace(summary.LicensePlate))
+                .GroupBy(summary => summary.TripId)
+                .Where(group => group.Count() == 1)
+                .ToDictionary(group => group.Key, group => group.Single());
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return new Dictionary<Guid, TripHistoryVehicleSummary>();
+        }
     }
 
     private async Task<IReadOnlyDictionary<Guid, string>> GetPaymentRedirectUrlsAsync(
