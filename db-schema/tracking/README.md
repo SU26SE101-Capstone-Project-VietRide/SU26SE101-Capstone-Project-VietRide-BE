@@ -34,7 +34,8 @@ Tracking Service là **NestJS service** xử lý real-time GPS broadcast (Socket
   - `tracking:latest:{tripId}` — last known position (TTL 5 min)
   - `tracking:gps_buffer:{tripId}` — buffer list (đến khi flush)
   - `tracking:eta:{tripId}:{stopId}` — dynamic ETA cache (TTL 60s)
-  - `tracking:off_route_since:{tripId}` — off-route timer start
+  - `tracking:off_route_since:{tripId}` — off-route episode state (TTL 24h hoặc clear)
+  - `tracking:off_route_lock:{tripId}` — owner-safe transition/cleanup lock (TTL 10s)
   - `tracking:active_trips` — set membership
   - `tracking:approaching_notified:{tripId}:{bookingId}:w{1|2}` — dedupe approaching alert (TTL đến hết chuyến)
 

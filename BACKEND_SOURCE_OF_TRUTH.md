@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.68.0
+> **Phiên bản:** 1.69.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-08-12
 > **Capstone:** SU26SE101 — SU26
@@ -1978,6 +1978,14 @@ cũ. Với `true`, service phải load effective assigned-route snapshot trướ
 `routeContext` + `routeVersion` (cùng strong ETag REST); lỗi trả
 `TRACKING_ROUTE_CONTEXT_UNAVAILABLE` và không join room.
 
+Driver/Assistant được tự join thêm `trip:crew:{tripId}`; Operator Dashboard join
+`operator:{operatorId}:fleet`. Event vận hành `trip:routeDeviation` chỉ phát vào hai room này với
+payload `{tripId,status:DEVIATED|ROUTE_RESTORED,distanceMeters,updatedAt}` và không phát vào room
+chung có passenger. Initial `DEVIATED` giữ nguyên Outbox `tracking.gps.off_route`; khi còn lệch,
+GPS hợp lệ đầu tiên sau mỗi khoảng ít nhất 60 giây chỉ phát realtime heartbeat. Về lại trong
+500 m phát đúng một `ROUTE_RESTORED`. Route change hoặc Trip terminal hard-clear state, không phát
+restore giả; heartbeat/restore không tạo thêm Outbox, FCM hoặc notification inbox.
+
 **Token expiry trong long-lived connection:** Tracking middleware **chỉ verify JWT tại handshake**, KHÔNG re-verify mid-session. Client responsibility:
 
 - Proactive refresh token ~1 phút trước TTL.
@@ -2321,9 +2329,9 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `trip.trip.crew_changed` | Trip | Notification | `{ tripId, operatorId, oldDriverUserId, oldAssistantUserId?, driverUserId, assistantUserId?, routeName, vehiclePlateNumber?, departureDateTime }` |
 | `trip.trip.started` | Trip | Parcel (block new parcel), Tracking | `{ tripId, actualDepartureTime }` |
 | `trip.assignment.start_blocked` | Trip | Notification (operator) | Exact `{ eventId, occurredAt, tripId, operatorId, resourceRole, resourceId, conflictingSourceType, conflictingSourceId, conflictReason: RESOURCE_ACTIVE, blockingUntil? }`; emitted through Trip Outbox at most once per blocked Trip while any assigned reservation remains `ACTIVE`. Trip state is unchanged and Notification fans out to active operator admins. |
-| `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility) | `{ eventId, occurredAt, tripId, operatorId, terminalAt, completedAt, hasSubstitution }`; `completedAt` equals `terminalAt` and is retained as the Booking compatibility alias |
-| `trip.trip.disrupted` | Trip | Booking, Parcel, Payment | Exact `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution, reason? }`; Booking and Parcel execute disruption recovery only when `hasSubstitution=false`, while Payment records settlement eligibility for either value. The event never carries a Trip-wide traveled ratio. |
-| `trip.trip.cancelled` | Trip | Booking, Parcel | { eventId, occurredAt, tripId, operatorId, cancelledAt, cancelReason } |
+| `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility), Tracking (runtime cleanup) | `{ eventId, occurredAt, tripId, operatorId, terminalAt, completedAt, hasSubstitution }`; `completedAt` equals `terminalAt` and is retained as the Booking compatibility alias |
+| `trip.trip.disrupted` | Trip | Booking, Parcel, Payment, Tracking (runtime cleanup) | Exact `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution, reason? }`; Booking and Parcel execute disruption recovery only when `hasSubstitution=false`, while Payment records settlement eligibility for either value. The event never carries a Trip-wide traveled ratio. |
+| `trip.trip.cancelled` | Trip | Booking, Parcel, Tracking (runtime cleanup) | { eventId, occurredAt, tripId, operatorId, cancelledAt, cancelReason } |
 | `trip.trip.vehicle_swapped` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldVehicleId,newVehicleId,oldVehiclePlateNumber,newVehiclePlateNumber,departureDateTime,driverUserId,assistantUserId,seatImpacts:[{bookingId,seatNumbers,reason}] }`; `assistantUserId` present nullable, reasons exactly `SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED` |
 | `trip.trip.vehicle_substituted` | Trip | Booking, Parcel (Day 35) | Exact `{eventId,occurredAt,substitutionId,disruptedAt,operatorId,oldTripId,oldTripStatus,oldVehicleId,newTripId,newTripStatus,newVehicleId,newVehiclePlateNumber,newTripDepartureDateTime,actorUserId,reason,notifyPassengers,mappings:[{bookingId,passengerId,originalSeatNumber,newSeatNumber,originalBoardingStatus}]}`; exactly one fact per substitution; `occurredAt = disruptedAt`; `substitutionId = eventId`; `oldTripStatus=DISRUPTED`; `newTripStatus=BOARDING`; both `originalSeatNumber` and `newSeatNumber` are nullable; `originalBoardingStatus=BOARDED\|PENDING`; `payload.eventId == Outbox row id == RabbitMQ MessageId`. |
 | `trip.trip.route_changed` | Trip | Booking, Notification | { eventId, occurredAt, tripId, operatorId, tripStatus, alternativeRouteId, affectedBookings } |
@@ -3536,7 +3544,8 @@ Mọi key dùng pattern `<service>:<purpose>:<id>` để namespace per service. 
 | `tracking:eta_batch_lock:{tripId}` | Tracking | Owner-safe atomic ETA batch calculation lock | 10s |
 | `tracking:trip_delay_state:{tripId}:{stopId}` | Tracking | Evaluated delay state (`stopId`, `delayStatus`, `delayMinutes`, `evaluatedAt`); reads legacy trip-level key during rolling deploy | 24h |
 | `tracking:trip_delay_lock:{tripId}` | Tracking | Owner-safe delay state evaluation lock | 10s |
-| `tracking:off_route_since:{tripId}` | Tracking | Off-route timer start | đến clear |
+| `tracking:off_route_since:{tripId}` | Tracking | Off-route episode state (`firstDetectedAt`, `alertedAt?`, `lastRealtimeEmittedAt?`) | 24h hoặc route/terminal clear |
+| `tracking:off_route_lock:{tripId}` | Tracking | Owner-safe off-route transition/cleanup lock | 10s |
 | `tracking:active_trips` | Tracking | Set of active tripIds | — |
 | `tracking:approaching_notified:{tripId}:{bookingId}:w{1\|2}` | Tracking | Dedupe approaching alert | đến hết chuyến |
 | `notification:fcm_token_blacklist:{token}` | Notification | Cache invalid FCM tokens | 1d |
@@ -4139,6 +4148,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.69.0** | 2026-08-12 | Codex | **MINOR** — Add crew/fleet-only `trip:routeDeviation` realtime transitions: one durable `DEVIATED`, GPS-driven 60-second heartbeats without notification spam, and one `ROUTE_RESTORED`. Add per-Trip Redis locking, deterministic Outbox dedupe, and route-change/terminal cleanup fencing while retaining 500m/2-minute thresholds and `STOPS_ONLY` fallback. No endpoint, migration, dependency, or integration-event routing-key change. |
 | **1.68.0** | 2026-08-12 | Codex | **MINOR** — Run Trip auto-boarding every minute while preserving the T-30 threshold and existing 5/15-minute start/completion fallbacks. Add fail-open current vehicle plate enrichment to public/internal Booking history and the Ticket branch of passenger history via one existing Trip batch call per page; expose only nullable `vehicle { licensePlate }`. No route, migration, dependency, Gateway, or integration-event change. |
 | **1.67.0** | 2026-08-11 | Codex | **MINOR** — Complete Incident resolution, Location root-scope compatibility, canonical Parcel quote/token/fare-aware paging/recipient linking, durable cargo RELEASE recovery, and status-aware origin→stops→destination ETA over assigned TripStop snapshots. Add one required Incident mutation and one read-only internal POST exemption, raising executable idempotency inventory to 212/191/21. Add one reversible Parcel migration; no dependency or integration event. |
 | **1.66.0** | 2026-08-11 | Codex | **MINOR** — Separate User lock from Operator suspension: restricted suspended-admin sessions, tenant refresh/Firebase revocation, `operatorStatus` JWT propagation and Gateway whitelist, additive suspension/profile/login fields, and canonical `OPERATOR_SUSPENDED`. Standardize HTTP/security logging and startup warning fixes. Add AND-composable Location `type` and Trip leaf-code aliases while preserving legacy ward names. No dependency or schema migration. |
