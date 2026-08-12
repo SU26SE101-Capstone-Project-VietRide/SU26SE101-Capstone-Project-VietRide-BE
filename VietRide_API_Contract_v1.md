@@ -4866,6 +4866,33 @@ Server broadcasts to room `trip:{tripId}`:
 - `eta:batch:update`
 - `trip:statusChanged`
 
+Tracking broadcasts the operational event `trip:routeDeviation` only to
+`trip:crew:{tripId}` and `operator:{operatorId}:fleet`; it is never sent to the shared
+`trip:{tripId}` room:
+
+```jsonc
+{
+  "tripId": "uuid",
+  "status": "DEVIATED", // DEVIATED | ROUTE_RESTORED
+  "distanceMeters": 850,
+  "updatedAt": "2026-08-12T16:30:00+07:00"
+}
+```
+
+Off-route means a raw GPS coordinate remained more than 500 metres from the cached effective
+route for more than 120 seconds. The initial `DEVIATED` creates the existing durable
+`tracking.gps.off_route` alert; while the vehicle remains off-route, the first accepted GPS update
+at least 60 seconds after the previous realtime emit produces a `DEVIATED` heartbeat with a fresh
+distance but no additional Outbox, FCM or inbox notification. The first GPS update at or within
+500 metres then emits one `ROUTE_RESTORED`. `updatedAt` is the triggering GPS `recordedAt` instant
+serialized by the public `Asia/Ho_Chi_Minh` convention. `distanceMeters` is a required non-negative
+integer for both statuses.
+
+Effective AlternativeRoute geometry is used when assigned. `STOPS_ONLY` remains a valid fallback;
+missing/unavailable geometry or fewer than two points skips evaluation. Route changes reset the
+off-route episode without emitting a false restore. `COMPLETED`, `CANCELLED` and `DISRUPTED` clear
+runtime state without emitting `ROUTE_RESTORED`; FE clears its banner from the terminal Trip fact.
+
 Driver và Assistant được Tracking tự động tham gia thêm room nội bộ
 `trip:crew:{tripId}`. Khi manifest thay đổi, Tracking chỉ broadcast các event booking vào crew
 room; Passenger room không nhận. `booking:created` được giữ tương thích, còn client mới dùng

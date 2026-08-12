@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-11 (Incident resolve, Parcel quote/recovery, recipient link, and assigned-route ETA reconciliation)
+> **Cập nhật:** 2026-08-12 (Off-route realtime transitions, heartbeat, and terminal cleanup)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -2479,8 +2479,13 @@ Background job (BullMQ scheduled job — chạy mỗi 5–10 phút trong Trackin
    Algorithm:
      1. Với mỗi GPS update, tính khoảng cách từ lat/lng xe đến segment đường route gần nhất
      2. Nếu distance > 500m: bắt đầu đếm timer (lưu Redis key off_route_since:{tripId})
-     3. Nếu khoảng cách về < 500m trước 2 phút: clear timer (false alarm)
-     4. Nếu timer đạt 2 phút liên tục: gửi OffRouteAlert event → Notification Service
+     3. Nếu khoảng cách về <= 500m trước 2 phút: clear timer (false alarm)
+     4. Nếu timer vượt 2 phút liên tục: gửi một OffRouteAlert event → Notification Service và
+        phát Socket.IO `trip:routeDeviation { status: DEVIATED }` cho crew + operator fleet
+     5. Khi vẫn lệch, GPS hợp lệ đầu tiên sau mỗi khoảng ít nhất 60 giây phát heartbeat
+        `DEVIATED` mới nhưng không tạo thêm notification; khi về <= 500m phát đúng một
+        `ROUTE_RESTORED`. Route change hoặc Trip terminal chỉ clear runtime state, không phát
+        restored giả.
    ```
 2. **Tài xế/phụ xe báo:** Nhận thấy đường tắc hoặc sự cố, tài xế báo trực tiếp qua app (nút "Báo sự cố") → operator nhận notification
 
@@ -5073,7 +5078,8 @@ Mọi key dùng pattern `<service>:<purpose>:<id>` để namespace per service. 
 | `tracking:latest:{tripId}` | Tracking | Last known GPS position per trip | 5 phút |
 | `tracking:gps_buffer:{tripId}` | Tracking | GPS trail buffer (list) trước batch write | đến khi flush |
 | `tracking:eta:{tripId}:{stopId}` | Tracking | Dynamic ETA cached | 60 giây |
-| `tracking:off_route_since:{tripId}` | Tracking | Off-route timer (start time) | đến khi clear |
+| `tracking:off_route_since:{tripId}` | Tracking | Off-route episode state (first detection, alert, realtime heartbeat) | 24 giờ hoặc route/terminal clear |
+| `tracking:off_route_lock:{tripId}` | Tracking | Owner-safe off-route transition/cleanup lock | 10 giây |
 | `tracking:active_trips` | Tracking | Set of active tripIds (membership) | — |
 | `tracking:approaching_notified:{tripId}:{bookingId}:w{1\|2}` | Tracking | Dedupe approaching alert (2 waves) | đến hết chuyến |
 | `notification:fcm_token_blacklist:{token}` | Notification | Cache invalid FCM tokens | 1 ngày |

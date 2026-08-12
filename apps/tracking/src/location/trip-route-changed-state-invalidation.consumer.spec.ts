@@ -3,6 +3,7 @@ import type { RedisService } from '@vietride/nest-redis';
 import type { ConsumeMessage } from 'amqplib';
 import type { TripDataProvider } from '../eta/trip-data.provider';
 import type { RouteGeometryProvider } from '../off-route/route-geometry.provider';
+import type { OffRouteService } from '../off-route/off-route.service';
 import { trackingTripDelayStateKey } from '../trip-delay/trip-delay.constants';
 import { RouteStateGenerationRegistry } from '../route-state/route-state-generation.registry';
 import { TripRouteChangedStateInvalidationConsumer } from './trip-route-changed-state-invalidation.consumer';
@@ -44,9 +45,9 @@ describe('TripRouteChangedStateInvalidationConsumer', () => {
     expect(fixture.tripData.invalidateRouteStops).toHaveBeenCalledWith(TRIP_ID);
     expect(fixture.routeGeometry.invalidateRouteGeometry).toHaveBeenCalledWith(TRIP_ID);
     expect(fixture.routeStateGeneration.capture(TRIP_ID)).toBe(1);
+    expect(fixture.offRoute.clearRuntimeState).toHaveBeenCalledWith(TRIP_ID);
     expect(fixture.redisClient.del).toHaveBeenCalledWith(
       `tracking:eta_state:${TRIP_ID}`,
-      `tracking:off_route_since:${TRIP_ID}`,
       trackingTripDelayStateKey(TRIP_ID),
     );
     expect(fixture.redisClient.del).toHaveBeenCalledWith(`tracking:eta:${TRIP_ID}:${STOP_ID}`);
@@ -143,12 +144,16 @@ function createFixture() {
     invalidateRouteGeometry: jest.fn(),
   } as jest.Mocked<RouteGeometryProvider>;
   const routeStateGeneration = new RouteStateGenerationRegistry();
+  const offRoute = {
+    clearRuntimeState: jest.fn(),
+  } as unknown as jest.Mocked<OffRouteService>;
   const consumer = new TripRouteChangedStateInvalidationConsumer(
     { subscribe } as unknown as RabbitMqConsumer,
     { getClient: () => redisClient } as unknown as RedisService,
     tripData,
     routeGeometry,
     routeStateGeneration,
+    offRoute,
   );
 
   return {
@@ -158,6 +163,7 @@ function createFixture() {
     tripData,
     routeGeometry,
     routeStateGeneration,
+    offRoute,
     getHandler: () => handler,
   };
 }
