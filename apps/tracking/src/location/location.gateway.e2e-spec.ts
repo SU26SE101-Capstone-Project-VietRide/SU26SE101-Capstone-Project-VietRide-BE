@@ -447,6 +447,71 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     otherOperator.disconnect();
   });
 
+  it.each(['DEVIATED', 'ROUTE_RESTORED'] as const)(
+    'broadcasts trip:routeDeviation %s only to Trip crew and the matching operator fleet',
+    async (status) => {
+      const assistant = await connectSocket(
+        await signIdentityToken('ASSISTANT', TEST_OPERATOR_ID),
+      );
+      const passenger = await connectSocket(await signIdentityToken('PASSENGER'));
+      const otherCrew = await connectSocket(
+        await signIdentityToken('ASSISTANT', TEST_OPERATOR_ID),
+      );
+      const operator = await connectSocket(
+        await signIdentityToken('OPERATOR_ADMIN', TEST_OPERATOR_ID),
+      );
+      const otherOperator = await connectSocket(
+        await signIdentityToken('OPERATOR_ADMIN', OTHER_OPERATOR_ID),
+      );
+      const driver = await connectSocket(await signIdentityToken('DRIVER', TEST_OPERATOR_ID));
+      const otherTripId = '99999999-9999-4999-8999-999999999999';
+      await emitWithAck<JoinTripTrackingAck>(assistant, 'joinTripTracking', {
+        tripId: TEST_TRIP_ID,
+      });
+      await emitWithAck<JoinTripTrackingAck>(passenger, 'joinTripTracking', {
+        tripId: TEST_TRIP_ID,
+      });
+      await emitWithAck<JoinTripTrackingAck>(otherCrew, 'joinTripTracking', {
+        tripId: otherTripId,
+      });
+      await emitWithAck<JoinTripTrackingAck>(operator, 'joinOperatorFleet', {});
+      await emitWithAck<JoinTripTrackingAck>(otherOperator, 'joinOperatorFleet', {});
+
+      const deviation = {
+        tripId: TEST_TRIP_ID,
+        status,
+        distanceMeters: status === 'DEVIATED' ? 850 : 120,
+        updatedAt: '2026-06-03T10:00:00.000Z',
+      };
+      offRouteHandleGpsUpdate.mockResolvedValueOnce(deviation);
+      const crewEvent = waitForEvent<Record<string, unknown>>(assistant, 'trip:routeDeviation');
+      const operatorEvent = waitForEvent<Record<string, unknown>>(operator, 'trip:routeDeviation');
+      const passengerListener = jest.fn();
+      const otherCrewListener = jest.fn();
+      const otherOperatorListener = jest.fn();
+      passenger.on('trip:routeDeviation', passengerListener);
+      otherCrew.on('trip:routeDeviation', otherCrewListener);
+      otherOperator.on('trip:routeDeviation', otherOperatorListener);
+
+      await expect(emitWithAck<GpsUpdateAck>(driver, 'gps:update', createGpsPayload()))
+        .resolves.toEqual({ success: true });
+      const expectedDeviation = transformFrontendTimestamps(deviation);
+      await expect(crewEvent).resolves.toEqual(expectedDeviation);
+      await expect(operatorEvent).resolves.toEqual(expectedDeviation);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(passengerListener).not.toHaveBeenCalled();
+      expect(otherCrewListener).not.toHaveBeenCalled();
+      expect(otherOperatorListener).not.toHaveBeenCalled();
+
+      assistant.disconnect();
+      passenger.disconnect();
+      otherCrew.disconnect();
+      operator.disconnect();
+      otherOperator.disconnect();
+      driver.disconnect();
+    },
+  );
+
   it('keeps gps:update successful when the trip is absent from the fleet projection', async () => {
     const debugSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
     const operator = await connectSocket(

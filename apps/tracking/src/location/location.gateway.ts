@@ -370,7 +370,7 @@ export class LocationGateway implements OnGatewayInit {
       .emit('gps:update', transformFrontendTimestamps(event));
     void this.publishFleetGps(user, event);
     this.publishSharedGps(event);
-    void this.runDetection(event, result.rawEvent).catch((error) => {
+    void this.runDetection(user, event, result.rawEvent).catch((error) => {
       this.logger.error(
         `Tracking detection chain failed for trip ${event.tripId}: ${(error as Error).message}`,
       );
@@ -411,8 +411,23 @@ export class LocationGateway implements OnGatewayInit {
     }
   }
 
-  private async runDetection(event: GpsUpdateEvent, rawEvent: GpsUpdateEvent): Promise<void> {
-    await this.offRouteService.handleGpsUpdate(rawEvent);
+  private async runDetection(
+    user: TrackingUser,
+    event: GpsUpdateEvent,
+    rawEvent: GpsUpdateEvent,
+  ): Promise<void> {
+    const routeDeviation = await this.offRouteService.handleGpsUpdate(rawEvent);
+    if (routeDeviation) {
+      const payload = transformFrontendTimestamps(routeDeviation);
+      this.server
+        .to(trackingTripCrewRoom(event.tripId))
+        .emit('trip:routeDeviation', payload);
+      if (user.operatorId) {
+        this.server
+          .to(trackingOperatorFleetRoom(user.operatorId))
+          .emit('trip:routeDeviation', payload);
+      }
+    }
     const etaUpdate = await this.etaService.handleGpsUpdate(event);
     if (etaUpdate) {
       const { etas, ...primaryEtaUpdate } = etaUpdate;
