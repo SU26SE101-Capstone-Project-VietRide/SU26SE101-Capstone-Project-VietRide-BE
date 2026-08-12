@@ -64,7 +64,10 @@ public sealed class GetBookingHistoryQueryHandlerTests
         tripClient.GetHistoryVehicleSummariesAsync(
                 Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(new[] { booking.TripId })),
                 Arg.Any<CancellationToken>())
-            .Returns([new TripHistoryVehicleSummary(booking.TripId, "51B-123.45")]);
+            .Returns([new TripHistoryVehicleSummary(
+                booking.TripId,
+                "51B-123.45",
+                new TripHistoryVehicleTypeSummary("LIMOUSINE", "Limousine"))]);
         var handler = new GetBookingHistoryQueryHandler(repository, paymentLookup, tripClient);
 
         var result = await handler.Handle(
@@ -90,7 +93,9 @@ public sealed class GetBookingHistoryQueryHandlerTests
             "ISSUED",
             350_000));
         item.PaymentRedirectUrl.Should().BeNull();
-        item.Vehicle.Should().BeEquivalentTo(new BookingHistoryVehicleDto("51B-123.45"));
+        item.Vehicle.Should().BeEquivalentTo(new BookingHistoryVehicleDto(
+            "51B-123.45",
+            new BookingHistoryVehicleTypeDto("LIMOUSINE", "Limousine")));
         await paymentLookup.DidNotReceiveWithAnyArgs()
             .LookupAsync(default, default!, default);
     }
@@ -280,6 +285,28 @@ public sealed class GetBookingHistoryQueryHandlerTests
             .Should().Be(typeof(Task<ActionResult<PagedResult<BookingHistoryItemDto>>>));
         typeof(InternalBookingsController).GetMethod(nameof(InternalBookingsController.GetHistoryAsync))!.ReturnType
             .Should().Be(typeof(Task<ActionResult<PagedResult<BookingHistoryItemDto>>>));
+    }
+
+    [Fact]
+    public void BookingHistoryVehicleDto_AlwaysSerializesNullableVehicleType()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        };
+
+        using var legacy = JsonDocument.Parse(JsonSerializer.Serialize(
+            new BookingHistoryVehicleDto("51B-123.45"), options));
+        using var enriched = JsonDocument.Parse(JsonSerializer.Serialize(
+            new BookingHistoryVehicleDto(
+                "51B-123.45",
+                new BookingHistoryVehicleTypeDto("LIMOUSINE", "Limousine")), options));
+
+        legacy.RootElement.TryGetProperty("vehicleType", out var legacyType).Should().BeTrue();
+        legacyType.ValueKind.Should().Be(JsonValueKind.Null);
+        var enrichedType = enriched.RootElement.GetProperty("vehicleType");
+        enrichedType.GetProperty("code").GetString().Should().Be("LIMOUSINE");
+        enrichedType.GetProperty("displayName").GetString().Should().Be("Limousine");
     }
 
     [Fact]

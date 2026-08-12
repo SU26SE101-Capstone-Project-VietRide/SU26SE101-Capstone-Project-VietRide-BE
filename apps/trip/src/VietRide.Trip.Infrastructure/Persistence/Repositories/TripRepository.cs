@@ -62,6 +62,8 @@ internal sealed class TripRepository : ITripRepository
                    v.id,
                    v.license_plate,
                    v.status::text,
+                   vt.code,
+                   vt.display_name,
                    t.driver_user_id,
                    t.assistant_user_id
             FROM vietride_trip.trips AS t
@@ -69,6 +71,7 @@ internal sealed class TripRepository : ITripRepository
             INNER JOIN vietride_trip.stations AS origin ON origin.id = r.origin_station_id
             INNER JOIN vietride_trip.stations AS destination ON destination.id = r.destination_station_id
             INNER JOIN vietride_trip.vehicles AS v ON v.id = t.vehicle_id
+            INNER JOIN vietride_trip.vehicle_types AS vt ON vt.id = v.vehicle_type_id
             WHERE t.id = ANY(@trip_ids)
             ORDER BY t.id;
             """;
@@ -91,9 +94,12 @@ internal sealed class TripRepository : ITripRepository
                 new InternalTripVehicleSummaryDto(
                     reader.GetGuid(8),
                     reader.GetString(9),
-                    reader.GetString(10)),
-                reader.GetGuid(11),
-                reader.IsDBNull(12) ? null : reader.GetGuid(12)));
+                    reader.GetString(10),
+                    new InternalTripVehicleTypeSummaryDto(
+                        reader.GetString(11),
+                        reader.GetString(12))),
+                reader.GetGuid(13),
+                reader.IsDBNull(14) ? null : reader.GetGuid(14)));
         }
 
         return summaries;

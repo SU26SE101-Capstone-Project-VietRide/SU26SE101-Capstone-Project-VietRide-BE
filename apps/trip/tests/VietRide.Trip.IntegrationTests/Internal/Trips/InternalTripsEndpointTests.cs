@@ -48,7 +48,11 @@ public sealed class InternalTripsEndpointTests
             DateTimeOffset.Parse("2026-07-29T01:00:00Z"),
             DateTimeOffset.Parse("2026-07-29T08:00:00Z"),
             new InternalTripRouteSummaryDto(routeId, "HCM - Da Lat", "HCM", "Da Lat"),
-            new InternalTripVehicleSummaryDto(vehicleId, "51B-123.45", "MAINTENANCE"),
+            new InternalTripVehicleSummaryDto(
+                vehicleId,
+                "51B-123.45",
+                "MAINTENANCE",
+                new InternalTripVehicleTypeSummaryDto("LIMOUSINE", "Limousine")),
             driverUserId,
             null);
         var mediator = new StubMediator(_ => new[] { summary });
@@ -65,6 +69,9 @@ public sealed class InternalTripsEndpointTests
         document.RootElement[0].GetProperty("tripId").GetGuid().Should().Be(tripId);
         document.RootElement[0].GetProperty("route").GetProperty("routeId").GetGuid().Should().Be(routeId);
         document.RootElement[0].GetProperty("vehicle").GetProperty("vehicleId").GetGuid().Should().Be(vehicleId);
+        var vehicleType = document.RootElement[0].GetProperty("vehicle").GetProperty("vehicleType");
+        vehicleType.GetProperty("code").GetString().Should().Be("LIMOUSINE");
+        vehicleType.GetProperty("displayName").GetString().Should().Be("Limousine");
         document.RootElement[0].GetProperty("driverUserId").GetGuid().Should().Be(driverUserId);
         mediator.LastRequest.Should().BeOfType<BatchTripSummariesQuery>()
             .Which.TripIds.Should().Equal(tripId);

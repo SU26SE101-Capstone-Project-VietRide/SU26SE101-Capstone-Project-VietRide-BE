@@ -296,9 +296,11 @@ function makeFixture(now = new Date()) {
     phoneTail,
     password,
     operatorId: randomUUID(),
+    operatorSubscriptionId: randomUUID(),
     systemAdminId: null,
     operatorAdminId: null,
     operatorStaffId: null,
+    passengerId: null,
     routeId: randomUUID(),
     originStationId: randomUUID(),
     destinationStationId: randomUUID(),
@@ -308,6 +310,11 @@ function makeFixture(now = new Date()) {
     bookingId: randomUUID(),
     bookingPassengerId: randomUUID(),
     bookingStatusHistoryId: randomUUID(),
+    passengerBookingId: randomUUID(),
+    passengerRecordId: randomUUID(),
+    passengerTicketId: randomUUID(),
+    passengerTicketCode: `VT-${time.currentDate.replaceAll('-', '')}-${suffix.slice(0, 8).toUpperCase()}`,
+    passengerBookingCode: `VR-${time.currentDate.replaceAll('-', '')}-${suffix.slice(0, 8).toUpperCase()}`,
     bookingStatsId: randomUUID(),
     parcelId: randomUUID(),
     parcelStatusHistoryId: randomUUID(),
@@ -322,7 +329,11 @@ function makeFixture(now = new Date()) {
     systemEmail: `ui25-system-${suffix}@example.test`,
     operatorEmail: `ui25-operator-${suffix}@example.test`,
     staffEmail: `ui25-staff-${suffix}@example.test`,
-    registrationKeys: [randomUUID(), randomUUID(), randomUUID()],
+    passengerEmail: `ui25-passenger-${suffix}@example.test`,
+    vehicleTypeCode: `UI25${suffix.slice(0, 4).toUpperCase()}`,
+    vehicleTypeDisplayName: 'UI-25 Custom Coach',
+    vehicleLicensePlate: '51B-25025',
+    registrationKeys: [randomUUID(), randomUUID(), randomUUID(), randomUUID()],
     adminPolicyCreateKey: randomUUID(),
     adminPolicyUpdateKey: randomUUID(),
     adminPolicyDeleteKey: randomUUID(),
@@ -389,10 +400,18 @@ async function seedIdentity(fixture) {
     `+8496${fixture.phoneTail}`,
     fixture.registrationKeys[2],
   );
+  await registerFixtureUser(
+    fixture.passengerEmail,
+    fixture.password,
+    'UI-25 Passenger',
+    `+8494${fixture.phoneTail}`,
+    fixture.registrationKeys[3],
+  );
 
   fixture.systemAdminId = identityUserId(fixture.systemEmail);
   fixture.operatorAdminId = identityUserId(fixture.operatorEmail);
   fixture.operatorStaffId = identityUserId(fixture.staffEmail);
+  fixture.passengerId = identityUserId(fixture.passengerEmail);
 
   psql(
     'vietride_identity',
@@ -406,6 +425,13 @@ INSERT INTO operators (
   'UI25-${fixture.suffix}-TAX','${fixture.operatorEmail}','+84950000025',
   'APPROVED',now(),true,'https://example.test/ui25-operator.png','UI-25 Representative','+84950000026'
 );
+INSERT INTO operator_subscriptions (
+  id,operator_id,active_plan_id,status,started_at,expires_at,payment_method,billing_period
+) VALUES (
+  '${fixture.operatorSubscriptionId}','${fixture.operatorId}',
+  '00000000-0000-0000-0000-000000000001','ACTIVE',now(),now() + interval '30 days',
+  'WALLET','MONTHLY'
+);
 UPDATE users SET role='SYSTEM_ADMIN',status='ACTIVE',operator_id=NULL,deleted_at=NULL,
   failed_login_attempts=0,last_failed_login_at=NULL,locked_from_status=NULL
 WHERE id='${fixture.systemAdminId}';
@@ -415,6 +441,9 @@ WHERE id='${fixture.operatorAdminId}';
 UPDATE users SET role='OPERATOR_STAFF',status='ACTIVE',operator_id='${fixture.operatorId}',deleted_at=NULL,
   failed_login_attempts=0,last_failed_login_at=NULL,locked_from_status=NULL
 WHERE id='${fixture.operatorStaffId}';
+UPDATE users SET role='PASSENGER',status='ACTIVE',operator_id=NULL,deleted_at=NULL,
+  failed_login_attempts=0,last_failed_login_at=NULL,locked_from_status=NULL
+WHERE id='${fixture.passengerId}';
 COMMIT;`,
   );
 
@@ -422,6 +451,7 @@ COMMIT;`,
     systemAdmin: await login(fixture.systemEmail, fixture.password, 'SYSTEM_ADMIN'),
     operatorAdmin: await login(fixture.operatorEmail, fixture.password, 'OPERATOR_ADMIN'),
     operatorStaff: await login(fixture.staffEmail, fixture.password, 'OPERATOR_STAFF'),
+    passenger: await login(fixture.passengerEmail, fixture.password, 'PASSENGER'),
   };
 }
 
@@ -430,23 +460,23 @@ function seedTrip(fixture) {
     'vietride_trip',
     `SET search_path TO vietride_trip, public;
 BEGIN;
-INSERT INTO stations (id,name,slug,address_street,city,province,latitude,longitude,supports_shuttle,is_active)
+INSERT INTO stations (id,name,slug,address_street,city,latitude,longitude,supports_shuttle,is_active)
 VALUES
- ('${fixture.originStationId}','UI-25 Origin','ui25-origin-${fixture.suffix}','1 Origin','Hồ Chí Minh','Hồ Chí Minh',10.77,106.70,false,true),
- ('${fixture.destinationStationId}','UI-25 Destination','ui25-destination-${fixture.suffix}','2 Destination','Đà Lạt','Lâm Đồng',11.94,108.44,false,true);
+ ('${fixture.originStationId}','UI-25 Origin','ui25-origin-${fixture.suffix}','1 Origin','Hồ Chí Minh',10.77,106.70,false,true),
+ ('${fixture.destinationStationId}','UI-25 Destination','ui25-destination-${fixture.suffix}','2 Destination','Đà Lạt',11.94,108.44,false,true);
 INSERT INTO routes (id,operator_id,name,origin_station_id,destination_station_id,base_fare,is_active)
 VALUES ('${fixture.routeId}','${fixture.operatorId}','UI-25 HCM - Đà Lạt','${fixture.originStationId}','${fixture.destinationStationId}',100000,true);
 INSERT INTO vehicle_types (id,code,display_name,default_seat_count,is_system_defined,is_active)
-VALUES ('${fixture.vehicleTypeId}','UI25${fixture.suffix.slice(0, 4).toUpperCase()}','UI-25 Coach',40,false,true);
+VALUES ('${fixture.vehicleTypeId}','${fixture.vehicleTypeCode}','${fixture.vehicleTypeDisplayName}',40,false,true);
 INSERT INTO vehicles (id,operator_id,vehicle_type_id,license_plate,seat_layout_json,total_seats,max_cargo_weight_kg,max_cargo_volume_m3,status,is_active)
-VALUES ('${fixture.vehicleId}','${fixture.operatorId}','${fixture.vehicleTypeId}','51B-25025','{}'::jsonb,40,1000,20,'ACTIVE',true);
+VALUES ('${fixture.vehicleId}','${fixture.operatorId}','${fixture.vehicleTypeId}','${fixture.vehicleLicensePlate}','{}'::jsonb,40,1000,20,'ACTIVE',true);
 INSERT INTO trips (
  id,operator_id,route_id,vehicle_id,driver_user_id,departure_date_time,estimated_arrival_time,
- completed_at,status,source,base_fare,max_cargo_weight_kg
+ completed_at,status,source,base_fare,max_cargo_weight_kg,seat_layout_snapshot_json
  ) VALUES (
   '${fixture.tripId}','${fixture.operatorId}','${fixture.routeId}','${fixture.vehicleId}','${fixture.operatorStaffId}',
   '${fixture.currentDate}T08:00:00+07:00','${fixture.currentDate}T11:00:00+07:00',
-  '${fixture.currentDate}T11:00:00+07:00','COMPLETED','MANUAL',100000,1000
+  '${fixture.currentDate}T11:00:00+07:00','COMPLETED','MANUAL',100000,1000,'{}'::jsonb
 );
 COMMIT;`,
   );
@@ -476,6 +506,29 @@ VALUES ('${fixture.bookingPassengerId}','${fixture.bookingId}','A01','BOARDED');
 INSERT INTO booking_status_history (id,booking_id,status,occurred_at,source)
 VALUES ('${fixture.bookingStatusHistoryId}','${fixture.bookingId}','COMPLETED',
         '${fixture.currentDate}T11:00:00+07:00','UI25_E2E');
+INSERT INTO bookings (
+ id,booking_code,passenger_user_id,trip_id,operator_id,pickup_station_id,dropoff_station_id,
+ base_fare,discount_amount,total_amount,status,trip_snapshot_origin_name,trip_snapshot_dest_name,
+ trip_snapshot_departure,trip_snapshot_route_name,trip_current_departure,confirmed_at,
+ buyer_display_name,buyer_email,buyer_phone,created_at,updated_at
+) VALUES (
+ '${fixture.passengerBookingId}','${fixture.passengerBookingCode}','${fixture.passengerId}','${fixture.tripId}',
+ '${fixture.operatorId}','${fixture.originStationId}','${fixture.destinationStationId}',100000,0,100000,
+ 'CONFIRMED','UI-25 Origin','UI-25 Destination','${fixture.currentDate}T08:00:00+07:00','UI-25 HCM - Đà Lạt',
+ '${fixture.currentDate}T08:00:00+07:00','${fixture.currentDate}T07:30:00+07:00',
+ 'UI-25 Passenger','${fixture.passengerEmail}','+8494${fixture.phoneTail}',
+ '${fixture.currentDate}T07:30:00+07:00','${fixture.fixtureInstantUtc}'
+);
+INSERT INTO passengers (id,booking_id,seat_number,boarding_status)
+VALUES ('${fixture.passengerRecordId}','${fixture.passengerBookingId}','B02','PENDING');
+INSERT INTO tickets (
+ id,booking_id,passenger_id,ticket_code,seat_number,status,fare_amount,discount_amount,paid_amount,
+ issued_at,created_at,updated_at
+) VALUES (
+ '${fixture.passengerTicketId}','${fixture.passengerBookingId}','${fixture.passengerRecordId}',
+ '${fixture.passengerTicketCode}','B02','ISSUED',100000,0,100000,
+ '${fixture.currentDate}T07:30:00+07:00','${fixture.currentDate}T07:30:00+07:00','${fixture.fixtureInstantUtc}'
+);
 INSERT INTO booking_stats (
  id,operator_id,operator_name,stat_date,trip_id,total_bookings,total_confirmed,total_cancelled,
  total_no_show,total_completed,total_revenue,total_refunded,total_seats_booked,updated_at
@@ -485,6 +538,52 @@ INSERT INTO booking_stats (
 );
 COMMIT;`,
   );
+}
+
+function assertTicketVehicle(item, fixture, vehicleSelector) {
+  const vehicle = vehicleSelector(item);
+  assert(vehicle, `Ticket history omitted vehicle for booking ${fixture.passengerBookingId}`);
+  assert.equal(vehicle.licensePlate, fixture.vehicleLicensePlate);
+  assert.equal(vehicle.vehicleType?.code, fixture.vehicleTypeCode);
+  assert.equal(vehicle.vehicleType?.displayName, fixture.vehicleTypeDisplayName);
+}
+
+async function verifyPassengerTicketHistory(fixture, passengerToken) {
+  const bookingResult = await api('GET', '/v1/bookings/history?page=1&pageSize=100', {
+    token: passengerToken,
+  });
+  assert.equal(bookingResult.response.status, 200, 'Passenger Booking history request failed');
+  assert.equal(bookingResult.json?.success, true, 'Passenger Booking history envelope failed');
+  const bookingItems = bookingResult.json?.data?.items;
+  assert(Array.isArray(bookingItems), 'Passenger Booking history returned no item array');
+  const ownedBooking = bookingItems.find((item) => item.bookingId === fixture.passengerBookingId);
+  assert(ownedBooking, 'Passenger Booking history omitted the owned fixture booking');
+  assert(
+    !bookingItems.some((item) => item.bookingId === fixture.bookingId),
+    'Passenger Booking history leaked another user booking',
+  );
+  assert.equal(ownedBooking.bookingCode, fixture.passengerBookingCode);
+  assert.equal(ownedBooking.tickets?.[0]?.ticketCode, fixture.passengerTicketCode);
+  assertTicketVehicle(ownedBooking, fixture, (item) => item.vehicle);
+
+  const facadeResult = await api(
+    'GET',
+    '/v1/passenger/history?type=TICKET&page=1&pageSize=100',
+    { token: passengerToken },
+  );
+  assert.equal(facadeResult.response.status, 200, 'Passenger History TICKET request failed');
+  assert.equal(facadeResult.json?.success, true, 'Passenger History TICKET envelope failed');
+  const facadeItems = facadeResult.json?.data?.items;
+  assert(Array.isArray(facadeItems), 'Passenger History TICKET returned no item array');
+  const ownedFacadeItem = facadeItems.find((item) => item.id === fixture.passengerBookingId);
+  assert(ownedFacadeItem, 'Passenger History TICKET omitted the owned fixture booking');
+  assert(
+    !facadeItems.some((item) => item.id === fixture.bookingId),
+    'Passenger History TICKET leaked another user booking',
+  );
+  assert.equal(ownedFacadeItem.code, fixture.passengerBookingCode);
+  assert.equal(ownedFacadeItem.ticket?.tickets?.[0]?.ticketCode, fixture.passengerTicketCode);
+  assertTicketVehicle(ownedFacadeItem, fixture, (item) => item.ticket?.vehicle);
 }
 
 function seedParcel(fixture) {
@@ -645,12 +744,8 @@ function runNewman(fixture, tokens) {
       'cli',
     ];
     if (process.platform === 'win32') {
-      const commandLine = ['npx', ...newmanArgs]
-        .map((value) =>
-          /\s/.test(String(value)) ? `"${String(value).replaceAll('"', '\\"')}"` : String(value),
-        )
-        .join(' ');
-      run(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', commandLine], { inherit: true });
+      const npxCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js');
+      run(process.execPath, [npxCli, ...newmanArgs], { inherit: true });
     } else {
       run('npx', newmanArgs, { inherit: true });
     }
@@ -761,7 +856,7 @@ SELECT lower(email) || '|' || id
 FROM users
 WHERE lower(email) IN (lower(${sqlLiteral(fixture.systemEmail)}),lower(${sqlLiteral(
       fixture.operatorEmail,
-    )}),lower(${sqlLiteral(fixture.staffEmail)}));`,
+    )}),lower(${sqlLiteral(fixture.staffEmail)}),lower(${sqlLiteral(fixture.passengerEmail)}));`,
     true,
   )
     .split(/\r?\n/)
@@ -770,6 +865,7 @@ WHERE lower(email) IN (lower(${sqlLiteral(fixture.systemEmail)}),lower(${sqlLite
   fixture.systemAdminId ??= idsByEmail.get(fixture.systemEmail.toLowerCase()) || null;
   fixture.operatorAdminId ??= idsByEmail.get(fixture.operatorEmail.toLowerCase()) || null;
   fixture.operatorStaffId ??= idsByEmail.get(fixture.staffEmail.toLowerCase()) || null;
+  fixture.passengerId ??= idsByEmail.get(fixture.passengerEmail.toLowerCase()) || null;
 }
 
 function runCleanupStages(stages) {
@@ -832,11 +928,13 @@ COMMIT;`,
       'vietride_booking',
       `SET search_path TO vietride_booking, public;
 BEGIN;
-DELETE FROM booking_status_history WHERE booking_id='${fixture.bookingId}';
-DELETE FROM passengers WHERE booking_id='${fixture.bookingId}';
+DELETE FROM tickets WHERE id='${fixture.passengerTicketId}'
+   OR booking_id IN ('${fixture.bookingId}','${fixture.passengerBookingId}');
+DELETE FROM booking_status_history WHERE booking_id IN ('${fixture.bookingId}','${fixture.passengerBookingId}');
+DELETE FROM passengers WHERE booking_id IN ('${fixture.bookingId}','${fixture.passengerBookingId}');
 DELETE FROM platform_booking_stats WHERE booking_id='${fixture.bookingId}';
 DELETE FROM booking_stats WHERE id='${fixture.bookingStatsId}';
-DELETE FROM bookings WHERE id='${fixture.bookingId}';
+DELETE FROM bookings WHERE id IN ('${fixture.bookingId}','${fixture.passengerBookingId}');
 COMMIT;`,
     )],
     ['Trip fixtures', () => psql(
@@ -853,7 +951,12 @@ DELETE FROM stations WHERE id IN ('${fixture.originStationId}','${fixture.destin
 COMMIT;`,
     )],
     ['Identity fixtures', () => {
-      const userIds = [fixture.systemAdminId, fixture.operatorAdminId, fixture.operatorStaffId].filter(Boolean);
+      const userIds = [
+        fixture.systemAdminId,
+        fixture.operatorAdminId,
+        fixture.operatorStaffId,
+        fixture.passengerId,
+      ].filter(Boolean);
       const list = userIds.length
         ? userIds.map(sqlLiteral).join(',')
         : "'00000000-0000-0000-0000-000000000000'";
@@ -865,7 +968,7 @@ CREATE TEMP TABLE ui25_owned_users ON COMMIT DROP AS
   SELECT id FROM users
   WHERE lower(email) IN (lower(${sqlLiteral(fixture.systemEmail)}),lower(${sqlLiteral(
         fixture.operatorEmail,
-      )}),lower(${sqlLiteral(fixture.staffEmail)}));
+      )}),lower(${sqlLiteral(fixture.staffEmail)}),lower(${sqlLiteral(fixture.passengerEmail)}));
 DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM ui25_owned_users);
 DELETE FROM email_verification_tokens WHERE user_id IN (SELECT id FROM ui25_owned_users);
 DELETE FROM activity_logs WHERE user_id IN (SELECT id FROM ui25_owned_users);
@@ -874,6 +977,8 @@ DELETE FROM outbox_events WHERE payload::text LIKE '%${fixture.runId}%'
     ? userIds.map((id) => `payload::text LIKE '%${id}%'`).join(' OR ')
     : 'false'};
 DELETE FROM users WHERE id IN (SELECT id FROM ui25_owned_users) OR id IN (${list});
+DELETE FROM operator_subscriptions WHERE id='${fixture.operatorSubscriptionId}'
+   OR operator_id='${fixture.operatorId}';
 DELETE FROM operators WHERE id='${fixture.operatorId}';
 COMMIT;`,
       );
@@ -887,7 +992,12 @@ function verifyCleanup(fixture) {
   const policyIdsSql = policyIds.length
     ? policyIds.map(sqlLiteral).join(',')
     : "'00000000-0000-0000-0000-000000000000'";
-  const userIds = [fixture.systemAdminId, fixture.operatorAdminId, fixture.operatorStaffId].filter(Boolean);
+  const userIds = [
+    fixture.systemAdminId,
+    fixture.operatorAdminId,
+    fixture.operatorStaffId,
+    fixture.passengerId,
+  ].filter(Boolean);
   const userIdsSql = userIds.length
     ? userIds.map(sqlLiteral).join(',')
     : "'00000000-0000-0000-0000-000000000000'";
@@ -898,9 +1008,10 @@ function verifyCleanup(fixture) {
         `SET search_path TO vietride_identity, public;
 SELECT
  (SELECT count(*) FROM operators WHERE id='${fixture.operatorId}') +
+ (SELECT count(*) FROM operator_subscriptions WHERE id='${fixture.operatorSubscriptionId}') +
  (SELECT count(*) FROM users WHERE email IN (${sqlLiteral(fixture.systemEmail)},${sqlLiteral(
           fixture.operatorEmail,
-        )},${sqlLiteral(fixture.staffEmail)}));`,
+        )},${sqlLiteral(fixture.staffEmail)},${sqlLiteral(fixture.passengerEmail)}));`,
         true,
       ),
     ),
@@ -917,7 +1028,11 @@ SELECT
     booking: Number(
       psql(
         'vietride_booking',
-        `SELECT count(*) FROM vietride_booking.bookings WHERE id='${fixture.bookingId}';`,
+        `SELECT
+ (SELECT count(*) FROM vietride_booking.bookings
+    WHERE id IN ('${fixture.bookingId}','${fixture.passengerBookingId}')) +
+ (SELECT count(*) FROM vietride_booking.passengers WHERE id='${fixture.passengerRecordId}') +
+ (SELECT count(*) FROM vietride_booking.tickets WHERE id='${fixture.passengerTicketId}');`,
         true,
       ),
     ),
@@ -990,6 +1105,7 @@ async function main() {
     seedBooking(fixture);
     seedParcel(fixture);
     seedPayment(fixture);
+    await verifyPassengerTicketHistory(fixture, tokens.passenger);
     runNewman(fixture, tokens);
     verifyPersistence(fixture);
   } catch (error) {

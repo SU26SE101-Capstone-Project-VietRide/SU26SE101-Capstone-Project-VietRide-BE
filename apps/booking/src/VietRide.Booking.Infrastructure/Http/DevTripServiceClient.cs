@@ -25,7 +25,10 @@ public sealed class DevTripServiceClient : ITripServiceClient
         Task.FromResult<IReadOnlyList<TripHistoryVehicleSummary>>(tripIds
             .Where(tripId => tripId != Guid.Empty)
             .Distinct()
-            .Select(tripId => new TripHistoryVehicleSummary(tripId, "51A-000.01"))
+            .Select(tripId => new TripHistoryVehicleSummary(
+                tripId,
+                "51A-000.01",
+                new TripHistoryVehicleTypeSummary("STANDARD_BUS", "Standard bus")))
             .ToArray());
 
     public Task<TripSnapshot?> GetTripSnapshotAsync(

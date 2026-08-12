@@ -56,7 +56,10 @@ public sealed record TripStopSnapshot(
 /// <summary>Seat availability summary embedded in <see cref="TripSnapshot"/>.</summary>
 public sealed record TripSeatSummary(int TotalSeats, int AvailableSeats);
 
-public sealed record TripHistoryVehicleSummary(Guid TripId, string LicensePlate);
+public sealed record TripHistoryVehicleSummary(
+    Guid TripId,
+    string LicensePlate,
+    TripHistoryVehicleTypeSummary? VehicleType = null);
 
 public abstract record ShuttleRoadDistanceOutcome
 {

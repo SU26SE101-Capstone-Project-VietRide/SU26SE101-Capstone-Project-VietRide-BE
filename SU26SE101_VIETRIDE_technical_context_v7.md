@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-12 (Off-route realtime transitions, heartbeat, and terminal cleanup)
+> **Cập nhật:** 2026-08-12 (Passenger ticket history vehicle-type enrichment)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -1771,13 +1771,14 @@ Trip history trong Passenger App hiển thị các booking mà user đó đã Đ
 
 Lý do: Passenger entity chỉ lưu operational data (seatNumber, boardingStatus), không lưu nhân thân và không liên kết tới User account khác buyer. Không thể lookup "booking nào có Passenger là tôi". Đây là design trade-off chấp nhận được cho v1 — đặt vé cho người khác vẫn thấy trong history của người đặt; người được đặt hộ không thấy (trừ khi họ tự vào app và đặt).
 
-**Trip info cho history list — snapshot strategy:** `GET /bookings/history` trả về data từ Booking DB, **không cần HTTP call sang Trip-Route-Vehicle Service**. Booking entity có 4 snapshot fields (`tripSnapshotOriginName`, `tripSnapshotDestName`, `tripSnapshotDeparture`, `tripSnapshotRouteName`) được set khi tạo Booking — đủ để render history row (tên tuyến, giờ khởi hành, tên bến). Xem entity spec ở section 8. Lý do chọn snapshot thay vì (b) HTTP call mỗi lần: N HTTP call khi load list — không scale, latency cao; thay vì (c) client ghép 2 API: double round-trip, lộ service boundary.
+**Trip info cho history list — snapshot strategy:** `GET /bookings/history` lấy dữ liệu hành trình nền từ Booking DB. Booking entity có 4 snapshot fields (`tripSnapshotOriginName`, `tripSnapshotDestName`, `tripSnapshotDeparture`, `tripSnapshotRouteName`) được set khi tạo Booking — đủ để render history row (tên tuyến, giờ khởi hành, tên bến). Để hiển thị xe hiện tại, Booking thực hiện đúng một batch call distinct Trip IDs sang Trip Service cho mỗi trang và enrich `vehicle { licensePlate, vehicleType { code, displayName } }`; không gọi per row. Vehicle type hỗ trợ cả loại hệ thống và loại custom của operator. Trip cũ chưa trả `vehicleType` hoặc dữ liệu type thiếu/blank thì vẫn giữ `vehicle` và trả `vehicleType=null`; Trip enrichment lỗi hoặc biển số thiếu/blank thì fail-open `vehicle=null`. Xem entity spec ở section 8. Snapshot tránh N HTTP call khi load list; client cũng không phải ghép hai API hay biết service boundary.
 
 **Passenger history facade — `GET /v1/passenger/history`:** FE chọn đúng một nhánh bằng query
 `type=TICKET|PARCEL`; v1 không có `ALL` và không free-text search. Parcel Service sở hữu facade vì
 dependency một chiều Parcel → Booking đã tồn tại. Nhánh `TICKET` chỉ gọi
 `GET /internal/v1/bookings/history?userId=...`, phân trang theo Booking và trả Ticket summaries
-bên trong Booking. Nhánh `PARCEL` chỉ query Parcel local với `senderUserId = JWT sub`; parcel mà
+bên trong Booking, gồm nguyên vẹn nullable current `vehicle { licensePlate, vehicleType { code,
+displayName } }` từ Booking và không gọi Trip lần nữa. Nhánh `PARCEL` chỉ query Parcel local với `senderUserId = JWT sub`; parcel mà
 user chỉ là người nhận không nằm trong nhánh này. Cả hai dùng `createdAt DESC, id DESC`, range
 `from` inclusive/`to` exclusive, `pageSize <= 100`. Booking upstream lỗi phải trả
 `502 UPSTREAM_UNAVAILABLE`, không giả thành trang rỗng. Trip enrichment cho parcel được deduplicate

@@ -26,27 +26,56 @@ public class TripServiceClientTests
         new(JsonSerializerDefaults.Web);
 
     [Fact]
-    public async Task GetHistoryVehicleSummariesAsync_SendsDistinctBatchAndReturnsOnlyValidRequestedPlates()
+    public async Task GetHistoryVehicleSummariesAsync_SendsDistinctBatchAndMapsTrimmedVehicleType()
     {
         var otherTripId = Guid.NewGuid();
+        var legacyTripId = Guid.NewGuid();
+        var malformedTypeTripId = Guid.NewGuid();
         var unrequestedTripId = Guid.NewGuid();
         var body = JsonSerializer.Serialize(new object[]
         {
-            new { tripId = TripId, vehicle = new { licensePlate = " 51B-123.45 " } },
+            new
+            {
+                tripId = TripId,
+                vehicle = new
+                {
+                    licensePlate = " 51B-123.45 ",
+                    vehicleType = new { code = " LIMOUSINE ", displayName = " Limousine " },
+                },
+            },
             new { tripId = otherTripId, vehicle = new { licensePlate = " " } },
+            new { tripId = legacyTripId, vehicle = new { licensePlate = "51B-456.78" } },
+            new
+            {
+                tripId = malformedTypeTripId,
+                vehicle = new
+                {
+                    licensePlate = "51B-876.54",
+                    vehicleType = new { code = "SLEEPER_BUS", displayName = " " },
+                },
+            },
             new { tripId = unrequestedTripId, vehicle = new { licensePlate = "51B-999.99" } },
             null!,
         }, JsonOptions);
         var handler = new FakeMessageHandler(HttpStatusCode.OK, body);
         var client = BuildClient(handler);
 
-        var result = await client.GetHistoryVehicleSummariesAsync([TripId, TripId, otherTripId]);
+        var result = await client.GetHistoryVehicleSummariesAsync(
+            [TripId, TripId, otherTripId, legacyTripId, malformedTypeTripId]);
 
-        result.Should().Equal(new TripHistoryVehicleSummary(TripId, "51B-123.45"));
+        result.Should().BeEquivalentTo(
+        [
+            new TripHistoryVehicleSummary(
+                TripId,
+                "51B-123.45",
+                new TripHistoryVehicleTypeSummary("LIMOUSINE", "Limousine")),
+            new TripHistoryVehicleSummary(legacyTripId, "51B-456.78"),
+            new TripHistoryVehicleSummary(malformedTypeTripId, "51B-876.54"),
+        ]);
         handler.LastRequest!.Method.Should().Be(HttpMethod.Post);
         handler.LastRequest.RequestUri!.AbsolutePath.Should().Be("/internal/v1/trips/summaries/batch");
         using var request = JsonDocument.Parse(handler.LastBody!);
-        request.RootElement.GetProperty("tripIds").EnumerateArray().Should().HaveCount(2);
+        request.RootElement.GetProperty("tripIds").EnumerateArray().Should().HaveCount(4);
     }
 
     [Theory]

@@ -1420,7 +1420,13 @@ Response `200`:
         "bookingGroupId": null,
         "tripDirection": null,
         "routeName": "TP.HCM - Hà Nội",
-        "vehicle": { "licensePlate": "51B-123.45" },
+        "vehicle": {
+          "licensePlate": "51B-123.45",
+          "vehicleType": {
+            "code": "LIMOUSINE",
+            "displayName": "Limousine"
+          }
+        },
         "tickets": [
           {
             "ticketId": "uuid",
@@ -1446,13 +1452,18 @@ Response `200`:
 
 Validation failures return `422 VALIDATION_ERROR`.
 
-`vehicle` is always serialized and is either `{ "licensePlate": string }` for the Trip's current
-Vehicle or `null`. Booking performs one distinct-ID call to
+`vehicle` is always serialized and is either
+`{ "licensePlate": string, "vehicleType": { "code": string, "displayName": string } | null }`
+for the Trip's current Vehicle or `null`. System-defined and operator-custom Vehicle Types use the
+same public shape. Booking trims all three strings and emits `vehicleType` only when both `code`
+and `displayName` are non-blank. During rolling deployment, an older Trip response without
+`vehicleType`, or a malformed partial/blank type, preserves the valid plate and returns
+`vehicleType=null`. Booking performs one distinct-ID call to
 `POST /internal/v1/trips/summaries/batch` for each non-empty history page (up to 100 Trips), so a
 vehicle swap is reflected without an N+1 lookup. Missing Trip summaries, blank/malformed plates,
 non-success responses, timeouts, and transport failures leave only the affected enrichment null
-and do not fail the base history response. No vehicle ID, status, type, seat layout, capacity,
-image, or other management field is exposed.
+and do not fail the base history response. No vehicle ID, status, seat layout, capacity, image, or
+other management field is exposed.
 
 `paymentRedirectUrl` is the final root property of every item and is always serialized. It is
 non-null only for a `PENDING_PAYMENT` Booking whose latest eligible VNPay Payment lookup matches
@@ -3546,7 +3557,13 @@ Response `200` item shape:
     "bookingGroupId": null,
     "tripDirection": null,
     "routeName": "TP.HCM - Hà Nội",
-    "vehicle": { "licensePlate": "51B-123.45" },
+    "vehicle": {
+      "licensePlate": "51B-123.45",
+      "vehicleType": {
+        "code": "LIMOUSINE",
+        "displayName": "Limousine"
+      }
+    },
     "tickets": [
       {
         "ticketId": "uuid",
@@ -3565,8 +3582,10 @@ Response `200` item shape:
 For `PARCEL`, `ticket` is null and `parcel` is
 `{ bookingId, recipientName, sizeCategory, photoUrl, deliveryMethod }`. Exactly one of `ticket` or
 `parcel` is non-null. Journey fields may be null for legacy data or unavailable Trip enrichment.
-For `TICKET`, `ticket.vehicle` is always serialized as `{ licensePlate }` or `null`; Parcel forwards
-the fail-open Booking history projection and does not call Trip again. Only the plate is public.
+For `TICKET`, `ticket.vehicle` is always serialized as
+`{ licensePlate, vehicleType: { code, displayName } | null }` or `null`; Parcel forwards the
+fail-open Booking history projection unchanged and does not call Trip again. The public vehicle
+projection contains only the plate and type identity/display fields.
 `paymentRedirectUrl` is the final root property and is always serialized. `TICKET` forwards the
 value from Booking history without another Payment call. `PARCEL` returns only the latest eligible
 deposit/final VNPay URL for the exact owner/reference/amount/deadline: deposit requires
@@ -9655,8 +9674,9 @@ redacted display name. Operator batch items preserve the existing field name and
 `{ operatorId, operatorName, logoUrl, contactPhone }`.
 
 Trip summary items are `{ tripId, status, departureAt, arrivalEstimate, route { routeId, name,
-originName, destinationName }, vehicle { vehicleId, licensePlate, status }, driverUserId,
-assistantUserId }`. Identity metric maps are arrays of `{ role, count }` and `{ status, count }`;
+originName, destinationName }, vehicle { vehicleId, licensePlate, status, vehicleType { code,
+displayName } }, driverUserId, assistantUserId }`. Vehicle type may be system-defined or custom.
+Identity metric maps are arrays of `{ role, count }` and `{ status, count }`;
 approved operator IDs are distinct and sorted. Vehicle-count and route-performance responses are
 the exact array item shapes in the table and are sorted by ID/route name for deterministic callers.
 

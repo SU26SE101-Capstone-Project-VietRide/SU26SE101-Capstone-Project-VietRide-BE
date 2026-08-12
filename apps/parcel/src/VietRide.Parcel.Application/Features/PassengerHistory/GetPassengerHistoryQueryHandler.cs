@@ -119,7 +119,13 @@ public sealed class GetPassengerHistoryQueryHandler
                     ticket.PaidAmount)).ToList(),
                 booking.Vehicle is null
                     ? null
-                    : new PassengerHistoryVehicleDto(booking.Vehicle.LicensePlate)),
+                    : new PassengerHistoryVehicleDto(
+                        booking.Vehicle.LicensePlate,
+                        booking.Vehicle.VehicleType is null
+                            ? null
+                            : new PassengerHistoryVehicleTypeDto(
+                                booking.Vehicle.VehicleType.Code,
+                                booking.Vehicle.VehicleType.DisplayName))),
             null,
             booking.PaymentRedirectUrl,
             CreateTrackingTarget(booking.DropoffStopId, booking.DropoffStationId)))

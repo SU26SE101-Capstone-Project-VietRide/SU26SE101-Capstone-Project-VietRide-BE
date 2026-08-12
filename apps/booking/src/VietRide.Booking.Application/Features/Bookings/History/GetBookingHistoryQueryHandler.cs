@@ -76,7 +76,13 @@ public sealed class GetBookingHistoryQueryHandler
             booking.DropoffStationId,
             booking.DropoffStopId,
             vehicles.TryGetValue(booking.TripId, out var vehicle)
-                ? new BookingHistoryVehicleDto(vehicle.LicensePlate)
+                ? new BookingHistoryVehicleDto(
+                    vehicle.LicensePlate,
+                    vehicle.VehicleType is null
+                        ? null
+                        : new BookingHistoryVehicleTypeDto(
+                            vehicle.VehicleType.Code,
+                            vehicle.VehicleType.DisplayName))
                 : null,
             paymentRedirectUrls.GetValueOrDefault(booking.Id)))
             .ToList();

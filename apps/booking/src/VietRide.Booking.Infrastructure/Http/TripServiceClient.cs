@@ -77,7 +77,8 @@ public sealed class TripServiceClient : ITripServiceClient
                 .Where(group => group.Count() == 1)
                 .Select(group => new TripHistoryVehicleSummary(
                     group.Key,
-                    group.Single().Vehicle!.LicensePlate!.Trim()))
+                    group.Single().Vehicle!.LicensePlate!.Trim(),
+                    MapVehicleType(group.Single().Vehicle!.VehicleType)))
                 .ToArray();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -93,6 +94,16 @@ public sealed class TripServiceClient : ITripServiceClient
             return [];
         }
     }
+
+    private static TripHistoryVehicleTypeSummary? MapVehicleType(
+        TripSummaryBatchVehicleType? vehicleType)
+        => vehicleType is not null
+            && !string.IsNullOrWhiteSpace(vehicleType.Code)
+            && !string.IsNullOrWhiteSpace(vehicleType.DisplayName)
+                ? new TripHistoryVehicleTypeSummary(
+                    vehicleType.Code.Trim(),
+                    vehicleType.DisplayName.Trim())
+                : null;
 
     /// <inheritdoc/>
     public async Task<TripSnapshot?> GetTripSnapshotAsync(
@@ -640,7 +651,13 @@ public sealed class TripServiceClient : ITripServiceClient
 
     private sealed record TripSummaryBatchItem(Guid TripId, TripSummaryBatchVehicle? Vehicle);
 
-    private sealed record TripSummaryBatchVehicle(string? LicensePlate);
+    private sealed record TripSummaryBatchVehicle(
+        string? LicensePlate,
+        TripSummaryBatchVehicleType? VehicleType);
+
+    private sealed record TripSummaryBatchVehicleType(
+        string? Code,
+        string? DisplayName);
 
     private sealed record LockRoundTripSeatsRequest(
         LockRoundTripLegRequest Outbound,

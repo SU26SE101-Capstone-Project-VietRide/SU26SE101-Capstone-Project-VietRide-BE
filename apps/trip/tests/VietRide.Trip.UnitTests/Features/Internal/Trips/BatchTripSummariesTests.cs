@@ -58,7 +58,11 @@ public sealed class BatchTripSummariesTests
                 DateTimeOffset.Parse("2026-07-29T01:00:00Z"),
                 DateTimeOffset.Parse("2026-07-29T08:00:00Z"),
                 new InternalTripRouteSummaryDto(Guid.NewGuid(), "HCM - Da Lat", "HCM", "Da Lat"),
-                new InternalTripVehicleSummaryDto(Guid.NewGuid(), "51B-123.45", "MAINTENANCE"),
+                new InternalTripVehicleSummaryDto(
+                    Guid.NewGuid(),
+                    "51B-123.45",
+                    "MAINTENANCE",
+                    new InternalTripVehicleTypeSummaryDto("LIMOUSINE", "Limousine")),
                 Guid.NewGuid(),
                 null),
         };

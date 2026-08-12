@@ -42,10 +42,14 @@ public sealed class BatchTripSummariesRepositoryTests
             first.Vehicle.VehicleId.Should().Be(seed.FirstVehicleId);
             first.Vehicle.LicensePlate.Should().Be("51B-123.45");
             first.Vehicle.Status.Should().Be("MAINTENANCE");
+            first.Vehicle.VehicleType.Code.Should().Be("UI10_CUSTOM");
+            first.Vehicle.VehicleType.DisplayName.Should().Be("UI-10 custom coach");
             first.DriverUserId.Should().Be(seed.FirstDriverUserId);
             first.AssistantUserId.Should().BeNull();
 
             var second = result.Single(item => item.TripId == seed.SecondTripId);
+            second.Vehicle.VehicleType.Code.Should().Be("SLEEPER_BUS");
+            second.Vehicle.VehicleType.DisplayName.Should().Be("Xe giường nằm");
             second.DriverUserId.Should().Be(seed.SecondDriverUserId);
             second.AssistantUserId.Should().Be(seed.SecondAssistantUserId);
         }
@@ -85,7 +89,8 @@ public sealed class BatchTripSummariesRepositoryTests
             Money.FromRaw(310_000),
             300m,
             420);
-        var vehicleType = VehicleType.Create("UI10", "UI-10 summary coach", 10, 1);
+        var customVehicleType = VehicleType.Create("UI10_CUSTOM", "UI-10 custom coach", 10, 1);
+        var systemVehicleType = await db.VehicleTypes.SingleAsync(type => type.Code == "SLEEPER_BUS");
         var layout = JsonSerializer.SerializeToElement(new
         {
             version = 1,
@@ -112,7 +117,7 @@ public sealed class BatchTripSummariesRepositoryTests
         });
         var firstVehicle = Vehicle.Create(
             firstOperatorId,
-            vehicleType.Id,
+            customVehicleType.Id,
             "51B-123.45",
             layout,
             1,
@@ -121,7 +126,7 @@ public sealed class BatchTripSummariesRepositoryTests
         firstVehicle.ChangeStatus(VehicleStatus.MAINTENANCE);
         var secondVehicle = Vehicle.Create(
             secondOperatorId,
-            vehicleType.Id,
+            systemVehicleType.Id,
             "51B-543.21",
             layout,
             1,
@@ -169,7 +174,7 @@ public sealed class BatchTripSummariesRepositoryTests
             destination,
             firstRoute,
             secondRoute,
-            vehicleType,
+            customVehicleType,
             firstVehicle,
             secondVehicle,
             firstTrip,

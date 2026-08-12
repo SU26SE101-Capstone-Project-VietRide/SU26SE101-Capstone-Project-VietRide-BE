@@ -46,7 +46,9 @@ public sealed class GetPassengerHistoryQueryHandlerTests
             [new BookingHistoryTicketDto(Guid.NewGuid(), "VT-20260701-ABCDEFGH", "A01", "ISSUED", 350_000)],
             "https://sandbox.vnpayment.vn/ticket",
             DropoffStopId: dropoffStopId,
-            Vehicle: new BookingHistoryVehicleDto("51B-123.45"));
+            Vehicle: new BookingHistoryVehicleDto(
+                "51B-123.45",
+                new BookingHistoryVehicleTypeDto("LIMOUSINE", "Limousine")));
         bookingClient.GetPassengerHistoryAsync(
                 userId,
                 "CONFIRMED",
@@ -71,7 +73,9 @@ public sealed class GetPassengerHistoryQueryHandlerTests
         result.Items[0].Ticket.Should().NotBeNull();
         result.Items[0].Parcel.Should().BeNull();
         result.Items[0].Ticket!.Tickets.Should().ContainSingle();
-        result.Items[0].Ticket!.Vehicle.Should().BeEquivalentTo(new PassengerHistoryVehicleDto("51B-123.45"));
+        result.Items[0].Ticket!.Vehicle.Should().BeEquivalentTo(new PassengerHistoryVehicleDto(
+            "51B-123.45",
+            new PassengerHistoryVehicleTypeDto("LIMOUSINE", "Limousine")));
         result.Items[0].PaymentRedirectUrl.Should().Be("https://sandbox.vnpayment.vn/ticket");
         result.Items[0].TrackingTarget.Should().BeEquivalentTo(new
         {
@@ -531,6 +535,21 @@ public sealed class GetPassengerHistoryQueryHandlerTests
 
         json.RootElement.TryGetProperty("vehicle", out var vehicle).Should().BeTrue();
         vehicle.ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public void PassengerHistoryVehicleAlwaysSerializesNullableVehicleType()
+    {
+        var vehicle = new PassengerHistoryVehicleDto("51B-123.45");
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        };
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(vehicle, options));
+
+        json.RootElement.TryGetProperty("vehicleType", out var vehicleType).Should().BeTrue();
+        vehicleType.ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     [Theory]
