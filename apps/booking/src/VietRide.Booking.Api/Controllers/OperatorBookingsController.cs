@@ -6,6 +6,7 @@ using VietRide.Booking.Api.Controllers.Requests;
 using VietRide.Booking.Application.Features.OperatorBookings.GetOperatorBookingDetail;
 using VietRide.Booking.Application.Features.OperatorBookings.ListOperatorBookings;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 
 namespace VietRide.Booking.Api.Controllers;
 
@@ -22,6 +23,7 @@ public sealed class OperatorBookingsController : ControllerBase
     }
 
     [HttpGet]
+    [AllowedQueryParameters("status", "tripId", "date", "passengerPhone", "bookingCode", "search", "page", "pageSize", "sortBy", "sortDir")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<OperatorBookingListItem>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
@@ -47,7 +49,8 @@ public sealed class OperatorBookingsController : ControllerBase
                 request.Page,
                 request.PageSize,
                 request.SortBy,
-                request.SortDir),
+                request.SortDir,
+                request.Search),
             cancellationToken);
 
         return Ok(result);

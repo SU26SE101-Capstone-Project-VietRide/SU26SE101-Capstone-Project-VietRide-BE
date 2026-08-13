@@ -24,6 +24,9 @@ public sealed class ListOperatorBookingsQueryValidator : AbstractValidator<ListO
         RuleFor(x => x.BookingCode)
             .Must(value => value is null || value.Trim() is { Length: > 0 and <= 30 })
             .WithErrorCode("VALIDATION_ERROR");
+        RuleFor(x => x.Search)
+            .MaximumLength(255)
+            .WithErrorCode("VALIDATION_ERROR");
     }
 
     private static bool BeValidStatuses(string? value)

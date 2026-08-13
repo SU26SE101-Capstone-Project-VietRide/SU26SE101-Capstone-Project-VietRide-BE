@@ -152,6 +152,28 @@ public sealed class ListOperatorBookingsQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_ForwardsGeneralSearchAndNormalizedBuyerPhoneWithoutIdentityLookup()
+    {
+        _repository.ListOperatorBookingsAsync(
+                Arg.Any<OperatorBookingListCriteria>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new OperatorBookingListPage([], 0));
+        var sut = new ListOperatorBookingsQueryHandler(_repository, _identity);
+
+        await sut.Handle(new ListOperatorBookingsQuery(
+            Guid.NewGuid(), null, null, null, null, null,
+            Search: " 0901234567 "), default);
+
+        await _identity.DidNotReceive().GetUserIdByPhoneAsync(
+            Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _repository.Received(1).ListOperatorBookingsAsync(
+            Arg.Is<OperatorBookingListCriteria>(criteria =>
+                criteria.Search == "0901234567"
+                && criteria.SearchPhone == "+84901234567"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Handle_InvalidSortMapsThroughSharedFilterToHttp400InvalidSortField()
     {
         var sut = new ListOperatorBookingsQueryHandler(_repository, _identity);

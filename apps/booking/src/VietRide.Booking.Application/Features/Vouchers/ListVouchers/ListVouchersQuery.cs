@@ -19,4 +19,6 @@ public sealed record ListVouchersQuery(
     /// <summary>VIETRIDE_FUNDED or OPERATOR_FUNDED string. Null = no filter.</summary>
     string? FundingType,
     bool? IsActive,
-    QueryOptions Options) : IRequest<PagedResult<VoucherListItem>>;
+    QueryOptions Options,
+    string? Search = null,
+    string? Service = null) : IRequest<PagedResult<VoucherListItem>>;

@@ -779,13 +779,40 @@ internal sealed class BookingRepository : IBookingRepository
         OperatorBookingListCriteria criteria,
         CancellationToken ct = default)
     {
-        IQueryable<BookingEntity> query = string.IsNullOrEmpty(criteria.BookingCode)
-            ? _db.Bookings.Where(booking => booking.OperatorId == criteria.OperatorId)
-            : _db.Bookings.FromSqlInterpolated($@"
-                SELECT *
-                FROM vietride_booking.bookings
-                WHERE operator_id = {criteria.OperatorId}
-                  AND UPPER(booking_code) = UPPER({criteria.BookingCode})");
+        IQueryable<BookingEntity> query;
+        if (!string.IsNullOrWhiteSpace(criteria.Search))
+        {
+            var pattern = $"%{criteria.Search.Trim()}%";
+            query = criteria.SearchPhone is null
+                ? _db.Bookings.FromSqlInterpolated($@"
+                    SELECT *
+                    FROM vietride_booking.bookings
+                    WHERE operator_id = {criteria.OperatorId}
+                      AND (booking_code ILIKE {pattern}
+                        OR buyer_display_name ILIKE {pattern})")
+                : _db.Bookings.FromSqlInterpolated($@"
+                    SELECT *
+                    FROM vietride_booking.bookings
+                    WHERE operator_id = {criteria.OperatorId}
+                      AND (booking_code ILIKE {pattern}
+                        OR buyer_display_name ILIKE {pattern}
+                        OR buyer_phone = {criteria.SearchPhone})");
+            if (!string.IsNullOrEmpty(criteria.BookingCode))
+            {
+                var bookingCode = BookingCode.Parse(criteria.BookingCode);
+                query = query.Where(booking => booking.BookingCode == bookingCode);
+            }
+        }
+        else
+        {
+            query = string.IsNullOrEmpty(criteria.BookingCode)
+                ? _db.Bookings.Where(booking => booking.OperatorId == criteria.OperatorId)
+                : _db.Bookings.FromSqlInterpolated($@"
+                    SELECT *
+                    FROM vietride_booking.bookings
+                    WHERE operator_id = {criteria.OperatorId}
+                      AND UPPER(booking_code) = UPPER({criteria.BookingCode})");
+        }
         query = query.AsNoTracking();
 
         if (criteria.Statuses is { Count: > 0 })
