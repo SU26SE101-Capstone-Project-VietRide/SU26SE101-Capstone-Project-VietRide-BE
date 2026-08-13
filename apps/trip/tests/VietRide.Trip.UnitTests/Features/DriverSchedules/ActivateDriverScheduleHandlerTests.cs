@@ -100,7 +100,7 @@ public sealed class ActivateDriverScheduleHandlerTests
     }
 
     [Fact]
-    public async Task Handle_AssistantNonActiveStatus_ActivatesBecauseStatusIsNotValidated()
+    public async Task Handle_AssistantNonActiveStatus_ThrowsValidationErrorAndDoesNotActivate()
     {
         var assistantUserId = Guid.NewGuid();
         var fixture = ActivateFixture.Create(
@@ -108,14 +108,15 @@ public sealed class ActivateDriverScheduleHandlerTests
             assistantUserId: assistantUserId,
             assistantStatus: "LOCKED");
 
-        var result = await fixture.Handler.Handle(
+        var action = () => fixture.Handler.Handle(
             new ActivateDriverScheduleCommand(fixture.OperatorId, fixture.Schedule.Id),
             CancellationToken.None);
 
-        result.IsActive.Should().BeTrue();
-        fixture.Schedule.IsActive.Should().BeTrue();
-        fixture.UnitOfWork.SaveChangesCount.Should().Be(1);
-        fixture.Scheduler.EnqueueCount.Should().Be(1);
+        var exception = await action.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().ContainSingle(error => error.Field == "assistantUserId");
+        fixture.Schedule.IsActive.Should().BeFalse();
+        fixture.UnitOfWork.SaveChangesCount.Should().Be(0);
+        fixture.Scheduler.EnqueueCount.Should().Be(0);
     }
 
     private sealed class ActivateFixture

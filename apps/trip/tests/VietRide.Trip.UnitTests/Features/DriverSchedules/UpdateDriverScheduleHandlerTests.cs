@@ -179,6 +179,29 @@ public sealed class UpdateDriverScheduleHandlerTests
     }
 
     [Fact]
+    public async Task LockedReplacementDriver_IsRejectedBeforeTransaction()
+    {
+        var fixture = Fixture.Create();
+        var lockedDriver = Guid.NewGuid();
+        fixture.Identity.Users[lockedDriver] = IdentityUserLookupResult.Success(
+            lockedDriver,
+            "DRIVER",
+            fixture.Schedule.OperatorId,
+            "LOCKED");
+        var command = fixture.Command(
+            UpdateDriverScheduleCommand.FutureOnly,
+            driverUserIdSpecified: true,
+            driverUserId: lockedDriver);
+
+        var action = () => fixture.Handler.Handle(command, CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().ContainSingle(error => error.Field == "driverUserId");
+        fixture.Schedule.DriverUserId.Should().NotBe(lockedDriver);
+        fixture.UnitOfWork.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task IncompatibleHeldSeat_PrecedesGeneralTwoHourTooLateConflict()
     {
         var fixture = Fixture.Create();
