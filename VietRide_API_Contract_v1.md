@@ -1161,12 +1161,13 @@ Query parameters:
 | `date` | `YYYY-MM-DD`? | null | Calendar day in `Asia/Ho_Chi_Minh` (Asia/Ho_Chi_Minh). Convert local midnight and the next local midnight to the UTC half-open interval `[fromUtc, toUtc)` and filter `trip_current_departure`. Invalid dates return `422 VALIDATION_ERROR`. |
 | `passengerPhone` | string? | null | Trim outer whitespace, then apply `PhoneNumber.Normalize`: accept only local `0xxxxxxxxx`/`0xxxxxxxxxx` or canonical `+84xxxxxxxxx`/`+84xxxxxxxxxx`; canonicalize local input to E.164. Internal spaces, hyphens, parentheses, or other separators are invalid and are not stripped. |
 | `bookingCode` | string? | null | Trimmed, non-empty, maximum 30 characters, exact case-insensitive match. |
+| `search` | string? | null | Maximum 255 characters. OR-search across booking code and buyer snapshot `BuyerDisplayName`; when the input is a valid phone it also exact-matches normalized `BuyerPhone`. This is buyer search, not per-passenger PII. |
 | `page` | integer | `1` | Must be `>= 1`. |
 | `pageSize` | integer | `20` | Must be `>= 1`; values above 100 are clamped to 100. |
 | `sortBy` | string | `createdAt` | Allow-list: `createdAt`, `departureAt`, `bookingCode`, `status`, `totalAmount`; otherwise `400 INVALID_SORT_FIELD`. |
 | `sortDir` | string | `desc` | `asc` or `desc`; otherwise `422 VALIDATION_ERROR`. |
 
-`search`, `searchIn`, `operatorId`, and `includeDeleted` are not supported. Every SQL query path first constrains `bookings.operator_id = :claimOperatorId`, before filters and pagination. `sortBy=departureAt` sorts by `trip_current_departure`; there is no `currentDepartureAt` sort key. Sort always adds `id` as the deterministic tie-breaker in the same direction as `sortDir`.
+`searchIn`, `operatorId`, and `includeDeleted` are not supported. Filters outside the OR fields of `search` combine with it using AND. Every SQL query path first constrains `bookings.operator_id = :claimOperatorId`, before filters and pagination. `sortBy=departureAt` sorts by `trip_current_departure`; there is no `currentDepartureAt` sort key. Sort always adds `id` as the deterministic tie-breaker in the same direction as `sortDir`.
 
 When `passengerPhone` is present, Booking validates and normalizes it before URI-escaping the canonical E.164 value and calling `GET /internal/v1/users/by-phone`. Only Identity's `404 RESOURCE_NOT_FOUND` means no matching user and produces a normal empty page.
 
@@ -1827,7 +1828,7 @@ Response `200`:
 
 Auth: `SYSTEM_ADMIN`.
 
-Query: `fundingType?` (`VIETRIDE_FUNDED` | `OPERATOR_FUNDED`), `isActive?` (bool), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `422 INVALID_SORT_FIELD`). `ownerOperatorId` is not supported on this endpoint and must not expose operator-owned vouchers. `applicableServices` in each item contains `BOOKING`, `PARCEL`, or both. v1 returns only active (non-soft-deleted) vouchers (respects EF `HasQueryFilter(deleted_at == null)`); `includeDeleted` not supported in v1.
+Query: `fundingType?` (`VIETRIDE_FUNDED` | `OPERATOR_FUNDED`), `isActive?` (bool), `search?` (case-insensitive contains on code/name), `service?` (`BOOKING|PARCEL`, array membership), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `422 INVALID_SORT_FIELD`). `ownerOperatorId` is not supported on this endpoint and must not expose operator-owned vouchers. `applicableServices` in each item contains `BOOKING`, `PARCEL`, or both. v1 returns only active (non-soft-deleted) vouchers (respects EF `HasQueryFilter(deleted_at == null)`); `includeDeleted` not supported in v1.
 
 Response `200`:
 ```json
@@ -1931,7 +1932,7 @@ Auth: `OPERATOR_ADMIN`.
 
 Lists vouchers owned by the caller operator. The service takes `operatorId` from the authenticated JWT claim and always filters `ownerOperatorId = caller.operatorId`; client-supplied `ownerOperatorId` is not accepted. Read-only — no Idempotency-Key.
 
-Query: `isActive?` (bool), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `422 INVALID_SORT_FIELD`). No `fundingType` query in v1. v1 returns only non-soft-deleted vouchers.
+Query: `isActive?` (bool), `search?` (case-insensitive contains on code/name), `service?` (`BOOKING|PARCEL`, array membership), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `422 INVALID_SORT_FIELD`). No `fundingType` query in v1. v1 returns only non-soft-deleted vouchers.
 
 Response `200`: same paged `VoucherListItem` shape as `GET /v1/admin/vouchers`, with `ownerOperatorId` populated. `applicableServices` identifies whether the voucher applies to `BOOKING`, `PARCEL`, or both.
 
@@ -2064,13 +2065,16 @@ Response `200`: matching active locations sorted by `sortOrder`, then `name`.
 Auth: `SYSTEM_ADMIN`.
 
 Endpoints:
-- `GET /v1/admin/locations?page=&pageSize=&search=&isActive=`
+- `GET /v1/admin/locations?page=&pageSize=&search=&isActive=&type=&parentCode=`
 - `POST /v1/admin/locations`
 - `PATCH /v1/admin/locations/{id}`
 - `DELETE /v1/admin/locations/{id}` soft-deactivates the location.
 
 Admin `search` uses the same case- and Vietnamese-accent-insensitive code/name matching as the
-public catalog.
+public catalog. `type` accepts `PROVINCE|MUNICIPALITY|WARD|COMMUNE|SPECIAL_ZONE`. `parentCode`
+returns direct children of an existing top-level location, including when that parent is inactive;
+an absent or non-top-level parent returns `422 VALIDATION_ERROR`. All filters combine with AND and
+run before count/paging.
 
 Create/update request:
 ```json
@@ -2222,6 +2226,7 @@ Response `200`:
   "data": {
     "tripId": "uuid",
     "vehicleType": "SLEEPER_BUS",
+    "aisles": [{ "afterCol": 2 }],
     "seats": [
       { "seatNumber": "A01", "status": "AVAILABLE", "type": "SLEEPER_LOWER", "row": 1, "col": 1, "deck": 1, "disabledReason": null }
     ]
@@ -2232,7 +2237,9 @@ Response `200`:
 
 Trip seat-map geometry is an immutable layout snapshot captured when the Trip is created.
 Changing the current Vehicle template does not change an existing Trip seat-map. The snapshot
-may change only through the documented vehicle substitution/swap flows.
+may change only through the documented vehicle substitution/swap flows. `aisles` always exists;
+it is `[]` when the captured layout has no aisle. `afterCol` places the aisle after that seat column
+for every deck.
 
 ### POST `/v1/operator/trips/{tripId}/seats/{seatNumber}/disable`
 
@@ -5797,7 +5804,7 @@ hiện có trả cùng field. JSON cũ không có field vẫn deserialize hợp 
 
 ### GET `/v1/admin/trip-settlements`
 
-Auth: `SYSTEM_ADMIN`. Query: operator filters plus `operatorId?`, `stuckOnly?`, `severity?`. A stuck row is unresolved `ELIGIBLE` with `activeFailureCode != null`; `HIGH` means failure count `>=3` **or** stuck age `>21 days`.
+Auth: `SYSTEM_ADMIN`. Query: operator filters plus `operatorId?`, `stuckOnly?`, `severity?`, `search?`. UUID search matches settlement/trip ID. Text search matches persisted operator name or active failure code by case-insensitive contains, and persisted ledger reference/trip code by case-insensitive prefix. Search is applied before count/paging and performs no live cross-service lookup. A stuck row is unresolved `ELIGIBLE` with `activeFailureCode != null`; `HIGH` means failure count `>=3` **or** stuck age `>21 days`.
 
 ### POST `/v1/admin/trip-settlements/{settlementId}/settle`
 
@@ -5931,7 +5938,7 @@ Auth: `SYSTEM_ADMIN`. Returns `{ platformWalletId, balance, updatedAt }`.
 
 ### GET `/v1/admin/platform-wallet/transactions`
 
-Auth: `SYSTEM_ADMIN`. Paged query supports `type?`, `referenceType?`, `from?`, `to?`, `sortBy=createdAt|amount`, `sortDir?`. Items contain transaction identity, direction, positive amount, balance snapshots, reference, note and created time.
+Auth: `SYSTEM_ADMIN`. Paged query supports `type?`, `referenceType?`, `from?`, `to?`, `search?`, `sortBy=createdAt|amount`, `sortDir?`. UUID search matches transaction/reference ID. Text search matches note or persisted actor display name by case-insensitive contains, and an exact `referenceType` enum name. Search is applied before count/paging. Items contain transaction identity, direction, positive amount, balance snapshots, reference, note and created time.
 
 ### POST `/v1/admin/platform-wallet/adjust`
 
@@ -6941,7 +6948,7 @@ Stop address. These fields are read-time projections, not duplicated Stop persis
 
 Auth: `OPERATOR_STAFF`, `OPERATOR_ADMIN`.
 
-Query: `page?`, `pageSize?`, `search?`.
+Query: `page?`, `pageSize?`, `search?`, `isActive?`.
 
 Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Optional `search` is allow-listed to Stop `name` and `address` only.
 
@@ -7013,6 +7020,19 @@ operator-owned stops through `GET/PATCH/DELETE /v1/admin/stops` (list supports `
 Station delete is an ordinary soft-delete and deactivates OperatorStation mappings; it does not
 create a canonical redirect. Stop delete follows the replacement and historical-preservation rules
 above.
+
+`GET /v1/admin/stations` accepts `page?`, `pageSize?`, `search?`, `isActive?`,
+`supportsShuttle?`, `sortBy?` (`name|createdAt|updatedAt`) and `sortDir?` (`asc|desc`). Search is
+case- and Vietnamese-accent-insensitive over name, city, ward, addressStreet and slug. The
+backwards-compatible default remains `name asc`; filters and sort apply before count/paging.
+
+`GET /v1/admin/stations/summary` is `SYSTEM_ADMIN`-only, accepts no query keys and returns:
+
+```json
+{ "total": 100, "active": 90, "inactive": 10, "supportsShuttle": 24 }
+```
+
+Counts include all non-soft-deleted Stations; `supportsShuttle` is independent of activation.
 
 ### PATCH `/v1/admin/stations/{id}`
 
@@ -7255,7 +7275,7 @@ Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
 
 Query: `page?`, `pageSize?`, `search?`.
 
-Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Optional `search` follows BSOT §5.8 and is allow-listed to Route `name`.
+Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Optional `search` follows BSOT §5.8 and is allow-listed to Route `name`; `isActive` is a boolean activation filter applied before count/paging.
 
 Response `200`: `PagedResult<RouteListItemDto>` in the ADR 0004 success envelope.
 
@@ -7653,7 +7673,7 @@ The catalog contains the three platform-seeded system types:
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
 
-Query: `page?`, `pageSize?`, `search?`, `searchIn?`, `sortBy?`, `sortDir?`.
+Query: `page?`, `pageSize?`, `search?`, `searchIn?`, `sortBy?`, `sortDir?`, `vehicleTypeId?`, `status?`, `isActive?`.
 
 Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Search and sort follow BSOT §5.8; allowed search fields are `code` and `displayName`.
 
@@ -7847,7 +7867,7 @@ Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
 
 Query: `page?`, `pageSize?`, `search?`, `searchIn?`, `sortBy?`, `sortDir?`.
 
-Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Search and sort follow BSOT §5.8; the allowed search field is `licensePlate`. Only non-soft-deleted Vehicles owned by the caller's operator are returned.
+Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Search and sort follow BSOT §5.8; the allowed search field is `licensePlate`. `vehicleTypeId` is exact. `status` accepts only `ACTIVE|MAINTENANCE|OFF_DUTY|RETIRED`; `isActive` is an independent boolean and no `INACTIVE` Vehicle status exists. Only non-soft-deleted Vehicles owned by the caller's operator are returned.
 
 Response `200`: `PagedResult<VehicleDto>` in the ADR 0004 success envelope. `VehicleDto` keeps
 `totalSeats` for compatibility and also returns computed `usablePassengerCapacity`, which counts
@@ -8135,7 +8155,27 @@ crew. Unchanged crew members receive no notification.
 
 ### GET `/v1/operator/driver-schedules`
 
-Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `routeId?`, `driverUserId?`, `isActive?`. Response is a paged schedule list. Each item retains the existing schedule IDs and fields, and adds `route` (including `originStation`/`destinationStation`), nullable `vehicle` (including `imageUrls`), and nullable `driver`/`assistant` summaries `{ id, displayName, avatarUrl, role, operatorId, status }`.
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `routeId?`, `driverUserId?`, `isActive?`, `vehicleTypeId?`, `search?`. `search` is an OR across Route name, assigned Vehicle license plate, and active assigned Driver/Assistant display name; the crew-name IDs are resolved through the Internal Identity endpoint before Trip count/paging. Identity failure returns `503 UPSTREAM_UNAVAILABLE`. `vehicleTypeId` filters the assigned Vehicle before paging. DriverSchedule is recurring weekly only; `isOneTime` is not supported. Response is a paged schedule list. Each item retains the existing schedule IDs and fields, and adds `route` (including `originStation`/`destinationStation`), nullable `vehicle` (including `imageUrls`), and nullable `driver`/`assistant` summaries `{ id, displayName, avatarUrl, role, operatorId, status }`.
+
+### GET `/internal/v1/operators/{operatorId}/crew/search?search=`
+
+Auth: valid Internal JWT only; not exposed through Gateway. `search` is required, trimmed and at
+most 255 characters. It matches active `DRIVER|ASSISTANT` display names within the exact operator.
+Success `200` is a raw array without an `ApiResponse` wrapper:
+
+```json
+[{ "userId": "uuid", "displayName": "Nguyen Van A", "role": "DRIVER" }]
+```
+
+### GET `/internal/v1/routes/search?operatorId=&search=`
+
+Auth: valid Internal JWT only; not exposed through Gateway. Both parameters are required;
+`search` is trimmed and at most 255 characters. Search is limited to non-soft-deleted Routes owned
+by `operatorId` and matches Route name or origin/destination Station text. Success `200` is raw:
+
+```json
+{ "routeIds": ["uuid"] }
+```
 
 ### Read-model additions
 
@@ -9441,6 +9481,14 @@ display fields from Identity; no actor field is accepted from the request. A PAT
 content field records one `UPDATE` even when it also toggles `active`; only an active-only PATCH
 records `ACTIVATE` or `DEACTIVATE`. Identity actor lookup failure aborts the transaction and returns
 `503 UPSTREAM_UNAVAILABLE` without a Policy or audit row.
+
+### GET `/v1/operator/parcel-route-fares`
+
+Auth: `OPERATOR_ADMIN|OPERATOR_STAFF`; tenant comes only from the JWT. Query accepts `routeId?`,
+`sizeCategory?`, `page?`, `pageSize?` and `search?`. When `search` is present, Parcel calls the
+Internal Trip Route search and applies returned route IDs before count/paging. It does not persist
+or denormalize Route/Station names. No route match returns a normal empty page; Trip lookup failure
+returns `503 UPSTREAM_UNAVAILABLE`.
 
 ### PUT `/v1/operator/parcel-route-fares/{routeId}/batch`
 

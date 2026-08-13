@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.70.0
+> **Phiên bản:** 1.71.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-12
+> **Cập nhật lần cuối:** 2026-08-13
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1551,6 +1551,10 @@ the ordered assigned snapshot.
 - **Search:** `search=<text>` + `searchIn=field1,field2` (thay thế `q=<text>` cũ; BE whitelist các field được phép search per aggregate).
 - **Sort:** `sortBy=<field>&sortDir=asc|desc` — **`sortBy` PHẢI nằm trong whitelist của aggregate** (security requirement — ngăn arbitrary-column sort/search → injection / info-leak). Query handler/repository reject bất kỳ field nào không trong allow-list với `400 INVALID_SORT_FIELD`. Default `sortDir=desc`, default `sortBy` do aggregate quyết định (thường `createdAt`).
 - **Soft-delete:** `includeDeleted=true` — chỉ cho phép admin/privileged endpoint (ADR 0003).
+- **Unknown query keys:** endpoint gắn `AllowedQueryParametersAttribute` reject mọi query key ngoài
+  contract (so khớp không phân biệt hoa/thường) bằng `422 VALIDATION_ERROR`; `error.fields` có một
+  entry cho từng key lạ. Quy tắc này được áp dụng theo endpoint trong giai đoạn rollout, không phải
+  global implicit policy cho các endpoint chưa gắn attribute.
 
 #### Trip location search và Operator Incident reads
 
@@ -2198,6 +2202,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `GET /internal/v1/users/{userId}/device-tokens` | Notification | Lấy FCM tokens active để push |
 | `GET /internal/v1/operators/{operatorId}` | All services | Lookup operator info for logical FK validation (raw success DTO) |
 | `GET /internal/v1/operators/{operatorId}/subscription` | Booking, Trip, Parcel | Raw current subscription + plan limits/module flags + usage counters |
+| `GET /internal/v1/operators/{operatorId}/crew/search?search=` | Trip | Internal-JWT-only, raw active DRIVER/ASSISTANT matches scoped to the operator; response `{userId,displayName,role}[]`, used before DriverSchedule paging. |
 | `POST /internal/v1/operators/{operatorId}/usage/increment` | Trip, Booking, Parcel | Body `{resource, delta}` where resource is `VEHICLES|DRIVERS|ASSISTANTS|OPERATOR_USERS|ROUTES|TRIPS_THIS_MONTH`; atomically increment usage counter without concurrent overshoot |
 | `POST /internal/v1/operators/{operatorId}/quota-allocations` | Trip | Claim durable idempotent quota allocation by `{ resource, resourceId, periodKey? }`; no distributed transaction |
 | `POST /internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release` | Trip | Idempotently release an allocation after local persistence fails or its resource is soft-deleted |
@@ -2222,6 +2227,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `POST /internal/v1/trips/{tripId}/book-seats` | Booking | Convert HELD → BOOKED khi payment success (API contract canonical name; was `confirm-seats`) |
 | `GET /internal/v1/trips/{tripId}/passengers-pending` | Booking | Cho operator dashboard |
 | `GET /internal/v1/stations/{id}` · `GET /internal/v1/stops/{id}` · `GET /internal/v1/routes/{id}` | All services | Trip internal-auth required; raw DTO lookup. Station active returns canonical resolution; merged soft-delete returns original identity plus terminal `canonicalStationId`; ordinary soft-delete/missing returns `STATION_NOT_FOUND`. Stop not found returns `STOP_NOT_FOUND`. Errors use ADR 0004 envelope. |
+| `GET /internal/v1/routes/search?operatorId=&search=` | Parcel | Internal-JWT-only operator-scoped Route search over Route name and origin/destination Station text; raw response `{routeIds:uuid[]}` and no Gateway exposure. |
 | `GET /internal/v1/reports/platform/trips?from=&to=` | Booking | Raw completed-Trip count grouped by operator; `status=COMPLETED`, `completed_at` in UTC `[from,to)` |
 | `GET /internal/v1/trips/{tripId}/cargo/capacity` | Parcel | Lấy available cargo capacity |
 | `POST /internal/v1/trips/{tripId}/cargo/reserve` · `remeasure` · `load` · `release` | Parcel | Idempotent single-Trip cargo-ledger mutation and counter update |
@@ -4148,6 +4154,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.71.0** | 2026-08-13 | Codex | **MINOR** — Close FE seat-map/search-filter gaps: preserve immutable Trip layout aisles; add tenant-safe filters/search for schedules, vehicles, routes, admin locations/stations, vouchers, operator bookings, admin financial reads and Parcel fares; add Station summary plus Internal-JWT crew/route searches; and introduce endpoint-scoped unknown-query rejection with `422 VALIDATION_ERROR`. DriverSchedule remains recurring-only (`isOneTime` absent), Vehicle keeps separate status/isActive, and booking search uses buyer snapshots without new passenger PII. No migration, dependency, Gateway route, event, or RAG runtime change. |
 | **1.70.0** | 2026-08-12 | Codex | **MINOR** — Add system/custom Vehicle Type identity to the existing current-vehicle projection for public/internal Booking history and the Ticket branch of passenger history. Trip batch summary performs one joined query; Booking trims and validates both type fields, tolerates older Trip payloads with `vehicleType=null`, and keeps fail-open `vehicle=null` semantics. No route, migration, dependency, Gateway, Parcel branch, or event change. |
 | **1.69.0** | 2026-08-12 | Codex | **MINOR** — Add crew/fleet-only `trip:routeDeviation` realtime transitions: one durable `DEVIATED`, GPS-driven 60-second heartbeats without notification spam, and one `ROUTE_RESTORED`. Add per-Trip Redis locking, deterministic Outbox dedupe, and route-change/terminal cleanup fencing while retaining 500m/2-minute thresholds and `STOPS_ONLY` fallback. No endpoint, migration, dependency, or integration-event routing-key change. |
 | **1.68.0** | 2026-08-12 | Codex | **MINOR** — Run Trip auto-boarding every minute while preserving the T-30 threshold and existing 5/15-minute start/completion fallbacks. Add fail-open current vehicle plate enrichment to public/internal Booking history and the Ticket branch of passenger history via one existing Trip batch call per page; expose only nullable `vehicle { licensePlate }`. No route, migration, dependency, Gateway, or integration-event change. |
