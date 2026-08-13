@@ -107,6 +107,17 @@ public sealed class LifecycleOperatorCommandHandlerTests
         await fixture.ActivityLogs.Received(1).AddAsync(
             Arg.Is<ActivityLog>(x => x.Action == ActivityLogAction.REJECT_OPERATOR && HasLifecycleMetadata(x.Metadata, operatorEntity.Id, "SYSTEM_ADMIN_REJECT_OPERATOR")),
             Arg.Any<CancellationToken>());
+        await fixture.Outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(),
+            OperatorRejectedIntegrationEvent.EventType,
+            Arg.Is<string>(payload => HasOperatorRejectedPayload(
+                payload,
+                operatorEntity.Id,
+                operatorEntity.Name,
+                operatorEntity.ContactEmail,
+                "Business documents are invalid.",
+                FixedNow)),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -259,6 +270,25 @@ public sealed class LifecycleOperatorCommandHandlerTests
             && timestampElement.GetDateTimeOffset() == timestamp;
     }
 
+    private static bool HasOperatorRejectedPayload(
+        string payload,
+        Guid operatorId,
+        string companyName,
+        string contactEmail,
+        string reason,
+        DateTimeOffset occurredAt)
+    {
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+
+        return root.GetProperty("eventId").GetGuid() != Guid.Empty
+            && root.GetProperty("occurredAt").GetDateTimeOffset() == occurredAt
+            && root.GetProperty("operatorId").GetGuid() == operatorId
+            && root.GetProperty("companyName").GetString() == companyName
+            && root.GetProperty("contactEmail").GetString() == contactEmail
+            && root.GetProperty("reason").GetString() == reason;
+    }
+
     private static bool HasLifecycleMetadata(string? metadata, Guid operatorId, string source)
     {
         using var document = JsonDocument.Parse(metadata!);
@@ -291,7 +321,12 @@ public sealed class LifecycleOperatorCommandHandlerTests
                 Clock,
                 Outbox,
                 WalletBackfillMarkers);
-            RejectHandler = new RejectOperatorCommandHandler(Operators, OperatorSubscriptions, ActivityLogs, Clock);
+            RejectHandler = new RejectOperatorCommandHandler(
+                Operators,
+                OperatorSubscriptions,
+                ActivityLogs,
+                Clock,
+                Outbox);
             SuspendHandler = new SuspendOperatorCommandHandler(
                 Operators,
                 Users,

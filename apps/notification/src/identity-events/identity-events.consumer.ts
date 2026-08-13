@@ -1,12 +1,14 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
   IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+  IDENTITY_OPERATOR_REJECTED_ROUTING_KEY,
   IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
   IDENTITY_OTP_REQUESTED_ROUTING_KEY,
   IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
   IDENTITY_USER_CREATED_ROUTING_KEY,
   IdentityOperatorApprovedEventSchema,
+  IdentityOperatorRejectedEventSchema,
   IdentityOperatorRegistrationSubmittedEventSchema,
   IdentityOperatorSuspendedEventSchema,
   IdentityOtpRequestedEventSchema,
@@ -68,6 +70,13 @@ export class IdentityEventsConsumer implements OnModuleInit {
       'notification.identity.operator.approved',
       IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
       (payload, raw) => this.handleOperatorApproved(payload, raw),
+      { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+
+    await this.consumer.subscribe(
+      'notification.identity.operator.rejected',
+      IDENTITY_OPERATOR_REJECTED_ROUTING_KEY,
+      (payload, raw) => this.handleOperatorRejected(payload, raw),
       { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
     );
 
@@ -162,6 +171,47 @@ export class IdentityEventsConsumer implements OnModuleInit {
       'Nhà xe bị tạm ngưng',
       'Nhà xe của bạn đã bị tạm ngưng. Vui lòng liên hệ quản trị hệ thống để được hỗ trợ.',
     );
+  }
+
+  async handleOperatorRejected(payload: unknown, raw: ConsumeMessage): Promise<void> {
+    const parsed = IdentityOperatorRejectedEventSchema.safeParse(payload);
+    const messageId = parsed.success ? parsed.data.eventId : getMessageId(raw);
+    if (!messageId) throw new Error(`MISSING_MESSAGE_ID_${IDENTITY_OPERATOR_REJECTED_ROUTING_KEY}`);
+
+    const processingState = await this.idempotency.begin(
+      IDENTITY_OPERATOR_REJECTED_ROUTING_KEY,
+      messageId,
+      raw.content,
+    );
+    if (processingState === 'duplicate') return;
+    if (processingState === 'locked') {
+      throw new Error(`MESSAGE_LOCKED_${IDENTITY_OPERATOR_REJECTED_ROUTING_KEY}_${messageId}`);
+    }
+
+    try {
+      if (!parsed.success) {
+        this.logger.warn(
+          `Dropping malformed ${IDENTITY_OPERATOR_REJECTED_ROUTING_KEY} messageId=${messageId}`,
+        );
+        await this.idempotency.markProcessed(IDENTITY_OPERATOR_REJECTED_ROUTING_KEY, messageId);
+        return;
+      }
+
+      const event = parsed.data;
+      await this.notificationsService.enqueueEmail({
+        dedupeKey: `${IDENTITY_OPERATOR_REJECTED_ROUTING_KEY}:${messageId}:email`,
+        toEmail: event.contactEmail,
+        templateKey: EmailTemplateKey.OPERATOR_SUBSCRIPTION_NOTICE,
+        templateData: {
+          title: 'Đơn đăng ký nhà xe bị từ chối',
+          message: `Đơn đăng ký của ${event.companyName} bị từ chối. Lý do: ${event.reason} Bạn có thể gửi lại đơn mới nếu cần.`,
+        },
+      });
+      await this.idempotency.markProcessed(IDENTITY_OPERATOR_REJECTED_ROUTING_KEY, messageId);
+    } catch (error) {
+      await this.idempotency.release(IDENTITY_OPERATOR_REJECTED_ROUTING_KEY, messageId);
+      throw error;
+    }
   }
 
   async handleSubscriptionUsageWarning(payload: unknown, raw: ConsumeMessage): Promise<void> {

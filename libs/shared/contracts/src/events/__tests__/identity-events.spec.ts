@@ -1,9 +1,11 @@
 import {
   IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+  IDENTITY_OPERATOR_REJECTED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
   IDENTITY_OTP_REQUESTED_ROUTING_KEY,
   IDENTITY_USER_CREATED_ROUTING_KEY,
   IdentityOperatorApprovedEventSchema,
+  IdentityOperatorRejectedEventSchema,
   IdentityOperatorSuspendedEventSchema,
   IdentityOtpRequestedEventSchema,
   IdentityUserCreatedEventSchema,
@@ -20,6 +22,7 @@ describe('Identity integration event contracts', () => {
   it('binds the published routing keys', () => {
     expect(IDENTITY_USER_CREATED_ROUTING_KEY).toBe('identity.user.created');
     expect(IDENTITY_OPERATOR_APPROVED_ROUTING_KEY).toBe('identity.operator.approved');
+    expect(IDENTITY_OPERATOR_REJECTED_ROUTING_KEY).toBe('identity.operator.rejected');
     expect(IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY).toBe('identity.operator.suspended');
     expect(IDENTITY_OTP_REQUESTED_ROUTING_KEY).toBe('identity.otp.requested');
   });
@@ -51,6 +54,22 @@ describe('Identity integration event contracts', () => {
       approvedAt: '2026-06-10T08:30:00+07:00',
     });
     expect(result.success).toBe(true);
+  });
+
+  it('accepts only the exact identity.operator.rejected payload', () => {
+    const payload = {
+      eventId: '33333333-3333-4333-8333-333333333333',
+      occurredAt: '2026-08-13T08:30:00+07:00',
+      operatorId: '22222222-2222-4222-8222-222222222222',
+      companyName: 'Nhà xe Việt Ride',
+      contactEmail: 'operator@example.com',
+      reason: 'Hồ sơ đăng ký không hợp lệ.',
+    };
+
+    expect(IdentityOperatorRejectedEventSchema.safeParse(payload).success).toBe(true);
+    expect(
+      IdentityOperatorRejectedEventSchema.safeParse({ ...payload, unexpected: true }).success,
+    ).toBe(false);
   });
 
   it('accepts a well-formed identity.operator.suspended payload', () => {
