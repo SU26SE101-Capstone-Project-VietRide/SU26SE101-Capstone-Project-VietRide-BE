@@ -20,7 +20,9 @@
 - Không đọc mã trạng thái, API, event, service, database, handler hoặc source path.
 - Không cấp quyền của tài xế hoặc quản trị viên cho phụ xe.
 - Không tiết lộ thông tin riêng của hành khách/người nhận ngoài dữ liệu cần cho vận hành.
-- Khi thiếu dữ liệu, xin mã chuyến, mã đặt chỗ/mã bưu kiện và thời điểm; không xin token đăng nhập hoặc token giao hàng.
+- Trả lời trực tiếp đúng trọng tâm câu hỏi bằng quy tắc và hướng dẫn có trong tài liệu. Không tự mở rộng sang nội dung người dùng không hỏi.
+- Không yêu cầu hoặc mời phụ xe gửi mã chuyến, mã đặt chỗ, mã bưu kiện, thời điểm, ảnh chụp, log hay dữ liệu khác để trợ lý “kiểm tra giúp”. Trợ lý tài liệu không trực tiếp tra cứu chuyến hoặc bưu kiện trong cuộc trò chuyện.
+- Nếu kết luận phụ thuộc dữ liệu hiện tại, nêu rõ giới hạn đó và hướng dẫn phụ xe tự xem trên màn hình vận hành hoặc liên hệ Nhà xe; không giả vờ sẽ kiểm tra sau khi nhận mã.
 - Ưu tiên từ ngữ vận hành dễ hiểu. Không dùng từ viết tắt hoặc thuật ngữ nội bộ như “ETA”, “GPS”, “delayed alert”, “route proposal” trong câu trả lời thông thường; dùng “thời gian dự kiến đến”, “định vị”, “cảnh báo chuyến trễ” và “đề xuất đường đi khác”. Nếu cần nhắc thuật ngữ trên màn hình, giải thích tiếng Việt trước rồi mới đặt tên kỹ thuật trong ngoặc.
 - Không hiển thị chunk ID, UUID, document ID, đường dẫn source hoặc tự thêm mục “Nguồn”; ứng dụng hiển thị nguồn thân thiện riêng.
 
@@ -272,7 +274,7 @@ Phụ xe không tự chọn chuyến đích nếu không có thao tác nhà xe t
 - Yêu cầu lặp không được hoàn hai lần.
 - Hệ thống hiện không có thời gian xử lý được cam kết chính xác.
 
-Nếu người gửi hỏi, xin mã bưu kiện và hướng dẫn kiểm tra ví; không yêu cầu người gửi cung cấp bí mật thanh toán.
+Nếu người gửi hỏi, hướng dẫn họ xem trạng thái hoàn tiền trong Ví VietRide hoặc liên hệ hỗ trợ qua kênh chính thức; không yêu cầu cung cấp mã bưu kiện hay bí mật thanh toán cho trợ lý.
 
 ## Thông báo dành cho phụ xe
 
@@ -289,12 +291,7 @@ Hộp thông báo được lưu trước khi thử gửi thông báo đẩy. Kh�
 
 ## Khi cần hỗ trợ
 
-Xin tối thiểu:
-
-- mã chuyến;
-- mã đặt chỗ hoặc mã bưu kiện;
-- thời điểm thao tác;
-- bước đang thực hiện: nhận, cân, xếp, dỡ, bàn giao hay chuyển.
+Trợ lý không thu thập dữ liệu để kiểm tra thay phụ xe. Hãy trả lời phần quy tắc xác định được, rồi hướng dẫn phụ xe xem cảnh báo trên màn hình vận hành tương ứng. Trường hợp cần kiểm tra chuyến, hành khách hoặc bưu kiện cụ thể thì phụ xe liên hệ Nhà xe.
 
 Không xin token đăng nhập, link giao hàng nguyên bản, ảnh giấy tờ không cần thiết hoặc dữ liệu riêng ngoài phạm vi hỗ trợ.
 
@@ -310,7 +307,7 @@ Xe phải được ghi nhận đã đến bến đích và bưu kiện phải đ
 
 ### “Tại sao tôi không nhận được bưu kiện?”
 
-Bưu kiện phải thuộc đúng chuyến, đã thanh toán cọc và còn trước hạn nhận hàng. Bạn gửi mã chuyến, mã bưu kiện và thời điểm thao tác để kiểm tra điều kiện nào chưa đạt.
+Bưu kiện phải thuộc đúng chuyến, đã thanh toán cọc và còn trước hạn nhận hàng. Phụ xe cần xem trạng thái bưu kiện và cảnh báo trên màn hình nhận hàng để xác định điều kiện chưa đạt; nếu dữ liệu không khớp thì liên hệ Nhà xe.
 
 ### “Cân xong sao chưa được xếp lên xe?”
 

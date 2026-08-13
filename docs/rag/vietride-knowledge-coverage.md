@@ -27,7 +27,7 @@ giải thích hành vi bằng ngôn ngữ người dùng; dấu “Theo phạm v
 
 - Mỗi domain phải có ít nhất một section trong mọi tài liệu được đánh dấu “Có”.
 - Mỗi domain phải có câu hỏi regression cho các role chịu tác động trực tiếp.
-- Câu hỏi cần dữ liệu hiện tại phải nêu mã tối thiểu cần xin, không biến tài liệu tĩnh thành dữ liệu live.
+- Câu hỏi cần dữ liệu hiện tại phải trả lời phần quy tắc xác định được, nêu rõ giới hạn và chỉ nơi người dùng tự kiểm tra. Không yêu cầu người dùng gửi mã hoặc dữ liệu để trợ lý “kiểm tra giúp”, vì tài liệu tĩnh không có khả năng tra cứu trực tiếp.
 - Câu hỏi xuyên service phải mô tả kết quả người dùng nhìn thấy; không kể tên service/event mặc định.
 - Rule chưa có implementation hoặc còn mâu thuẫn phải được ghi là chưa đủ thông tin.
 - Câu gợi ý UI là regression bắt buộc, không được phát hành UI trước knowledge tương ứng.

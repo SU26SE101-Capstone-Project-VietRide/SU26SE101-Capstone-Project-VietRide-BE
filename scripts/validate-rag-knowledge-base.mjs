@@ -30,8 +30,15 @@ const OPERATOR_DIVISION_PATTERNS = [
   /phân biệt quyền Nhân viên/i,
 ];
 const PLAIN_LANGUAGE_RULE = 'Ưu tiên từ ngữ';
+const DIRECT_ANSWER_RULE = 'Trả lời trực tiếp đúng trọng tâm câu hỏi';
+const NO_LOOKUP_REQUEST_RULE = 'Không yêu cầu hoặc mời';
 const DELAY_QUESTION = '### “Nếu chuyến trễ hơn 30 phút thì sao?”';
 const UNEXPLAINED_DELAY_TERMS = /\b(?:ETA|GPS|delayed alert|route proposal)\b/i;
+const LOOKUP_INVITATION_PATTERNS = [
+  /(?:bạn|vui lòng|hãy)\s+(?:gửi|cung cấp|đưa)\s+(?:cho\s+(?:tôi|mình)\s+)?mã[^.\n]*(?:kiểm tra|tra cứu)/i,
+  /(?:gửi|cung cấp|đưa)\s+mã[^.\n]*(?:để|rồi)\s+(?:tôi|mình|trợ lý)?\s*(?:kiểm tra|tra cứu)/i,
+  /xin\s+(?:đúng\s+)?mã[^.\n]*(?:kiểm tra|tra cứu)?/i,
+];
 
 const errors = [];
 const docs = new Map();
@@ -45,6 +52,15 @@ for (const [file, roles] of EXPECTED_FILES) {
   assert(!content.includes('\r'), `${file}: phải dùng LF`);
   assert(content.includes('Không hiển thị chunk ID, UUID'), `${file}: thiếu quy tắc ẩn identifier nội bộ`);
   assert(content.includes(PLAIN_LANGUAGE_RULE), `${file}: thiếu quy tắc dùng tiếng Việt dễ hiểu`);
+  assert(content.includes(DIRECT_ANSWER_RULE), `${file}: thiếu quy tắc trả lời đúng trọng tâm`);
+  assert(content.includes(NO_LOOKUP_REQUEST_RULE), `${file}: thiếu quy tắc không xin mã để tra cứu`);
+  const answerContent = content
+    .split('\n')
+    .filter((line) => !line.includes(NO_LOOKUP_REQUEST_RULE) && !line.includes('Không yêu cầu họ cung cấp mã'))
+    .join('\n');
+  for (const pattern of LOOKUP_INVITATION_PATTERNS) {
+    assert(!pattern.test(answerContent), `${file}: còn mời người dùng gửi mã để trợ lý kiểm tra: ${pattern}`);
+  }
   for (const domain of REQUIRED_BY_FILE.get(file) ?? []) {
     assert(content.toLocaleLowerCase('vi').includes(domain.toLocaleLowerCase('vi')), `${file}: thiếu domain ${domain}`);
   }
@@ -91,6 +107,7 @@ for (const scenario of regression.scenarios) {
   for (const field of ['role', 'topic', 'questions', 'mustInclude', 'mustNotInclude', 'requiresLiveData', 'askFor']) {
     assert(Object.hasOwn(scenario, field), `Scenario ${scenario.topic ?? '<unknown>'} thiếu ${field}`);
   }
+  assert(Array.isArray(scenario.askFor) && scenario.askFor.length === 0, `Scenario ${scenario.topic}: askFor phải rỗng vì trợ lý không nhận mã để tra cứu`);
 }
 
 const promptRegistry = await readUtf8(
@@ -99,6 +116,8 @@ const promptRegistry = await readUtf8(
 const chatTypes = await readUtf8(resolve(ROOT, 'apps', 'rag', 'src', 'chat', 'chat.types.ts'));
 assert(!promptRegistry.includes('Only cite chunk IDs included in the retrieved context.'), 'Prompt còn yêu cầu cite chunk ID');
 assert(promptRegistry.includes('Không hiển thị chunk ID, UUID'), 'Prompt thiếu quy tắc ẩn UUID');
+assert(promptRegistry.includes(DIRECT_ANSWER_RULE), 'Prompt thiếu quy tắc trả lời đúng trọng tâm');
+assert(promptRegistry.includes('Không yêu cầu hoặc mời người dùng gửi mã'), 'Prompt còn thiếu quy tắc không nhận mã để tra cứu');
 assert(!/event: 'done'[\s\S]{0,300}citedChunkIds/.test(chatTypes), 'Public SSE done còn citedChunkIds');
 assert(/event: 'done'[\s\S]{0,300}citations/.test(chatTypes), 'Public SSE done thiếu citations');
 
