@@ -195,7 +195,10 @@ public sealed class TripsEndpointTests
         var seatMap = new TripSeatMapDto(
             tripId,
             "SLEEPER_BUS",
-            [new TripSeatMapSeatDto("A01", "AVAILABLE", "SLEEPER_LOWER", 1, 1, 1)]);
+            [new TripSeatMapSeatDto("A01", "AVAILABLE", "SLEEPER_LOWER", 1, 1, 1)])
+        {
+            Aisles = [new VietRide.Trip.Application.Features.Vehicles.SeatLayoutAisleDto(2)],
+        };
         var mediator = new StubMediator(_ => seatMap);
         using var factory = new TripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
@@ -206,6 +209,8 @@ public sealed class TripsEndpointTests
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         AssertSuccessEnvelope(document, 200);
         var seat = document.RootElement.GetProperty("data").GetProperty("seats")[0];
+        document.RootElement.GetProperty("data").GetProperty("aisles")[0]
+            .GetProperty("afterCol").GetInt32().Should().Be(2);
         seat.GetProperty("seatNumber").GetString().Should().Be("A01");
         seat.GetProperty("status").GetString().Should().Be("AVAILABLE");
         seat.GetProperty("type").GetString().Should().Be("SLEEPER_LOWER");
@@ -214,6 +219,26 @@ public sealed class TripsEndpointTests
         seat.GetProperty("deck").GetInt32().Should().Be(1);
         mediator.LastRequest.Should().BeOfType<GetTripSeatMapQuery>()
             .Which.TripId.Should().Be(tripId);
+    }
+
+    [Fact]
+    public async Task GetSeatMap_UnknownQueryKey_Returns422ValidationEnvelopeBeforeDispatch()
+    {
+        var mediator = new StubMediator(_ => throw new InvalidOperationException("Must not dispatch."));
+        using var factory = new TripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(CreateAuthorizedRequest(
+            HttpMethod.Get,
+            $"/v1/trips/{Guid.NewGuid()}/seat-map?isOneTime=true"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("VALIDATION_ERROR");
+        document.RootElement.GetProperty("error").GetProperty("fields")[0]
+            .GetProperty("field").GetString().Should().Be("isOneTime");
+        mediator.LastRequest.Should().BeNull();
     }
 
     [Fact]

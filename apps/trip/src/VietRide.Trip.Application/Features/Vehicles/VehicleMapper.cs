@@ -1,4 +1,3 @@
-using System.Text.Json;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Domain.Entities;
 
@@ -11,8 +10,7 @@ public static class VehicleMapper
         VehicleAssignmentProjection? currentAssignment = null,
         VehicleAssignmentProjection? nextAssignment = null)
     {
-        var layout = vehicle.SeatLayoutJson.Deserialize<SeatLayoutDto>()
-            ?? throw new InvalidOperationException("Stored vehicle seat layout is invalid.");
+        var layout = SeatLayoutJsonSerializer.Deserialize(vehicle.SeatLayoutJson);
 
         return new VehicleDto(
             vehicle.Id,

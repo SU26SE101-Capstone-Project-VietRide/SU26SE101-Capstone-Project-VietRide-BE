@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
+using VietRide.Shared.Web.Filters;
 using VietRide.Trip.Application.Features.Internal.Routes;
 
 namespace VietRide.Trip.Api.Controllers;
@@ -32,6 +33,22 @@ public sealed class InternalRoutesController : ControllerBase
             new GetRouteOwnershipQuery(routeId, operatorId),
             cancellationToken);
 
+        return Ok(result);
+    }
+
+    [HttpGet("search")]
+    [AllowedQueryParameters("operatorId", "search")]
+    [ProducesResponseType(typeof(InternalRouteSearchDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<InternalRouteSearchDto>> SearchAsync(
+        [FromQuery] Guid operatorId,
+        [FromQuery] string search,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new SearchInternalRoutesQuery(operatorId, search),
+            cancellationToken);
         return Ok(result);
     }
 }

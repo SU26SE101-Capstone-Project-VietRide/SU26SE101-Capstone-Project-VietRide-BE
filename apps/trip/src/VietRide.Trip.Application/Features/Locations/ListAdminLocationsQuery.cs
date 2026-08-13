@@ -7,4 +7,6 @@ public sealed record ListAdminLocationsQuery(
     int? Page,
     int? PageSize,
     string? Search,
-    bool? IsActive) : IRequest<PagedResult<LocationDto>>;
+    bool? IsActive,
+    string? Type = null,
+    string? ParentCode = null) : IRequest<PagedResult<LocationDto>>;

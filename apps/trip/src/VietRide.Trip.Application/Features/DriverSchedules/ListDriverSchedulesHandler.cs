@@ -1,10 +1,10 @@
-using System.Text.Json;
 using MediatR;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.Routes;
 using VietRide.Trip.Application.Features.Stations;
+using VietRide.Trip.Application.Features.Trips.Operations;
 using VietRide.Trip.Application.Features.Vehicles;
 
 namespace VietRide.Trip.Application.Features.DriverSchedules;
@@ -25,6 +25,45 @@ public sealed class ListDriverSchedulesHandler(
         if (request.RouteId.HasValue) query = query.Where(x => x.RouteId == request.RouteId.Value);
         if (request.DriverUserId.HasValue) query = query.Where(x => x.DriverUserId == request.DriverUserId.Value);
         if (request.IsActive.HasValue) query = query.Where(x => x.IsActive == request.IsActive.Value);
+        if (request.VehicleTypeId.HasValue)
+        {
+            var vehicleTypeMatchIds = vehicleRepository.QueryNoTracking()
+                .Where(vehicle => vehicle.OperatorId == request.OperatorId
+                    && vehicle.VehicleTypeId == request.VehicleTypeId.Value)
+                .Select(vehicle => vehicle.Id);
+            query = query.Where(schedule => schedule.VehicleId.HasValue
+                && vehicleTypeMatchIds.Contains(schedule.VehicleId.Value));
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var search = request.Search.Trim();
+            var normalizedSearch = search.ToLowerInvariant();
+            var crewSearch = await identityClient.SearchOperatorCrewAsync(
+                request.OperatorId,
+                search,
+                cancellationToken);
+            if (!crewSearch.Succeeded)
+            {
+                throw new TripIdentityUnavailableException(
+                    crewSearch.Message ?? "Identity crew search is unavailable.");
+            }
+
+            var crewUserIds = crewSearch.Users.Select(user => user.UserId).ToArray();
+            var routeIds = routeRepository.QueryNoTracking()
+                .Where(route => route.OperatorId == request.OperatorId
+                    && route.Name.ToLower().Contains(normalizedSearch))
+                .Select(route => route.Id);
+            var licensePlateMatchIds = vehicleRepository.QueryNoTracking()
+                .Where(vehicle => vehicle.OperatorId == request.OperatorId
+                    && vehicle.LicensePlate.ToLower().Contains(normalizedSearch))
+                .Select(vehicle => vehicle.Id);
+            query = query.Where(schedule =>
+                routeIds.Contains(schedule.RouteId)
+                || (schedule.VehicleId.HasValue && licensePlateMatchIds.Contains(schedule.VehicleId.Value))
+                || crewUserIds.Contains(schedule.DriverUserId)
+                || (schedule.AssistantUserId.HasValue && crewUserIds.Contains(schedule.AssistantUserId.Value)));
+        }
         var total = query.LongCount();
         var schedules = query.OrderBy(x => x.DepartureTime).ThenBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize).ToList();
         var routes = routeRepository.QueryNoTracking().Where(x => x.OperatorId == request.OperatorId && schedules.Select(s => s.RouteId).Contains(x.Id)).ToList();
@@ -37,7 +76,7 @@ public sealed class ListDriverSchedulesHandler(
             .AsEnumerable()
             .ToDictionary(x => x.Id, x =>
             {
-                var layout = x.SeatLayoutJson.Deserialize<SeatLayoutDto>()!;
+                var layout = SeatLayoutJsonSerializer.Deserialize(x.SeatLayoutJson);
                 return new VehicleDto(
                     x.Id,
                     x.OperatorId,

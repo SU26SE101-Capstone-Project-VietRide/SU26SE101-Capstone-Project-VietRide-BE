@@ -642,22 +642,24 @@ public sealed class TripHandlerProjectionTests
     {
         var operatorId = Guid.NewGuid();
         var vehicleType = VehicleType.Create("SLEEPER_BUS", "Sleeper bus", null, 2, true);
+        var webJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var snapshotLayout = JsonSerializer.SerializeToElement(new SeatLayoutDto(
+            1,
+            "SLEEPER_BUS",
+            2,
+            8,
+            4,
+            2,
+            [new SeatLayoutAisleDto(2)],
+            [
+                new SeatLayoutSeatDto("A01", 7, 3, 2, "SLEEPER_LOWER", true, false, false),
+                new SeatLayoutSeatDto("A02", 8, 4, 2, "SLEEPER_UPPER", true, false, false),
+            ]), webJsonOptions);
         var vehicle = Vehicle.Create(
             operatorId,
             vehicleType.Id,
             "51B-12345",
-            JsonSerializer.SerializeToElement(new SeatLayoutDto(
-                1,
-                "SLEEPER_BUS",
-                2,
-                8,
-                4,
-                2,
-                [new SeatLayoutAisleDto(2)],
-                [
-                    new SeatLayoutSeatDto("A01", 7, 3, 2, "SLEEPER_LOWER", true, false, false),
-                    new SeatLayoutSeatDto("A02", 8, 4, 2, "SLEEPER_UPPER", true, false, false),
-                ])),
+            snapshotLayout,
             2,
             null,
             null);
@@ -675,7 +677,21 @@ public sealed class TripHandlerProjectionTests
             null,
             maxCargoVolumeM3: null,
             estimatedPassengerLuggageKg: 0m,
-            seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
+            seatLayoutSnapshotJson: snapshotLayout);
+        vehicle.UpdateSeatLayout(
+            JsonSerializer.SerializeToElement(new SeatLayoutDto(
+                1,
+                "SLEEPER_BUS",
+                2,
+                8,
+                4,
+                2,
+                [new SeatLayoutAisleDto(1)],
+                [
+                    new SeatLayoutSeatDto("A01", 7, 3, 2, "SLEEPER_LOWER", true, false, false),
+                    new SeatLayoutSeatDto("A02", 8, 4, 2, "SLEEPER_UPPER", true, false, false),
+                ]), webJsonOptions),
+            2);
         var handler = new GetTripSeatMapHandler(
             new InMemoryTripRepository([trip]),
             new InMemoryTripSeatRepository([TripSeat.Create(trip.Id, "A01")]),
@@ -686,6 +702,7 @@ public sealed class TripHandlerProjectionTests
 
         result.Seats.Should().ContainSingle().Which.Should().BeEquivalentTo(
             new TripSeatMapSeatDto("A01", "AVAILABLE", "SLEEPER_LOWER", 7, 3, 2));
+        result.Aisles.Should().ContainSingle().Which.AfterCol.Should().Be(2);
     }
 
     [Fact]

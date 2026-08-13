@@ -38,6 +38,31 @@ public sealed class ListVehiclesHandlerTests
     }
 
     [Fact]
+    public async Task Handle_ForwardsVehicleTypeStatusAndActivationFilters()
+    {
+        object?[]? receivedArguments = null;
+        var repository = TestProxy<IVehicleRepository>.Create((method, args) =>
+        {
+            if (method.Name != nameof(IVehicleRepository.ListByOperatorAsync))
+                return null;
+            receivedArguments = args;
+            return PagedResult<VietRide.Trip.Domain.Entities.Vehicle>.Create([], 1, 20, 0);
+        });
+        var vehicleTypeId = Guid.NewGuid();
+
+        await new ListVehiclesHandler(repository).Handle(
+            new ListVehiclesQuery(
+                Guid.NewGuid(), 1, 20, null, null, null, null,
+                vehicleTypeId, "MAINTENANCE", false),
+            CancellationToken.None);
+
+        Assert.NotNull(receivedArguments);
+        Assert.Equal(vehicleTypeId, receivedArguments[8]);
+        Assert.Equal(VietRide.Trip.Domain.Entities.VehicleStatus.MAINTENANCE, receivedArguments[9]);
+        Assert.Equal(false, receivedArguments[10]);
+    }
+
+    [Fact]
     public async Task Handle_WhenOperatorHasNoVehicles_ReturnsEmptyPage()
     {
         var repository = TestProxy<IVehicleRepository>.Create((method, _) =>

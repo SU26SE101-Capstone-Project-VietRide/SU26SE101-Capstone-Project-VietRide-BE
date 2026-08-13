@@ -208,6 +208,41 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
         }
     }
 
+    public async Task<IdentityCrewSearchResult> SearchOperatorCrewAsync(
+        Guid operatorId,
+        string search,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var query = Uri.EscapeDataString(search.Trim());
+            using var response = await _httpClient.GetAsync(
+                $"/internal/v1/operators/{operatorId:D}/crew/search?search={query}",
+                cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return IdentityCrewSearchResult.Failure(
+                    $"Identity returned status code {(int)response.StatusCode} for crew search.");
+            }
+
+            var users = await response.Content.ReadFromJsonAsync<List<IdentityCrewProfile>>(
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false);
+            return users is null
+                ? IdentityCrewSearchResult.Failure("Identity returned an empty crew-search payload.")
+                : IdentityCrewSearchResult.Success(users);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return IdentityCrewSearchResult.Failure(
+                "Identity crew search failed due to transport or circuit-breaker failure.");
+        }
+    }
+
     public async Task<QuotaAllocationResult> ClaimQuotaAllocationAsync(
         Guid operatorId,
         string resource,

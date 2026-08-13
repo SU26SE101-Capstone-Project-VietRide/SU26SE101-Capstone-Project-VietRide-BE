@@ -10,5 +10,8 @@ public sealed record ListVehiclesQuery(
     string? Search,
     string? SearchIn,
     string? SortBy,
-    string? SortDir)
+    string? SortDir,
+    Guid? VehicleTypeId = null,
+    string? Status = null,
+    bool? IsActive = null)
     : IRequest<PagedResult<VehicleDto>>;

@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
@@ -16,10 +17,22 @@ namespace VietRide.Trip.Api.Controllers;
 public sealed class AdminStationsController(IMediator mediator) : ControllerBase
 {
     [HttpGet]
+    [AllowedQueryParameters("page", "pageSize", "search", "isActive", "supportsShuttle", "sortBy", "sortDir")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<StationDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<PagedResult<StationDto>>> GetAsync(
         [FromQuery] int? page, [FromQuery] int? pageSize, [FromQuery] string? search,
-        [FromQuery] bool? isActive, CancellationToken cancellationToken)
-        => Ok(await mediator.Send(new ListAdminStationsQuery(page, pageSize, search, isActive), cancellationToken));
+        [FromQuery] bool? isActive, [FromQuery] bool? supportsShuttle,
+        [FromQuery] string? sortBy, [FromQuery] string? sortDir,
+        CancellationToken cancellationToken)
+        => Ok(await mediator.Send(new ListAdminStationsQuery(
+            page, pageSize, search, isActive, supportsShuttle, sortBy, sortDir), cancellationToken));
+
+    [HttpGet("summary")]
+    [AllowedQueryParameters]
+    [ProducesResponseType(typeof(ApiResponse<AdminStationSummaryDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<AdminStationSummaryDto>> GetSummaryAsync(CancellationToken cancellationToken)
+        => Ok(await mediator.Send(new GetAdminStationSummaryQuery(), cancellationToken));
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<StationDto>> GetByIdAsync(Guid id, CancellationToken cancellationToken)

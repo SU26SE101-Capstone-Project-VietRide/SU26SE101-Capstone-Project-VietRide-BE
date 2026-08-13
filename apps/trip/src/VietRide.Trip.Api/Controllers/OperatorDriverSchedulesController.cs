@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Api.Controllers.Requests;
@@ -26,16 +27,20 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
     }
 
     [HttpGet]
+    [AllowedQueryParameters("page", "pageSize", "routeId", "driverUserId", "isActive", "search", "vehicleTypeId")]
     [Authorize(Roles = "OPERATOR_STAFF,OPERATOR_ADMIN")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<DriverScheduleDetailDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<PagedResult<DriverScheduleDetailDto>>> List(
         [FromQuery] int? page, [FromQuery] int? pageSize, [FromQuery] Guid? routeId,
-        [FromQuery] Guid? driverUserId, [FromQuery] bool? isActive, CancellationToken cancellationToken)
+        [FromQuery] Guid? driverUserId, [FromQuery] bool? isActive,
+        [FromQuery] string? search, [FromQuery] Guid? vehicleTypeId,
+        CancellationToken cancellationToken)
     {
         var operatorId = CurrentUserClaims.GetOperatorId(User)
             ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage driver schedules.");
-        return Ok(await sender.Send(new ListDriverSchedulesQuery(operatorId, page, pageSize, routeId, driverUserId, isActive), cancellationToken));
+        return Ok(await sender.Send(new ListDriverSchedulesQuery(
+            operatorId, page, pageSize, routeId, driverUserId, isActive, search, vehicleTypeId), cancellationToken));
     }
 
     [HttpPost]

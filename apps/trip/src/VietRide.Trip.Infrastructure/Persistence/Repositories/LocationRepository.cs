@@ -105,6 +105,16 @@ internal sealed class LocationRepository : ILocationRepository
         string? search,
         bool? isActive,
         CancellationToken cancellationToken)
+        => await ListAsync(page, pageSize, search, isActive, cancellationToken, null, null);
+
+    public async Task<PagedResult<Location>> ListAsync(
+        int page,
+        int pageSize,
+        string? search,
+        bool? isActive,
+        CancellationToken cancellationToken,
+        string? type = null,
+        Guid? parentLocationId = null)
     {
         var query = BuildAccentInsensitiveSearchQuery(search);
 
@@ -112,6 +122,11 @@ internal sealed class LocationRepository : ILocationRepository
         {
             query = query.Where(location => location.IsActive == isActive.Value);
         }
+
+        if (!string.IsNullOrWhiteSpace(type))
+            query = query.Where(location => location.Type == type);
+        if (parentLocationId.HasValue)
+            query = query.Where(location => location.ParentLocationId == parentLocationId.Value);
 
         var totalItems = await query.LongCountAsync(cancellationToken);
         var items = await query

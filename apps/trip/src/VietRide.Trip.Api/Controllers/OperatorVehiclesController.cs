@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Application.Features.Vehicles;
 
@@ -48,6 +49,7 @@ public sealed class OperatorVehiclesController : ControllerBase
     }
 
     [HttpGet]
+    [AllowedQueryParameters("page", "pageSize", "search", "searchIn", "sortBy", "sortDir", "vehicleTypeId", "status", "isActive")]
     [Authorize(Roles = OperatorReadRoles)]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<VehicleDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -58,6 +60,9 @@ public sealed class OperatorVehiclesController : ControllerBase
         [FromQuery] string? searchIn,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
+        [FromQuery] Guid? vehicleTypeId,
+        [FromQuery] string? status,
+        [FromQuery] bool? isActive,
         CancellationToken cancellationToken)
     {
         return Ok(await mediator.Send(
@@ -68,7 +73,10 @@ public sealed class OperatorVehiclesController : ControllerBase
                 search,
                 searchIn,
                 sortBy,
-                sortDir),
+                sortDir,
+                vehicleTypeId,
+                status,
+                isActive),
             cancellationToken));
     }
 

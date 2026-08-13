@@ -194,6 +194,24 @@ public sealed class RouteHandlersTests
     }
 
     [Fact]
+    public async Task ListRoutes_AppliesIsActiveBeforeTotalAndPaging()
+    {
+        var active = CreateRoute(OperatorId, "Active route");
+        var inactive = CreateRoute(OperatorId, "Inactive route");
+        inactive.Deactivate();
+        var handler = new ListRoutesHandler(
+            new FakeRouteRepository([active, inactive]),
+            new FakeDriverScheduleRepository([]));
+
+        var result = await handler.Handle(
+            new ListRoutesQuery(OperatorId, 1, 20, null, false),
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle(item => item.Id == inactive.Id);
+        result.TotalItems.Should().Be(1);
+    }
+
+    [Fact]
     public async Task ListRoutes_ReturnsAllOwnedSchedulesForRoutesOnCurrentPageInStableOrder()
     {
         var route = CreateRoute(OperatorId, "A route");
