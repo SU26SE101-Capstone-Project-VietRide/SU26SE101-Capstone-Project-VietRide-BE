@@ -4,6 +4,7 @@ using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.Services;
+using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Features.Vehicles;
 
@@ -41,6 +42,9 @@ public sealed class ListVehiclesHandler : IRequestHandler<ListVehiclesQuery, Pag
         CancellationToken cancellationToken)
     {
         ValidateSortBy(request.SortBy);
+        var status = string.IsNullOrWhiteSpace(request.Status)
+            ? (VehicleStatus?)null
+            : Enum.Parse<VehicleStatus>(request.Status, ignoreCase: true);
         var page = Math.Max(request.Page ?? DefaultPage, DefaultPage);
         var pageSize = Math.Clamp(request.PageSize ?? DefaultPageSize, 1, MaxPageSize);
         var result = await vehicleRepository.ListByOperatorAsync(
@@ -51,7 +55,10 @@ public sealed class ListVehiclesHandler : IRequestHandler<ListVehiclesQuery, Pag
             request.SearchIn,
             request.SortBy,
             string.IsNullOrWhiteSpace(request.SortDir) ? "desc" : request.SortDir,
-            cancellationToken);
+            cancellationToken,
+            request.VehicleTypeId,
+            status,
+            request.IsActive);
 
         var assignments = resourceAvailability is null
             ? new Dictionary<Guid, (VehicleAssignmentProjection? Current, VehicleAssignmentProjection? Next)>()

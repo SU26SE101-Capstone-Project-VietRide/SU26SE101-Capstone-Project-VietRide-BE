@@ -106,6 +106,7 @@ function isSuspendedOperatorWhitelisted(method: string, path: string): boolean {
   return (
     (normalizedMethod === 'GET' && path === '/v1/operator/profile') ||
     (normalizedMethod === 'GET' && path === '/v1/operator/subscription') ||
+    (normalizedMethod === 'POST' && path === '/v1/auth/change-password') ||
     (normalizedMethod === 'POST' && path === '/v1/auth/refresh') ||
     (normalizedMethod === 'POST' && path === '/v1/auth/logout')
   );
@@ -128,7 +129,6 @@ function validateAccessGates(
     };
   }
 
-
   if (isOperatorRole(role) && !operatorStatus) {
     return {
       statusCode: 401,
@@ -142,7 +142,8 @@ function validateAccessGates(
       return {
         statusCode: 403,
         code: 'OPERATOR_SUSPENDED',
-        message: 'The operator is suspended. Access is limited to suspension status and subscription details.',
+        message:
+          'The operator is suspended. Access is limited to suspension status and subscription details.',
       };
     }
   } else if (isOperatorRole(role) && operatorStatus !== 'APPROVED') {

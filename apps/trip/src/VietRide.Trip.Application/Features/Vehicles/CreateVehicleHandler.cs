@@ -1,4 +1,3 @@
-using System.Text.Json;
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
@@ -54,7 +53,7 @@ public sealed class CreateVehicleHandler : IRequestHandler<CreateVehicleCommand,
             request.OperatorId,
             vehicleType.Id,
             licensePlate,
-            JsonSerializer.SerializeToElement(request.SeatLayoutJson),
+            SeatLayoutJsonSerializer.Serialize(request.SeatLayoutJson),
             request.TotalSeats,
             request.MaxCargoWeightKg,
             request.MaxCargoVolumeM3,

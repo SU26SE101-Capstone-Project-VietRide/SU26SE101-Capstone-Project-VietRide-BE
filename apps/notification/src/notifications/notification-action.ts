@@ -38,7 +38,6 @@ const BOOKING_DETAIL_TYPES = new Set<NotificationType>([
   NotificationType.BOOKING_CONFIRMED,
   NotificationType.BOOKING_CANCELLED,
   NotificationType.BOOKING_DISRUPTED,
-  NotificationType.BOOKING_REFUNDED,
   NotificationType.PASSENGER_NO_SHOW,
 ]);
 
@@ -70,7 +69,11 @@ export function resolveNotificationAction(
   type: NotificationType,
   rawData: unknown,
 ): NotificationActionDto {
-  if (type === NotificationType.WALLET_CREDITED || type === NotificationType.WALLET_DEBITED) {
+  if (
+    type === NotificationType.WALLET_CREDITED ||
+    type === NotificationType.WALLET_DEBITED ||
+    type === NotificationType.BOOKING_REFUNDED
+  ) {
     return { type: 'OPEN_WALLET', params: {} };
   }
   if (type.startsWith('SUBSCRIPTION_')) {

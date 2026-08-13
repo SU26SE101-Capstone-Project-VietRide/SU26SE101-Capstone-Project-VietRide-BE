@@ -9,6 +9,7 @@ using VietRide.Booking.Application.Features.OperatorVouchers.SetOperatorVoucherA
 using VietRide.Booking.Application.Features.OperatorVouchers.UpdateOperatorVoucher;
 using VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 
 namespace VietRide.Booking.Api.Controllers;
 
@@ -92,6 +93,7 @@ public sealed class OperatorVouchersController : ControllerBase
     /// Optional filters: isActive. sortBy whitelist is validated by Application.
     /// </remarks>
     [HttpGet]
+    [AllowedQueryParameters("isActive", "search", "service", "page", "pageSize", "sortBy", "sortDir")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<VoucherListItem>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ListVouchers(
@@ -116,7 +118,9 @@ public sealed class OperatorVouchersController : ControllerBase
                 PageSize = request.PageSize,
                 SortBy = request.SortBy,
                 SortDir = request.SortDir,
-            });
+            },
+            Search: request.Search,
+            Service: request.Service);
 
         var result = await _sender.Send(query, ct);
 

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.AlternativeRoutes;
@@ -80,6 +81,7 @@ public sealed class OperatorRoutesController : ControllerBase
         => Ok(await mediator.Send(ToFullCommand(GetRequiredOperatorId(), id, request), cancellationToken));
 
     [HttpGet]
+    [AllowedQueryParameters("page", "pageSize", "search", "isActive")]
     [Authorize(Roles = OperatorReadRoles)]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<RouteListItemDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -88,10 +90,11 @@ public sealed class OperatorRoutesController : ControllerBase
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
         [FromQuery] string? search,
+        [FromQuery] bool? isActive,
         CancellationToken cancellationToken)
     {
         return Ok(await mediator.Send(
-            new ListRoutesQuery(GetRequiredOperatorId(), page, pageSize, search),
+            new ListRoutesQuery(GetRequiredOperatorId(), page, pageSize, search, isActive),
             cancellationToken));
     }
 

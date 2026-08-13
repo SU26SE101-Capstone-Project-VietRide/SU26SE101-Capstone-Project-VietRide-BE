@@ -15,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
+using VietRide.Identity.Api.Controllers;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Features.Auth.ResendInitialPassword;
@@ -28,6 +29,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Persistence;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Identity.IntegrationTests.Api;
 
@@ -56,6 +58,21 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
         var response = await client.PostAsync($"/v1/operator/users/{TargetUserId}/resend-initial-password", null);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Theory]
+    [InlineData(nameof(OperatorUsersController.Lock))]
+    [InlineData(nameof(OperatorUsersController.Unlock))]
+    public void LockUnlock_UseSharedRequiredNoBodyIdempotency(string methodName)
+    {
+        var method = typeof(OperatorUsersController).GetMethod(methodName)
+            ?? throw new InvalidOperationException($"Method {methodName} was not found.");
+
+        var attribute = method.GetCustomAttributes(typeof(RequireIdempotencyAttribute), inherit: true)
+            .Cast<RequireIdempotencyAttribute>()
+            .Single();
+
+        attribute.AllowRequestBody.Should().BeFalse();
     }
 
     [Fact]

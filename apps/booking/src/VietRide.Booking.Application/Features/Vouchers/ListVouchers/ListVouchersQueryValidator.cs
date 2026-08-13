@@ -34,5 +34,12 @@ public sealed class ListVouchersQueryValidator : AbstractValidator<ListVouchersQ
             .Must(f => f is null || ValidFundingTypes.Contains(f, StringComparer.OrdinalIgnoreCase))
             .WithErrorCode("VALIDATION_ERROR")
             .WithMessage($"fundingType must be one of: {string.Join(", ", ValidFundingTypes)}.");
+        RuleFor(x => x.Search).MaximumLength(255);
+        RuleFor(x => x.Service)
+            .Must(value => string.IsNullOrWhiteSpace(value)
+                || value.Equals("BOOKING", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("PARCEL", StringComparison.OrdinalIgnoreCase))
+            .WithErrorCode("VALIDATION_ERROR")
+            .WithMessage("service must be BOOKING or PARCEL.");
     }
 }

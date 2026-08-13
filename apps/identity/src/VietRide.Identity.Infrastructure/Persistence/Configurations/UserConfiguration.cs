@@ -66,6 +66,11 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
             .HasColumnType("user_status")
             .IsRequired(false);
 
+        builder.Property(u => u.LockSource)
+            .HasColumnName("lock_source")
+            .HasColumnType("user_lock_source")
+            .IsRequired(false);
+
         builder.Property(u => u.OperatorId)
             .HasColumnName("operator_id")
             .HasColumnType("uuid")
@@ -149,8 +154,8 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
 
             t.HasCheckConstraint(
                 "chk_users_locked_from_status",
-                "((status = 'LOCKED' AND locked_from_status IN ('ACTIVE', 'PENDING_EMAIL_VERIFICATION')) " +
-                "OR (status <> 'LOCKED' AND locked_from_status IS NULL))");
+                "((status = 'LOCKED' AND locked_from_status IN ('ACTIVE', 'PENDING_EMAIL_VERIFICATION') AND lock_source IS NOT NULL) " +
+                "OR (status <> 'LOCKED' AND locked_from_status IS NULL AND lock_source IS NULL))");
         });
     }
 }

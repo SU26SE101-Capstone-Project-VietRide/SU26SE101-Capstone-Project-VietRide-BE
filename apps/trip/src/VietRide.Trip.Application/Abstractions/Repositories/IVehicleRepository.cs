@@ -24,6 +24,20 @@ public interface IVehicleRepository : IRepository<Vehicle, Guid>
         string sortDir,
         CancellationToken cancellationToken);
 
+    Task<PagedResult<Vehicle>> ListByOperatorAsync(
+        Guid operatorId,
+        int page,
+        int pageSize,
+        string? search,
+        string? searchIn,
+        string? sortBy,
+        string sortDir,
+        CancellationToken cancellationToken,
+        Guid? vehicleTypeId = null,
+        VehicleStatus? status = null,
+        bool? isActive = null) => ListByOperatorAsync(
+            operatorId, page, pageSize, search, searchIn, sortBy, sortDir, cancellationToken);
+
     Task<bool> LicensePlateExistsAsync(
         string licensePlate,
         Guid? excludedVehicleId,

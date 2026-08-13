@@ -32,6 +32,26 @@ public interface IIdentityInternalClient
         CancellationToken cancellationToken = default) =>
         Task.FromResult(IdentityOperatorLookupResult.ValidationFailure("Identity operator lookup is not implemented."));
 
+    Task<IdentityCrewSearchResult> SearchOperatorCrewAsync(
+        Guid operatorId,
+        string search,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(IdentityCrewSearchResult.Failure("Identity crew search is not implemented."));
+
+}
+
+public sealed record IdentityCrewProfile(Guid UserId, string DisplayName, string Role);
+
+public sealed record IdentityCrewSearchResult(
+    bool Succeeded,
+    IReadOnlyList<IdentityCrewProfile> Users,
+    string? Message)
+{
+    public static IdentityCrewSearchResult Success(IReadOnlyList<IdentityCrewProfile> users) =>
+        new(true, users, null);
+
+    public static IdentityCrewSearchResult Failure(string message) =>
+        new(false, [], message);
 }
 
 /// <summary>

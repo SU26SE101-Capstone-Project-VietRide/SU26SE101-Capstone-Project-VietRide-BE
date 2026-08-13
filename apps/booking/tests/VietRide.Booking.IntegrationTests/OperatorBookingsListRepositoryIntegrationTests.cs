@@ -135,6 +135,45 @@ public sealed class OperatorBookingsListRepositoryIntegrationTests
         result.TotalItems.Should().Be(0);
     }
 
+    [Fact]
+    public async Task List_SearchWithoutNormalizedPhone_FiltersBeforeCountPagingAndKeepsTenantScope()
+    {
+        await _factory.InitializeAsync();
+        var owner = Guid.NewGuid();
+        var foreignOwner = Guid.NewGuid();
+        var matchingId = Guid.NewGuid();
+        var departure = new DateTimeOffset(2026, 8, 13, 17, 0, 0, TimeSpan.Zero);
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<BookingDbContext>();
+            await InsertBooking(db, matchingId, "VR-20260813-SEARCH01", owner, Guid.NewGuid(), Guid.NewGuid(),
+                "CONFIRMED", departure, 120_000, departure, "Alice Needle");
+            await InsertBooking(db, Guid.NewGuid(), "VR-20260813-CONTROL1", owner, Guid.NewGuid(), Guid.NewGuid(),
+                "CONFIRMED", departure, 120_000, departure, "Bob Control");
+            await InsertBooking(db, Guid.NewGuid(), "VR-20260813-FOREIGN1", foreignOwner, Guid.NewGuid(), Guid.NewGuid(),
+                "CONFIRMED", departure, 120_000, departure, "Alice Needle");
+        }
+
+        await using var readScope = _factory.Services.CreateAsyncScope();
+        var repository = readScope.ServiceProvider.GetRequiredService<IBookingRepository>();
+        var criteria = new OperatorBookingListCriteria(
+            owner, null, null, null, null, null, null, 1, 1, "createdAt", true,
+            Search: "alice needle", SearchPhone: null);
+
+        var byBuyer = await repository.ListOperatorBookingsAsync(criteria);
+
+        byBuyer.TotalItems.Should().Be(1);
+        byBuyer.Items.Should().ContainSingle().Which.Id.Should().Be(matchingId);
+
+        var byCodeAndExistingFilter = await repository.ListOperatorBookingsAsync(criteria with
+        {
+            Search = "vr-20260813-search01",
+            BookingCode = "VR-20260813-SEARCH01",
+        });
+        byCodeAndExistingFilter.TotalItems.Should().Be(1);
+        byCodeAndExistingFilter.Items.Should().ContainSingle().Which.Id.Should().Be(matchingId);
+    }
+
     private static async Task InsertBooking(
         BookingDbContext db,
         Guid id,
@@ -145,18 +184,19 @@ public sealed class OperatorBookingsListRepositoryIntegrationTests
         string status,
         DateTimeOffset departure,
         long amount,
-        DateTimeOffset createdAt)
+        DateTimeOffset createdAt,
+        string? buyerDisplayName = null)
     {
         await db.Database.ExecuteSqlInterpolatedAsync($@"
 INSERT INTO vietride_booking.bookings (
     id, booking_code, passenger_user_id, trip_id, operator_id, pickup_station_id,
     base_fare, discount_amount, total_amount, status, refund_override,
     trip_snapshot_origin_name, trip_snapshot_dest_name, trip_snapshot_departure, trip_current_departure,
-    trip_snapshot_route_name, created_at, updated_at)
+    trip_snapshot_route_name, buyer_display_name, created_at, updated_at)
 VALUES (
     {id}, {code}, {passengerUserId}, {tripId}, {operatorId}, {Guid.NewGuid()},
     {amount}, 0, {amount}, {status}::booking_status, FALSE,
-    'Origin', 'Destination', {departure}, {departure}, 'Route', {createdAt}, {createdAt});");
+    'Origin', 'Destination', {departure}, {departure}, 'Route', {buyerDisplayName}, {createdAt}, {createdAt});");
         await db.Database.ExecuteSqlInterpolatedAsync($@"
 INSERT INTO vietride_booking.passengers (
     id, booking_id, seat_number, boarding_status, created_at, updated_at)

@@ -448,6 +448,7 @@ describe('createProxyHandler auth enforcement', () => {
   it.each([
     ['GET', '/v1/operator/profile'],
     ['GET', '/v1/operator/subscription'],
+    ['POST', '/v1/auth/change-password'],
     ['POST', '/v1/auth/refresh'],
     ['POST', '/v1/auth/logout'],
   ] as const)('allows a suspended OPERATOR_ADMIN to access %s %s', async (method, path) => {
@@ -515,7 +516,11 @@ describe('createProxyHandler auth enforcement', () => {
   it('rejects an operator token without operatorStatus after strict rollout', async () => {
     const signer = { sign: jest.fn() } as unknown as InternalJwtSigner;
     const handler = createProxyHandler(env, signer);
-    const req = makeRequest('/v1/operator/profile', { 'x-request-id': 'req-missing-status' }, 'GET');
+    const req = makeRequest(
+      '/v1/operator/profile',
+      { 'x-request-id': 'req-missing-status' },
+      'GET',
+    );
     (req as RequestWithUser).user = {
       sub: 'operator-admin-id',
       role: 'OPERATOR_ADMIN',

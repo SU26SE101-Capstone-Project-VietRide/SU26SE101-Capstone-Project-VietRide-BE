@@ -13,4 +13,6 @@ public sealed record OperatorBookingListCriteria(
     int Page,
     int PageSize,
     string SortBy,
-    bool SortDescending);
+    bool SortDescending,
+    string? Search = null,
+    string? SearchPhone = null);

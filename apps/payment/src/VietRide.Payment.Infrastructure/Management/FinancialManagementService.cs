@@ -353,9 +353,9 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     }
 
     public async Task<PagedResult<AdminSettlementDto>> ListAdminSettlementsAsync(
-        PageOptions options, Guid? operatorId, string? status, Guid? tripId, bool stuckOnly, string? severity, CancellationToken ct)
+        PageOptions options, Guid? operatorId, string? status, Guid? tripId, bool stuckOnly, string? severity, CancellationToken ct, string? search = null)
     {
-        var page = await LoadSettlementRowsAsync(options, operatorId, status, tripId, stuckOnly, severity, ct);
+        var page = await LoadSettlementRowsAsync(options, operatorId, status, tripId, stuckOnly, severity, ct, search);
         var (operators, users) = await LoadSettlementFallbacksAsync(page.Rows, ct);
         var highBefore = _clock.UtcNow.AddDays(-21);
         var items = page.Rows.Select(item => new AdminSettlementDto(item.Id, item.TripId, item.OperatorId,
@@ -376,7 +376,7 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     }
 
     public async Task<PagedResult<PlatformWalletTransactionDto>> ListPlatformTransactionsAsync(
-        PageOptions options, string? type, string? referenceType, CancellationToken ct)
+        PageOptions options, string? type, string? referenceType, CancellationToken ct, string? search = null)
     {
         ValidatePage(options, ["createdAt", "amount"]);
         var query = _db.PlatformWalletTransactions.AsNoTracking().AsQueryable();
@@ -384,6 +384,32 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             query = query.Where(item => item.Type == parsedType);
         if (ParseOptional<PlatformWalletTransactionRef>(referenceType) is { } parsedReference)
             query = query.Where(item => item.ReferenceType == parsedReference);
+        var normalizedSearch = NormalizeSearch(search);
+        if (normalizedSearch is not null)
+        {
+            if (Guid.TryParse(normalizedSearch, out var id))
+            {
+                query = query.Where(item => item.Id == id || item.ReferenceId == id);
+            }
+            else
+            {
+                var pattern = $"%{EscapeLike(normalizedSearch)}%";
+                var parsedSearchReference = Enum.TryParse<PlatformWalletTransactionRef>(
+                    normalizedSearch,
+                    ignoreCase: true,
+                    out var searchReference)
+                    ? searchReference
+                    : (PlatformWalletTransactionRef?)null;
+                query = parsedSearchReference.HasValue
+                    ? query.Where(item =>
+                        (item.Note != null && EF.Functions.ILike(item.Note, pattern, "\\"))
+                        || (item.ActorDisplayName != null && EF.Functions.ILike(item.ActorDisplayName, pattern, "\\"))
+                        || item.ReferenceType == parsedSearchReference.Value)
+                    : query.Where(item =>
+                        (item.Note != null && EF.Functions.ILike(item.Note, pattern, "\\"))
+                        || (item.ActorDisplayName != null && EF.Functions.ILike(item.ActorDisplayName, pattern, "\\")));
+            }
+        }
         query = ApplyDates(query, options);
         var total = await query.LongCountAsync(ct);
         query = (options.SortBy ?? "createdAt", IsAscending(options)) switch
@@ -787,10 +813,14 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                 var scopedLedger = _db.OperatorLedgerEntries.AsNoTracking();
                 if (operatorId.HasValue)
                     scopedLedger = scopedLedger.Where(item => item.OperatorId == operatorId.Value);
-                query = query.Where(item => scopedLedger.Any(entry =>
-                    entry.TripId == item.TripId
-                    && entry.ReferenceCode != null
-                    && EF.Functions.ILike(entry.ReferenceCode, prefixPattern, "\\")));
+                var containsPattern = $"%{EscapeLike(normalizedSearch)}%";
+                query = query.Where(item =>
+                    (item.OperatorName != null && EF.Functions.ILike(item.OperatorName, containsPattern, "\\"))
+                    || (item.ActiveFailureCode != null && EF.Functions.ILike(item.ActiveFailureCode, containsPattern, "\\"))
+                    || scopedLedger.Any(entry =>
+                        entry.TripId == item.TripId
+                        && entry.ReferenceCode != null
+                        && EF.Functions.ILike(entry.ReferenceCode, prefixPattern, "\\")));
             }
         }
         query = ApplySettlementDates(query, options, normalizedDateField);

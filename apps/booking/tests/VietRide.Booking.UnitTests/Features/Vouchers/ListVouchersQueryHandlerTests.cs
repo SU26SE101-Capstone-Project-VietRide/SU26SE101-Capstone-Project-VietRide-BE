@@ -226,4 +226,35 @@ public class ListVouchersQueryHandlerTests
         result.Items.Should().HaveCount(1);
         result.Items[0].FundingType.Should().Be("OPERATOR_FUNDED");
     }
+
+    [Fact]
+    public async Task Handle_ForwardsSearchAndNormalizedServiceFilters()
+    {
+        _vouchers.ListAsync(
+                ownerOperatorId: null,
+                platformOnly: true,
+                fundingType: null,
+                isActive: null,
+                page: 1,
+                pageSize: 20,
+                sortBy: null,
+                sortDir: "desc",
+                ct: Arg.Any<CancellationToken>(),
+                search: "summer",
+                service: "PARCEL")
+            .Returns((Array.Empty<Voucher>(), 0L));
+
+        await BuildSut().Handle(new ListVouchersQuery(
+            null,
+            true,
+            null,
+            null,
+            new QueryOptions { Page = 1, PageSize = 20 },
+            "summer",
+            "parcel"), CancellationToken.None);
+
+        await _vouchers.Received(1).ListAsync(
+            null, true, null, null, 1, 20, null, "desc",
+            Arg.Any<CancellationToken>(), "summer", "PARCEL");
+    }
 }

@@ -180,6 +180,11 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
         {
             throw AssignmentValidationFailure(fieldName, "Identity user must belong to the caller operator.");
         }
+
+        if (!string.Equals(user.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+        {
+            throw AssignmentValidationFailure(fieldName, "Identity user must be active before assignment.");
+        }
     }
 
     private static ValidationException AssignmentValidationFailure(string fieldName, string message)

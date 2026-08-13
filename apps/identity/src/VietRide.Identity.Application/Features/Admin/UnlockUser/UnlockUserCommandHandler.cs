@@ -38,6 +38,7 @@ public sealed class UnlockUserCommandHandler : IRequestHandler<UnlockUserCommand
         var user = await _users.GetByIdForUpdateAsync(request.UserId, cancellationToken)
             ?? throw new NotFoundException("User", request.UserId);
         var previousStatus = user.Status;
+        var previousLockSource = user.LockSource;
 
         await _lockoutCounter.ResetAsync(user.Id, cancellationToken);
         var restoredStatus = user.Unlock();
@@ -47,7 +48,9 @@ public sealed class UnlockUserCommandHandler : IRequestHandler<UnlockUserCommand
             targetUserId = user.Id,
             previousStatus = previousStatus.ToString(),
             newStatus = restoredStatus.ToString(),
+            previousLockSource = previousLockSource?.ToString(),
             statusChanged = true,
+            source = "SYSTEM_ADMIN_UNLOCK_USER",
         });
         await _activityLogs.AddAsync(
             ActivityLog.Create(

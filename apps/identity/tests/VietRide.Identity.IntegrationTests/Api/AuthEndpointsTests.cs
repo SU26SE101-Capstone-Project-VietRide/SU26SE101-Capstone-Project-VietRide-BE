@@ -15,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
+using VietRide.Identity.Api.Controllers;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Features.Auth.ForgotPassword;
@@ -34,6 +35,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Persistence;
 using VietRide.Shared.Persistence.Outbox;
+using VietRide.Shared.Web.Idempotency;
 using Xunit;
 
 namespace VietRide.Identity.IntegrationTests.Api;
@@ -191,6 +193,30 @@ public sealed class AuthEndpointsTests :
         var data = doc.RootElement.GetProperty("data");
         data.GetProperty("userId").GetGuid().Should().Be(HappyPathAuthSender.UserId);
         data.GetProperty("status").GetString().Should().Be("ACTIVE");
+    }
+
+    [Fact]
+    public void PostChangePassword_UsesSharedRequiredIdempotency()
+    {
+        var method = typeof(AuthController).GetMethod(nameof(AuthController.ChangePassword))
+            ?? throw new InvalidOperationException("ChangePassword action was not found.");
+
+        method.GetCustomAttributes(typeof(RequireIdempotencyAttribute), inherit: true)
+            .Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task PostChangePassword_Anonymous_Returns401()
+    {
+        using var client = _factory.CreateIdempotentClient();
+
+        var response = await client.PostAsJsonAsync("/v1/auth/change-password", new
+        {
+            currentPassword = "OldPassword1",
+            newPassword = "NewPassword2",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -529,6 +555,9 @@ public sealed class AuthEndpointsTests :
     [InlineData(UserRole.PASSENGER)]
     [InlineData(UserRole.DRIVER)]
     [InlineData(UserRole.ASSISTANT)]
+    [InlineData(UserRole.OPERATOR_STAFF)]
+    [InlineData(UserRole.OPERATOR_ADMIN)]
+    [InlineData(UserRole.SYSTEM_ADMIN)]
     public async Task ForgotResetPassword_ActiveUser_UsesRealHandlersDbAndAllowsLoginWithNewPassword(UserRole role)
     {
         await _dbFactory.ResetAsync();

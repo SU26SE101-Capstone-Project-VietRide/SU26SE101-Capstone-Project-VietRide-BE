@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.70.0
+> **Phiên bản:** 1.72.1
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-12
+> **Cập nhật lần cuối:** 2026-08-13
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1279,7 +1279,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
 endpoint có behavior-idempotent hay không, trừ đúng 21 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `212 mutation surfaces / 191 required / 21 exempt`;
+bảng sau. Inventory executable phải giữ tổng `215 mutation surfaces / 194 required / 21 exempt`;
 thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
 
 **Canonical 21 exemptions (không yêu cầu `Idempotency-Key`):**
@@ -1355,6 +1355,9 @@ Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable
 | 25 | `POST /v1/assistant/parcels/{parcelId}/deliver` | Parcel |
 | 26 | `POST /v1/admin/users/{userId}/lock` | Identity |
 | 27 | `POST /v1/admin/users/{userId}/unlock` | Identity |
+| 27a | `POST /v1/operator/users/{userId}/lock` | Identity |
+| 27b | `POST /v1/operator/users/{userId}/unlock` | Identity |
+| 27c | `POST /v1/auth/change-password` | Identity |
 | 28 | `POST /v1/admin/stations/{primaryStationId}/merge` | Trip |
 | 29 | `DELETE /v1/operator/stops/{id}?replacedByStopId=` | Trip |
 | 30 | `POST /v1/bookings/{bookingId}/pending-action/{actionId}/accept-fallback` | Booking |
@@ -1551,6 +1554,10 @@ the ordered assigned snapshot.
 - **Search:** `search=<text>` + `searchIn=field1,field2` (thay thế `q=<text>` cũ; BE whitelist các field được phép search per aggregate).
 - **Sort:** `sortBy=<field>&sortDir=asc|desc` — **`sortBy` PHẢI nằm trong whitelist của aggregate** (security requirement — ngăn arbitrary-column sort/search → injection / info-leak). Query handler/repository reject bất kỳ field nào không trong allow-list với `400 INVALID_SORT_FIELD`. Default `sortDir=desc`, default `sortBy` do aggregate quyết định (thường `createdAt`).
 - **Soft-delete:** `includeDeleted=true` — chỉ cho phép admin/privileged endpoint (ADR 0003).
+- **Unknown query keys:** endpoint gắn `AllowedQueryParametersAttribute` reject mọi query key ngoài
+  contract (so khớp không phân biệt hoa/thường) bằng `422 VALIDATION_ERROR`; `error.fields` có một
+  entry cho từng key lạ. Quy tắc này được áp dụng theo endpoint trong giai đoạn rollout, không phải
+  global implicit policy cho các endpoint chưa gắn attribute.
 
 #### Trip location search và Operator Incident reads
 
@@ -2048,6 +2055,16 @@ target plan in `SubscriptionUpgradeAttempt` grants no entitlement before Payment
 PENDING_EMAIL_VERIFICATION | PENDING_INITIAL_PASSWORD | ACTIVE | LOCKED | DELETED
 ```
 
+**`User.lockSource` (required exactly while `status=LOCKED`):**
+```
+AUTOMATIC_LOGIN_FAILURE | OPERATOR_ADMIN | SYSTEM_ADMIN | LEGACY_UNKNOWN
+```
+
+`SYSTEM_ADMIN` lock has precedence. `OPERATOR_ADMIN` of an `APPROVED` tenant may lock/unlock only
+same-tenant `DRIVER|ASSISTANT`; target lookup masks cross-tenant/non-manageable roles as 404. Operator
+unlock accepts only `AUTOMATIC_LOGIN_FAILURE|OPERATOR_ADMIN`; platform and legacy locks remain
+System-Admin-only. Existing locked rows are backfilled `LEGACY_UNKNOWN`.
+
 **`Operator.registrationStatus`:**
 ```
 PENDING | APPROVED | REJECTED | SUSPENDED
@@ -2059,10 +2076,10 @@ PENDING | APPROVED | REJECTED | SUSPENDED
 
 - Min 8 ký tự, ≥1 chữ + ≥1 số.
 - Hash bcrypt cost 12.
-- Password change require verify mật khẩu cũ.
+- Authenticated password change supports all six roles when `ACTIVE` with a local password, verifies the current password, rejects reuse, revokes all refresh tokens with `PASSWORD_CHANGE`, resets DB/Redis lockout state, emits the existing Firebase revoke request with `PASSWORD_CHANGED`, and writes `CHANGE_PASSWORD`. Suspended `OPERATOR_ADMIN` restricted sessions may call only this security mutation in addition to the existing whitelist.
 - Login allows `PASSENGER` users in `PENDING_EMAIL_VERIFICATION` to receive a normal token bundle for the mobile restricted session; FE gates features via `data.user.status`. Non-passenger `PENDING_EMAIL_VERIFICATION` users still fail with `AUTH_EMAIL_NOT_VERIFIED`.
-- Password reset for any `ACTIVE` user role uses a `PASSWORD_RESET` email OTP. `forgot-password` returns generic success for unknown/non-eligible emails; `reset-password` marks the OTP used, hashes the new password, and revokes active refresh tokens with reason `PASSWORD_RESET`.
-- **Account lockout:** 5 lần sai trong 15 phút → `User.status = LOCKED`. Chỉ System Admin mở khóa. Login thành công reset counter.
+- Password reset for any `ACTIVE` user role with `passwordHash != null` uses a `PASSWORD_RESET` email OTP. `forgot-password` returns generic success for unknown/non-eligible/Google-only emails; `reset-password` marks the OTP used, hashes the new password, resets DB/Redis lockout counters and revokes active refresh tokens with reason `PASSWORD_RESET`.
+- **Account lockout:** 5 lần sai trong 15 phút → `User.status = LOCKED`, `lockSource=AUTOMATIC_LOGIN_FAILURE`. Không auto-unlock. System Admin can unlock every source; approved Operator Admin can unlock only same-tenant Driver/Assistant locks sourced by automatic failure or Operator Admin.
 - Track `failedLoginAttempts` + `lastFailedLoginAt` trên User entity.
 
 ### 6.9 Email OTP — 2 lớp bảo vệ
@@ -2191,13 +2208,14 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/users/{userId}` | All services | Internal-JWT-only raw user lookup `{ id, displayName, avatarUrl, role, operatorId, status, phone }` for HTTP validate logical FK. Errors use ADR 0004 envelope. Trip DriverSchedule create/activation validates role/operator; Shuttle dispatch còn yêu cầu driver active có display name/phone và snapshot hai field này vào assignment event. |
+| `GET /internal/v1/users/{userId}` | All services | Internal-JWT-only raw user lookup `{ id, displayName, avatarUrl, role, operatorId, status, phone }` for HTTP validate logical FK. Errors use ADR 0004 envelope. Trip DriverSchedule create/activation/update-crew validates role/operator và bắt buộc `status = ACTIVE`; user `LOCKED` trả `422 VALIDATION_ERROR`. Shuttle dispatch còn yêu cầu driver active có display name/phone và snapshot hai field này vào assignment event. |
 | `GET /internal/v1/users?ids=<uuid>&ids=<uuid>` | Booking, Trip, Parcel, RAG | Read-only 1..100 user batch; raw additive display/contact/status DTO, including a redacted representation for requested soft-deleted IDs |
 | `GET /internal/v1/users/by-phone?phone={normalizedE164}` | Booking | Internal-JWT-only exact non-deleted-user phone lookup for the operator booking-monitor filter. Caller URI-escapes a prevalidated canonical E.164 value; raw success is exactly `{ userId }`, no PII. No match is ADR 0004 `404 RESOURCE_NOT_FOUND`. Booking maps only that exact response to an empty result; all other failures map to `502 UPSTREAM_UNAVAILABLE`. |
 | `GET /internal/v1/users/by-email?email=` | Parcel | Internal-JWT-only exact normalized-email lookup against non-deleted users; raw success exactly `{ userId }`, no PII. Caller trim/lowercase + URI-escape. Exact `404 RESOURCE_NOT_FOUND` means no link; transport/5xx/malformed response makes Parcel create fail `503 UPSTREAM_UNAVAILABLE`. |
 | `GET /internal/v1/users/{userId}/device-tokens` | Notification | Lấy FCM tokens active để push |
 | `GET /internal/v1/operators/{operatorId}` | All services | Lookup operator info for logical FK validation (raw success DTO) |
 | `GET /internal/v1/operators/{operatorId}/subscription` | Booking, Trip, Parcel | Raw current subscription + plan limits/module flags + usage counters |
+| `GET /internal/v1/operators/{operatorId}/crew/search?search=` | Trip | Internal-JWT-only, raw active DRIVER/ASSISTANT matches scoped to the operator; response `{userId,displayName,role}[]`, used before DriverSchedule paging. |
 | `POST /internal/v1/operators/{operatorId}/usage/increment` | Trip, Booking, Parcel | Body `{resource, delta}` where resource is `VEHICLES|DRIVERS|ASSISTANTS|OPERATOR_USERS|ROUTES|TRIPS_THIS_MONTH`; atomically increment usage counter without concurrent overshoot |
 | `POST /internal/v1/operators/{operatorId}/quota-allocations` | Trip | Claim durable idempotent quota allocation by `{ resource, resourceId, periodKey? }`; no distributed transaction |
 | `POST /internal/v1/operators/{operatorId}/quota-allocations/{allocationId}/release` | Trip | Idempotently release an allocation after local persistence fails or its resource is soft-deleted |
@@ -2222,6 +2240,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `POST /internal/v1/trips/{tripId}/book-seats` | Booking | Convert HELD → BOOKED khi payment success (API contract canonical name; was `confirm-seats`) |
 | `GET /internal/v1/trips/{tripId}/passengers-pending` | Booking | Cho operator dashboard |
 | `GET /internal/v1/stations/{id}` · `GET /internal/v1/stops/{id}` · `GET /internal/v1/routes/{id}` | All services | Trip internal-auth required; raw DTO lookup. Station active returns canonical resolution; merged soft-delete returns original identity plus terminal `canonicalStationId`; ordinary soft-delete/missing returns `STATION_NOT_FOUND`. Stop not found returns `STOP_NOT_FOUND`. Errors use ADR 0004 envelope. |
+| `GET /internal/v1/routes/search?operatorId=&search=` | Parcel | Internal-JWT-only operator-scoped Route search over Route name and origin/destination Station text; raw response `{routeIds:uuid[]}` and no Gateway exposure. |
 | `GET /internal/v1/reports/platform/trips?from=&to=` | Booking | Raw completed-Trip count grouped by operator; `status=COMPLETED`, `completed_at` in UTC `[from,to)` |
 | `GET /internal/v1/trips/{tripId}/cargo/capacity` | Parcel | Lấy available cargo capacity |
 | `POST /internal/v1/trips/{tripId}/cargo/reserve` · `remeasure` · `load` · `release` | Parcel | Idempotent single-Trip cargo-ledger mutation and counter update |
@@ -2308,7 +2327,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `identity.operator.approved` | Identity | Payment (init OperatorWallet) | `{ eventId, operatorId, approvedAt }`; new approvals generate an eventId in the approval transaction; legacy backfill reuses the stable eventId persisted in `operator_wallet_backfill_markers` |
 | `identity.operator.rejected` | Identity | Notification (email) | Exact `{ eventId, occurredAt, operatorId, companyName, contactEmail, reason }`; Identity snapshots the registration email and rejection reason in the same transaction as the rejected Operator, cancelled pending subscription, and activity log. Notification sends email only; no in-app/push notification is created. |
 | `identity.operator.suspended` | Identity | Trip, Booking | `{ operatorId, suspendedAt }` |
-| `identity.firebase_session.revoke_requested` | Identity | Identity | `{ eventId, occurredAt, userId, reason }`; user lock emits one request, operator suspend emits one per scoped `OPERATOR_ADMIN`; consumer calls Firebase refresh-token revocation, treats missing Firebase users as no-op, and lets transient failures retry/DLQ |
+| `identity.firebase_session.revoke_requested` | Identity | Identity | `{ eventId, occurredAt, userId, reason }`; System/Operator user lock emits `USER_LOCKED`, self password change emits `PASSWORD_CHANGED`, and operator suspend emits one request per scoped user; consumer calls Firebase refresh-token revocation, treats missing Firebase users as no-op, and lets transient failures retry/DLQ |
 | `booking.booking.created` | Booking | Tracking, Notification | Exact `{ eventId, occurredAt, bookingId, bookingCode, tripId, status: "CONFIRMED", ticketCodes[], seatNumbers[], departureDateTime, passengerCount, pickup: { stationId, stopId, address }, dropoff: { stationId, stopId, address }, driverUserId, assistantUserId }`; emitted atomically with the CONFIRMED transition; `eventId == OutboxMessage.Id == RabbitMQ MessageId`. |
 | `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttleRequests?: [{ direction, address, latitude, longitude, roadDistanceMeters }], shuttlePickup?: { address, latitude, longitude } }`; `shuttlePickup` is legacy inbound compatibility. |
 | `booking.booking.cancelled` | Booking | Notification, Trip, Payment, Booking, Tracking | Canonical fields plus operational `{ tripId, previousStatus: PENDING_PAYMENT\|CONFIRMED, seatNumbers[] }`. Legacy payload remains accepted. Crew Notification/Tracking process only `previousStatus=CONFIRMED` and suppress per-booking crew fan-out for terminal Trip cancellation/disruption. Passenger refund and existing consumers remain unchanged. |
@@ -4149,6 +4168,9 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.72.1** | 2026-08-13 | Codex | **PATCH** — Close the Identity→Trip crew-assignment gap found by real Docker E2E: DriverSchedule create, activation and crew update now require the logical Identity Driver/Assistant to remain `ACTIVE`; `LOCKED` users are rejected with `422 VALIDATION_ERROR` before schedule/trip persistence. No endpoint, schema, dependency, event or inventory change. |
+| **1.72.0** | 2026-08-13 | Codex | **MINOR** — Add tenant-masked Operator Admin lock/unlock for same-tenant Driver/Assistant with persisted lock-source precedence and legacy-safe backfill; add authenticated all-role local password change with global session revocation; align forgot/reset eligibility and lockout reset semantics. Adds three UUID-v4-required mutations, raising the canonical inventory from 212/191/21 to 215/194/21; adds one reversible Identity migration, no dependency or new routing key. |
+| **1.71.0** | 2026-08-13 | Codex | **MINOR** — Close FE seat-map/search-filter gaps: preserve immutable Trip layout aisles; add tenant-safe filters/search for schedules, vehicles, routes, admin locations/stations, vouchers, operator bookings, admin financial reads and Parcel fares; add Station summary plus Internal-JWT crew/route searches; and introduce endpoint-scoped unknown-query rejection with `422 VALIDATION_ERROR`. DriverSchedule remains recurring-only (`isOneTime` absent), Vehicle keeps separate status/isActive, and booking search uses buyer snapshots without new passenger PII. No migration, dependency, Gateway route, event, or RAG runtime change. |
 | **1.70.0** | 2026-08-12 | Codex | **MINOR** — Add system/custom Vehicle Type identity to the existing current-vehicle projection for public/internal Booking history and the Ticket branch of passenger history. Trip batch summary performs one joined query; Booking trims and validates both type fields, tolerates older Trip payloads with `vehicleType=null`, and keeps fail-open `vehicle=null` semantics. No route, migration, dependency, Gateway, Parcel branch, or event change. |
 | **1.69.0** | 2026-08-12 | Codex | **MINOR** — Add crew/fleet-only `trip:routeDeviation` realtime transitions: one durable `DEVIATED`, GPS-driven 60-second heartbeats without notification spam, and one `ROUTE_RESTORED`. Add per-Trip Redis locking, deterministic Outbox dedupe, and route-change/terminal cleanup fencing while retaining 500m/2-minute thresholds and `STOPS_ONLY` fallback. No endpoint, migration, dependency, or integration-event routing-key change. |
 | **1.68.0** | 2026-08-12 | Codex | **MINOR** — Run Trip auto-boarding every minute while preserving the T-30 threshold and existing 5/15-minute start/completion fallbacks. Add fail-open current vehicle plate enrichment to public/internal Booking history and the Ticket branch of passenger history via one existing Trip batch call per page; expose only nullable `vehicle { licensePlate }`. No route, migration, dependency, Gateway, or integration-event change. |

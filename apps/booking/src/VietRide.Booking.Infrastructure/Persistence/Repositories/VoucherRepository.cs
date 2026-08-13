@@ -78,7 +78,9 @@ internal sealed class VoucherRepository : IVoucherRepository
         int pageSize,
         string? sortBy,
         string sortDir,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? search = null,
+        string? service = null)
     {
         var query = _db.Vouchers.AsNoTracking();
 
@@ -92,6 +94,16 @@ internal sealed class VoucherRepository : IVoucherRepository
 
         if (isActive.HasValue)
             query = query.Where(v => v.IsActive == isActive.Value);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var pattern = $"%{search.Trim()}%";
+            query = query.Where(v => EF.Functions.ILike(v.Code, pattern)
+                || EF.Functions.ILike(v.Name, pattern));
+        }
+
+        if (!string.IsNullOrWhiteSpace(service))
+            query = query.Where(v => v.ApplicableServices.Contains(service));
 
         // Apply sort
         query = ApplySort(query, sortBy, sortDir);

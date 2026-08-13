@@ -122,6 +122,16 @@ public sealed class DevTripServiceClient : ITripServiceClient
         return Task.FromResult(new RouteOwnershipOutcome(RouteOwnershipOutcomeKind.Success, null));
     }
 
+    public Task<RouteSearchOutcome> SearchRoutesAsync(
+        Guid operatorId,
+        string search,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Using dev Trip stub for SearchRoutesAsync({OperatorId}).", operatorId);
+        return Task.FromResult(RouteSearchOutcome.Success(
+            [Guid.Parse("22222222-2222-4222-8222-222222222222")]));
+    }
+
     public Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsAsync(
         Guid originStationId,
         Guid destinationStationId,
