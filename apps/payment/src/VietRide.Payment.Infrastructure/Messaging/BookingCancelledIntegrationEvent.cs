@@ -14,6 +14,9 @@ public sealed record BookingCancelledIntegrationEvent : IIntegrationEvent
 
     private Guid? _eventId;
     private DateTimeOffset? _occurredAtOffset;
+    private Guid? _tripId;
+    private string? _previousStatus;
+    private IReadOnlyCollection<string>? _seatNumbers;
 
     [JsonPropertyName("eventId")]
     public Guid? EventId
@@ -43,6 +46,15 @@ public sealed record BookingCancelledIntegrationEvent : IIntegrationEvent
     [JsonIgnore]
     public bool HasOccurredAt { get; private init; }
 
+    [JsonIgnore]
+    public bool HasTripId { get; private init; }
+
+    [JsonIgnore]
+    public bool HasPreviousStatus { get; private init; }
+
+    [JsonIgnore]
+    public bool HasSeatNumbers { get; private init; }
+
     [JsonPropertyName("bookingId"), JsonRequired]
     public Guid? BookingId { get; init; }
 
@@ -65,6 +77,39 @@ public sealed record BookingCancelledIntegrationEvent : IIntegrationEvent
     [JsonPropertyName("ticketCount")]
     public int? TicketCount { get; init; }
 
+    [JsonPropertyName("tripId")]
+    public Guid? TripId
+    {
+        get => _tripId;
+        init
+        {
+            _tripId = value;
+            HasTripId = true;
+        }
+    }
+
+    [JsonPropertyName("previousStatus")]
+    public string? PreviousStatus
+    {
+        get => _previousStatus;
+        init
+        {
+            _previousStatus = value;
+            HasPreviousStatus = true;
+        }
+    }
+
+    [JsonPropertyName("seatNumbers")]
+    public IReadOnlyCollection<string>? SeatNumbers
+    {
+        get => _seatNumbers;
+        init
+        {
+            _seatNumbers = value;
+            HasSeatNumbers = true;
+        }
+    }
+
     Guid IIntegrationEvent.EventId => EventId ?? BookingId ?? Guid.Empty;
     DateTime IIntegrationEvent.OccurredAt => (OccurredAtOffset ?? DateTimeOffset.UnixEpoch).UtcDateTime;
     string IIntegrationEvent.EventType => EventType;
@@ -73,7 +118,12 @@ public sealed record BookingCancelledIntegrationEvent : IIntegrationEvent
     {
         var canonical = HasEventId && EventId.HasValue && HasOccurredAt && OccurredAtOffset.HasValue;
         var legacy = !HasEventId && !HasOccurredAt;
-        if (!canonical && !legacy
+        var operational = HasTripId && HasPreviousStatus && HasSeatNumbers;
+        var preOperational = !HasTripId && !HasPreviousStatus && !HasSeatNumbers;
+        var supportedShape = legacy && preOperational
+            || canonical && preOperational
+            || canonical && operational;
+        if (!supportedShape
             || EventId == Guid.Empty
             || !BookingId.HasValue || BookingId.Value == Guid.Empty
             || !UserId.HasValue || UserId.Value == Guid.Empty
@@ -82,7 +132,11 @@ public sealed record BookingCancelledIntegrationEvent : IIntegrationEvent
             || string.IsNullOrWhiteSpace(CancellationReason)
             || BookingCode is not null && string.IsNullOrWhiteSpace(BookingCode)
             || TicketCount is < 0
-            || TicketCodes?.Any(string.IsNullOrWhiteSpace) == true)
+            || TicketCodes?.Any(string.IsNullOrWhiteSpace) == true
+            || operational && (!TripId.HasValue || TripId.Value == Guid.Empty
+                || PreviousStatus is not ("PENDING_PAYMENT" or "CONFIRMED")
+                || SeatNumbers is null
+                || SeatNumbers.Any(string.IsNullOrWhiteSpace)))
         {
             throw new ArgumentException("Booking-cancelled event is malformed.");
         }
