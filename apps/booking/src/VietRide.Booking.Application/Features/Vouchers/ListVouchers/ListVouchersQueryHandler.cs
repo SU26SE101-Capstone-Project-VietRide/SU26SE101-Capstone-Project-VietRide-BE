@@ -37,7 +37,9 @@ public sealed class ListVouchersQueryHandler
             pageSize: request.Options.PageSize,
             sortBy: request.Options.SortBy,
             sortDir: request.Options.SortDir,
-            ct: cancellationToken);
+            ct: cancellationToken,
+            search: request.Search,
+            service: request.Service?.Trim().ToUpperInvariant());
 
         var mapped = items
             .Select(v => new VoucherListItem(

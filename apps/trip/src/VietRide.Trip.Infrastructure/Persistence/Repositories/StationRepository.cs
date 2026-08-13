@@ -84,7 +84,9 @@ internal sealed class StationRepository : IStationRepository
                     WHERE deleted_at IS NULL
                       AND (unaccent(name) ILIKE unaccent('%' || {normalized} || '%')
                         OR unaccent(city) ILIKE unaccent('%' || {normalized} || '%')
-                        OR unaccent(ward) ILIKE unaccent('%' || {normalized} || '%'))
+                        OR unaccent(ward) ILIKE unaccent('%' || {normalized} || '%')
+                        OR unaccent(address_street) ILIKE unaccent('%' || {normalized} || '%')
+                        OR unaccent(slug) ILIKE unaccent('%' || {normalized} || '%'))
                     """)
                 .AsNoTracking()
             : _dbContext.Stations

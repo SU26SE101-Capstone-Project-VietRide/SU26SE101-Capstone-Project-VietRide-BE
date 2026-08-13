@@ -1,4 +1,3 @@
-using System.Text.Json;
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
@@ -64,11 +63,11 @@ public sealed class UpdateVehicleHandler : IRequestHandler<UpdateVehicleCommand,
         {
             var effectiveSeatLayout = request.HasSeatLayoutJson
                 ? request.SeatLayoutJson
-                : vehicle.SeatLayoutJson.Deserialize<SeatLayoutDto>();
+                : SeatLayoutJsonSerializer.Deserialize(vehicle.SeatLayoutJson);
             var effectiveTotalSeats = request.TotalSeats ?? vehicle.TotalSeats;
             SeatLayoutValidator.Validate(effectiveSeatLayout, effectiveTotalSeats);
             vehicle.UpdateSeatLayout(
-                JsonSerializer.SerializeToElement(effectiveSeatLayout),
+                SeatLayoutJsonSerializer.Serialize(effectiveSeatLayout),
                 effectiveTotalSeats);
         }
 

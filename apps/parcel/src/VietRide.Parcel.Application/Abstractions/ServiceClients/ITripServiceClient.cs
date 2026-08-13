@@ -33,6 +33,12 @@ public interface ITripServiceClient
         Guid operatorId,
         CancellationToken cancellationToken = default);
 
+    Task<RouteSearchOutcome> SearchRoutesAsync(
+        Guid operatorId,
+        string search,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(RouteSearchOutcome.Failure("Trip route search is not implemented by this client."));
+
     Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsAsync(
         Guid originStationId,
         Guid destinationStationId,

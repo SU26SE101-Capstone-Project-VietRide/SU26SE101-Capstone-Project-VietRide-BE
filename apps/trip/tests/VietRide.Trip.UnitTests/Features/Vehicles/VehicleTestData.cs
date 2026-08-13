@@ -1,3 +1,4 @@
+using System.Text.Json;
 using VietRide.Trip.Application.Features.Vehicles;
 using VietRide.Trip.Domain.Entities;
 
@@ -5,6 +6,8 @@ namespace VietRide.Trip.UnitTests.Features.Vehicles;
 
 internal static class VehicleTestData
 {
+    private static readonly JsonSerializerOptions WebJsonOptions = new(JsonSerializerDefaults.Web);
+
     public static SeatLayoutDto CreateSeatLayout(int totalSeats = 2)
     {
         var seats = Enumerable.Range(1, totalSeats)
@@ -27,7 +30,7 @@ internal static class VehicleTestData
             operatorId,
             vehicleTypeId ?? Guid.NewGuid(),
             "51A-12345",
-            System.Text.Json.JsonSerializer.SerializeToElement(CreateSeatLayout()),
+            JsonSerializer.SerializeToElement(CreateSeatLayout(), WebJsonOptions),
             2,
             1000m,
             10m);

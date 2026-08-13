@@ -96,6 +96,20 @@ public sealed class ForgotPasswordCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_ActiveGoogleOnlyUser_ReturnsGenericSuccessWithoutOtp()
+    {
+        var user = User.CreateGoogleAccount("google@example.com", "Google", null);
+        var (users, tokens, rateLimiter, clock, outbox) = MakeDefaults(user);
+        var handler = BuildHandler(users, tokens, rateLimiter, clock, outbox);
+
+        var result = await handler.Handle(new ForgotPasswordCommand(user.Email), CancellationToken.None);
+
+        result.Email.Should().Be(user.Email);
+        await tokens.DidNotReceive().TryAddAsync(Arg.Any<EmailVerificationToken>(), Arg.Any<CancellationToken>());
+        await outbox.DidNotReceive().EnqueueAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Handle_RateLimitExceeded_ThrowsAuthOtpRateLimitExceeded()
     {
         var (users, tokens, rateLimiter, clock, outbox) = MakeDefaults(CreateActiveUser(UserRole.PASSENGER));

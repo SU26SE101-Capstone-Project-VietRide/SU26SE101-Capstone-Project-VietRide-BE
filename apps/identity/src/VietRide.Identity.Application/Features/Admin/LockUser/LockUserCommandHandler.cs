@@ -41,12 +41,14 @@ public sealed class LockUserCommandHandler : IRequestHandler<LockUserCommand, Lo
         var user = await _users.GetByIdForUpdateAsync(request.UserId, cancellationToken)
             ?? throw new NotFoundException("User", request.UserId);
         var previousStatus = user.Status;
-        var statusChanged = user.Lock();
+        var previousLockSource = user.LockSource;
+        var statusChanged = user.Lock(UserLockSource.SYSTEM_ADMIN);
 
         if (!statusChanged
-            && user.LockedFromStatus is not (UserStatus.ACTIVE or UserStatus.PENDING_EMAIL_VERIFICATION))
+            && (user.LockedFromStatus is not (UserStatus.ACTIVE or UserStatus.PENDING_EMAIL_VERIFICATION)
+                || user.LockSource is null))
         {
-            throw new InvalidOperationException("LOCKED user is missing a valid lockedFromStatus invariant.");
+            throw new InvalidOperationException("LOCKED user is missing a valid lock origin invariant.");
         }
 
         await _refreshTokens.RevokeActiveByUserAsync(
@@ -70,7 +72,10 @@ public sealed class LockUserCommandHandler : IRequestHandler<LockUserCommand, Lo
             targetUserId = user.Id,
             previousStatus = previousStatus.ToString(),
             newStatus = user.Status.ToString(),
+            previousLockSource = previousLockSource?.ToString(),
+            newLockSource = user.LockSource?.ToString(),
             statusChanged,
+            source = "SYSTEM_ADMIN_LOCK_USER",
         });
         await _activityLogs.AddAsync(
             ActivityLog.Create(

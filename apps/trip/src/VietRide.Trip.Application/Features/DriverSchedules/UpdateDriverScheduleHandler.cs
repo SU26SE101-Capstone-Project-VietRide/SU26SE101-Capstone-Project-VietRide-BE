@@ -661,7 +661,9 @@ public sealed class UpdateDriverScheduleHandler
         IReadOnlyCollection<string> changedFields,
         CancellationToken cancellationToken)
     {
-        if (changedFields.Contains("driverUserId"))
+        var activatingSchedule = changedFields.Contains("isActive") && effective.IsActive;
+
+        if (changedFields.Contains("driverUserId") || activatingSchedule)
         {
             await ValidateIdentityUserAsync(
                 request.OperatorId,
@@ -671,7 +673,8 @@ public sealed class UpdateDriverScheduleHandler
                 cancellationToken);
         }
 
-        if (changedFields.Contains("assistantUserId") && effective.AssistantUserId.HasValue)
+        if ((changedFields.Contains("assistantUserId") || activatingSchedule)
+            && effective.AssistantUserId.HasValue)
         {
             await ValidateIdentityUserAsync(
                 request.OperatorId,
@@ -707,9 +710,12 @@ public sealed class UpdateDriverScheduleHandler
         var user = await identity.GetUserAsync(userId, cancellationToken);
         if (!user.Found
             || user.OperatorId != operatorId
-            || !string.Equals(user.Role, role, StringComparison.OrdinalIgnoreCase))
+            || !string.Equals(user.Role, role, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(user.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
         {
-            throw ValidationFailure(field, $"Identity user must have role {role} under the caller operator.");
+            throw ValidationFailure(
+                field,
+                $"Identity user must be an active {role} under the caller operator.");
         }
     }
 

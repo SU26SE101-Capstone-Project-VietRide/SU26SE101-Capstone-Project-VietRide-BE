@@ -134,7 +134,7 @@ public sealed class CreateDriverScheduleHandlerTests
     }
 
     [Fact]
-    public async Task Handle_DriverNonActiveStatus_PersistsScheduleBecauseStatusIsNotValidated()
+    public async Task Handle_DriverNonActiveStatus_ThrowsValidationErrorAndDoesNotPersist()
     {
         var command = CreateCommand();
         var driverSchedules = StubDispatchProxy<IDriverScheduleRepository>.Create();
@@ -148,9 +148,6 @@ public sealed class CreateDriverScheduleHandlerTests
         identity.SetResult(nameof(IIdentityInternalClient.GetUserAsync),
             IdentityUserLookupResult.Success(command.DriverUserId, "DRIVER", command.OperatorId, "LOCKED"));
         routes.SetResult(nameof(IRouteRepository.ExistsActiveOwnedByOperatorAsync), true);
-        ConfigureRouteDuration(command, routes, routeStops, routeDurationMinutes: 180, routeStopDurations: []);
-        driverSchedules.SetResult(nameof(IDriverScheduleRepository.HasDriverConflictAsync), false);
-
         var handler = new CreateDriverScheduleHandler(
             driverSchedules.Object,
             identity.Object,
@@ -160,12 +157,13 @@ public sealed class CreateDriverScheduleHandlerTests
             scheduler.Object,
             unitOfWork.Object);
 
-        var result = await handler.Handle(command, CancellationToken.None);
+        var action = () => handler.Handle(command, CancellationToken.None);
 
-        result.DriverUserId.Should().Be(command.DriverUserId);
-        driverSchedules.CallCount(nameof(IDriverScheduleRepository.AddAsync)).Should().Be(1);
-        unitOfWork.CallCount(nameof(IUnitOfWork.SaveChangesAsync)).Should().Be(1);
-        scheduler.CallCount(nameof(ITripGenerationJobScheduler.EnqueueScheduleGeneration)).Should().Be(1);
+        var exception = await action.Should().ThrowAsync<ValidationException>();
+        exception.Which.Errors.Should().ContainSingle(error => error.Field == "driverUserId");
+        driverSchedules.CallCount(nameof(IDriverScheduleRepository.AddAsync)).Should().Be(0);
+        unitOfWork.CallCount(nameof(IUnitOfWork.SaveChangesAsync)).Should().Be(0);
+        scheduler.CallCount(nameof(ITripGenerationJobScheduler.EnqueueScheduleGeneration)).Should().Be(0);
     }
 
     [Fact]

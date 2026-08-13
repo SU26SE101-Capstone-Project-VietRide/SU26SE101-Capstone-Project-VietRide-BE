@@ -1,4 +1,5 @@
 using FluentValidation;
+using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Features.Vehicles;
 
@@ -23,5 +24,14 @@ public sealed class ListVehiclesValidator : AbstractValidator<ListVehiclesQuery>
                 || value.Equals("asc", StringComparison.OrdinalIgnoreCase)
                 || value.Equals("desc", StringComparison.OrdinalIgnoreCase))
             .WithMessage("SortDir must be 'asc' or 'desc'.");
+        RuleFor(query => query.VehicleTypeId)
+            .NotEqual(Guid.Empty)
+            .When(query => query.VehicleTypeId.HasValue);
+        RuleFor(query => query.Status)
+            .Must(value => string.IsNullOrWhiteSpace(value)
+                || Enum.GetNames<VehicleStatus>().Contains(
+                    value.Trim(),
+                    StringComparer.OrdinalIgnoreCase))
+            .WithMessage($"Status must be one of: {string.Join(", ", Enum.GetNames<VehicleStatus>())}.");
     }
 }

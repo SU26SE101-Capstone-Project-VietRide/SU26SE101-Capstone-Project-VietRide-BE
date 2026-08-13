@@ -238,6 +238,41 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
         }
     }
 
+    public async Task<RouteSearchOutcome> SearchRoutesAsync(
+        Guid operatorId,
+        string search,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var encodedSearch = Uri.EscapeDataString(search.Trim());
+            using var response = await _httpClient.GetAsync(
+                $"/internal/v1/routes/search?operatorId={operatorId:D}&search={encodedSearch}",
+                cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return RouteSearchOutcome.Failure(
+                    $"Trip service returned status {(int)response.StatusCode} for route search.");
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<InternalRouteSearchResponse>(
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false);
+            return payload is null
+                ? RouteSearchOutcome.Failure("Trip route search returned an empty payload.")
+                : RouteSearchOutcome.Success(payload.RouteIds);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TripServiceClient.SearchRoutesAsync failed.");
+            return RouteSearchOutcome.Failure("Trip route search transport failure.");
+        }
+    }
+
     public async Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsAsync(
         Guid originStationId,
         Guid destinationStationId,

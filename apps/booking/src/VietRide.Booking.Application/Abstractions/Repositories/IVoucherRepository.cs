@@ -47,7 +47,9 @@ public interface IVoucherRepository : IRepository<Voucher, Guid>
         int pageSize,
         string? sortBy,
         string sortDir,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        string? search = null,
+        string? service = null);
 
     /// <summary>
     /// Adds an <see cref="OperatorVoucherConsent"/> to the change tracker (same transaction as the voucher).

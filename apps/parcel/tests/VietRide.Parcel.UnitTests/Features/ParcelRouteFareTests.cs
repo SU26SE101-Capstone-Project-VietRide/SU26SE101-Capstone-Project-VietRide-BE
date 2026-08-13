@@ -323,6 +323,64 @@ public sealed class ParcelRouteFareTests
         ex.ErrorCode.Should().Be("VALIDATION_ERROR");
     }
 
+    [Fact]
+    public async Task List_SearchFiltersByRouteIdsBeforeCountAndPaging()
+    {
+        var matchingRouteId = Guid.NewGuid();
+        var otherRouteId = Guid.NewGuid();
+        var fares = new[]
+        {
+            ParcelRouteFare.Create(matchingRouteId, ParcelSizeCategory.SMALL, OperatorId, Money.FromRaw(10000), Now, null),
+            ParcelRouteFare.Create(otherRouteId, ParcelSizeCategory.SMALL, OperatorId, Money.FromRaw(20000), Now, null),
+        };
+        var repo = Substitute.For<IParcelRouteFareRepository>();
+        repo.QueryNoTracking().Returns(fares.AsAsyncQueryable());
+        var tripClient = Substitute.For<ITripServiceClient>();
+        tripClient.SearchRoutesAsync(OperatorId, "Da Lat", Arg.Any<CancellationToken>())
+            .Returns(RouteSearchOutcome.Success([matchingRouteId]));
+
+        var result = await new ListParcelRouteFaresQueryHandler(repo, tripClient).Handle(
+            new ListParcelRouteFaresQuery(OperatorId, null, null, 1, 20, "Da Lat"),
+            CancellationToken.None);
+
+        result.TotalItems.Should().Be(1);
+        result.Items.Should().ContainSingle(item => item.RouteId == matchingRouteId);
+    }
+
+    [Fact]
+    public async Task List_SearchWithoutMatchingRoutesReturnsEmptyPage()
+    {
+        var repo = Substitute.For<IParcelRouteFareRepository>();
+        repo.QueryNoTracking().Returns(Array.Empty<ParcelRouteFare>().AsAsyncQueryable());
+        var tripClient = Substitute.For<ITripServiceClient>();
+        tripClient.SearchRoutesAsync(OperatorId, "No Match", Arg.Any<CancellationToken>())
+            .Returns(RouteSearchOutcome.Success([]));
+
+        var result = await new ListParcelRouteFaresQueryHandler(repo, tripClient).Handle(
+            new ListParcelRouteFaresQuery(OperatorId, null, null, 1, 20, "No Match"),
+            CancellationToken.None);
+
+        result.TotalItems.Should().Be(0);
+        result.Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task List_SearchWhenTripIsUnavailableReturnsUpstreamUnavailable()
+    {
+        var repo = Substitute.For<IParcelRouteFareRepository>();
+        repo.QueryNoTracking().Returns(Array.Empty<ParcelRouteFare>().AsAsyncQueryable());
+        var tripClient = Substitute.For<ITripServiceClient>();
+        tripClient.SearchRoutesAsync(OperatorId, "Da Lat", Arg.Any<CancellationToken>())
+            .Returns(RouteSearchOutcome.Failure("Trip unavailable"));
+
+        var action = () => new ListParcelRouteFaresQueryHandler(repo, tripClient).Handle(
+            new ListParcelRouteFaresQuery(OperatorId, null, null, 1, 20, "Da Lat"),
+            CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<ParcelDependencyUnavailableException>();
+        exception.Which.ErrorCode.Should().Be("UPSTREAM_UNAVAILABLE");
+    }
+
     #endregion
 
     #region Update

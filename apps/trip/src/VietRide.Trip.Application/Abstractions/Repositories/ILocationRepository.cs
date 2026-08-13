@@ -48,4 +48,14 @@ public interface ILocationRepository : IRepository<Location, Guid>
         string? search,
         bool? isActive,
         CancellationToken cancellationToken);
+
+    Task<PagedResult<Location>> ListAsync(
+        int page,
+        int pageSize,
+        string? search,
+        bool? isActive,
+        CancellationToken cancellationToken,
+        string? type = null,
+        Guid? parentLocationId = null) =>
+        ListAsync(page, pageSize, search, isActive, cancellationToken);
 }

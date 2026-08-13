@@ -51,7 +51,7 @@ public sealed class ForgotPasswordCommandHandler : IRequestHandler<ForgotPasswor
             throw new TooManyRequestsException("AUTH_OTP_RATE_LIMIT_EXCEEDED", "Too many OTP requests. Please try again later.");
 
         var user = await _users.GetByEmailAsync(emailLower, cancellationToken);
-        if (user is null || user.Status != UserStatus.ACTIVE)
+        if (user is null || user.Status != UserStatus.ACTIVE || user.PasswordHash is null)
         {
             _logger.LogInformation(
                 "Password reset requested for non-eligible email {Email}; returning generic success.",
@@ -60,7 +60,7 @@ public sealed class ForgotPasswordCommandHandler : IRequestHandler<ForgotPasswor
         }
 
         user = await _users.GetByIdForUpdateAsync(user.Id, cancellationToken);
-        if (user is null || user.Status != UserStatus.ACTIVE)
+        if (user is null || user.Status != UserStatus.ACTIVE || user.PasswordHash is null)
         {
             _logger.LogInformation(
                 "Password reset request became ineligible before serialization; returning generic success.");

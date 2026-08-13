@@ -29,6 +29,16 @@ public interface IUserRepository : IRepository<User, Guid>
     Task<User?> GetByIdForUpdateAsync(Guid id, CancellationToken ct = default)
         => GetByIdAsync(id, ct);
 
+    /// <summary>
+    /// Acquires a row lock for a Driver or Assistant in the exact operator tenant.
+    /// Returns null for cross-tenant and non-manageable roles to preserve tenant masking.
+    /// </summary>
+    Task<User?> GetManageableOperatorUserForUpdateAsync(
+        Guid id,
+        Guid operatorId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Operator-scoped user locking is not implemented by this repository.");
+
     Task<PagedResult<User>> ListAdminUsersAsync(
         QueryOptions options,
         UserRole? role,

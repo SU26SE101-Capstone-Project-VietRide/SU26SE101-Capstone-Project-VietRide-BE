@@ -168,6 +168,40 @@ public sealed class AdminFinancialProjectionEndpointTests
     }
 
     [Fact]
+    public async Task FinancialSearch_IsForwardedBeforeServicePaging()
+    {
+        _factory.Reset();
+        _factory.Financial.ListAdminSettlementsAsync(
+                default!, default, default, default, default, default, default, default)
+            .ReturnsForAnyArgs(PagedResult<AdminSettlementDto>.Create([], 1, 20, 0));
+        _factory.Financial.ListPlatformTransactionsAsync(
+                default!, default, default, default, default)
+            .ReturnsForAnyArgs(PagedResult<PlatformWalletTransactionDto>.Create([], 1, 20, 0));
+        using var client = _factory.CreateRoleClient("SYSTEM_ADMIN");
+
+        var settlements = await client.GetAsync("/v1/admin/trip-settlements?search=trip-ref");
+        var transactions = await client.GetAsync("/v1/admin/platform-wallet/transactions?search=actor-name");
+
+        settlements.StatusCode.Should().Be(HttpStatusCode.OK);
+        transactions.StatusCode.Should().Be(HttpStatusCode.OK);
+        await _factory.Financial.Received(1).ListAdminSettlementsAsync(
+            Arg.Any<PageOptions>(),
+            null,
+            null,
+            null,
+            false,
+            null,
+            Arg.Any<CancellationToken>(),
+            "trip-ref");
+        await _factory.Financial.Received(1).ListPlatformTransactionsAsync(
+            Arg.Any<PageOptions>(),
+            null,
+            null,
+            Arg.Any<CancellationToken>(),
+            "actor-name");
+    }
+
+    [Fact]
     public async Task ManualPlatformAdjustment_UsesAuthenticatedSubAndRequiresIdempotencyKey()
     {
         _factory.Reset();

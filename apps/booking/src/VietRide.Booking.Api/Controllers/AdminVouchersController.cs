@@ -8,6 +8,7 @@ using VietRide.Booking.Application.Features.AdminVouchers.UpdateAdminVoucher;
 using VietRide.Booking.Application.Features.Vouchers.CreateVoucher;
 using VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 
 namespace VietRide.Booking.Api.Controllers;
 
@@ -98,6 +99,7 @@ public sealed class AdminVouchersController : ControllerBase
     /// Returns only non-soft-deleted vouchers.
     /// </remarks>
     [HttpGet]
+    [AllowedQueryParameters("fundingType", "isActive", "search", "service", "page", "pageSize", "sortBy", "sortDir")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<VoucherListItem>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ListVouchers(
@@ -124,7 +126,9 @@ public sealed class AdminVouchersController : ControllerBase
                 PageSize = request.PageSize,
                 SortBy = request.SortBy,
                 SortDir = request.SortDir,
-            });
+            },
+            Search: request.Search,
+            Service: request.Service);
 
         var result = await _sender.Send(query, ct);
 

@@ -128,6 +128,22 @@ internal sealed class VehicleRepository : IVehicleRepository
         string? sortBy,
         string sortDir,
         CancellationToken cancellationToken)
+        => await ListByOperatorAsync(
+            operatorId, page, pageSize, search, searchIn, sortBy, sortDir,
+            cancellationToken, null, null, null);
+
+    public async Task<PagedResult<Vehicle>> ListByOperatorAsync(
+        Guid operatorId,
+        int page,
+        int pageSize,
+        string? search,
+        string? searchIn,
+        string? sortBy,
+        string sortDir,
+        CancellationToken cancellationToken,
+        Guid? vehicleTypeId = null,
+        VehicleStatus? status = null,
+        bool? isActive = null)
     {
         var query = QueryNoTracking()
             .Where(vehicle => vehicle.OperatorId == operatorId && vehicle.DeletedAt == null);
@@ -137,6 +153,13 @@ internal sealed class VehicleRepository : IVehicleRepository
             var pattern = $"%{search.Trim()}%";
             query = query.Where(vehicle => EF.Functions.ILike(vehicle.LicensePlate, pattern));
         }
+
+        if (vehicleTypeId.HasValue)
+            query = query.Where(vehicle => vehicle.VehicleTypeId == vehicleTypeId.Value);
+        if (status.HasValue)
+            query = query.Where(vehicle => vehicle.Status == status.Value);
+        if (isActive.HasValue)
+            query = query.Where(vehicle => vehicle.IsActive == isActive.Value);
 
         var totalItems = await query.LongCountAsync(cancellationToken);
         var items = await ApplySort(query, sortBy, sortDir)

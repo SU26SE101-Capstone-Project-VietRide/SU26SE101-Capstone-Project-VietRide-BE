@@ -27,6 +27,7 @@ public sealed class IdentityDbContext : VietRideDbContextBase
     {
         builder.MapEnum<UserRole>("user_role", PostgresEnumNameTranslator);
         builder.MapEnum<UserStatus>("user_status", PostgresEnumNameTranslator);
+        builder.MapEnum<UserLockSource>("user_lock_source", PostgresEnumNameTranslator);
         builder.MapEnum<EmailVerificationPurpose>("email_verification_purpose", PostgresEnumNameTranslator);
         builder.MapEnum<OAuthProvider>("oauth_provider", PostgresEnumNameTranslator);
         builder.MapEnum<RefreshTokenRevokeReason>("refresh_token_revoke_reason", PostgresEnumNameTranslator);
@@ -61,6 +62,7 @@ public sealed class IdentityDbContext : VietRideDbContextBase
     {
         modelBuilder.HasPostgresEnum("user_role", Enum.GetNames<UserRole>());
         modelBuilder.HasPostgresEnum("user_status", Enum.GetNames<UserStatus>());
+        modelBuilder.HasPostgresEnum("user_lock_source", Enum.GetNames<UserLockSource>());
         modelBuilder.HasPostgresEnum("email_verification_purpose", Enum.GetNames<EmailVerificationPurpose>());
         modelBuilder.HasPostgresEnum("oauth_provider", Enum.GetNames<OAuthProvider>());
         modelBuilder.HasPostgresEnum("refresh_token_revoke_reason", Enum.GetNames<RefreshTokenRevokeReason>());

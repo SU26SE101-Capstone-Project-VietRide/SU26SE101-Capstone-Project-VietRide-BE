@@ -1,4 +1,3 @@
-using System.Text.Json;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
 using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
@@ -146,8 +145,7 @@ internal static class TripProjectionMapper
         IReadOnlyCollection<TripSeat> seats)
     {
         var layoutJson = trip.SeatLayoutSnapshotJson ?? vehicle.SeatLayoutJson;
-        var layout = layoutJson.Deserialize<SeatLayoutDto>()
-            ?? throw new InvalidOperationException("Stored vehicle seat layout is invalid.");
+        var layout = SeatLayoutJsonSerializer.Deserialize(layoutJson);
         var layoutSeats = layout.Seats.ToDictionary(seat => seat.SeatNumber, StringComparer.OrdinalIgnoreCase);
         var seatDtos = seats
             .OrderBy(seat => seat.SeatNumber, StringComparer.OrdinalIgnoreCase)
@@ -159,7 +157,10 @@ internal static class TripProjectionMapper
             trip.SeatLayoutSnapshotJson.HasValue
                 ? layout.VehicleTypeCode
                 : vehicleType?.Code ?? layout.VehicleTypeCode,
-            seatDtos);
+            seatDtos)
+        {
+            Aisles = layout.Aisles,
+        };
     }
 
     private static TripSeatMapSeatDto ToSeatMapSeatDto(

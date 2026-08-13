@@ -39,6 +39,9 @@ public sealed class ListRoutesHandler : IRequestHandler<ListRoutesQuery, PagedRe
             query = query.Where(route => route.Name.Contains(search));
         }
 
+        if (request.IsActive.HasValue)
+            query = query.Where(route => route.IsActive == request.IsActive.Value);
+
         var totalItems = query.LongCount();
         var routes = query
             .OrderBy(route => route.Name)

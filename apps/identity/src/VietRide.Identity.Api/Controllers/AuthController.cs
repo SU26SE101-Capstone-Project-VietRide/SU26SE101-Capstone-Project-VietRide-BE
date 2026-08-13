@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
+using VietRide.Identity.Application.Features.Auth.ChangePassword;
 using VietRide.Identity.Application.Features.Auth.ForgotPassword;
 using VietRide.Identity.Application.Features.Auth.GoogleLogin;
 using VietRide.Identity.Application.Features.Auth.Login;
@@ -140,6 +141,32 @@ public sealed class AuthController : ControllerBase
     {
         var result = await _sender.Send(
             new ResetPasswordCommand(request.Email, request.Code, request.NewPassword),
+            ct);
+
+        return Ok(result);
+    }
+
+    /// <summary>Changes the authenticated user's local password and revokes every active session.</summary>
+    [HttpPost("change-password")]
+    [Authorize]
+    [RequireIdempotency]
+    [ProducesResponseType(typeof(ApiResponse<ChangePasswordResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ChangePassword(
+        [FromBody] ChangePasswordRequest request,
+        CancellationToken ct)
+    {
+        var result = await _sender.Send(
+            new ChangePasswordCommand(
+                CurrentUserClaims.GetUserId(User),
+                request.CurrentPassword,
+                request.NewPassword,
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                Request.Headers.UserAgent.ToString()),
             ct);
 
         return Ok(result);

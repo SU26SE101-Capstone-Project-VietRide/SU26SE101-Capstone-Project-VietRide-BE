@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
@@ -68,6 +69,7 @@ public sealed class TripsController : ControllerBase
     }
 
     [HttpGet("{tripId:guid}/seat-map")]
+    [AllowedQueryParameters]
     [Authorize]
     [ProducesResponseType(typeof(ApiResponse<TripSeatMapDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]

@@ -47,6 +47,21 @@ internal sealed class UserRepository : IUserRepository
             .SingleOrDefaultAsync(ct);
     }
 
+    public async Task<User?> GetManageableOperatorUserForUpdateAsync(
+        Guid id,
+        Guid operatorId,
+        CancellationToken ct = default)
+    {
+        var tracked = _db.Users.Local.FirstOrDefault(user => user.Id == id);
+        if (tracked is not null)
+            _db.Entry(tracked).State = EntityState.Detached;
+
+        return await _db.Users
+            .FromSqlInterpolated($"SELECT * FROM vietride_identity.users WHERE id = {id} AND operator_id = {operatorId} AND role IN ('DRIVER', 'ASSISTANT') AND deleted_at IS NULL FOR UPDATE")
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(ct);
+    }
+
     public async Task<PagedResult<User>> ListAdminUsersAsync(
         QueryOptions options,
         UserRole? role,

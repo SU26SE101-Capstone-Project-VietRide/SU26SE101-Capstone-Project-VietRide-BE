@@ -57,7 +57,9 @@ public sealed class ListOperatorBookingsQueryHandler
             request.Page,
             effectivePageSize,
             request.SortBy ?? "createdAt",
-            request.SortDir.Equals("desc", StringComparison.OrdinalIgnoreCase));
+            request.SortDir.Equals("desc", StringComparison.OrdinalIgnoreCase),
+            request.Search?.Trim(),
+            TryNormalizePhone(request.Search));
         var result = await _bookings.ListOperatorBookingsAsync(criteria, cancellationToken);
         var items = result.Items;
         var missingBuyerIds = items
@@ -107,5 +109,19 @@ public sealed class ListOperatorBookingsQueryHandler
 
         var range = BusinessTime.GetUtcDayRange(date.Value);
         return (range.FromUtc, range.ToUtcExclusive);
+    }
+
+    private static string? TryNormalizePhone(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        try
+        {
+            return PhoneNumber.Normalize(value).Value;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 }

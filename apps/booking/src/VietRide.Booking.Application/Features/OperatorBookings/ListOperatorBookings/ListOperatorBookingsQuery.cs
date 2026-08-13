@@ -13,4 +13,5 @@ public sealed record ListOperatorBookingsQuery(
     int Page = 1,
     int PageSize = 20,
     string? SortBy = null,
-    string SortDir = "desc") : IRequest<PagedResult<OperatorBookingListItem>>;
+    string SortDir = "desc",
+    string? Search = null) : IRequest<PagedResult<OperatorBookingListItem>>;

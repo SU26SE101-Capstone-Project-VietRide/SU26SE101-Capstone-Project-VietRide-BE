@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Application.Features.Locations;
 
@@ -20,6 +21,7 @@ public sealed class AdminLocationsController : ControllerBase
     }
 
     [HttpGet]
+    [AllowedQueryParameters("page", "pageSize", "search", "isActive", "type", "parentCode")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<LocationDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     public async Task<ActionResult<PagedResult<LocationDto>>> GetAsync(
@@ -27,10 +29,12 @@ public sealed class AdminLocationsController : ControllerBase
         [FromQuery] int? pageSize,
         [FromQuery] string? search,
         [FromQuery] bool? isActive,
+        [FromQuery] string? type,
+        [FromQuery] string? parentCode,
         CancellationToken cancellationToken)
     {
         return Ok(await mediator.Send(
-            new ListAdminLocationsQuery(page, pageSize, search, isActive),
+            new ListAdminLocationsQuery(page, pageSize, search, isActive, type, parentCode),
             cancellationToken));
     }
 

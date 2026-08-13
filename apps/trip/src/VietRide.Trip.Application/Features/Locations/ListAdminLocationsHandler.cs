@@ -1,6 +1,8 @@
 using MediatR;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Features.Locations;
 
@@ -23,12 +25,31 @@ public sealed class ListAdminLocationsHandler : IRequestHandler<ListAdminLocatio
     {
         var page = Math.Max(request.Page ?? DefaultPage, DefaultPage);
         var pageSize = Math.Clamp(request.PageSize ?? DefaultPageSize, 1, MaxPageSize);
+        Guid? parentId = null;
+        if (!string.IsNullOrWhiteSpace(request.ParentCode))
+        {
+            var normalizedParentCode = request.ParentCode.Trim().ToUpperInvariant();
+            var parent = locationRepository.QueryNoTracking()
+                .FirstOrDefault(location => location.Code.ToUpper() == normalizedParentCode);
+            if (parent is null || !Location.IsTopLevelType(parent.Type))
+            {
+                throw new CodedValidationException(
+                    "VALIDATION_ERROR",
+                    "parentCode must identify an existing top-level location.",
+                    [new ValidationError("parentCode", "Parent location was not found or is not top-level.")]);
+            }
+
+            parentId = parent.Id;
+        }
+
         var result = await locationRepository.ListAsync(
             page,
             pageSize,
             request.Search,
             request.IsActive,
-            cancellationToken);
+            cancellationToken,
+            string.IsNullOrWhiteSpace(request.Type) ? null : request.Type.Trim().ToUpperInvariant(),
+            parentId);
         var parentIds = result.Items
             .Where(location => location.ParentLocationId.HasValue)
             .Select(location => location.ParentLocationId!.Value)
