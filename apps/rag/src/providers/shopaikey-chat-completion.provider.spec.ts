@@ -1,7 +1,7 @@
 import type { Env } from '../config/env.schema';
-import { OpenRouterChatCompletionProvider } from './openrouter-chat-completion.provider';
+import { ShopAiKeyChatCompletionProvider } from './shopaikey-chat-completion.provider';
 
-describe('OpenRouterChatCompletionProvider', () => {
+describe('ShopAiKeyChatCompletionProvider', () => {
   const originalFetch = global.fetch;
   let fetchMock: jest.Mock;
 
@@ -20,7 +20,7 @@ describe('OpenRouterChatCompletionProvider', () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ choices: [{ message: { content: 'Câu trả lời' } }] }),
     );
-    const provider = new OpenRouterChatCompletionProvider(makeEnv());
+    const provider = new ShopAiKeyChatCompletionProvider(makeEnv());
 
     await expect(provider.complete(makeRequest())).resolves.toBe('Câu trả lời');
   });
@@ -29,7 +29,7 @@ describe('OpenRouterChatCompletionProvider', () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ choices: [{ message: { content: 'Câu trả lời' } }] }),
     );
-    const provider = new OpenRouterChatCompletionProvider(makeEnv());
+    const provider = new ShopAiKeyChatCompletionProvider(makeEnv());
 
     await provider.complete({
       ...makeRequest(),
@@ -38,11 +38,36 @@ describe('OpenRouterChatCompletionProvider', () => {
     });
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
-      model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+      model: 'gemini-3.5-flash',
       messages: [{ role: 'user', content: 'Xin chào' }],
       stream: false,
       temperature: 0,
-      reasoning: { enabled: false },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.shopaikey.com/v1/chat/completions',
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer test-key',
+          'Content-Type': 'application/json',
+        },
+      }),
+    );
+  });
+
+  it.each([
+    [{ enabled: true } as const, 'medium'],
+    [{ effort: 'low' } as const, 'low'],
+    [{ enabled: true, effort: 'high' } as const, 'high'],
+  ])('maps reasoning controls to reasoning_effort', async (reasoning, expectedEffort) => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ choices: [{ message: { content: 'Câu trả lời' } }] }),
+    );
+    const provider = new ShopAiKeyChatCompletionProvider(makeEnv());
+
+    await provider.complete({ ...makeRequest(), reasoning });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+      reasoning_effort: expectedEffort,
     });
   });
 
@@ -50,12 +75,12 @@ describe('OpenRouterChatCompletionProvider', () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ choices: [{ message: { content: 'Câu trả lời' } }] }),
     );
-    const provider = new OpenRouterChatCompletionProvider(makeEnv());
+    const provider = new ShopAiKeyChatCompletionProvider(makeEnv());
 
     await provider.complete(makeRequest());
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
-      model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+      model: 'gemini-3.5-flash',
       messages: [{ role: 'user', content: 'Xin chào' }],
       stream: false,
     });
@@ -63,7 +88,7 @@ describe('OpenRouterChatCompletionProvider', () => {
 
   it('preserves the controlled rate-limit error code', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ error: { code: 'rate_limit_exceeded' } }, 429));
-    const provider = new OpenRouterChatCompletionProvider(makeEnv());
+    const provider = new ShopAiKeyChatCompletionProvider(makeEnv());
 
     await expect(provider.complete(makeRequest())).rejects.toMatchObject({
       response: expect.objectContaining({ errorCode: 'RAG_PROVIDER_RATE_LIMITED' }),
@@ -84,18 +109,18 @@ describe('OpenRouterChatCompletionProvider', () => {
         { status: 200 },
       ),
     );
-    const provider = new OpenRouterChatCompletionProvider(makeEnv());
+    const provider = new ShopAiKeyChatCompletionProvider(makeEnv());
 
     await expect(collect(provider.stream(makeRequest()))).resolves.toEqual(['Xin ', 'chào']);
   });
 
-  it('rejects an OpenRouter error frame instead of silently persisting an empty answer', async () => {
+  it('rejects a ShopAIKey error frame instead of silently persisting an empty answer', async () => {
     fetchMock.mockResolvedValue(
       new Response('data: {"error":{"code":"provider_unavailable","message":"capacity"}}\n\n', {
         status: 200,
       }),
     );
-    const provider = new OpenRouterChatCompletionProvider(makeEnv());
+    const provider = new ShopAiKeyChatCompletionProvider(makeEnv());
 
     await expect(collect(provider.stream(makeRequest()))).rejects.toMatchObject({
       response: expect.objectContaining({ errorCode: 'RAG_PROVIDER_UNAVAILABLE' }),
@@ -125,7 +150,7 @@ describe('OpenRouterChatCompletionProvider', () => {
         },
       };
     });
-    const provider = new OpenRouterChatCompletionProvider(makeEnv({ RAG_PROVIDER_TIMEOUT_MS: 25 }));
+    const provider = new ShopAiKeyChatCompletionProvider(makeEnv({ RAG_PROVIDER_TIMEOUT_MS: 25 }));
     const pending = provider.stream(makeRequest())[Symbol.asyncIterator]().next();
     const expectation = expect(pending).rejects.toMatchObject({
       response: expect.objectContaining({ errorCode: 'RAG_PROVIDER_UNAVAILABLE' }),
@@ -174,14 +199,10 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     JWT_ISSUER: 'vietride-identity',
     JWT_AUDIENCE: 'vietride-api',
     LOG_LEVEL: 'info',
-    OPENROUTER_API_KEY: 'test-key',
-    OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
-    OPENROUTER_CHAT_MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free',
-    OPENROUTER_EMBEDDING_MODEL: 'nvidia/llama-nemotron-embed-vl-1b-v2:free',
-    OPENROUTER_HTTP_REFERER: undefined,
-    OPENROUTER_APP_TITLE: 'VietRide RAG',
-    OPENROUTER_ALLOW_PAID_FALLBACK: false,
-    RAG_EMBEDDING_DIMENSIONS: 'auto',
+    SHOPAIKEY_API_KEY: 'test-key',
+    SHOPAIKEY_BASE_URL: 'https://api.shopaikey.com/v1',
+    SHOPAIKEY_CHAT_MODEL: 'gemini-3.5-flash',
+    SHOPAIKEY_EMBEDDING_MODEL: 'gemini-embedding-2-preview',
     RAG_PROVIDER_TIMEOUT_MS: 10_000,
     RAG_MAX_MESSAGE_CHARS: 500,
     RAG_MAX_CONTEXT_TOKENS: 4_000,

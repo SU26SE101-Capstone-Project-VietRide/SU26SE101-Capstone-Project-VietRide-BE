@@ -100,6 +100,7 @@ describe('resolveNotificationAction', () => {
   });
 
   it.each([
+    NotificationType.PARCEL_RESERVED,
     NotificationType.PARCEL_LOADED,
     NotificationType.PARCEL_IN_TRANSIT,
     NotificationType.PARCEL_DELIVERED_PENDING_CONFIRM,

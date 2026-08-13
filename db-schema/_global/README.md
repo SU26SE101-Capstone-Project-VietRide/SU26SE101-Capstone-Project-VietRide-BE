@@ -54,7 +54,7 @@ Tất cả schema tuân thủ v6 Section 8 conventions:
 - **`departureTime`:** `TIME` (no timezone) — semantic local Asia/Ho_Chi_Minh.
 - **UUID:** `UUID` type với `gen_random_uuid()` default.
 - **JSON config:** `JSONB`.
-- **pgvector embedding:** RAG dùng `halfvec(2048)` với HNSW `halfvec_cosine_ops`; model OpenRouter `nvidia/llama-nemotron-embed-vl-1b-v2:free`.
+- **pgvector embedding:** RAG dùng `halfvec(2048)` với HNSW `halfvec_cosine_ops`; ShopAIKey model `gemini-embedding-2-preview` qua API tương thích OpenAI.
 
 ### Money CHECK constraints
 - `Wallet.balance >= 0`, `PlatformWallet.balance >= 0`, `OperatorWallet.balance >= 0` (CHECK).

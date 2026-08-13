@@ -423,8 +423,8 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 | **VNPay** | Cổng thanh toán, nạp ví | Redirect-based, HMAC-SHA512 signature verify |
 | **Firebase FCM** | Push notification mobile | Firebase Admin SDK |
 | **Firebase Storage** | Client upload ảnh vehicle/logo/parcel/incident/avatar | 5GB free; RAG và invoice vẫn server-owned |
-| **OpenRouter LLM API** | Generate câu trả lời RAG | Model `nvidia/nemotron-3-ultra-550b-a55b:free`, streaming SSE |
-| **OpenRouter Embedding API** | Embed chunks cho RAG retrieval | Model `nvidia/llama-nemotron-embed-vl-1b-v2:free` — 2.048 dimensions |
+| **ShopAIKey LLM API** | Generate câu trả lời RAG qua API tương thích OpenAI | Model `gemini-3.5-flash`, streaming SSE |
+| **ShopAIKey Embedding API** | Embed chunks cho RAG retrieval qua API tương thích OpenAI | Model `gemini-embedding-2-preview` — yêu cầu cố định 2.048 dimensions |
 | **pgvector** | Vector similarity search cho RAG | PostgreSQL extension — thay thế Elasticsearch |
 | **SendGrid / SMTP** | Email — OTP đăng ký, parcel delivery link | Free tier 100 email/ngày |
 
@@ -3661,7 +3661,7 @@ Lịch sử chat lưu lại per session để audit. System Admin phê duyệt t
 **RAG Service — entity requirements (PostgreSQL + pgvector):**
 
 - **KnowledgeDocument:** file gốc upload (PDF, DOCX, TXT, MARKDOWN). Fields cần có: title, description (nullable), storageProvider `CLOUDINARY`, storagePath (Cloudinary public ID/path, không lưu signed URL dài hạn), fileType enum, `accessLevel` enum (PUBLIC | OPERATOR | ADMIN — quyết định role nào query được; `PUBLIC` là FAQ/chính sách passenger in-scope v1), status enum (PENDING_REVIEW | APPROVED | REJECTED | ARCHIVED), uploadedByUserId, approvedByUserId nullable, approvedAt nullable, timestamps.
-- **KnowledgeChunk:** đoạn text được tách từ document (unit retrieval). Fields: documentId FK, chunkIndex (0-indexed), content (text), tokenCount (kiểm soát context window), `embedding` **halfvec(2048)** dùng pgvector với OpenRouter model `nvidia/llama-nemotron-embed-vl-1b-v2:free`. Dùng HNSW cosine index `USING hnsw (embedding halfvec_cosine_ops)` cho similarity search.
+- **KnowledgeChunk:** đoạn text được tách từ document (unit retrieval). Fields: documentId FK, chunkIndex (0-indexed), content (text), tokenCount (kiểm soát context window), `embedding` **halfvec(2048)** dùng pgvector với ShopAIKey model `gemini-embedding-2-preview` qua API tương thích OpenAI. Dùng HNSW cosine index `USING hnsw (embedding halfvec_cosine_ops)` cho similarity search.
 - **RagConversation:** 1 session chat. Fields: userId, role enum (PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_ADMIN | SYSTEM_ADMIN — để filter accessLevel khi query chunk), startedAt, lastMessageAt.
 - **RagMessage:** từng turn trong conversation. Fields: conversationId FK, role enum (USER | ASSISTANT), content (text), `citedChunkIds` UUID[] (audit trail — các chunk dùng để generate câu trả lời), tokensUsed nullable.
 
@@ -3700,7 +3700,7 @@ Passenger không query được tài liệu OPERATOR/ADMIN. Driver/Assistant kh�
    c. Chunk text: chia đoạn ~500 token, overlap 50 token giữa các chunk
         (overlap để tránh mất context ở ranh giới chunk)
    d. FOR EACH chunk:
-        - Gọi OpenRouter Embedding API model `nvidia/llama-nemotron-embed-vl-1b-v2:free`
+        - Gọi ShopAIKey Embedding API model `gemini-embedding-2-preview` với `dimensions=2048`
           → vector 2.048 chiều; fail fast nếu provider trả dimension khác `halfvec(2048)` của DB
         - INSERT KnowledgeChunk { documentId, chunkIndex, content, tokenCount, embedding }
    e. UPDATE KnowledgeDocument: đánh dấu embedding complete
@@ -3710,7 +3710,7 @@ Passenger không query được tài liệu OPERATOR/ADMIN. Driver/Assistant kh�
    b. pgvector similarity search: SELECT chunk ORDER BY embedding <=> queryVector LIMIT 5
       WHERE document.accessLevel IN (roles_allowed_for_user)
    c. Build context prompt: [system prompt] + [top-5 chunks] + [conversation history] + [user question]
-   d. Call OpenRouter model `nvidia/nemotron-3-ultra-550b-a55b:free` với stream = true → SSE response về client
+   d. Call ShopAIKey model `gemini-3.5-flash` qua `/v1/chat/completions` với stream = true → SSE response về client
    e. INSERT RagMessage { role=USER }, INSERT RagMessage { role=ASSISTANT, citedChunkIds=[...] }
 ```
 
@@ -4998,7 +4998,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **File storage** | Cloudinary cho tài liệu RAG; Firebase Storage cho client media (avatar, vehicle, parcel, incident) |
 | **Timezone** | Storage UTC · Display Asia/Ho_Chi_Minh (`+07:00`) · API ISO 8601 với offset · `departureTime TIME` lưu local Asia/Ho_Chi_Minh |
 | **MediatR** | Pin v11.x (v12+ commercial license) |
-| **LLM** | OpenRouter: chat `nvidia/nemotron-3-ultra-550b-a55b:free`; embedding `nvidia/llama-nemotron-embed-vl-1b-v2:free` |
+| **LLM** | ShopAIKey OpenAI-compatible API: chat `gemini-3.5-flash`; embedding `gemini-embedding-2-preview` với 2.048 dimensions |
 | **BỎ** | Walk-in booking, CSV import, walk-in parcel — mọi booking/parcel chỉ qua Passenger App |
 
 ### Conventions quan trọng
@@ -5295,7 +5295,7 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 #### RAG AI Service
 
 - **`KnowledgeDocument`** — File upload metadata: Cloudinary storageProvider/storagePath, fileType, accessLevel PUBLIC | OPERATOR | ADMIN, status PENDING_REVIEW | APPROVED | REJECTED | ARCHIVED, audit fields.
-- **`KnowledgeChunk`** — Đoạn text + `embedding halfvec(2048)` pgvector cho OpenRouter model `nvidia/llama-nemotron-embed-vl-1b-v2:free`. Có HNSW cosine index cho similarity search.
+- **`KnowledgeChunk`** — Đoạn text + `embedding halfvec(2048)` pgvector cho ShopAIKey model `gemini-embedding-2-preview`. Có HNSW cosine index cho similarity search.
 - **`RagConversation`** — 1 session chat: userId, role (filter accessLevel).
 - **`RagMessage`** — Mỗi turn USER | ASSISTANT trong conversation. Có `citedChunkIds` audit trail.
 - **`OutboxEvent`** cho `DocumentApproved` event.

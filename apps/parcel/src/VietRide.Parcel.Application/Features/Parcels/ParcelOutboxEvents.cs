@@ -9,6 +9,7 @@ public static class ParcelOutboxEvents
     private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     public const string Created = "parcel.parcel.created";
+    public const string Reserved = "parcel.parcel.reserved";
     public const string Loaded = "parcel.parcel.loaded";
     public const string Unloaded = "parcel.parcel.unloaded";
     public const string DeliveredPendingConfirm = "parcel.parcel.delivered_pending_confirm";

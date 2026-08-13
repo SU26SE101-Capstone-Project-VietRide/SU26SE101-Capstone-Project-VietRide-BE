@@ -4,13 +4,13 @@ import { ENV_TOKEN } from '../app/tokens';
 import type { Env } from '../config/env.schema';
 import type { ChatCompletionProvider, ChatCompletionRequest } from './chat-completion.provider';
 
-interface OpenRouterChatChoice {
+interface ShopAiKeyChatChoice {
   message?: { content?: string };
   delta?: { content?: string };
 }
 
-interface OpenRouterChatResponse {
-  choices?: OpenRouterChatChoice[];
+interface ShopAiKeyChatResponse {
+  choices?: ShopAiKeyChatChoice[];
   error?: { code?: string | number };
 }
 
@@ -24,10 +24,10 @@ interface ProviderAbortContext {
 const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 const CIRCUIT_BREAKER_OPEN_MS = 60_000;
 const PROVIDER_DIAGNOSTIC_MAX_LENGTH = 100;
-const logger = pino({ name: 'OpenRouterChatCompletionProvider' });
+const logger = pino({ name: 'ShopAiKeyChatCompletionProvider' });
 
 @Injectable()
-export class OpenRouterChatCompletionProvider implements ChatCompletionProvider {
+export class ShopAiKeyChatCompletionProvider implements ChatCompletionProvider {
   private consecutiveFailures = 0;
   private circuitOpenUntil = 0;
 
@@ -41,13 +41,13 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
         abortContext.signal,
       );
       abortContext.refresh();
-      const body = (await response.json()) as OpenRouterChatResponse;
+      const body = (await response.json()) as ShopAiKeyChatResponse;
       const content = body.choices?.[0]?.message?.content;
       if (!content?.trim()) {
         this.recordFailure(502);
         throw new ServiceUnavailableException({
           errorCode: 'RAG_PROVIDER_INVALID_RESPONSE',
-          detail: 'OpenRouter chat provider returned an invalid response',
+          detail: 'ShopAIKey chat provider returned an invalid response',
         });
       }
       this.recordSuccess();
@@ -74,7 +74,7 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
         this.recordFailure(502);
         throw new ServiceUnavailableException({
           errorCode: 'RAG_PROVIDER_INVALID_RESPONSE',
-          detail: 'OpenRouter chat provider returned no stream body',
+          detail: 'ShopAIKey chat provider returned no stream body',
         });
       }
 
@@ -114,32 +114,32 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
       method: 'POST',
       headers: this.buildHeaders(),
       body: JSON.stringify({
-        model: this.env.OPENROUTER_CHAT_MODEL,
+        model: this.env.SHOPAIKEY_CHAT_MODEL,
         messages: request.messages,
         stream: request.stream,
         ...(request.temperature !== undefined && { temperature: request.temperature }),
-        ...(request.reasoning !== undefined && { reasoning: request.reasoning }),
+        ...this.buildReasoningConfig(request),
       }),
       signal,
     };
-    const response = await fetch(`${this.env.OPENROUTER_BASE_URL}/chat/completions`, init);
+    const response = await fetch(`${this.env.SHOPAIKEY_BASE_URL}/chat/completions`, init);
 
     if (!response.ok) {
       this.recordFailure(response.status);
       const diagnostics = await this.readFailureDiagnostics(response);
       logger.warn(
-        { model: this.env.OPENROUTER_CHAT_MODEL, ...diagnostics },
-        'OpenRouter chat request failed',
+        { model: this.env.SHOPAIKEY_CHAT_MODEL, ...diagnostics },
+        'ShopAIKey chat request failed',
       );
       if (response.status === 429) {
         throw new ServiceUnavailableException({
           errorCode: 'RAG_PROVIDER_RATE_LIMITED',
-          detail: 'OpenRouter chat provider rate limit reached',
+          detail: 'ShopAIKey chat provider rate limit reached',
         });
       }
       throw new ServiceUnavailableException({
         errorCode: 'RAG_PROVIDER_UNAVAILABLE',
-        detail: 'OpenRouter chat provider is unavailable',
+        detail: 'ShopAIKey chat provider is unavailable',
       });
     }
 
@@ -148,13 +148,18 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
 
   private buildHeaders(): Record<string, string> {
     return {
-      Authorization: `Bearer ${this.env.OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${this.env.SHOPAIKEY_API_KEY}`,
       'Content-Type': 'application/json',
-      ...(this.env.OPENROUTER_HTTP_REFERER
-        ? { 'HTTP-Referer': this.env.OPENROUTER_HTTP_REFERER }
-        : {}),
-      'X-Title': this.env.OPENROUTER_APP_TITLE,
     };
+  }
+
+  private buildReasoningConfig(
+    request: ChatCompletionRequest,
+  ): { reasoning_effort?: 'low' | 'medium' | 'high' } {
+    if (request.reasoning?.enabled === false) return {};
+    if (request.reasoning?.effort) return { reasoning_effort: request.reasoning.effort };
+    if (request.reasoning?.enabled === true) return { reasoning_effort: 'medium' };
+    return {};
   }
 
   private readSseToken(line: string): string | undefined {
@@ -162,20 +167,20 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
     const payload = line.slice('data: '.length).trim();
     if (!payload || payload === '[DONE]') return undefined;
     try {
-      const parsed = JSON.parse(payload) as OpenRouterChatResponse;
+      const parsed = JSON.parse(payload) as ShopAiKeyChatResponse;
       if (parsed.error) {
         const upstreamErrorCode = this.sanitizeDiagnostic(parsed.error.code);
         this.recordFailure(502);
         logger.warn(
           {
-            model: this.env.OPENROUTER_CHAT_MODEL,
+            model: this.env.SHOPAIKEY_CHAT_MODEL,
             ...(upstreamErrorCode ? { upstreamErrorCode } : {}),
           },
-          'OpenRouter chat stream returned an error frame',
+          'ShopAIKey chat stream returned an error frame',
         );
         throw new ServiceUnavailableException({
           errorCode: 'RAG_PROVIDER_UNAVAILABLE',
-          detail: 'OpenRouter chat provider is unavailable',
+          detail: 'ShopAIKey chat provider is unavailable',
         });
       }
       return parsed.choices?.[0]?.delta?.content;
@@ -220,11 +225,11 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
     upstreamErrorCode?: string;
   }> {
     const upstreamRequestId = this.sanitizeDiagnostic(
-      response.headers.get('x-request-id') ?? response.headers.get('x-openrouter-request-id'),
+      response.headers.get('x-request-id'),
     );
     let upstreamErrorCode: string | undefined;
     try {
-      const body = JSON.parse(await response.text()) as OpenRouterChatResponse;
+      const body = JSON.parse(await response.text()) as ShopAiKeyChatResponse;
       upstreamErrorCode = this.sanitizeDiagnostic(body.error?.code);
     } catch {
       // Never log an unstructured upstream body because it can echo request content.
@@ -252,15 +257,15 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
     this.recordFailure(503);
     logger.warn(
       {
-        model: this.env.OPENROUTER_CHAT_MODEL,
+        model: this.env.SHOPAIKEY_CHAT_MODEL,
         stage,
         failureType: timedOut ? 'timeout' : error instanceof Error ? error.name : 'unknown',
       },
-      'OpenRouter chat transport failed',
+      'ShopAIKey chat transport failed',
     );
     return new ServiceUnavailableException({
       errorCode: 'RAG_PROVIDER_UNAVAILABLE',
-      detail: 'OpenRouter chat provider is unavailable',
+      detail: 'ShopAIKey chat provider is unavailable',
     });
   }
 
@@ -268,7 +273,7 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
     if (Date.now() < this.circuitOpenUntil) {
       throw new ServiceUnavailableException({
         errorCode: 'RAG_PROVIDER_CIRCUIT_OPEN',
-        detail: 'OpenRouter chat provider circuit is open',
+        detail: 'ShopAIKey chat provider circuit is open',
       });
     }
   }

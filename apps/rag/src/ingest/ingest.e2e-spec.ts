@@ -59,7 +59,7 @@ describe('IngestService (e2e)', () => {
     expect(repository.replaceChunksAndComplete).toHaveBeenCalledWith(
       expect.objectContaining({ id: '33333333-3333-3333-3333-333333333333' }),
       expect.arrayContaining([expect.objectContaining({ content: 'Nội dung hỗ trợ hành khách' })]),
-      'nvidia/llama-nemotron-embed-vl-1b-v2:free',
+      'gemini-embedding-2-preview',
       EMBEDDING_DIMENSIONS,
     );
     expect(repository.markEventPublished).toHaveBeenCalledWith(EVENT_ID);
@@ -83,14 +83,10 @@ function makeEnv(): Env {
     JWT_ISSUER: 'vietride-identity',
     JWT_AUDIENCE: 'vietride-api',
     LOG_LEVEL: 'info',
-    OPENROUTER_API_KEY: 'test-key',
-    OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
-    OPENROUTER_CHAT_MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free',
-    OPENROUTER_EMBEDDING_MODEL: 'nvidia/llama-nemotron-embed-vl-1b-v2:free',
-    OPENROUTER_HTTP_REFERER: undefined,
-    OPENROUTER_APP_TITLE: 'VietRide RAG',
-    OPENROUTER_ALLOW_PAID_FALLBACK: false,
-    RAG_EMBEDDING_DIMENSIONS: 'auto',
+    SHOPAIKEY_API_KEY: 'test-key',
+    SHOPAIKEY_BASE_URL: 'https://api.shopaikey.com/v1',
+    SHOPAIKEY_CHAT_MODEL: 'gemini-3.5-flash',
+    SHOPAIKEY_EMBEDDING_MODEL: 'gemini-embedding-2-preview',
     RAG_PROVIDER_TIMEOUT_MS: 10_000,
     RAG_MAX_MESSAGE_CHARS: 500,
     RAG_MAX_CONTEXT_TOKENS: 4_000,

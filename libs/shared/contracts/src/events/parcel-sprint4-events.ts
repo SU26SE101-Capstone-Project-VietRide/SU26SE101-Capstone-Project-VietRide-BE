@@ -17,6 +17,19 @@ const parcelLoadedEventSchema = z
 
 export type ParcelLoadedEvent = z.infer<typeof parcelLoadedEventSchema>;
 
+const parcelReservedEventSchema = z
+  .object({
+    ...eventIdentityFields,
+    parcelId: z.string().uuid(),
+    parcelCode: z.string().trim().min(1),
+    tripId: z.string().uuid(),
+    operatorId: z.string().uuid(),
+    senderUserId: z.string().uuid(),
+  })
+  .strict();
+
+export type ParcelReservedEvent = z.infer<typeof parcelReservedEventSchema>;
+
 const parcelAutoRejectedLegacyEventSchema = z
   .object({
     ...eventIdentityFields,
@@ -95,6 +108,7 @@ export type ParcelSettlementRecoveredEvent = z.infer<
 >;
 
 export {
+  parcelReservedEventSchema as ParcelReservedEventSchema,
   parcelLoadedEventSchema as ParcelLoadedEventSchema,
   parcelAutoRejectedEventSchema as ParcelAutoRejectedEventSchema,
   parcelReviewApprovedEventSchema as ParcelReviewApprovedEventSchema,
@@ -103,6 +117,7 @@ export {
 };
 
 export const PARCEL_LOADED_ROUTING_KEY = 'parcel.parcel.loaded';
+export const PARCEL_RESERVED_ROUTING_KEY = 'parcel.parcel.reserved';
 export const PARCEL_AUTO_REJECTED_ROUTING_KEY = 'parcel.parcel.auto_rejected';
 export const PARCEL_REVIEW_APPROVED_ROUTING_KEY = 'parcel.parcel.review_approved';
 export const PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY =

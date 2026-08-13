@@ -7,11 +7,6 @@ const booleanEnvSchema = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
-const optionalNonEmptyString = z.preprocess((value) => {
-  if (value === '') return undefined;
-  return value;
-}, z.string().optional());
-
 export const envSchema = baseEnvSchema.merge(
   z.object({
     PORT: z.coerce.number().int().positive().default(3003),
@@ -20,16 +15,10 @@ export const envSchema = baseEnvSchema.merge(
     REDIS_URL: z.string().url(),
     RABBITMQ_URL: z.string().url(),
     RABBITMQ_EXCHANGE: z.string().default('vietride.events'),
-    OPENROUTER_API_KEY: z.string().min(1),
-    OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
-    OPENROUTER_CHAT_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b:free'),
-    OPENROUTER_EMBEDDING_MODEL: z.string().default('nvidia/llama-nemotron-embed-vl-1b-v2:free'),
-    OPENROUTER_HTTP_REFERER: optionalNonEmptyString,
-    OPENROUTER_APP_TITLE: z.string().default('VietRide RAG'),
-    OPENROUTER_ALLOW_PAID_FALLBACK: booleanEnvSchema.default(false),
-    RAG_EMBEDDING_DIMENSIONS: z
-      .union([z.literal('auto'), z.coerce.number().int().positive()])
-      .default('auto'),
+    SHOPAIKEY_API_KEY: z.string().min(1),
+    SHOPAIKEY_BASE_URL: z.string().url().default('https://api.shopaikey.com/v1'),
+    SHOPAIKEY_CHAT_MODEL: z.string().default('gemini-3.5-flash'),
+    SHOPAIKEY_EMBEDDING_MODEL: z.string().default('gemini-embedding-2-preview'),
     RAG_PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
     RAG_MAX_MESSAGE_CHARS: z.coerce.number().int().positive().default(4000),
     RAG_MAX_CONTEXT_TOKENS: z.coerce.number().int().positive().default(4_000),

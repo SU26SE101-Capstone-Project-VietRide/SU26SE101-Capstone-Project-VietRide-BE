@@ -36,7 +36,7 @@ FE/mobile không nhập `X-Internal-Auth` trong Swagger và không hardcode inte
 | Method | Path | Mô tả | Auth/Role |
 |---|---|---|---|
 | `GET` | `/health` | Liveness probe, kiểm tra RAG service còn sống. | Public. |
-| `GET` | `/ready` | Readiness probe, kiểm tra Prisma, Redis, RabbitMQ, Cloudinary, OpenRouter. | Public. |
+| `GET` | `/ready` | Readiness probe, kiểm tra Prisma, Redis, RabbitMQ, Cloudinary và ShopAIKey. | Public. |
 | `POST` | `/v1/rag/chat` | Chat với RAG knowledge base bằng SSE streaming. | `PASSENGER`, `DRIVER`, `ASSISTANT`, `OPERATOR_STAFF`, `OPERATOR_ADMIN`, `SYSTEM_ADMIN`. |
 | `POST` | `/v1/rag/messages/:messageId/feedback` | Tạo/cập nhật feedback cho assistant message. | Caller phải là owner của message/conversation. |
 | `GET` | `/v1/rag/feedback` | Admin audit danh sách feedback. | `SYSTEM_ADMIN`. |

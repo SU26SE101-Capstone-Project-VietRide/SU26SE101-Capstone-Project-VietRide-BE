@@ -57,7 +57,7 @@ describe('Day 44 offline RAG seed planner', () => {
 
     assert.equal(result.documents.length, 3);
     assert.equal(result.chunks.length, 3);
-    assert.equal(result.embeddingModel, 'nvidia/llama-nemotron-embed-vl-1b-v2:free');
+    assert.equal(result.embeddingModel, 'gemini-embedding-2-preview');
     assert.equal(result.embeddingDimensions, 2_048);
     assert.ok(
       result.documents.every(

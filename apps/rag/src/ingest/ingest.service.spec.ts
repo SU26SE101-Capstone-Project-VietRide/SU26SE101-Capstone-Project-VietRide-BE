@@ -72,7 +72,7 @@ describe('IngestService', () => {
         expect.objectContaining({ sectionHeader: 'Vé xe', chunkIndex: 0 }),
         expect.objectContaining({ sectionHeader: 'Hoàn tiền', chunkIndex: 1 }),
       ]),
-      'nvidia/llama-nemotron-embed-vl-1b-v2:free',
+      'gemini-embedding-2-preview',
       EMBEDDING_DIMENSIONS,
     );
     expect(idempotency.markProcessed).toHaveBeenCalledWith(DOCUMENT_ID, 'owner-1');
@@ -90,7 +90,7 @@ describe('IngestService', () => {
   it('marks document failed and releases lock when provider is unavailable', async () => {
     const providerError = new ServiceUnavailableException({
       errorCode: 'RAG_PROVIDER_RATE_LIMITED',
-      detail: 'OpenRouter embedding provider rate limit reached',
+      detail: 'ShopAIKey embedding provider rate limit reached',
     });
     idempotency.begin.mockResolvedValue({ state: 'acquired', ownerToken: 'owner-2' });
     repository.findDocumentForIngest.mockResolvedValue(makeDocument());
@@ -207,14 +207,10 @@ function makeEnv(): Env {
     JWT_ISSUER: 'vietride-identity',
     JWT_AUDIENCE: 'vietride-api',
     LOG_LEVEL: 'info',
-    OPENROUTER_API_KEY: 'test-key',
-    OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
-    OPENROUTER_CHAT_MODEL: 'nvidia/nemotron-3-ultra-550b-a55b:free',
-    OPENROUTER_EMBEDDING_MODEL: 'nvidia/llama-nemotron-embed-vl-1b-v2:free',
-    OPENROUTER_HTTP_REFERER: undefined,
-    OPENROUTER_APP_TITLE: 'VietRide RAG',
-    OPENROUTER_ALLOW_PAID_FALLBACK: false,
-    RAG_EMBEDDING_DIMENSIONS: 'auto',
+    SHOPAIKEY_API_KEY: 'test-key',
+    SHOPAIKEY_BASE_URL: 'https://api.shopaikey.com/v1',
+    SHOPAIKEY_CHAT_MODEL: 'gemini-3.5-flash',
+    SHOPAIKEY_EMBEDDING_MODEL: 'gemini-embedding-2-preview',
     RAG_PROVIDER_TIMEOUT_MS: 10_000,
     RAG_MAX_MESSAGE_CHARS: 500,
     RAG_MAX_CONTEXT_TOKENS: 4_000,

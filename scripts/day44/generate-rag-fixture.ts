@@ -4,9 +4,9 @@ const crypto = require('node:crypto') as typeof import('node:crypto');
 const fs = require('node:fs') as typeof import('node:fs');
 const path = require('node:path') as typeof import('node:path');
 
-export const RAG_FIXTURE_MODEL = 'nvidia/llama-nemotron-embed-vl-1b-v2:free';
+export const RAG_FIXTURE_MODEL = 'gemini-embedding-2-preview';
 export const RAG_FIXTURE_DIMENSION = 2_048;
-export const RAG_FIXTURE_ENDPOINT = 'https://openrouter.ai/api/v1/embeddings';
+export const RAG_FIXTURE_ENDPOINT = 'https://api.shopaikey.com/v1/embeddings';
 export const RAG_FIXTURE_DOCUMENT_PATHS = [
   'docs/rag/vietride-public-demo-knowledge-base.txt',
   'docs/rag/vietride-operator-demo-knowledge-base.txt',
@@ -34,7 +34,7 @@ interface ProvenanceDocument {
 interface RagFixtureProvenance {
   schemaVersion: 1;
   generatorVersion: 1;
-  provider: 'openrouter';
+  provider: 'shopaikey';
   endpoint: typeof RAG_FIXTURE_ENDPOINT;
   model: typeof RAG_FIXTURE_MODEL;
   dimension: typeof RAG_FIXTURE_DIMENSION;
@@ -159,7 +159,7 @@ function assertProvenance(value: unknown): asserts value is RagFixtureProvenance
   if (
     provenance.schemaVersion !== 1 ||
     provenance.generatorVersion !== 1 ||
-    provenance.provider !== 'openrouter' ||
+    provenance.provider !== 'shopaikey' ||
     provenance.endpoint !== RAG_FIXTURE_ENDPOINT ||
     provenance.model !== RAG_FIXTURE_MODEL ||
     provenance.dimension !== RAG_FIXTURE_DIMENSION ||
@@ -189,7 +189,12 @@ async function requestEmbedding(
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ model, input }),
+      body: JSON.stringify({
+        model,
+        input,
+        encoding_format: 'float',
+        dimensions: RAG_FIXTURE_DIMENSION,
+      }),
     });
     if (!response.ok) throw new Error('provider request failed');
     const body = (await response.json()) as { data?: Array<{ embedding?: unknown }> };
@@ -268,7 +273,7 @@ export async function generateRagFixture(options: GenerateOptions): Promise<void
   const provenance: RagFixtureProvenance = {
     schemaVersion: 1,
     generatorVersion: 1,
-    provider: 'openrouter',
+    provider: 'shopaikey',
     endpoint: RAG_FIXTURE_ENDPOINT,
     model: RAG_FIXTURE_MODEL,
     dimension: RAG_FIXTURE_DIMENSION,
@@ -343,7 +348,7 @@ export async function main(arguments_: string[] = process.argv.slice(2)): Promis
 
   if (args.generate) {
     await generateRagFixture({
-      apiKey: process.env.OPENROUTER_API_KEY,
+      apiKey: process.env.SHOPAIKEY_API_KEY,
       baseUrl: requiredArgument(args, 'base-url'),
       model: requiredArgument(args, 'model'),
       fixturePath,

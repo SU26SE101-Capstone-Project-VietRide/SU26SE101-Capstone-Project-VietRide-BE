@@ -4805,6 +4805,11 @@ navigation data resolves to `NONE`; it never fails the inbox read. IDs remain in
 `action.params` for client navigation but system-generated `title`/`body` use human-readable
 codes/names or a natural-language fallback instead of raw UUIDs. Existing rows are not backfilled.
 
+`PARCEL_RESERVED` is emitted to the Assistant currently assigned to the Parcel's Trip only after
+the sender's deposit succeeds and the Trip cargo reservation is confirmed. It is stored in the
+Assistant inbox, queued for FCM push, and resolves to `OPEN_PARCEL_DETAIL` with
+`action.params.parcelId`. Driver is not a recipient.
+
 ### POST `/v1/notifications/{notificationId}/read`
 
 Auth: owner.

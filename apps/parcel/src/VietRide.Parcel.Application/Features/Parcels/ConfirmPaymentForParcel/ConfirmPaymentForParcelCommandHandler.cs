@@ -101,7 +101,14 @@ public sealed class ConfirmPaymentForParcelCommandHandler
                 VietRide.Shared.Kernel.Time.BusinessTime.ToLocalDate(now),
                 0, 0, 0, 0, 0, snapshot.DepositAmount, 0,
                 cancellationToken);
-            await TryReserveCargoAfterPaymentAsync(snapshot, request.PaymentId, cancellationToken);
+            var cargoReserved = await TryReserveCargoAfterPaymentAsync(
+                snapshot,
+                request.PaymentId,
+                cancellationToken);
+            if (cargoReserved)
+            {
+                await EnqueueReservedAsync(snapshot, now, cancellationToken);
+            }
             return true;
         }
 
@@ -170,6 +177,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
         if (canStillServe)
         {
             await ConsumeVoucherIfNeededAsync(parcel.Id, request.Method, cancellationToken);
+            await EnqueueReservedAsync(snapshot, now, cancellationToken);
         }
         else
         {
@@ -513,7 +521,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             or ParcelStatus.RETURNED
             or ParcelStatus.DELIVERY_CONFIRMED;
 
-    private async Task TryReserveCargoAfterPaymentAsync(
+    private async Task<bool> TryReserveCargoAfterPaymentAsync(
         ParcelPaymentTransitionSnapshot snapshot,
         Guid paymentId,
         CancellationToken cancellationToken)
@@ -534,11 +542,11 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             cancellationToken);
 
         if (outcome is null)
-            return;
+            return false;
 
         if (outcome.Kind == TripCargoOutcomeKind.Success)
         {
-            return;
+            return true;
         }
 
         var reason = outcome.Kind switch
@@ -575,6 +583,29 @@ public sealed class ConfirmPaymentForParcelCommandHandler
                 reason,
                 message = outcome.ErrorMessage,
                 paymentId,
+            },
+            cancellationToken);
+        return false;
+    }
+
+    private Task EnqueueReservedAsync(
+        ParcelPaymentTransitionSnapshot snapshot,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken)
+    {
+        var eventId = Guid.NewGuid();
+        return ParcelOutboxEvents.EnqueueAsync(
+            _outbox,
+            ParcelOutboxEvents.Reserved,
+            new
+            {
+                eventId,
+                occurredAt,
+                parcelId = snapshot.ParcelId,
+                parcelCode = snapshot.ParcelCode,
+                tripId = snapshot.TripId,
+                operatorId = snapshot.OperatorId,
+                senderUserId = snapshot.SenderUserId,
             },
             cancellationToken);
     }

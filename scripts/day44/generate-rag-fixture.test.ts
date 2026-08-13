@@ -46,7 +46,7 @@ function responseFor(embedding: unknown): Response {
 function options(paths: TestPaths, fetchImpl: typeof fetch, apiKey = 'runtime-secret') {
   return {
     apiKey,
-    baseUrl: 'https://openrouter.ai/api/v1',
+    baseUrl: 'https://api.shopaikey.com/v1',
     model: RAG_FIXTURE_MODEL,
     fixturePath: paths.fixture,
     provenancePath: paths.provenance,
@@ -121,19 +121,19 @@ describe('Day 44 RAG fixture generator', () => {
   test('CLI rejects non-canonical document paths before provider call or write', async () => {
     const paths = makePaths();
     const originalFetch = globalThis.fetch;
-    const originalKey = process.env.OPENROUTER_API_KEY;
+    const originalKey = process.env.SHOPAIKEY_API_KEY;
     let providerCalls = 0;
     globalThis.fetch = async () => {
       providerCalls += 1;
       return responseFor(Array(RAG_FIXTURE_DIMENSION).fill(0));
     };
-    process.env.OPENROUTER_API_KEY = 'runtime-only-test-key';
+    process.env.SHOPAIKEY_API_KEY = 'runtime-only-test-key';
 
     try {
       await assert.rejects(
         main([
           '--generate',
-          '--base-url=https://openrouter.ai/api/v1',
+          '--base-url=https://api.shopaikey.com/v1',
           `--model=${RAG_FIXTURE_MODEL}`,
           `--fixture=${paths.fixture}`,
           `--provenance=${paths.provenance}`,
@@ -146,8 +146,8 @@ describe('Day 44 RAG fixture generator', () => {
       assert.equal(fs.existsSync(paths.provenance), false);
     } finally {
       globalThis.fetch = originalFetch;
-      if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
-      else process.env.OPENROUTER_API_KEY = originalKey;
+      if (originalKey === undefined) delete process.env.SHOPAIKEY_API_KEY;
+      else process.env.SHOPAIKEY_API_KEY = originalKey;
       fs.rmSync(paths.root, { recursive: true, force: true });
     }
   });
@@ -176,8 +176,10 @@ describe('Day 44 RAG fixture generator', () => {
       assert.ok(
         requests.every(
           (request) =>
-            request.url === 'https://openrouter.ai/api/v1/embeddings' &&
-            JSON.parse(String(request.init?.body)).model === RAG_FIXTURE_MODEL,
+            request.url === 'https://api.shopaikey.com/v1/embeddings' &&
+            JSON.parse(String(request.init?.body)).model === RAG_FIXTURE_MODEL &&
+            JSON.parse(String(request.init?.body)).encoding_format === 'float' &&
+            JSON.parse(String(request.init?.body)).dimensions === RAG_FIXTURE_DIMENSION,
         ),
       );
 

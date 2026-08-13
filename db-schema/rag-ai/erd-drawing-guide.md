@@ -38,7 +38,7 @@ Xem `_global/cross-service-references.md`.
 ## Drawing Tips
 
 1. Tách 3 cluster rõ: Knowledge base, Conversation/Feedback, Reliability.
-2. Note `KnowledgeChunk.embedding` là `halfvec(2048)` cho pgvector và model OpenRouter `nvidia/llama-nemotron-embed-vl-1b-v2:free`.
+2. Note `KnowledgeChunk.embedding` là `halfvec(2048)` cho pgvector và ShopAIKey model `gemini-embedding-2-preview` qua API tương thích OpenAI.
 3. Note `KnowledgeDocument.storagePath` là Cloudinary public_id/path, không phải URL storage cũ.
 4. `RagMessage.citedChunkIds` và `MessageFeedback.chunkIds` là UUID[] logical reference, không vẽ line FK.
 

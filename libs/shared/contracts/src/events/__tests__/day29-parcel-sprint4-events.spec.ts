@@ -3,11 +3,13 @@ import {
   PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_REVIEW_APPROVED_ROUTING_KEY,
+  PARCEL_RESERVED_ROUTING_KEY,
   PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
   ParcelAutoRejectedEventSchema,
   ParcelFinalPaymentRequestedEventSchema,
   ParcelLoadedEventSchema,
   ParcelReviewApprovedEventSchema,
+  ParcelReservedEventSchema,
   ParcelSettlementRecoveredEventSchema,
   type ParcelAutoRejectedEvent,
   type ParcelLoadedEvent,
@@ -23,6 +25,23 @@ describe('Day 29 Sprint 4 Parcel event contracts', () => {
     expect(ParcelLoadedEventSchema.parse(event)).toEqual(event);
     expect(event.eventId).toBe(outboxEventId);
     expect(rabbitMessageId).toBe(event.eventId);
+  });
+
+  it('freezes parcel.parcel.reserved for Assistant notification fan-out', () => {
+    const event = {
+      eventId: '11111111-1111-4111-8111-111111111111',
+      occurredAt: '2026-08-13T10:00:00+07:00',
+      parcelId: '22222222-2222-4222-8222-222222222222',
+      parcelCode: 'VRP-20260813-ABCDEFGH',
+      tripId: '33333333-3333-4333-8333-333333333333',
+      operatorId: '44444444-4444-4444-8444-444444444444',
+      senderUserId: '55555555-5555-4555-8555-555555555555',
+    };
+
+    expect(PARCEL_RESERVED_ROUTING_KEY).toBe('parcel.parcel.reserved');
+    expect(ParcelReservedEventSchema.parse(event)).toEqual(event);
+    expect(ParcelReservedEventSchema.safeParse({ ...event, driverUserId: event.senderUserId }).success)
+      .toBe(false);
   });
 
   it('freezes parcel.parcel.auto_rejected with the sender identity', () => {
