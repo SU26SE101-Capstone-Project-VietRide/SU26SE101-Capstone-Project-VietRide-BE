@@ -9,8 +9,10 @@ using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorRecip
 using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorSummaries;
 using VietRide.Identity.Application.Features.Internal.Operators.IncrementOperatorUsage;
 using VietRide.Identity.Application.Features.Internal.Operators.QuotaAllocations;
+using VietRide.Identity.Application.Features.Internal.Operators.SearchOperatorCrew;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
+using VietRide.Shared.Web.Filters;
 using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Identity.Api.Controllers;
@@ -73,6 +75,22 @@ public sealed class InternalOperatorsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _mediator.Send(new GetOperatorCrewUserIdsQuery(operatorId), cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("{operatorId:guid}/crew/search")]
+    [AllowedQueryParameters("search")]
+    [ProducesResponseType(typeof(IReadOnlyList<InternalOperatorCrewDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<IReadOnlyList<InternalOperatorCrewDto>>> SearchCrewAsync(
+        Guid operatorId,
+        [FromQuery] string search,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new SearchOperatorCrewQuery(operatorId, search),
+            cancellationToken);
         return Ok(result);
     }
 
