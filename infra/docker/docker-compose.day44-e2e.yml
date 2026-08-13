@@ -37,8 +37,8 @@ services:
   rag:
     container_name: ${DAY44_CONTAINER_PREFIX:-day44-e2e}-rag
     environment:
-      OPENROUTER_API_KEY: day44-disabled-provider-sentinel
-      OPENROUTER_BASE_URL: http://provider-trap:8080
+      SHOPAIKEY_API_KEY: day44-disabled-provider-sentinel
+      SHOPAIKEY_BASE_URL: http://provider-trap:8080
       CLOUDINARY_CLOUD_NAME: day44-disabled-cloudinary
       CLOUDINARY_API_KEY: day44-disabled-cloudinary-key
       CLOUDINARY_API_SECRET: day44-disabled-cloudinary-secret

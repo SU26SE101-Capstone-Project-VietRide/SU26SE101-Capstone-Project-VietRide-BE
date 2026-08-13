@@ -23,12 +23,12 @@ Tài liệu này là timeline triển khai chính thức cho `apps/rag`. Mục t
 ## Quyết định đã chốt
 
 - Storage production: Cloudinary qua REST API, không thêm package mới.
-- Chat provider giai đoạn thử nghiệm: OpenRouter.
-- Chat model thử nghiệm: `nvidia/nemotron-3-ultra-550b-a55b:free`.
-- Embedding provider giai đoạn thử nghiệm: OpenRouter.
-- Embedding model thử nghiệm: `nvidia/llama-nemotron-embed-vl-1b-v2:free`.
-- Không tự fallback sang model trả phí nếu `OPENROUTER_ALLOW_PAID_FALLBACK=false`.
-- Không hardcode dimension embedding. Service phải probe dimension từ provider trước khi ingest và fail fast nếu DB dimension không khớp.
+- Chat provider hiện tại: ShopAIKey qua API tương thích OpenAI.
+- Chat model hiện tại: `gemini-3.5-flash`.
+- Embedding provider hiện tại: ShopAIKey qua API tương thích OpenAI.
+- Embedding model hiện tại: `gemini-embedding-2-preview`.
+- Một `SHOPAIKEY_API_KEY` dùng chung cho chat và embedding; không có fallback OpenRouter.
+- Dimension embedding là invariant `2048` của `halfvec(2048)`, cố định trong code. Service gửi `dimensions=2048`, probe provider và fail fast nếu vector không khớp.
 - Tài liệu v1 chỉ ingest TXT/MARKDOWN. PDF/DOCX làm sau khi USER duyệt parser dependency.
 
 ## Taxonomy dữ liệu
@@ -95,13 +95,10 @@ RABBITMQ_URL=
 RABBITMQ_EXCHANGE=vietride.events
 INTERNAL_JWT_SECRET=
 
-OPENROUTER_API_KEY=
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_CHAT_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
-OPENROUTER_EMBEDDING_MODEL=nvidia/llama-nemotron-embed-vl-1b-v2:free
-OPENROUTER_HTTP_REFERER=http://localhost:3000
-OPENROUTER_APP_TITLE=VietRide RAG
-OPENROUTER_ALLOW_PAID_FALLBACK=false
+SHOPAIKEY_API_KEY=
+SHOPAIKEY_BASE_URL=https://api.shopaikey.com/v1
+SHOPAIKEY_CHAT_MODEL=gemini-3.5-flash
+SHOPAIKEY_EMBEDDING_MODEL=gemini-embedding-2-preview
 
 RAG_INGEST_WORKER_ENABLED=true
 INTENT_FILTER_ENABLED=true
@@ -187,7 +184,7 @@ Scope:
   - `ChatCompletionProvider`
   - `EmbeddingProvider`
   - `StorageProvider`
-- Tạo OpenRouter provider skeleton bằng built-in `fetch`.
+- Tạo ShopAIKey provider bằng built-in `fetch` theo contract tương thích OpenAI.
 - Tạo Cloudinary storage provider skeleton bằng built-in `fetch`.
 - Tạo embedding dimension probe.
 
@@ -195,7 +192,7 @@ DoD:
 
 - Missing/invalid internal JWT trả 401.
 - Internal JWT hợp lệ gắn user context vào request.
-- Env schema parse được OpenRouter/Cloudinary config.
+- Env schema parse được ShopAIKey/Cloudinary config.
 - Embedding probe có thể assert vector numeric và dimension.
 - Verify:
 
@@ -259,7 +256,7 @@ Scope:
 - Download file từ Cloudinary.
 - Extract TXT/MARKDOWN.
 - Chunk theo heading/section, fallback 500 token + overlap 50.
-- Embed bằng OpenRouter embedding model free.
+- Embed bằng ShopAIKey model `gemini-embedding-2-preview` với `dimensions=2048`.
 - Assert vector dimension đúng DB.
 - Insert chunks và populate `search_vector`.
 - Update ingest status.
@@ -281,7 +278,7 @@ Scope:
 - Verify internal JWT.
 - Create/reuse conversation.
 - Persist USER message.
-- Embed query bằng OpenRouter embedding model free.
+- Embed query bằng ShopAIKey model `gemini-embedding-2-preview` với `dimensions=2048`.
 - Vector cosine topK cố định `k=5`.
 - Access filter:
   - `PASSENGER`: `PUBLIC`
@@ -290,7 +287,7 @@ Scope:
 - Tenant filter:
   - global docs: `operator_id IS NULL`
   - operator docs: `operator_id = caller.operatorId`
-- Stream chat qua OpenRouter model free.
+- Stream chat qua ShopAIKey model `gemini-3.5-flash`.
 - Persist ASSISTANT message và cited chunk IDs.
 
 DoD:
@@ -315,7 +312,7 @@ Scope:
 - Circuit breaker cho 429/5xx.
 - Redis embedding cache.
 - Redact logs.
-- Readiness kiểm tra DB, Redis, Cloudinary config và OpenRouter probe status.
+- Readiness kiểm tra DB, Redis, Cloudinary config và ShopAIKey chat/embedding probe status.
 
 DoD:
 

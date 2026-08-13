@@ -89,7 +89,7 @@ async function configure() {
     DAY44_CONTAINER_PREFIX: containerPrefix,
     DAY44_POSTGRES_CONTAINER: postgresContainer,
     DEMO_SEED_ACCOUNT_PASSWORD: password,
-    OPENROUTER_API_KEY: '',
+    SHOPAIKEY_API_KEY: '',
     INTERNAL_JWT_SECRET: 'day44-e2e-internal-jwt-secret-32-bytes-minimum',
     SYSTEM_ADMIN_BOOTSTRAP_PASSWORD: 'day44-e2e-bootstrap-only-password',
     VNPAY_HASH_SECRET: 'day44-e2e-disabled-vnpay-secret',
@@ -1070,7 +1070,7 @@ function assertAcceptanceMatrix() {
   );
   assertCount(
     'vietride_rag',
-    "SELECT count(*) FROM vietride_rag.knowledge_documents WHERE storage_path LIKE 'day44-v1/%' AND status='APPROVED' AND ingest_status='COMPLETED' AND embedding_model='nvidia/llama-nemotron-embed-vl-1b-v2:free' AND embedding_dimensions=2048",
+    "SELECT count(*) FROM vietride_rag.knowledge_documents WHERE storage_path LIKE 'day44-v1/%' AND status='APPROVED' AND ingest_status='COMPLETED' AND embedding_model='gemini-embedding-2-preview' AND embedding_dimensions=2048",
     3,
     'RAG exact documents',
   );

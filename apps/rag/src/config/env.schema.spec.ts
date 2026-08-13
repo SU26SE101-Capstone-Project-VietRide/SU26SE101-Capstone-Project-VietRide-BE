@@ -1,17 +1,21 @@
 import { envSchema } from './env.schema';
 
 describe('env.schema', () => {
-  it('defaults OPENROUTER_CHAT_MODEL to nvidia/nemotron-3-ultra-550b-a55b:free', () => {
+  it('defaults ShopAIKey models and base URL', () => {
     const env = envSchema.parse(makeValidEnv());
-    expect(env.OPENROUTER_CHAT_MODEL).toBe('nvidia/nemotron-3-ultra-550b-a55b:free');
+    expect(env.SHOPAIKEY_BASE_URL).toBe('https://api.shopaikey.com/v1');
+    expect(env.SHOPAIKEY_CHAT_MODEL).toBe('gemini-3.5-flash');
+    expect(env.SHOPAIKEY_EMBEDDING_MODEL).toBe('gemini-embedding-2-preview');
   });
 
-  it('parses OPENROUTER_CHAT_MODEL override', () => {
+  it('parses ShopAIKey model overrides', () => {
     const env = envSchema.parse({
       ...makeValidEnv(),
-      OPENROUTER_CHAT_MODEL: 'custom/model:free',
+      SHOPAIKEY_CHAT_MODEL: 'custom-chat-model',
+      SHOPAIKEY_EMBEDDING_MODEL: 'custom-embedding-model',
     });
-    expect(env.OPENROUTER_CHAT_MODEL).toBe('custom/model:free');
+    expect(env.SHOPAIKEY_CHAT_MODEL).toBe('custom-chat-model');
+    expect(env.SHOPAIKEY_EMBEDDING_MODEL).toBe('custom-embedding-model');
   });
 
   it('enables the complete free-only RAG feature set by default', () => {
@@ -33,7 +37,6 @@ describe('env.schema', () => {
       summarize: true,
     });
     expect(env.RAG_OUTBOX_PUBLISH_ENABLED).toBe(false);
-    expect(env.OPENROUTER_ALLOW_PAID_FALLBACK).toBe(false);
     expect(env.RAG_PROVIDER_TIMEOUT_MS).toBe(30_000);
   });
 });
@@ -43,7 +46,7 @@ function makeValidEnv(): Record<string, string> {
     DATABASE_URL: 'postgresql://user:pass@localhost:5432/rag',
     REDIS_URL: 'redis://localhost:6379',
     RABBITMQ_URL: 'amqp://guest:guest@localhost:5672',
-    OPENROUTER_API_KEY: 'test-key',
+    SHOPAIKEY_API_KEY: 'test-key',
     CLOUDINARY_CLOUD_NAME: 'cloud',
     CLOUDINARY_API_KEY: 'ckey',
     CLOUDINARY_API_SECRET: 'csec',

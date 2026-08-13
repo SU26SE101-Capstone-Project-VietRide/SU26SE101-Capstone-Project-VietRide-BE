@@ -19,7 +19,7 @@ export interface ReadinessDependencyDto {
   redis: 'ok';
   rabbitmq: 'ok';
   cloudinary: 'ok';
-  openrouter: 'ok';
+  shopaikey: 'ok';
   ingest: 'ok';
 }
 
@@ -48,7 +48,7 @@ export class ReadinessService {
         this.checkRedis(),
         this.checkRabbitMq(),
         this.checkCloudinaryConfig(),
-        this.checkOpenRouter(),
+        this.checkShopAiKey(),
         this.checkIngest(),
       ]);
     } catch {
@@ -75,7 +75,7 @@ export class ReadinessService {
         redis: 'ok',
         rabbitmq: 'ok',
         cloudinary: 'ok',
-        openrouter: 'ok',
+        shopaikey: 'ok',
         ingest: 'ok',
       },
     };
@@ -112,7 +112,7 @@ export class ReadinessService {
     }
   }
 
-  private async checkOpenRouter(): Promise<void> {
+  private async checkShopAiKey(): Promise<void> {
     const [, chatProbe] = await Promise.all([
       this.embeddingProbe.probe(),
       this.chatProvider.complete({
@@ -120,7 +120,7 @@ export class ReadinessService {
         messages: RAG_CHAT_READINESS_MESSAGES,
       }),
     ]);
-    if (!chatProbe.trim()) throw new Error('OpenRouter chat probe returned no content');
+    if (!chatProbe.trim()) throw new Error('ShopAIKey chat probe returned no content');
   }
 
   private async checkIngest(): Promise<void> {

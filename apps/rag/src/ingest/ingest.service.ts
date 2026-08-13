@@ -10,7 +10,8 @@ import { EMBEDDING_PROVIDER, ENV_TOKEN, STORAGE_PROVIDER } from '../app/tokens';
 import type { Env } from '../config/env.schema';
 import type { EmbeddingProvider } from '../providers/embedding.provider';
 import type { StorageProvider } from '../providers/storage.provider';
-import { RAG_INGEST_EXPECTED_EMBEDDING_DIMENSIONS, RAG_INGEST_MAX_RETRY } from './ingest.constants';
+import { RAG_EMBEDDING_DIMENSIONS } from '../embedding/embedding.constants';
+import { RAG_INGEST_MAX_RETRY } from './ingest.constants';
 import { IngestIdempotencyService } from './ingest-idempotency.service';
 import { IngestRepository } from './ingest.repository';
 import { chunkRagText } from './ingest-text-chunker.service';
@@ -127,7 +128,7 @@ export class IngestService {
         await this.repository.replaceChunksAndComplete(
           document,
           chunks,
-          this.env.OPENROUTER_EMBEDDING_MODEL,
+          this.env.SHOPAIKEY_EMBEDDING_MODEL,
           embeddingDimensions,
         );
         await this.idempotency.markProcessed(operationId, lease.ownerToken);
@@ -189,13 +190,8 @@ export class IngestService {
   }
 
   private assertEmbeddingDimension(embedding: number[]): void {
-    const expectedDimension =
-      this.env.RAG_EMBEDDING_DIMENSIONS === 'auto'
-        ? RAG_INGEST_EXPECTED_EMBEDDING_DIMENSIONS
-        : this.env.RAG_EMBEDDING_DIMENSIONS;
-
     if (
-      embedding.length !== expectedDimension ||
+      embedding.length !== RAG_EMBEDDING_DIMENSIONS ||
       embedding.some((value) => !Number.isFinite(value))
     ) {
       throw new ServiceUnavailableException({

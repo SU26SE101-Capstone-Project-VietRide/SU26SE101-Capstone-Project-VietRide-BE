@@ -162,7 +162,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | ioredis | 5.x | |
 | firebase-admin | 12.x | FCM push (Notification) |
 | @sendgrid/mail | 8.x | Email provider (Notification) |
-| Provider SDK riêng | Không dùng | RAG gọi OpenRouter chat/embedding bằng built-in `fetch`; Cloudinary raw asset bằng REST API |
+| Provider SDK riêng | Không dùng | RAG gọi ShopAIKey chat/embedding qua API tương thích OpenAI bằng built-in `fetch`; Cloudinary raw asset bằng REST API |
 | pgvector | 0.2.x | RAG only |
 | http-proxy-middleware | 3.x | Gateway proxy |
 | jose | 5.x | Gateway JWT sign/verify |
@@ -1104,7 +1104,7 @@ Realtime state (last position, ETA cache, off-route timer) → Redis only.
 
 #### RAG AI (`vietride_rag`)
 
-`KnowledgeDocument` (Cloudinary raw asset metadata) · `KnowledgeChunk` (`halfvec(2048)`, HNSW cosine) · `RagConversation` · `RagMessage` · `OutboxEvent`. Chat và embedding đều gọi OpenRouter; embedding model canonical là `nvidia/llama-nemotron-embed-vl-1b-v2:free`.
+`KnowledgeDocument` (Cloudinary raw asset metadata) · `KnowledgeChunk` (`halfvec(2048)`, HNSW cosine) · `RagConversation` · `RagMessage` · `OutboxEvent`. Chat và embedding đều gọi ShopAIKey qua API tương thích OpenAI; model canonical lần lượt là `gemini-3.5-flash` và `gemini-embedding-2-preview`, với dimension 2.048 cố định trong code.
 
 ### 4.3 Cross-service logical FK
 
@@ -2398,6 +2398,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `payment.invoice.issued` | Payment | Notification | `{ eventId, occurredAt, invoiceId, invoiceNumber, operatorId, amount, invoiceWebUrl, downloadApiUrl }`; neither URL is a Firebase signed URL |
 | `payment.trip_settlement.completed` | Payment | Notification (operator) | `{ eventId, occurredAt, settlementId, tripId, operatorId, netAmount, settlementMethod, settledAt }` |
 | `parcel.parcel.created` | Parcel | Notification | `{ parcelId, tripId, senderUserId, recipientUserId? }`; cargo soft hold is an idempotent synchronous Trip mutation when deposit payment starts |
+| `parcel.parcel.reserved` | Parcel | Notification (assigned Assistant) | Exact `{ eventId, occurredAt, parcelId, parcelCode, tripId, operatorId, senderUserId }`; Parcel emits only after an on-time deposit success transitions the Parcel to `RESERVED` and the idempotent Trip cargo reservation succeeds. Notification resolves the current same-operator `assistantUserId` from Trip, sends one `PARCEL_RESERVED` in-app/FCM notification, and does not notify Driver. `eventId == OutboxEvent.id == RabbitMQ MessageId`. |
 | `parcel.parcel.loaded` | Parcel | Notification, Trip (counter update) | Exact `{ eventId, occurredAt, parcelId, tripId, actualWeightKg, userIds[] }`; direct `userIds[]` contains the sender and recipient account when present; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
 | `parcel.parcel.unloaded` | Parcel | Notification | `{ parcelId, tripId, userIds[] }`; chỉ CAS `IN_TRANSIT -> UNLOADED` thắng mới enqueue, `userIds` distinct gồm sender và recipient account nếu có |
 | `parcel.parcel.delivered_pending_confirm` | Parcel | Notification | Exact `{ eventId, occurredAt, parcelId, parcelCode, operatorId, tripId, userId?, recipientUserIds[]?, expiresAt? }`; `eventId == Outbox row id == RabbitMQ MessageId`. Recipient fields are omitted when no account is linked, and `expiresAt` is omitted when no recipient email/token exists. Raw tokens and delivery URLs are forbidden; Parcel sends the recipient email through `POST /internal/v1/emails`. |
@@ -3718,7 +3719,7 @@ permitted.
 
 | Queue / Job | Trigger | Worker logic |
 |---|---|---|
-| `rag:document-ingest` | Enqueued on KnowledgeDocument APPROVED | Download Cloudinary raw asset → parse → chunk → call OpenRouter embedding model `nvidia/llama-nemotron-embed-vl-1b-v2:free` → validate 2.048 dimensions → INSERT `halfvec(2048)` KnowledgeChunk |
+| `rag:document-ingest` | Enqueued on KnowledgeDocument APPROVED | Download Cloudinary raw asset → parse → chunk → call ShopAIKey embedding model `gemini-embedding-2-preview` with `dimensions=2048` → validate 2.048 dimensions → INSERT `halfvec(2048)` KnowledgeChunk |
 | `rag:outbox-publisher` | Repeatable every 5s | Outbox poll |
 
 ### 10.3 Retry & DLQ conventions
@@ -3922,11 +3923,10 @@ PORT=3003
 DATABASE_URL=postgresql://...
 REDIS_URL=redis://...
 RABBITMQ_URL=amqp://...
-OPENROUTER_API_KEY=...
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_CHAT_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
-OPENROUTER_EMBEDDING_MODEL=nvidia/llama-nemotron-embed-vl-1b-v2:free
-RAG_EMBEDDING_DIMENSIONS=auto
+SHOPAIKEY_API_KEY=...
+SHOPAIKEY_BASE_URL=https://api.shopaikey.com/v1
+SHOPAIKEY_CHAT_MODEL=gemini-3.5-flash
+SHOPAIKEY_EMBEDDING_MODEL=gemini-embedding-2-preview
 CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
@@ -3938,7 +3938,7 @@ IDENTITY_INTERNAL_BASE_URL=http://identity:5001
 
 - **Local dev:** `.env` file (gitignored).
 - **Production:** Docker secrets hoặc environment variables injected qua deployment platform. Khuyến nghị Vault/AWS Secrets Manager nếu deploy production scale.
-- **NEVER commit:** `INTERNAL_JWT_SECRET`, `USER_JWT_PRIVATE_KEY`, `VNPAY_HASH_SECRET`, `FIREBASE_PRIVATE_KEY`, `OPENROUTER_API_KEY`, `CLOUDINARY_API_SECRET`, `SENDGRID_API_KEY`, `SYSTEM_ADMIN_BOOTSTRAP_PASSWORD`.
+- **NEVER commit:** `INTERNAL_JWT_SECRET`, `USER_JWT_PRIVATE_KEY`, `VNPAY_HASH_SECRET`, `FIREBASE_PRIVATE_KEY`, `SHOPAIKEY_API_KEY`, `CLOUDINARY_API_SECRET`, `SENDGRID_API_KEY`, `SYSTEM_ADMIN_BOOTSTRAP_PASSWORD`.
 - **Rotation:** xem 6.2 (JWKS key rotation). Internal JWT secret rotation cần coordinate restart toàn bộ services (downtime ~30s).
 
 ### 11.5 docker-compose.yml essentials
@@ -4127,7 +4127,7 @@ Mock qua interface đã định nghĩa ở `Application/Abstractions/`:
 | Firebase FCM | `IFcmPushClient` (Notification) | NSubstitute mock |
 | SendGrid | `ISendGridEmailClient` (Notification) | NSubstitute mock |
 | Google Maps Directions | `IGoogleDirectionsClient` (Tracking) | NSubstitute mock |
-| OpenRouter chat / embedding | `ChatCompletionProvider`, `EmbeddingProvider` (RAG) | Jest mock `fetch` hoặc provider test double; assert model ID, numeric vector và đúng 2.048 dimensions |
+| ShopAIKey chat / embedding | `ChatCompletionProvider`, `EmbeddingProvider` (RAG) | Jest mock `fetch` hoặc provider test double; assert OpenAI-compatible payload, model ID, numeric vector và đúng 2.048 dimensions |
 | RabbitMQ broker | `IEventPublisher` (Outbox-aware) | Unit: mock; Integration: Testcontainers real broker |
 | Inter-service HTTP | `ITripServiceClient`, `IIdentityServiceClient`, ... | NSubstitute mock; integration WireMock.NET hoặc real service |
 | Clock | `IClock` | NSubstitute return fixed UTC |

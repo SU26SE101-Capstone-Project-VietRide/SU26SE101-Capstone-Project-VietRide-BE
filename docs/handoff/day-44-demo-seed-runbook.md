@@ -16,7 +16,7 @@ point it at production databases or reuse the canonical system seed as demo data
 - Supply `DEMO_SEED_ACCOUNT_PASSWORD` only to the process that launches the command, using an
   approved runtime secret source. Never put it in `.env`, command arguments, shell history,
   logs, screenshots, tickets, or this document. Remove it from the process after the command.
-- Ordinary seed, verification, and E2E runs must have `OPENROUTER_API_KEY` absent. They use the
+- Ordinary seed, verification, and E2E runs must have `SHOPAIKEY_API_KEY` absent. They use the
   committed, attested fixture and make no embedding-provider request.
 
 ## Commands
@@ -37,7 +37,7 @@ npm run e2e:day44 -- --start-date=<YYYY-MM-DD>
 ```
 
 Before either command, inject `DEMO_SEED_ACCOUNT_PASSWORD` into that command's process without
-printing it. Ensure `OPENROUTER_API_KEY` is removed from the child environment. Clear the
+printing it. Ensure `SHOPAIKEY_API_KEY` is removed from the child environment. Clear the
 runtime variable in a `finally`/equivalent cleanup path even when the command fails.
 
 Verify the committed RAG fixture offline:
@@ -46,7 +46,7 @@ Verify the committed RAG fixture offline:
 node --require ts-node/register/transpile-only scripts/day44/generate-rag-fixture.ts --verify --fixture=scripts/day44/fixtures/rag-embeddings.json --provenance=scripts/day44/fixtures/rag-embeddings.provenance.json --documents=docs/rag/vietride-public-demo-knowledge-base.txt,docs/rag/vietride-operator-demo-knowledge-base.txt,docs/rag/vietride-admin-demo-knowledge-base.txt
 ```
 
-This command must run without `OPENROUTER_API_KEY`, must not call the provider, and must emit:
+This command must run without `SHOPAIKEY_API_KEY`, must not call the provider, and must emit:
 
 ```text
 RAG_FIXTURE_PROVENANCE=PASS
@@ -142,13 +142,13 @@ failure.
 
 Fixture generation is not a normal seed, E2E, or verification step. It was a one-time bootstrap
 that required explicit human approval, both fixture outputs to be absent, and a runtime-only
-`OPENROUTER_API_KEY`. A refresh must have a new reviewed plan and must never overwrite the
+`SHOPAIKEY_API_KEY`. A refresh must have a new reviewed plan and must never overwrite the
 committed fixture implicitly.
 
 The generator invocation is:
 
 ```powershell
-node --require ts-node/register/transpile-only scripts/day44/generate-rag-fixture.ts --generate --base-url=https://openrouter.ai/api/v1 --model=nvidia/llama-nemotron-embed-vl-1b-v2:free --fixture=scripts/day44/fixtures/rag-embeddings.json --provenance=scripts/day44/fixtures/rag-embeddings.provenance.json --documents=docs/rag/vietride-public-demo-knowledge-base.txt,docs/rag/vietride-operator-demo-knowledge-base.txt,docs/rag/vietride-admin-demo-knowledge-base.txt
+node --require ts-node/register/transpile-only scripts/day44/generate-rag-fixture.ts --generate --base-url=https://api.shopaikey.com/v1 --model=gemini-embedding-2-preview --fixture=scripts/day44/fixtures/rag-embeddings.json --provenance=scripts/day44/fixtures/rag-embeddings.provenance.json --documents=docs/rag/vietride-public-demo-knowledge-base.txt,docs/rag/vietride-operator-demo-knowledge-base.txt,docs/rag/vietride-admin-demo-knowledge-base.txt
 ```
 
 For an approved regeneration only, inject the provider key into the generator process without
@@ -173,7 +173,7 @@ All matched files use Prettier code style!
 Required-marker and credential-pattern scan command:
 
 ```text
-node -e "const fs=require('node:fs');const s=fs.readFileSync('docs/handoff/day-44-demo-seed-runbook.md','utf8');for(const v of ['DEMO_SEED_ACCOUNT_PASSWORD','OPENROUTER_API_KEY','generate-rag-fixture.ts --generate','generate-rag-fixture.ts --verify','--start-date','npm run seed:demo','npm run e2e:day44','RAG_FIXTURE_PROVENANCE=PASS','RAG_READY=PASS','IDEMPOTENT_RERUN=PASS','BOOKING_READY=PASS','PARCEL_READY=PASS','DAY44_RUN=PASS','/audit-day 44'])if(!s.includes(v))throw Error('missing '+v);for(const k of ['accessToken','refreshToken','password','otp','apiKey','Authorization'])if(new RegExp(k+'\\s*[:=]\\s*\\S+','i').test(s))throw Error('credential/header-like value');"
+node -e "const fs=require('node:fs');const s=fs.readFileSync('docs/handoff/day-44-demo-seed-runbook.md','utf8');for(const v of ['DEMO_SEED_ACCOUNT_PASSWORD','SHOPAIKEY_API_KEY','generate-rag-fixture.ts --generate','generate-rag-fixture.ts --verify','--start-date','npm run seed:demo','npm run e2e:day44','RAG_FIXTURE_PROVENANCE=PASS','RAG_READY=PASS','IDEMPOTENT_RERUN=PASS','BOOKING_READY=PASS','PARCEL_READY=PASS','DAY44_RUN=PASS','/audit-day 44'])if(!s.includes(v))throw Error('missing '+v);for(const k of ['accessToken','refreshToken','password','otp','apiKey','Authorization'])if(new RegExp(k+'\\s*[:=]\\s*\\S+','i').test(s))throw Error('credential/header-like value');"
 ```
 
 Result: PASS (exit `0`, no output).

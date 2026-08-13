@@ -2,15 +2,15 @@
 
 ## Overview
 
-NestJS service xử lý knowledge base ingestion và LLM streaming RAG. Ingest pipeline: upload file lên Cloudinary raw asset -> System Admin approve -> extract text -> chunk + embed bằng OpenRouter embedding model -> lưu với pgvector. Query: embed user message -> vector similarity top-k chunks -> OpenRouter chat model stream SSE.
+NestJS service xử lý knowledge base ingestion và LLM streaming RAG. Ingest pipeline: upload file lên Cloudinary raw asset -> System Admin approve -> extract text -> chunk + embed bằng ShopAIKey model `gemini-embedding-2-preview` qua API tương thích OpenAI -> lưu với pgvector. Query: embed user message -> vector similarity top-k chunks -> ShopAIKey model `gemini-3.5-flash` stream SSE.
 
 - **Database:** `vietride_rag`
 - **Schema:** `vietride_rag`
 - **Framework:** NestJS + Prisma
 - **Extensions:** `pgcrypto`, `vector` (pgvector)
 - **Storage:** Cloudinary raw assets, DB chỉ lưu `storage_path`/metadata, không lưu signed URL dài hạn.
-- **Chat model thử nghiệm:** `nvidia/nemotron-3-ultra-550b-a55b:free`
-- **Embedding model thử nghiệm:** `nvidia/llama-nemotron-embed-vl-1b-v2:free`
+- **Chat model hiện tại:** `gemini-3.5-flash` qua ShopAIKey
+- **Embedding model hiện tại:** `gemini-embedding-2-preview` qua ShopAIKey
 - **Embedding dimension hiện tại:** `2048`
 
 ## Entity List
@@ -40,7 +40,7 @@ Rule retrieval production:
 
 ## Design Decisions
 
-- `KnowledgeChunk.embedding halfvec(2048)` khớp kết quả probe thực tế của OpenRouter embedding model `nvidia/llama-nemotron-embed-vl-1b-v2:free`. Nếu đổi sang model dimension khác phải migration và re-embed corpus.
+- `KnowledgeChunk.embedding halfvec(2048)` là invariant của RAG và khớp output 2.048 chiều được yêu cầu từ ShopAIKey model `gemini-embedding-2-preview`. Nếu đổi sang model hoặc dimension khác phải migration và re-embed toàn bộ corpus.
 - `KnowledgeChunk.search_vector` là `tsvector` để chuẩn bị hybrid search phía sau feature flag, không thay thế vector search ở Phase 2.
 - Tạo HNSW index `idx_knowledge_chunks_embedding_hnsw` với `halfvec_cosine_ops` để hỗ trợ vector search cho embedding 2048 chiều.
 - `KnowledgeDocument.storage_path` lưu Cloudinary public_id/path. API mới tạo signed/controlled URL ngắn hạn khi cần preview.

@@ -1,9 +1,10 @@
 import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ENV_TOKEN } from '../app/tokens';
 import type { Env } from '../config/env.schema';
+import { RAG_EMBEDDING_DIMENSIONS } from '../embedding/embedding.constants';
 import type { EmbeddingProvider, EmbeddingRequest } from './embedding.provider';
 
-interface OpenRouterEmbeddingResponse {
+interface ShopAiKeyEmbeddingResponse {
   data?: Array<{ embedding?: number[] }>;
 }
 
@@ -11,7 +12,7 @@ const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
 const CIRCUIT_BREAKER_OPEN_MS = 60_000;
 
 @Injectable()
-export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
+export class ShopAiKeyEmbeddingProvider implements EmbeddingProvider {
   private consecutiveFailures = 0;
   private circuitOpenUntil = 0;
 
@@ -20,42 +21,50 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
   async embed(request: EmbeddingRequest): Promise<number[]> {
     this.assertCircuitClosed();
     const controller = new AbortController();
+    const abortFromExternal = () => controller.abort(request.signal?.reason);
+    if (request.signal?.aborted) abortFromExternal();
+    else request.signal?.addEventListener('abort', abortFromExternal, { once: true });
     const timeout = setTimeout(() => controller.abort(), this.env.RAG_PROVIDER_TIMEOUT_MS);
     const init: RequestInit = {
       method: 'POST',
       headers: this.buildHeaders(),
       body: JSON.stringify({
-        model: this.env.OPENROUTER_EMBEDDING_MODEL,
+        model: this.env.SHOPAIKEY_EMBEDDING_MODEL,
         input: request.input,
+        encoding_format: 'float',
+        dimensions: RAG_EMBEDDING_DIMENSIONS,
       }),
-      signal: request.signal ?? controller.signal,
+      signal: controller.signal,
     };
 
     try {
-      const response = await fetch(`${this.env.OPENROUTER_BASE_URL}/embeddings`, init);
+      const response = await fetch(`${this.env.SHOPAIKEY_BASE_URL}/embeddings`, init);
 
       if (!response.ok) {
         this.recordFailure(response.status);
         if (response.status === 429) {
           throw new ServiceUnavailableException({
             errorCode: 'RAG_PROVIDER_RATE_LIMITED',
-            detail: 'OpenRouter embedding provider rate limit reached',
+            detail: 'ShopAIKey embedding provider rate limit reached',
           });
         }
         throw new ServiceUnavailableException({
           errorCode: 'RAG_PROVIDER_UNAVAILABLE',
-          detail: 'OpenRouter embedding provider is unavailable',
+          detail: 'ShopAIKey embedding provider is unavailable',
         });
       }
 
       this.recordSuccess();
-      const body = (await response.json()) as OpenRouterEmbeddingResponse;
+      const body = (await response.json()) as ShopAiKeyEmbeddingResponse;
       const embedding = body.data?.[0]?.embedding;
-      if (!embedding?.length || embedding.some((value) => !Number.isFinite(value))) {
+      if (
+        embedding?.length !== RAG_EMBEDDING_DIMENSIONS ||
+        embedding.some((value) => !Number.isFinite(value))
+      ) {
         this.recordFailure(502);
         throw new ServiceUnavailableException({
           errorCode: 'RAG_PROVIDER_INVALID_RESPONSE',
-          detail: 'OpenRouter embedding provider returned an invalid vector',
+          detail: 'ShopAIKey embedding provider returned an invalid vector',
         });
       }
       return embedding;
@@ -64,19 +73,18 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
       this.recordFailure(503);
       throw new ServiceUnavailableException({
         errorCode: 'RAG_PROVIDER_UNAVAILABLE',
-        detail: 'OpenRouter embedding provider is unavailable',
+        detail: 'ShopAIKey embedding provider is unavailable',
       });
     } finally {
       clearTimeout(timeout);
+      request.signal?.removeEventListener('abort', abortFromExternal);
     }
   }
 
   private buildHeaders(): Record<string, string> {
     return {
-      Authorization: `Bearer ${this.env.OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${this.env.SHOPAIKEY_API_KEY}`,
       'Content-Type': 'application/json',
-      ...(this.env.OPENROUTER_HTTP_REFERER ? { 'HTTP-Referer': this.env.OPENROUTER_HTTP_REFERER } : {}),
-      'X-Title': this.env.OPENROUTER_APP_TITLE,
     };
   }
 
@@ -84,7 +92,7 @@ export class OpenRouterEmbeddingProvider implements EmbeddingProvider {
     if (Date.now() < this.circuitOpenUntil) {
       throw new ServiceUnavailableException({
         errorCode: 'RAG_PROVIDER_CIRCUIT_OPEN',
-        detail: 'OpenRouter embedding provider circuit is open',
+        detail: 'ShopAIKey embedding provider circuit is open',
       });
     }
   }

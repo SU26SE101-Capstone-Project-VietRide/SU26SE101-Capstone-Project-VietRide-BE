@@ -2,6 +2,6 @@ RUNBOOK SYSTEM ADMIN VIETRIDE - DAY 44
 
 System Admin quản lý toàn bộ nền tảng, phê duyệt nhà xe và quản lý RAG knowledge base. Tài liệu knowledge chỉ được dùng để truy xuất sau khi được phê duyệt. Phạm vi PUBLIC phục vụ tất cả vai trò, OPERATOR bị giới hạn theo nhà xe và vai trò vận hành, còn ADMIN chỉ dành cho SYSTEM_ADMIN.
 
-Khi kiểm tra Day 44, xác nhận ba tài liệu RAG ở trạng thái APPROVED và COMPLETED, mỗi tài liệu có đúng một chunk tìm kiếm được và embedding 2.048 chiều từ model nvidia/llama-nemotron-embed-vl-1b-v2:free. Seed mặc định phải dùng fixture đã attested, không gọi Cloudinary hoặc OpenRouter.
+Khi kiểm tra Day 44, xác nhận ba tài liệu RAG ở trạng thái APPROVED và COMPLETED, mỗi tài liệu có đúng một chunk tìm kiếm được và embedding 2.048 chiều từ ShopAIKey model gemini-embedding-2-preview. Seed mặc định phải dùng fixture đã attested, không gọi Cloudinary hoặc ShopAIKey.
 
-Nếu provenance, SHA256 nội dung, model, dimension hoặc fixture bị lệch, dừng seed trước mọi database write. Không tự động refresh fixture. Mọi lần tạo lại embedding cần phê duyệt rõ ràng, runtime OPENROUTER_API_KEY và quy trình review riêng; tuyệt đối không ghi API key hoặc Authorization header vào file hay log.
+Nếu provenance, SHA256 nội dung, model, dimension hoặc fixture bị lệch, dừng seed trước mọi database write. Không tự động refresh fixture. Mọi lần tạo lại embedding cần phê duyệt rõ ràng, runtime SHOPAIKEY_API_KEY và quy trình review riêng; tuyệt đối không ghi API key hoặc Authorization header vào file hay log.

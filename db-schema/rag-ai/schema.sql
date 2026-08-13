@@ -6,8 +6,8 @@
 -- =============================================================================
 -- pgvector extension required for embedding similarity search.
 -- Storage provider: Cloudinary raw assets.
--- Chat provider: OpenRouter nvidia/nemotron-3-ultra-550b-a55b:free.
--- Embedding model: OpenRouter nvidia/llama-nemotron-embed-vl-1b-v2:free.
+-- Chat provider: ShopAIKey OpenAI-compatible API, gemini-3.5-flash.
+-- Embedding model: ShopAIKey OpenAI-compatible API, gemini-embedding-2-preview.
 -- Embedding dimension: 2048.
 -- =============================================================================
 
@@ -388,7 +388,7 @@ CREATE TRIGGER trg_policy_audit_logs_immutable
 COMMENT ON COLUMN knowledge_documents.storage_path IS
     'Cloudinary public_id/path for raw document asset. Do not persist long-lived signed URLs.';
 COMMENT ON COLUMN knowledge_chunks.embedding IS
-    'halfvec(2048) for OpenRouter nvidia/llama-nemotron-embed-vl-1b-v2:free; HNSW cosine index enabled.';
+    'halfvec(2048) for ShopAIKey gemini-embedding-2-preview; HNSW cosine index enabled.';
 COMMENT ON COLUMN knowledge_chunks.search_vector IS
     'PostgreSQL full-text search vector for optional hybrid search.';
 COMMENT ON COLUMN rag_messages.cited_chunk_ids IS

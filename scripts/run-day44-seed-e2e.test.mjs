@@ -42,7 +42,7 @@ describe('Day 44 seed orchestrator harness', () => {
     assert.match(source, /providerRequests !== '0'/);
     assert.match(compose, /internal: true/);
     assert.match(compose, /provider-trap/);
-    assert.doesNotMatch(source, /OPENROUTER_API_KEY:\s*[^'"\s][^,\n]*/);
+    assert.doesNotMatch(source, /SHOPAIKEY_API_KEY:\s*[^'"\s][^,\n]*/);
   });
 
   test('renders an internally reachable provider trap without weakening isolation', () => {

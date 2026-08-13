@@ -1,0 +1,1 @@
+export const RAG_EMBEDDING_DIMENSIONS = 2_048;

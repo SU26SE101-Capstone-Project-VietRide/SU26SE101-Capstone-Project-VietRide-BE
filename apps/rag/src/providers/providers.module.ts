@@ -1,16 +1,16 @@
 import { Module } from '@nestjs/common';
 import { CHAT_COMPLETION_PROVIDER, EMBEDDING_PROVIDER, STORAGE_PROVIDER } from '../app/tokens';
 import { CloudinaryStorageProvider } from './cloudinary-storage.provider';
-import { OpenRouterChatCompletionProvider } from './openrouter-chat-completion.provider';
-import { OpenRouterEmbeddingProvider } from './openrouter-embedding.provider';
+import { ShopAiKeyChatCompletionProvider } from './shopaikey-chat-completion.provider';
+import { ShopAiKeyEmbeddingProvider } from './shopaikey-embedding.provider';
 
 @Module({
   providers: [
-    OpenRouterChatCompletionProvider,
-    OpenRouterEmbeddingProvider,
+    ShopAiKeyChatCompletionProvider,
+    ShopAiKeyEmbeddingProvider,
     CloudinaryStorageProvider,
-    { provide: CHAT_COMPLETION_PROVIDER, useExisting: OpenRouterChatCompletionProvider },
-    { provide: EMBEDDING_PROVIDER, useExisting: OpenRouterEmbeddingProvider },
+    { provide: CHAT_COMPLETION_PROVIDER, useExisting: ShopAiKeyChatCompletionProvider },
+    { provide: EMBEDDING_PROVIDER, useExisting: ShopAiKeyEmbeddingProvider },
     { provide: STORAGE_PROVIDER, useExisting: CloudinaryStorageProvider },
   ],
   exports: [CHAT_COMPLETION_PROVIDER, EMBEDDING_PROVIDER, STORAGE_PROVIDER],

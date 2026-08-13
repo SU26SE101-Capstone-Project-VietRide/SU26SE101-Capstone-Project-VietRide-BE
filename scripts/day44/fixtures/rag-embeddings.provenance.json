@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "generatorVersion": 1,
-  "provider": "openrouter",
-  "endpoint": "https://openrouter.ai/api/v1/embeddings",
-  "model": "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+  "provider": "legacy-openrouter",
+  "endpoint": "legacy-fixture-requires-shopaikey-regeneration",
+  "model": "legacy-fixture-requires-shopaikey-regeneration",
   "dimension": 2048,
   "documents": [
     {

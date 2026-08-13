@@ -56,7 +56,7 @@ Cross-checked critical fields per entity:
 - **Parcel:** 40+ field — sender NOT NULL, recipient nullable, dropoffStopId nullable, cargo/settlement fields, hashed `ParcelDeliveryToken` history (no plaintext token columns), dedicated durable Day-32 cargo-recovery operation, review fields (EXTRA_LARGE), durable transfer-confirmation claim, return fields, full timestamps ✅
 - **PlatformWallet / PlatformWalletTransaction / OperatorWallet / OperatorWalletTransaction / OperatorTripSettlement** (v1 wallet model): tất cả field theo v6 Section 4.6 spec ✅
 - **OperatorLedgerEntry:** đã có `trip_id` nullable, **không có** balance_before/after (đúng v6 audit-only sau wallet rewrite) ✅
-- **RAG: KnowledgeChunk.embedding halfvec(2048)** với HNSW cosine index cho OpenRouter model `nvidia/llama-nemotron-embed-vl-1b-v2:free` ✅
+- **RAG: KnowledgeChunk.embedding halfvec(2048)** với HNSW cosine index cho ShopAIKey model `gemini-embedding-2-preview` ✅
 
 JSONB shape fields đều có `COMMENT ON COLUMN` giải thích shape. Snapshot fields complete.
 

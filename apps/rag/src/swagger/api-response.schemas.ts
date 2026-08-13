@@ -84,13 +84,13 @@ export const readinessOkSchema: SchemaObject = {
     service: { type: 'string', example: 'rag' },
     dependencies: {
       type: 'object',
-      required: ['prisma', 'redis', 'rabbitmq', 'cloudinary', 'openrouter', 'ingest'],
+      required: ['prisma', 'redis', 'rabbitmq', 'cloudinary', 'shopaikey', 'ingest'],
       properties: {
         prisma: { type: 'string', example: 'ok' },
         redis: { type: 'string', example: 'ok' },
         rabbitmq: { type: 'string', example: 'ok' },
         cloudinary: { type: 'string', example: 'ok' },
-        openrouter: { type: 'string', example: 'ok' },
+        shopaikey: { type: 'string', example: 'ok' },
         ingest: { type: 'string', example: 'ok' },
       },
     },
