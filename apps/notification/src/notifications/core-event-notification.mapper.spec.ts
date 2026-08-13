@@ -137,15 +137,27 @@ describe('mapCoreEventToNotification', () => {
       mapCoreEventToNotification(BOOKING_REFUNDED_ROUTING_KEY, {
         userId: USER_ID,
         bookingId: BOOKING_ID,
-        refundAmount: '120000',
+        amount: '120000',
       }),
     ).toEqual(
       expect.objectContaining({
         type: NotificationType.BOOKING_REFUNDED,
         title: 'Hoàn tiền vé thành công',
         body: 'Khoản hoàn tiền cho vé của bạn đã được ghi nhận. Số tiền hoàn: 120000 VND.',
+        data: expect.objectContaining({ refundAmount: '120000' }),
       }),
     );
+  });
+
+  it('preserves a canonical zero booking refund amount', () => {
+    const notification = mapCoreEventToNotification(BOOKING_REFUNDED_ROUTING_KEY, {
+      userId: USER_ID,
+      bookingId: BOOKING_ID,
+      amount: 0,
+    });
+
+    expect(notification.body).toContain('Số tiền hoàn: 0 VND.');
+    expect(notification.data).toMatchObject({ refundAmount: 0 });
   });
 
   it('maps wallet credited event', () => {

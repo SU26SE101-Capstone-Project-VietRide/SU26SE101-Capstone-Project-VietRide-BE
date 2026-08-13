@@ -33,6 +33,10 @@ const bookingEventPayloadSchema = z.object({
   refundAmount: moneyAmountSchema,
 });
 
+const bookingRefundedPayloadSchema = bookingEventPayloadSchema.extend({
+  amount: moneyAmountSchema,
+});
+
 const walletEventPayloadSchema = z.object({
   userId: z.string().uuid(),
   walletTransactionId: z.string().uuid().optional(),
@@ -64,7 +68,7 @@ export function mapCoreEventToNotification(
     case BOOKING_DISRUPTED_ROUTING_KEY:
       return mapBookingDisrupted(BookingDisruptedEventSchema.parse(payload));
     case BOOKING_REFUNDED_ROUTING_KEY:
-      return mapBookingRefunded(bookingEventPayloadSchema.parse(payload));
+      return mapBookingRefunded(bookingRefundedPayloadSchema.parse(payload));
     case WALLET_CREDITED_ROUTING_KEY:
       return mapWalletCredited(walletEventPayloadSchema.parse(payload));
     case WALLET_DEBITED_ROUTING_KEY:
@@ -115,10 +119,10 @@ function mapBookingDisrupted(payload: BookingDisruptedEvent): CreateNotification
 }
 
 function mapBookingRefunded(
-  payload: z.infer<typeof bookingEventPayloadSchema>,
+  payload: z.infer<typeof bookingRefundedPayloadSchema>,
 ): CreateNotificationDto {
-  const refundText = payload.refundAmount
-    ? ` Số tiền hoàn: ${formatMoney(payload.refundAmount)} VND.`
+  const refundText = payload.amount !== undefined
+    ? ` Số tiền hoàn: ${formatMoney(payload.amount)} VND.`
     : '';
 
   return {
@@ -126,7 +130,7 @@ function mapBookingRefunded(
     type: NotificationType.BOOKING_REFUNDED,
     title: 'Hoàn tiền vé thành công',
     body: `Khoản hoàn tiền cho vé ${formatBookingReference(payload.bookingCode)} đã được ghi nhận.${refundText}`,
-    data: buildBookingData(payload),
+    data: buildBookingData({ ...payload, refundAmount: payload.amount }),
   };
 }
 

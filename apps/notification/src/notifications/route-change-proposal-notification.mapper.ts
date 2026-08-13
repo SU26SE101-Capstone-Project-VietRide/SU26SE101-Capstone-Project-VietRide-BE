@@ -81,7 +81,9 @@ export function mapRouteChangeProposalToNotifications(
   event: RouteChangeProposalEvent,
   resolvedRecipientUserIds: string[] = [],
 ): CreateNotificationDto[] {
-  const recipientUserIds = [...resolvedRecipientUserIds, event.proposedByUserId];
+  const recipientUserIds = routingKey === TRIP_ROUTE_CHANGE_PROPOSAL_CREATED_ROUTING_KEY
+    ? [...resolvedRecipientUserIds, event.proposedByUserId]
+    : [event.proposedByUserId];
   const content = contentByRoutingKey[routingKey];
 
   return [...new Set(recipientUserIds)].map((userId) => {
