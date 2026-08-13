@@ -39,6 +39,9 @@ class PublicTripRouteContextDataSwaggerDto {
   @ApiProperty({ format: 'uuid' })
   tripId!: string;
 
+  @ApiProperty({ required: false, example: 'IN_PROGRESS' })
+  tripStatus?: string;
+
   @ApiProperty({ type: PublicRouteGeometrySwaggerDto, nullable: true })
   geometry!: PublicRouteGeometrySwaggerDto | null;
 

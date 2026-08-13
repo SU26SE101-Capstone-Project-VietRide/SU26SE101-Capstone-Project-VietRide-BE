@@ -15,7 +15,12 @@ public sealed record AvailableTripResponse(
     DateTimeOffset EstimatedArrivalTime,
     long EstimatedPriceVnd,
     decimal DepositPercent,
-    long EstimatedDepositVnd)
+    long EstimatedDepositVnd,
+    string? QuoteToken = null,
+    DateTimeOffset? QuoteExpiresAt = null,
+    string? EstimatedSizeCategory = null,
+    long EstimatedGrossPriceVnd = 0,
+    long EstimatedDiscountVnd = 0)
 {
     [JsonIgnore]
     public long PriceVnd => EstimatedPriceVnd;

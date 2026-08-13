@@ -25,6 +25,7 @@ import {
   trackingOperatorFleetRoom,
 } from './location.constants';
 import { LocationService, type GpsUpdateEvent } from './location.service';
+import { TripRouteContextService } from '../tracking-data/trip-route-context.service';
 
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const TEST_USER_ID = '22222222-2222-4222-8222-222222222222';
@@ -43,6 +44,8 @@ interface JoinTripTrackingAck {
   scope?: string;
   error?: string;
   message?: string;
+  routeContext?: Record<string, unknown>;
+  routeVersion?: string;
 }
 
 interface GpsUpdateAck {
@@ -71,6 +74,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   let sharedPublishEta: jest.Mock;
   let sharedPublishStatus: jest.Mock;
   let operatorTripsList: jest.Mock;
+  let routeContextGet: jest.Mock;
   let gateway: LocationGateway;
 
   beforeAll(async () => {
@@ -105,6 +109,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     sharedPublishEta = jest.fn();
     sharedPublishStatus = jest.fn();
     operatorTripsList = jest.fn(async () => []);
+    routeContextGet = jest.fn();
     const redisService = {
       getClient: jest.fn(() => ({
         eval: redisEval,
@@ -177,6 +182,10 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
           provide: OperatorTripProjectionProvider,
           useValue: { list: operatorTripsList },
         },
+        {
+          provide: TripRouteContextService,
+          useValue: { getRouteContext: routeContextGet },
+        },
       ],
     }).compile();
 
@@ -213,6 +222,18 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     sharedPublishStatus.mockReset();
     operatorTripsList.mockReset();
     operatorTripsList.mockResolvedValue([]);
+    routeContextGet.mockReset();
+    routeContextGet.mockResolvedValue({
+      data: {
+        tripId: TEST_TRIP_ID,
+        tripStatus: 'IN_PROGRESS',
+        geometry: null,
+        originStation: null,
+        intermediateStops: [],
+        destinationStation: null,
+      },
+      etag: '"route-version-1"',
+    });
   });
 
   afterAll(async () => {
@@ -251,6 +272,44 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       room: `trip:${TEST_TRIP_ID}`,
       scope: 'BOOKING_OWNER',
     });
+    socket.disconnect();
+  });
+
+  it('returns the current REST route snapshot and strong version when explicitly requested', async () => {
+    const socket = await connectSocket(await signIdentityToken('PASSENGER'));
+
+    const ack = await emitWithAck<JoinTripTrackingAck>(socket, 'joinTripTracking', {
+      tripId: TEST_TRIP_ID,
+      includeRouteSnapshot: true,
+    });
+
+    expect(ack).toEqual(expect.objectContaining({
+      success: true,
+      tripId: TEST_TRIP_ID,
+      routeVersion: '"route-version-1"',
+      routeContext: expect.objectContaining({
+        tripId: TEST_TRIP_ID,
+        tripStatus: 'IN_PROGRESS',
+      }),
+    }));
+    expect(routeContextGet).toHaveBeenCalledWith(TEST_TRIP_ID);
+    socket.disconnect();
+  });
+
+  it('does not join the room when an opted-in route snapshot is unavailable', async () => {
+    routeContextGet.mockRejectedValueOnce(new Error('trip provider unavailable'));
+    const socket = await connectSocket(await signIdentityToken('PASSENGER'));
+
+    const ack = await emitWithAck<JoinTripTrackingAck>(socket, 'joinTripTracking', {
+      tripId: TEST_TRIP_ID,
+      includeRouteSnapshot: true,
+    });
+
+    expect(ack).toEqual({
+      success: false,
+      error: 'TRACKING_ROUTE_CONTEXT_UNAVAILABLE',
+    });
+    expect(ack.room).toBeUndefined();
     socket.disconnect();
   });
 
@@ -387,6 +446,71 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     operator.disconnect();
     otherOperator.disconnect();
   });
+
+  it.each(['DEVIATED', 'ROUTE_RESTORED'] as const)(
+    'broadcasts trip:routeDeviation %s only to Trip crew and the matching operator fleet',
+    async (status) => {
+      const assistant = await connectSocket(
+        await signIdentityToken('ASSISTANT', TEST_OPERATOR_ID),
+      );
+      const passenger = await connectSocket(await signIdentityToken('PASSENGER'));
+      const otherCrew = await connectSocket(
+        await signIdentityToken('ASSISTANT', TEST_OPERATOR_ID),
+      );
+      const operator = await connectSocket(
+        await signIdentityToken('OPERATOR_ADMIN', TEST_OPERATOR_ID),
+      );
+      const otherOperator = await connectSocket(
+        await signIdentityToken('OPERATOR_ADMIN', OTHER_OPERATOR_ID),
+      );
+      const driver = await connectSocket(await signIdentityToken('DRIVER', TEST_OPERATOR_ID));
+      const otherTripId = '99999999-9999-4999-8999-999999999999';
+      await emitWithAck<JoinTripTrackingAck>(assistant, 'joinTripTracking', {
+        tripId: TEST_TRIP_ID,
+      });
+      await emitWithAck<JoinTripTrackingAck>(passenger, 'joinTripTracking', {
+        tripId: TEST_TRIP_ID,
+      });
+      await emitWithAck<JoinTripTrackingAck>(otherCrew, 'joinTripTracking', {
+        tripId: otherTripId,
+      });
+      await emitWithAck<JoinTripTrackingAck>(operator, 'joinOperatorFleet', {});
+      await emitWithAck<JoinTripTrackingAck>(otherOperator, 'joinOperatorFleet', {});
+
+      const deviation = {
+        tripId: TEST_TRIP_ID,
+        status,
+        distanceMeters: status === 'DEVIATED' ? 850 : 120,
+        updatedAt: '2026-06-03T10:00:00.000Z',
+      };
+      offRouteHandleGpsUpdate.mockResolvedValueOnce(deviation);
+      const crewEvent = waitForEvent<Record<string, unknown>>(assistant, 'trip:routeDeviation');
+      const operatorEvent = waitForEvent<Record<string, unknown>>(operator, 'trip:routeDeviation');
+      const passengerListener = jest.fn();
+      const otherCrewListener = jest.fn();
+      const otherOperatorListener = jest.fn();
+      passenger.on('trip:routeDeviation', passengerListener);
+      otherCrew.on('trip:routeDeviation', otherCrewListener);
+      otherOperator.on('trip:routeDeviation', otherOperatorListener);
+
+      await expect(emitWithAck<GpsUpdateAck>(driver, 'gps:update', createGpsPayload()))
+        .resolves.toEqual({ success: true });
+      const expectedDeviation = transformFrontendTimestamps(deviation);
+      await expect(crewEvent).resolves.toEqual(expectedDeviation);
+      await expect(operatorEvent).resolves.toEqual(expectedDeviation);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(passengerListener).not.toHaveBeenCalled();
+      expect(otherCrewListener).not.toHaveBeenCalled();
+      expect(otherOperatorListener).not.toHaveBeenCalled();
+
+      assistant.disconnect();
+      passenger.disconnect();
+      otherCrew.disconnect();
+      operator.disconnect();
+      otherOperator.disconnect();
+      driver.disconnect();
+    },
+  );
 
   it('keeps gps:update successful when the trip is absent from the fleet projection', async () => {
     const debugSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
@@ -680,6 +804,54 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       delayMinutes: null,
     });
     expect(sharedPublishStatus).not.toHaveBeenCalled();
+    socket.disconnect();
+  });
+
+  it('broadcasts station targets only through eta:batch:update', async () => {
+    const socket = await connectSocket(await signIdentityToken('DRIVER', TEST_OPERATOR_ID));
+    const stationId = '44444444-4444-4444-8444-444444444444';
+    const stationEta: EtaUpdateEvent = {
+      tripId: TEST_TRIP_ID,
+      stopId: stationId,
+      stationId,
+      targetKind: 'STATION',
+      stopName: 'Origin station',
+      etaMinutes: 8,
+      estimatedArrivalTime: '2026-06-03T10:08:00.000Z',
+      distanceMeters: 4_000,
+      updatedAt: '2026-06-03T10:00:01.000Z',
+      etas: [{
+        tripId: TEST_TRIP_ID,
+        stationId,
+        targetKind: 'STATION',
+        stopName: 'Origin station',
+        etaMinutes: 8,
+        estimatedArrivalTime: '2026-06-03T10:08:00.000Z',
+        distanceMeters: 4_000,
+        updatedAt: '2026-06-03T10:00:01.000Z',
+        estimateQuality: 'FALLBACK',
+      }],
+    };
+    etaHandleGpsUpdate.mockResolvedValue(stationEta);
+    await emitWithAck<JoinTripTrackingAck>(socket, 'joinTripTracking', {
+      tripId: TEST_TRIP_ID,
+    });
+    const batchPromise = waitForEvent<Record<string, unknown>>(socket, 'eta:batch:update');
+    const legacyListener = jest.fn();
+    socket.on('eta:update', legacyListener);
+
+    await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
+    await expect(batchPromise).resolves.toEqual(expect.objectContaining({
+      tripId: TEST_TRIP_ID,
+      etas: expect.arrayContaining([
+        expect.objectContaining({ targetKind: 'STATION', stationId }),
+      ]),
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(legacyListener).not.toHaveBeenCalled();
+    expect(tripDelayHandleEtaUpdate).not.toHaveBeenCalled();
+    expect(approachingHandleEtaUpdate).not.toHaveBeenCalled();
     socket.disconnect();
   });
 

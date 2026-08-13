@@ -9,6 +9,7 @@ import { EtaService } from '../eta/eta.service';
 import type { TripDataProvider } from '../eta/trip-data.provider';
 import { ROUTE_GEOMETRY_PROVIDER } from '../off-route/off-route.constants';
 import type { RouteGeometryProvider } from '../off-route/route-geometry.provider';
+import { OffRouteService } from '../off-route/off-route.service';
 import { RouteStateGenerationRegistry } from '../route-state/route-state-generation.registry';
 import { trackingTripDelayStateKey } from '../trip-delay/trip-delay.constants';
 import { TripRouteChangedStateInvalidationConsumer } from './trip-route-changed-state-invalidation.consumer';
@@ -55,6 +56,14 @@ describe('TripRouteChangedStateInvalidationConsumer (in-process e2e)', () => {
         { provide: RedisService, useValue: { getClient: () => redis } },
         { provide: TRIP_DATA_PROVIDER, useValue: tripData },
         { provide: ROUTE_GEOMETRY_PROVIDER, useValue: routeGeometry },
+        {
+          provide: OffRouteService,
+          useValue: {
+            clearRuntimeState: jest.fn(async (tripId: string) => {
+              redis.values.delete(`tracking:off_route_since:${tripId}`);
+            }),
+          },
+        },
         RouteStateGenerationRegistry,
       ],
     }).compile();

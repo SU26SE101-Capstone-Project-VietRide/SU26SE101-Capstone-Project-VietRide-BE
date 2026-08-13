@@ -267,13 +267,23 @@ npx nx run tracking:build
 - Khi xe quay lại route trước 2 phút:
   - clear timer.
   - không publish alert.
+- Realtime state transition:
+  - initial alert emits `trip:routeDeviation { status: DEVIATED }` to the Trip crew and Operator
+    fleet rooms only.
+  - while still deviated, the first accepted GPS update at least 60 seconds later emits a
+    `DEVIATED` heartbeat without another Outbox/notification.
+  - returning to `<= 500m` after an alert emits one `ROUTE_RESTORED`; returning before an alert
+    only clears the timer.
+  - route changes and terminal Trip facts clear state under the same per-Trip Redis lock and do
+    not emit a synthetic restore.
 - Event qua Outbox:
   - `OffRouteAlert`.
   - payload gồm `tripId`, `latitude`, `longitude`, `distanceMeters`, `durationSeconds`, `detectedAt`, `userIds?`.
 - E2E/unit:
   - GPS drift ngắn không alert.
   - lệch tuyến liên tục đủ 2 phút -> publish 1 alert.
-  - quay lại route -> clear Redis key.
+  - heartbeat không tạo thêm Outbox; quay lại route phát restore đúng một lần.
+  - passenger/khác tenant không nhận event; terminal/route-change race không ghi lại state cũ.
 
 ### Verify
 
@@ -418,7 +428,8 @@ Redis state, Google Routes và delay recovery, vẫn giữ toàn bộ field cũ 
   nhất và không phát `DELAY_CLEARED` giả. Client reconnect dùng REST `/eta` để khôi phục trạng thái.
 - Tương thích Trip: chấp nhận và chuẩn hóa `null` cho `alertRecipientUserIds`, `estimatedArrivalTime`
   và các field tùy chọn liên quan; unit test phải dùng JSON envelope thực tế của Trip.
-- Swagger trên production: chỉ đăng ký `/docs` và `/docs-json` khi `TRACKING_SWAGGER_ENABLED=true`.
+- Swagger trên production: luôn đăng ký raw OpenAPI `/docs-json` để Gateway `/docs` tổng hợp spec;
+  UI trực tiếp `/docs` chỉ bật khi `TRACKING_SWAGGER_ENABLED=true`.
   Kiểm thử smoke trên hệ thống thật bằng token thật vẫn là gate vận hành bắt buộc sau deploy.
 - Thêm health/ready rõ hơn:
   - `/health` liveness.

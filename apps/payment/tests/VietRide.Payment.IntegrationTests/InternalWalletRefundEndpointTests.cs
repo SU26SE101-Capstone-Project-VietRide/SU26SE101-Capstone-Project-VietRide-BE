@@ -100,7 +100,12 @@ public sealed class InternalWalletRefundEndpointTests
 
         firstResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         secondResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        (await secondResponse.Content.ReadAsStringAsync()).Should().Be(await firstResponse.Content.ReadAsStringAsync());
+        var firstBody = await firstResponse.Content.ReadAsStringAsync();
+        var replayBody = await secondResponse.Content.ReadAsStringAsync();
+        replayBody.Should().Be(firstBody);
+        using var document = JsonDocument.Parse(firstBody);
+        document.RootElement.GetProperty("meta").GetProperty("timestamp").GetString()
+            .Should().MatchRegex(@"\.\d{7}Z$");
         mediator.SendCount.Should().Be(1);
     }
 

@@ -78,6 +78,25 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
         secondPage.TotalItems.Should().Be(2);
     }
 
+    [Fact]
+    public async Task Handle_AppliesEligibleRoutesBeforeCountAndPagination()
+    {
+        var fixture = Fixture.Create();
+        fixture.Trips.Items.Add(fixture.CreateTrip(Departure, 100m, 10m));
+
+        var excluded = await fixture.Handler.Handle(
+            fixture.Query(eligibleRouteIds: [Guid.NewGuid()]),
+            CancellationToken.None);
+        var included = await fixture.Handler.Handle(
+            fixture.Query(eligibleRouteIds: [fixture.Route.Id, fixture.Route.Id]),
+            CancellationToken.None);
+
+        excluded.Items.Should().BeEmpty();
+        excluded.TotalItems.Should().Be(0);
+        included.Items.Should().ContainSingle();
+        included.TotalItems.Should().Be(1);
+    }
+
     private sealed class Fixture
     {
         private Fixture(
@@ -145,7 +164,8 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
             decimal weightKg = 1m,
             decimal volumeM3 = 0.001m,
             int page = 1,
-            int pageSize = 20)
+            int pageSize = 20,
+            IReadOnlyCollection<Guid>? eligibleRouteIds = null)
             => new(
                 Origin.Id,
                 Destination.Id,
@@ -154,7 +174,8 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
                 volumeM3,
                 "MEDIUM",
                 page,
-                pageSize);
+                pageSize,
+                eligibleRouteIds);
     }
 
     private abstract class FakeRepository<TEntity, TId> : IRepository<TEntity, TId>

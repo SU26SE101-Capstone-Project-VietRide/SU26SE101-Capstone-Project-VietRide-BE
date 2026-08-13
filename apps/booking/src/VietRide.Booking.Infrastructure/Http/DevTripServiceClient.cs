@@ -19,6 +19,18 @@ public sealed class DevTripServiceClient : ITripServiceClient
         _logger = logger;
     }
 
+    public Task<IReadOnlyList<TripHistoryVehicleSummary>> GetHistoryVehicleSummariesAsync(
+        IReadOnlyCollection<Guid> tripIds,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<TripHistoryVehicleSummary>>(tripIds
+            .Where(tripId => tripId != Guid.Empty)
+            .Distinct()
+            .Select(tripId => new TripHistoryVehicleSummary(
+                tripId,
+                "51A-000.01",
+                new TripHistoryVehicleTypeSummary("STANDARD_BUS", "Standard bus")))
+            .ToArray());
+
     public Task<TripSnapshot?> GetTripSnapshotAsync(
         Guid tripId,
         CancellationToken cancellationToken = default)

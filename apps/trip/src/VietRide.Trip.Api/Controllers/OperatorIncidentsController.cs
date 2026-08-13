@@ -3,7 +3,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Trip.Api.Controllers.Requests;
+using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.Incidents.OperatorIncidents;
+using VietRide.Trip.Application.Features.Incidents.ResolveIncident;
 
 namespace VietRide.Trip.Api.Controllers;
 
@@ -54,6 +57,35 @@ public sealed class OperatorIncidentsController : ControllerBase
         => Ok(await mediator.Send(
             new GetOperatorIncidentQuery(GetRequiredOperatorId(), incidentId),
             cancellationToken));
+
+    [HttpPatch("{incidentId:guid}/resolve")]
+    [Authorize(Roles = "OPERATOR_ADMIN")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<OperatorIncidentDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<OperatorIncidentDto>> ResolveAsync(
+        Guid incidentId,
+        [FromBody] ResolveIncidentRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await mediator.Send(
+            new ResolveIncidentCommand(
+                GetRequiredOperatorId(),
+                CurrentUserClaims.GetUserId(User),
+                incidentId,
+                request.ResolutionNote),
+            cancellationToken));
+
+    [HttpPatch("{incidentId}/resolve")]
+    [Authorize(Roles = "OPERATOR_ADMIN")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult RejectMalformedResolveIncidentId(string incidentId)
+        => throw new CodedValidationException(
+            "VALIDATION_ERROR",
+            "incidentId must be a valid non-empty UUID.",
+            [new ValidationError("incidentId", "incidentId must be a valid non-empty UUID.")]);
 
     [HttpGet("{incidentId}")]
     [ApiExplorerSettings(IgnoreApi = true)]

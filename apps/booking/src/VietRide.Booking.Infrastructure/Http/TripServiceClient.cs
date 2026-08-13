@@ -38,6 +38,73 @@ public sealed class TripServiceClient : ITripServiceClient
         _logger = logger;
     }
 
+    public async Task<IReadOnlyList<TripHistoryVehicleSummary>> GetHistoryVehicleSummariesAsync(
+        IReadOnlyCollection<Guid> tripIds,
+        CancellationToken cancellationToken = default)
+    {
+        var requestedIds = tripIds
+            .Where(tripId => tripId != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (requestedIds.Length == 0)
+            return [];
+
+        try
+        {
+            using var response = await _httpClient.PostAsJsonAsync(
+                "/internal/v1/trips/summaries/batch",
+                new TripSummaryBatchRequest(requestedIds),
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                return [];
+
+            var summaries = await response.Content
+                .ReadFromJsonAsync<IReadOnlyList<TripSummaryBatchItem?>>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            if (summaries is null)
+                return [];
+
+            var requested = requestedIds.ToHashSet();
+            return summaries
+                .Where(summary => summary is not null
+                    && summary.TripId != Guid.Empty
+                    && requested.Contains(summary.TripId)
+                    && summary.Vehicle is not null
+                    && !string.IsNullOrWhiteSpace(summary.Vehicle.LicensePlate))
+                .Select(summary => summary!)
+                .GroupBy(summary => summary.TripId)
+                .Where(group => group.Count() == 1)
+                .Select(group => new TripHistoryVehicleSummary(
+                    group.Key,
+                    group.Single().Vehicle!.LicensePlate!.Trim(),
+                    MapVehicleType(group.Single().Vehicle!.VehicleType)))
+                .ToArray();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is HttpRequestException
+            or JsonException
+            or NotSupportedException
+            or OperationCanceledException)
+        {
+            _logger.LogWarning(exception, "Trip history vehicle enrichment is unavailable.");
+            return [];
+        }
+    }
+
+    private static TripHistoryVehicleTypeSummary? MapVehicleType(
+        TripSummaryBatchVehicleType? vehicleType)
+        => vehicleType is not null
+            && !string.IsNullOrWhiteSpace(vehicleType.Code)
+            && !string.IsNullOrWhiteSpace(vehicleType.DisplayName)
+                ? new TripHistoryVehicleTypeSummary(
+                    vehicleType.Code.Trim(),
+                    vehicleType.DisplayName.Trim())
+                : null;
+
     /// <inheritdoc/>
     public async Task<TripSnapshot?> GetTripSnapshotAsync(
         Guid tripId,
@@ -579,6 +646,18 @@ public sealed class TripServiceClient : ITripServiceClient
         int? TtlSeconds);
 
     private sealed record ShuttleRoadDistanceResponse(int DistanceMeters);
+
+    private sealed record TripSummaryBatchRequest(IReadOnlyList<Guid> TripIds);
+
+    private sealed record TripSummaryBatchItem(Guid TripId, TripSummaryBatchVehicle? Vehicle);
+
+    private sealed record TripSummaryBatchVehicle(
+        string? LicensePlate,
+        TripSummaryBatchVehicleType? VehicleType);
+
+    private sealed record TripSummaryBatchVehicleType(
+        string? Code,
+        string? DisplayName);
 
     private sealed record LockRoundTripSeatsRequest(
         LockRoundTripLegRequest Outbound,

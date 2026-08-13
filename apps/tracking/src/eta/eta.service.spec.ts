@@ -22,9 +22,11 @@ import type { TripDataProvider, TripStopSnapshot } from './trip-data.provider';
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const TEST_STOP_ID = '22222222-2222-4222-8222-222222222222';
 const TEST_DESTINATION_STATION_ID = '33333333-3333-4333-8333-333333333333';
+const TEST_ORIGIN_STATION_ID = '44444444-4444-4444-8444-444444444444';
 
 interface RedisMultiMock {
   set: jest.Mock;
+  del: jest.Mock;
   exec: jest.Mock;
 }
 
@@ -48,12 +50,18 @@ describe('EtaService', () => {
     });
     redisEval = jest.fn(async () => 1);
     const pendingMultiSets: Array<[string, string]> = [];
+    const pendingMultiDeletes: string[] = [];
     const multi = {} as RedisMultiMock;
     multi.set = jest.fn((key: string, value: string) => {
         pendingMultiSets.push([key, value]);
         return multi;
       });
+    multi.del = jest.fn((key: string) => {
+        pendingMultiDeletes.push(key);
+        return multi;
+      });
     multi.exec = jest.fn(async () => {
+        for (const key of pendingMultiDeletes) store.delete(key);
         for (const [key, value] of pendingMultiSets) store.set(key, value);
         return [];
       });
@@ -186,6 +194,114 @@ describe('EtaService', () => {
       expect.any(Object),
       expect.objectContaining({ stopId: TEST_DESTINATION_STATION_ID, stopName: 'Da Lat' }),
     );
+  });
+
+  it('targets the origin station before departure and uses direct local fallback', async () => {
+    routePeek.mockReturnValue({
+      tripId: TEST_TRIP_ID,
+      tripStatus: 'BOARDING',
+      points: [
+        { latitude: 10.7, longitude: 106.66 },
+        { latitude: 10.9, longitude: 106.66 },
+      ],
+      originStation: {
+        stationId: TEST_ORIGIN_STATION_ID,
+        name: 'Origin',
+        latitude: 10.8,
+        longitude: 106.7,
+      },
+    });
+
+    const result = await service.handleGpsUpdate(createGps());
+
+    expect(result).toEqual(expect.objectContaining({
+      targetKind: 'STATION',
+      stationId: TEST_ORIGIN_STATION_ID,
+    }));
+    expect(localProvider.calculate).not.toHaveBeenCalled();
+    const state = parseStoredObject(store.get(trackingEtaStateKey(TEST_TRIP_ID)) ?? '{}');
+    expect(state).toMatchObject({
+      targetKind: 'STATION',
+      targetId: TEST_ORIGIN_STATION_ID,
+    });
+    expect(state).not.toHaveProperty('stopId');
+  });
+
+  it.each([
+    ['express trip', []],
+    ['trip after its last stop', [createStop({ status: 'ARRIVED' })]],
+  ])('targets the destination for an in-progress %s', async (_caseName, stops) => {
+    tripDataProvider.getRouteStops.mockResolvedValue(stops);
+    routePeek.mockReturnValue({
+      tripId: TEST_TRIP_ID,
+      tripStatus: 'IN_PROGRESS',
+      points: [
+        { latitude: 10.7, longitude: 106.66 },
+        { latitude: 11.9, longitude: 108.44 },
+      ],
+      destinationStation: {
+        stationId: TEST_DESTINATION_STATION_ID,
+        name: 'Destination',
+        latitude: 11.9,
+        longitude: 108.44,
+      },
+    });
+
+    const result = await service.handleGpsUpdate(createGps());
+
+    expect(result).toEqual(expect.objectContaining({
+      targetKind: 'STATION',
+      stationId: TEST_DESTINATION_STATION_ID,
+    }));
+    expect(result?.etas).toHaveLength(1);
+  });
+
+  it('recalculates the destination immediately when the primary target changes from a stop', async () => {
+    tripDataProvider.getRouteStops.mockResolvedValue([createStop({ status: 'ARRIVED' })]);
+    routePeek.mockReturnValue({
+      tripId: TEST_TRIP_ID,
+      tripStatus: 'IN_PROGRESS',
+      points: [
+        { latitude: 10.7, longitude: 106.66 },
+        { latitude: 11.9, longitude: 108.44 },
+      ],
+      destinationStation: {
+        stationId: TEST_DESTINATION_STATION_ID,
+        name: 'Destination',
+        latitude: 11.9,
+        longitude: 108.44,
+      },
+    });
+    seedState({
+      latitude: 10.7627,
+      longitude: 106.6602,
+      etaMinutes: 30,
+      lastProviderCallAt: new Date(Date.now() - 10_000).toISOString(),
+    });
+    seedEta(30);
+    store.set(trackingEtaKey(TEST_TRIP_ID, TEST_DESTINATION_STATION_ID), JSON.stringify({
+      tripId: TEST_TRIP_ID,
+      targetKind: 'STATION',
+      stationId: TEST_DESTINATION_STATION_ID,
+      etaMinutes: 60,
+      estimatedArrivalTime: '2026-06-03T11:00:00.000Z',
+      distanceMeters: 100_000,
+      updatedAt: '2026-06-03T10:00:00.000Z',
+      estimateQuality: 'FALLBACK',
+    }));
+
+    const result = await service.handleGpsUpdate(createGps());
+
+    expect(result).toEqual(expect.objectContaining({
+      targetKind: 'STATION',
+      stationId: TEST_DESTINATION_STATION_ID,
+    }));
+    expect(localProvider.calculate).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ stopId: TEST_DESTINATION_STATION_ID }),
+    );
+    expect(store.has(trackingEtaKey(TEST_TRIP_ID, TEST_STOP_ID))).toBe(false);
+    expect(store.has(trackingEtaKey(TEST_TRIP_ID, TEST_DESTINATION_STATION_ID))).toBe(true);
   });
 
   it('discards a partial provider batch and falls back consistently for every target', async () => {

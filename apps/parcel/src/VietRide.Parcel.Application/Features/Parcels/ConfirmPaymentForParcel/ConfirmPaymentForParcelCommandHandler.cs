@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
+using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -52,11 +53,12 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             {
                 var expired = await _parcelRepository.TryMarkDepositExpiredAsync(
                     request.ReferenceId,
+                    request.PaymentId,
                     now,
                     cancellationToken);
                 if (expired is not null)
                 {
-                    await ReleaseDepositCargoAsync(request.ReferenceId, request.PaymentId, cancellationToken);
+                    await ReleaseDepositCargoAsync(request.ReferenceId, cancellationToken);
                 }
 
                 _logger.LogWarning(
@@ -69,7 +71,7 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             }
 
             var snapshot = await _parcelRepository.TryMarkDepositSucceededAsync(
-                request.ReferenceId, request.Amount, now, cancellationToken);
+                request.ReferenceId, request.PaymentId, request.Amount, now, cancellationToken);
             if (snapshot is null)
             {
                 var parcel = await _parcelRepository.GetByIdAsync(request.ReferenceId, cancellationToken);
@@ -212,6 +214,9 @@ public sealed class ConfirmPaymentForParcelCommandHandler
             return false;
         }
 
+        await new ParcelCargoReleaseRecoveryService(_parcelRepository, _tripClient)
+            .EnsurePendingReleaseCompletedAsync(parcel.Id, now, cancellationToken);
+
         var cargo = await _tripClient.ReserveCargoAsync(
             parcel.TripId,
             parcel.Id,
@@ -231,20 +236,18 @@ public sealed class ConfirmPaymentForParcelCommandHandler
 
     private async Task ReleaseDepositCargoAsync(
         Guid parcelId,
-        Guid paymentId,
         CancellationToken cancellationToken)
     {
         var parcel = await _parcelRepository.GetByIdAsync(parcelId, cancellationToken);
         if (parcel is null)
             return;
 
-        await _tripClient.ReleaseCargoAsync(
-            parcel.TripId,
-            parcel.Id,
-            parcel.EstimatedWeightKg,
-            parcel.EstimatedVolumeM3,
-            paymentId,
-            cancellationToken);
+        await new ParcelCargoReleaseRecoveryService(_parcelRepository, _tripClient)
+            .ReleaseOrScheduleAsync(
+                parcel,
+                "DEPOSIT_PAYMENT_LATE",
+                _clock.UtcNow,
+                cancellationToken);
     }
 
     private async Task<bool> HandleBalanceSucceededAsync(

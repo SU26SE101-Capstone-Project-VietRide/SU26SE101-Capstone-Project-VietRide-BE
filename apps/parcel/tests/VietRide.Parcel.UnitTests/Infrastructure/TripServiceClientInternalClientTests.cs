@@ -374,6 +374,41 @@ public class TripServiceClientInternalClientTests
         trip.AvailableCargoVolumeM3.Should().Be(9.999m);
     }
 
+    [Fact]
+    public async Task SearchAvailableParcelTripsForRoutesAsync_PostsEligibleRoutesAndFilters()
+    {
+        var routeId = Guid.NewGuid();
+        var body = JsonSerializer.Serialize(new
+        {
+            items = Array.Empty<object>(),
+            page = 2,
+            pageSize = 10,
+            totalItems = 0,
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var result = await client.SearchAvailableParcelTripsForRoutesAsync(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            new DateOnly(2026, 8, 11),
+            2.5m,
+            0.01m,
+            ParcelSizeCategory.SMALL,
+            [routeId, routeId],
+            2,
+            10);
+
+        result.Kind.Should().Be(ParcelTripSearchOutcomeKind.Success);
+        _handler.LastRequest!.Method.Should().Be(HttpMethod.Post);
+        _handler.LastRequest.RequestUri!.AbsolutePath.Should()
+            .Be("/internal/v1/trips/parcel-availability/search");
+        using var json = JsonDocument.Parse(_handler.LastBody!);
+        json.RootElement.GetProperty("eligibleRouteIds").EnumerateArray()
+            .Select(item => item.GetGuid()).Should().Equal(routeId);
+        json.RootElement.GetProperty("page").GetInt32().Should().Be(2);
+        json.RootElement.GetProperty("pageSize").GetInt32().Should().Be(10);
+    }
+
     private TripServiceClient BuildClient(HttpStatusCode status, string body)
     {
         _handler = new FakeMessageHandler(status, body);

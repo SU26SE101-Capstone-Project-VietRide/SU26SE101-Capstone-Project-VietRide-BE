@@ -58,6 +58,10 @@ public sealed class CreateParcelCommandValidator : AbstractValidator<CreateParce
             .MaximumLength(2000)
             .When(x => x.Description is not null);
 
+        RuleFor(x => x.QuoteToken)
+            .MaximumLength(16_384)
+            .When(x => x.QuoteToken is not null);
+
         RuleFor(x => x)
             .Must(x => string.IsNullOrWhiteSpace(x.PhotoUrl) || firebaseUrls.IsValidOwnedImageUrl(
                 x.PhotoUrl,

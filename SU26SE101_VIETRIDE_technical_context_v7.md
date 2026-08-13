@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-11 (resource availability, lock/suspend, and location-filter reconciliation)
+> **Cập nhật:** 2026-08-12 (Passenger ticket history vehicle-type enrichment)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -529,6 +529,11 @@ suspend phát Outbox revoke request để Identity gọi Firebase `RevokeRefresh
     `GET /v1/operator/incidents/{incidentId}`. `OPERATOR_ADMIN|OPERATOR_STAFF` chỉ thấy Incident
     thuộc Trip cùng `operatorId`; missing/cross-tenant đều là `INCIDENT_NOT_FOUND`. List hỗ trợ
     lọc Trip/category/OPEN|RESOLVED/date và trả reporter + Trip/Route context.
+  - Chỉ `OPERATOR_ADMIN` đóng sự cố qua
+    `PATCH /v1/operator/incidents/{incidentId}/resolve` với UUID-v4 Idempotency-Key và
+    `resolutionNote` sau trim dài 1..1000. BE ghi server `resolvedAt`, JWT `sub` vào
+    `resolvedByUserId`; double resolve khác key là `INCIDENT_ALREADY_RESOLVED`. Đổi tuyến/thay xe
+    không tự đóng sự cố và resolve không phát integration event.
 
 **Chức năng Assistant thêm:**
 - Theo dõi điểm dừng tiếp theo với countdown ETA
@@ -1572,7 +1577,7 @@ Socket.IO handshake flow:
 
 ```
 Client → Server:
-  socket.emit("joinTripTracking", { tripId: "<uuid>" }, (ack) => { ... })
+  socket.emit("joinTripTracking", { tripId: "<uuid>", includeRouteSnapshot?: false }, (ack) => { ... })
 
 Server authorization:
   Tracking Service lấy user context từ socket.data (đã verify JWT ở middleware).
@@ -1587,17 +1592,23 @@ Success ack:
     tripId: "<uuid>",
     room: "trip:<tripId>",
     scope?: "BOOKING_OWNER" | "DRIVER" | "ASSISTANT" | "OPERATOR" |
-           "PARCEL_SENDER" | "PARCEL_RECIPIENT"
+           "PARCEL_SENDER" | "PARCEL_RECIPIENT",
+    routeContext?: { ... },
+    routeVersion?: "<strong REST ETag>"
   }
 
 Error ack:
   {
     success: false,
-    error: "UNAUTHORIZED" | "VALIDATION_ERROR" | "TRIP_NOT_FOUND" | "ACCESS_DENIED",
+    error: "UNAUTHORIZED" | "VALIDATION_ERROR" | "TRIP_NOT_FOUND" | "ACCESS_DENIED" |
+           "TRACKING_ROUTE_CONTEXT_UNAVAILABLE",
     message?: "<human-readable short message>"
   }
 
-Nếu success → socket.join(`trip:${tripId}`).
+`includeRouteSnapshot` mặc định false để giữ contract/latency cũ. Khi true, Tracking phải lấy
+effective assigned-route snapshot trước khi join; ack thêm `routeContext` và `routeVersion` dùng
+cùng mapper/hash với REST. Nếu snapshot unavailable thì trả lỗi và KHÔNG join room. Nếu success →
+socket.join(`trip:${tripId}`).
 Room `trip:{tripId}` nhận GPS update + ETA update giống passenger tracking.
 Không broadcast thông tin hành khách/parcel khác; client chỉ render dữ liệu đúng scope.
 ```
@@ -1760,13 +1771,14 @@ Trip history trong Passenger App hiển thị các booking mà user đó đã Đ
 
 Lý do: Passenger entity chỉ lưu operational data (seatNumber, boardingStatus), không lưu nhân thân và không liên kết tới User account khác buyer. Không thể lookup "booking nào có Passenger là tôi". Đây là design trade-off chấp nhận được cho v1 — đặt vé cho người khác vẫn thấy trong history của người đặt; người được đặt hộ không thấy (trừ khi họ tự vào app và đặt).
 
-**Trip info cho history list — snapshot strategy:** `GET /bookings/history` trả về data từ Booking DB, **không cần HTTP call sang Trip-Route-Vehicle Service**. Booking entity có 4 snapshot fields (`tripSnapshotOriginName`, `tripSnapshotDestName`, `tripSnapshotDeparture`, `tripSnapshotRouteName`) được set khi tạo Booking — đủ để render history row (tên tuyến, giờ khởi hành, tên bến). Xem entity spec ở section 8. Lý do chọn snapshot thay vì (b) HTTP call mỗi lần: N HTTP call khi load list — không scale, latency cao; thay vì (c) client ghép 2 API: double round-trip, lộ service boundary.
+**Trip info cho history list — snapshot strategy:** `GET /bookings/history` lấy dữ liệu hành trình nền từ Booking DB. Booking entity có 4 snapshot fields (`tripSnapshotOriginName`, `tripSnapshotDestName`, `tripSnapshotDeparture`, `tripSnapshotRouteName`) được set khi tạo Booking — đủ để render history row (tên tuyến, giờ khởi hành, tên bến). Để hiển thị xe hiện tại, Booking thực hiện đúng một batch call distinct Trip IDs sang Trip Service cho mỗi trang và enrich `vehicle { licensePlate, vehicleType { code, displayName } }`; không gọi per row. Vehicle type hỗ trợ cả loại hệ thống và loại custom của operator. Trip cũ chưa trả `vehicleType` hoặc dữ liệu type thiếu/blank thì vẫn giữ `vehicle` và trả `vehicleType=null`; Trip enrichment lỗi hoặc biển số thiếu/blank thì fail-open `vehicle=null`. Xem entity spec ở section 8. Snapshot tránh N HTTP call khi load list; client cũng không phải ghép hai API hay biết service boundary.
 
 **Passenger history facade — `GET /v1/passenger/history`:** FE chọn đúng một nhánh bằng query
 `type=TICKET|PARCEL`; v1 không có `ALL` và không free-text search. Parcel Service sở hữu facade vì
 dependency một chiều Parcel → Booking đã tồn tại. Nhánh `TICKET` chỉ gọi
 `GET /internal/v1/bookings/history?userId=...`, phân trang theo Booking và trả Ticket summaries
-bên trong Booking. Nhánh `PARCEL` chỉ query Parcel local với `senderUserId = JWT sub`; parcel mà
+bên trong Booking, gồm nguyên vẹn nullable current `vehicle { licensePlate, vehicleType { code,
+displayName } }` từ Booking và không gọi Trip lần nữa. Nhánh `PARCEL` chỉ query Parcel local với `senderUserId = JWT sub`; parcel mà
 user chỉ là người nhận không nằm trong nhánh này. Cả hai dùng `createdAt DESC, id DESC`, range
 `from` inclusive/`to` exclusive, `pageSize <= 100`. Booking upstream lỗi phải trả
 `502 UPSTREAM_UNAVAILABLE`, không giả thành trang rỗng. Trip enrichment cho parcel được deduplicate
@@ -2468,8 +2480,13 @@ Background job (BullMQ scheduled job — chạy mỗi 5–10 phút trong Trackin
    Algorithm:
      1. Với mỗi GPS update, tính khoảng cách từ lat/lng xe đến segment đường route gần nhất
      2. Nếu distance > 500m: bắt đầu đếm timer (lưu Redis key off_route_since:{tripId})
-     3. Nếu khoảng cách về < 500m trước 2 phút: clear timer (false alarm)
-     4. Nếu timer đạt 2 phút liên tục: gửi OffRouteAlert event → Notification Service
+     3. Nếu khoảng cách về <= 500m trước 2 phút: clear timer (false alarm)
+     4. Nếu timer vượt 2 phút liên tục: gửi một OffRouteAlert event → Notification Service và
+        phát Socket.IO `trip:routeDeviation { status: DEVIATED }` cho crew + operator fleet
+     5. Khi vẫn lệch, GPS hợp lệ đầu tiên sau mỗi khoảng ít nhất 60 giây phát heartbeat
+        `DEVIATED` mới nhưng không tạo thêm notification; khi về <= 500m phát đúng một
+        `ROUTE_RESTORED`. Route change hoặc Trip terminal chỉ clear runtime state, không phát
+        restored giả.
    ```
 2. **Tài xế/phụ xe báo:** Nhận thấy đường tắc hoặc sự cố, tài xế báo trực tiếp qua app (nút "Báo sự cố") → operator nhận notification
 
@@ -2867,8 +2884,20 @@ depositRequiredVnd = round(estimatedTotalPriceVnd × 20%,
 
 - Không làm tròn kg và không floor/ceil số tiền theo 1.000 đồng. Ví dụ `3,2 kg × 1.000đ/kg = 3.200đ`.
 - Operator cấu hình `pricePerKgVnd` và `minimumPriceVnd`; Passenger/Assistant không được nhập giá.
-- Parcel thường được tạo ở `PENDING_PAYMENT`. `EXTRA_LARGE` vào `PENDING_OPERATOR_REVIEW`; chỉ sau khi duyệt mới vào `PENDING_PAYMENT`.
+- Mọi size backend derive, kể cả `EXTRA_LARGE`, cần fare active và được tạo ở `PENDING_PAYMENT`;
+  `PENDING_OPERATOR_REVIEW` chỉ dành cho record legacy.
+- Một `ParcelQuoteService` canonical duy nhất được dùng cho available trips, voucher, create và
+  validation payment. Fare active theo cửa sổ half-open; payment sau create dùng persisted snapshot,
+  không reprice fare hiện tại.
+- Available Trips phát optional signed `quoteToken` HMAC-SHA256 TTL mặc định 600 giây, bind sender,
+  trip/route/operator, station pair, dimensions/weight, chargeable/category, fare/DIM/settlement
+  versions, gross/discount/deposit và random `jti`. Request legacy vẫn hoạt động; token là
+  authoritative và dùng `PARCEL_QUOTE_INVALID|EXPIRED|STALE|MISMATCH` khi xung đột.
 - `POST /v1/parcels/{parcelId}/deposit-payment` tạo payment và giữ mềm cargo theo số đo ước tính trong 15 phút. Payment hết hạn chuyển `EXPIRED`, release hold và không consume voucher.
+- Sau reserve, mọi Payment error/fail/expiry/timeout phải release đồng bộ. Trip tạm unavailable
+  tạo/resume durable cargo recovery `RELEASE`; operation UUID là stable Idempotency-Key, sweep/event
+  duplicate hội tụ một logical release. Retry deposit phải hoàn tất pending RELEASE trước reserve;
+  sweep chỉ claim `PENDING_PAYMENT` chưa có `depositPaymentId`.
 - Payment cọc có `paidAt < dueAt` luôn được công nhận dù callback đến sau event timeout. Nếu chuyến không còn phục vụ được thì Parcel chuyển `CANCELLED` và hoàn toàn bộ khoản đã thu.
 - Cọc v2 cố định 20%. Nếu Passenger không check-in trước `latestCheckInAt`, Parcel chuyển `REJECTED`, mất toàn bộ cọc và release cargo.
 
@@ -3434,7 +3463,11 @@ Nếu người nhận đổi ý trong 15 phút:
 - **Snapshot:** `pricePerKgVnd`, `minimumPriceVnd`, `dimWeightFactor`, `settlementPolicyVersion`. Version đã được sử dụng không được update; policy mới phải tạo version mới.
 - **Operational recovery:** `pendingActionResumeStatus` xác định state cần resume sau capacity override/recovery; không tạo status column thứ hai.
 - **Thông tin người gửi:** `senderUserId` FK → User (NOT NULL — người gửi PHẢI có tài khoản VietRide, consistent với no walk-in parcel). Dùng để authorize tracking, query "hàng tôi đã gửi" (`GET /v1/parcels/sent`), và cho Tracking Service verify parcel sender khi joinTripTracking.
-- **Thông tin người nhận:** name (bắt buộc), phone (bắt buộc), email (**optional**). `recipientUserId` nullable link tới User — set khi người gửi nhập email và Identity Service lookup ra account hiện có. null = recipient không có tài khoản VietRide.
+- **Thông tin người nhận:** name (bắt buộc), phone (bắt buộc), email (**optional**).
+  `recipientUserId` nullable logical link tới User, không nhận từ public request. Parcel
+  trim/lowercase email và Identity exact-lookup non-deleted user: match lưu link trong create
+  transaction, exact 404 lưu null, transport/5xx/malformed response fail create 503. Link này cấp
+  `/received`, tracking authorization, Outbox và notification.
 - **Điểm xuống hàng:** `dropoffStopId` nullable FK → Stop. Null = giao tại destination station mặc định (terminal). Not null = giao tại Stop dọc tuyến. Validation:
   - `Parcel.dropoffStopId` phải nằm trong RouteStop của route gắn với trip; nếu không return `STOP_NOT_FOUND`.
   - Stop đó phải có `allowDropoff = true`; nếu false return `STOP_NOT_DROPOFF_ALLOWED`.
@@ -3482,31 +3515,30 @@ Nếu người nhận đổi ý trong 15 phút:
   là recovery identity cho atomic Trip cargo transfer.
 - **Return fields:** `returnReason`, `returnedAt`, `returnedByUserId` nullable — bắt buộc set khi status chuyển `RETURNED` từ `PENDING_OPERATOR_ACTION` hoặc `TRANSFER_ESCALATED`; ghi kèm `AuditLog` để đối soát.
 - **Cargo recovery history:** `ParcelCargoRecoveryOperation` stores a UUID-v4 operation id,
-  Parcel/operator, `TRANSFER|RETURN`, `PENDING|COMPLETED|FAILED`, source/target Trip,
+  Parcel/operator, `TRANSFER|RETURN|RELEASE`, `PENDING|COMPLETED|FAILED`, source/target Trip,
   target state, actor, reason, frozen refund facts, source status, claim/completion timestamps and
-  an optional failure code. A partial unique index permits at most one `PENDING` row per Parcel.
+  an optional failure code. The actor is nullable only for system-created `RELEASE` recovery. A
+  partial unique index permits at most one `PENDING` row per Parcel.
 - **Status lifecycle:** xem ParcelStatus enum ở section 8.
 - **Timestamps audit:** `confirmedAt`, `rejectedAt`, `rejectionReason` (optional free text), `confirmedByIp` (audit), `reviewedAt`/`reviewedByUserId`/`reviewDecision` (chỉ EXTRA_LARGE), `unloadedAt` nullable (cho cargo weight tracking — xem section 8).
 
 **Parcel pricing — Operator set per route:**
 
-Parcel có tính phí. Operator define bảng giá theo route + size category. Cần entity `ParcelRouteFare` với composite key (routeId + sizeCategory), giá BIGINT VND. Ví dụ tuyến SG→HN: SMALL 50k, MEDIUM 150k, LARGE 300k, EXTRA_LARGE để TBC (operator set sau khi approve).
+Parcel có tính phí. Operator define bảng giá theo route + size category. Cần entity `ParcelRouteFare` với composite key (routeId + sizeCategory), giá BIGINT VND. Mọi size category canonical, bao gồm `EXTRA_LARGE`, phải có fare active trước khi trip xuất hiện trong available search hoặc Parcel được tạo.
 
 **Payment flow cho parcel:**
 - Parcel payment hỗ trợ **cả Wallet và VNPay trực tiếp** (hoàn thiện như Booking, không bắt user top-up ví trước).
-- SMALL/MEDIUM/LARGE:
+- Mọi size category canonical (`SMALL|MEDIUM|LARGE|EXTRA_LARGE`):
   1. Passenger submit parcel request + `paymentMethod = WALLET | VNPAY`
   2. Parcel Service tạo Parcel status = `PENDING_PAYMENT`
-  3. Gọi Payment Service `/charge { referenceType: "PARCEL", parcelId, amount, method }`
+  3. Gọi Payment Service để thu deposit cố định 20% từ canonical quote snapshot
   4. Nếu Wallet success → Payment `SUCCEEDED`, Parcel → `PENDING`
   5. Nếu VNPay → Payment `PENDING_REDIRECT`, Parcel giữ `PENDING_PAYMENT`, response trả `paymentRedirectUrl`
   6. VNPay callback success → Payment Service publish `PaymentSucceeded { referenceType=PARCEL, parcelId }` → Parcel Service update Parcel → `PENDING`
   7. VNPay fail hoặc tới authoritative payment deadline → Payment `FAILED/EXPIRED`, Parcel →
-     `EXPIRED` (chưa nhận hàng, chưa refund)
-- EXTRA_LARGE:
-  1. Tạo parcel ban đầu status = `PENDING_OPERATOR_REVIEW`, chưa charge
-  2. Operator APPROVE → chuyển sang `PENDING_PAYMENT`, rồi chạy cùng payment flow Wallet/VNPay như trên
-  3. Operator REJECT trước payment → Parcel `REJECTED`, không charge
+     `EXPIRED` (chưa nhận hàng, chưa refund) và cargo hold phải được release idempotent
+- `PENDING_OPERATOR_REVIEW` và operator-specific deposit policy là legacy/dormant; không áp dụng cho
+  create flow settlement v2.
 - Hoàn tiền: nếu parcel đã thanh toán rồi bị CANCELLED/REJECTED/DELIVERY_REJECTED/RETURNED theo policy → refund về Ví VietRide mặc định. VNPay Refund API vẫn là v2; v1 hoàn qua Wallet để đơn giản vận hành.
 
 > >
@@ -3524,7 +3556,7 @@ Parcel có tính phí. Operator define bảng giá theo route + size category. C
 > - PENDING_OPERATOR_ACTION → RETURNED (operator trả hàng tại bến): INSERT PlatformWalletTransaction DEBIT + OperatorLedgerEntry { entryType=PARCEL_REFUND, tripId, amount = -max(depositPaidVnd + balancePaidVnd - refundedAmountVnd, 0), note="Parcel returned at terminal after trip cancel/disrupt" } atomic với Wallet credit.
 > - TRANSFER_ESCALATED → RETURNED: cùng pattern (refund 100% nếu parcel rời khỏi VietRide custody).
 > - DELIVERY_REJECTED → RETURN_INITIATED (recipient từ chối + 15p undo): refund logic phụ thuộc operator (out of scope ledger v1 — operator settle thủ công với sender; có thể adjust ledger qua System Admin endpoint nếu cần).
-> - EXTRA_LARGE → REJECTED bởi operator review: chưa charge (status từ PENDING_OPERATOR_REVIEW chưa qua PENDING_PAYMENT) → KHÔNG có ledger entry để rollback.
+> - Legacy Parcel bị operator reject trước payment: chưa charge nên KHÔNG có ledger entry để rollback.
 >
 > Refund ledger entries là **audit-only** — KHÔNG update OperatorWallet ngay. PlatformWallet DEBIT phản ánh tiền rời holding pool để hoàn về PassengerWallet. Nếu refund xảy ra trước Trip terminal (phổ biến) → operator wallet chưa được credit cho trip này, không cần debit. Nếu refund xảy ra sau khi `OperatorTripSettlement` đã SETTLED (late refund, rare) → Admin manual debit wallet qua `POST /v1/admin/operators/{id}/wallet/adjust` và ghi PlatformWallet adjustment tương ứng. Voucher rollback (nếu parcel apply voucher v2): tương tự booking voucher rollback pattern.
 
@@ -3834,7 +3866,7 @@ VietRide tách Station/Stop riêng biệt và thêm mapping OperatorStation:
 - `instructions` nullable — hướng dẫn lên xe/gửi hàng tại bến
 - `isActive` boolean — operator có đang khai thác bến này không
 
-> **Decision:** Station là địa điểm vật lý canonical cấp platform (ví dụ "Bến xe Miền Đông" chỉ có 1 record). **Operator tự tạo Station — KHÔNG cần System Admin duyệt.** Tránh duplicate qua UI autocomplete (xem 4.3): operator search trước, link Station hiện có nếu match; chỉ tạo mới khi thật sự chưa có. System Admin có role data-quality cleanup (merge duplicate, normalize) — không gatekeep. OperatorStation biểu diễn nhà xe nào dùng bến đó. Search endpoint: `GET /v1/stations/search?q=<text>&lat=&lng=` (public — passenger app cũng dùng để search trip).
+> **Decision:** Station là địa điểm vật lý canonical cấp platform (ví dụ "Bến xe Miền Đông" chỉ có 1 record). **Operator tự tạo Station — KHÔNG cần System Admin duyệt.** Tránh duplicate qua UI autocomplete (xem 4.3): operator search trước, link Station hiện có nếu match; chỉ tạo mới khi thật sự chưa có. System Admin có role data-quality cleanup (merge duplicate, normalize) — không gatekeep. OperatorStation biểu diễn nhà xe nào dùng bến đó. Search endpoint: `GET /v1/stations/search?q=<text>&city=&ward=&locationId=&locationScopeCode=` (public — passenger app cũng dùng để search trip). `locationId` exact; root code hai chữ số gồm active root + active direct leaves để giữ Station legacy, leaf code năm chữ số exact; hai location filter conflict và invalid/inactive/unknown trả 422.
 
 **Stop (Điểm dừng dọc tuyến) — requirements:**
 - Tên, operatorId, latitude, longitude, address
@@ -3927,10 +3959,16 @@ Fields cần có: tripId + stopId composite key, `orderIndex` (1-indexed, thứ 
 > `422 IDEMPOTENCY_KEY_MISMATCH`.
 
 > Hangfire job generate TripStop khi tạo Trip, copy từ RouteStop. Route change (alternative route) cập nhật TripStop per trip, không ảnh hưởng Route gốc.
+> Tracking REST/Socket/progress/ETA luôn dùng ordered `TripStop` snapshot đã assign cho Trip.
+> Effective AlternativeRoute chỉ cung cấp polyline và destination; live AlternativeRouteStop edit
+> không thay snapshot. Missing AlternativeRoute không fallback base Route; polyline lỗi chỉ được
+> fallback `STOPS_ONLY` của chính effective snapshot. Route-change invalidation tăng generation và
+> xóa route/geometry/ETA/off-route/delay cache; in-flight write từ version cũ phải bị loại.
 
 **Hai-layer ETA — static vs dynamic:**
 ```
 Layer 1 — Static ETA (trong DB):
+  Origin Station ETA = Trip.departureDateTime
   TripStop.estimatedArrivalTime = planned cumulative drive time + 20 phút dwell tại mỗi stop trước đó
   Trip.estimatedArrivalTime = planned cumulative drive time + 20 phút cho mọi stop trung gian
   → Google Routes ordered waypoints + TRAFFIC_AWARE tại departureTime là primary
@@ -3941,12 +3979,18 @@ Layer 1 — Static ETA (trong DB):
   → Passenger App hiển thị trước khi chuyến bắt đầu (không có GPS)
 
 Layer 2 — Dynamic ETA (trong Redis, Tracking Service maintain):
-  Redis key: tracking:eta:{tripId}:{targetId}  (TTL 60s; target là STOP hoặc destination STATION)
-  → Một batch ordered cho mọi PENDING stop phía trước và bến đích, cộng dwell 20 phút
+  Redis key: tracking:eta:{tripId}:{targetId}  (TTL 60s; value lưu targetKind + targetId)
+  → SCHEDULED|BOARDING có GPS: target origin STATION
+  → IN_PROGRESS: mọi PENDING STOP phía trước rồi destination STATION, cộng dwell 20 phút
+  → Express/no remaining stop/after-last-stop vẫn target destination, không trả null
   → Update khi next stop đổi, xe di chuyển >500m hoặc ETA next stop < 15 phút
   → Một lock per Trip; toàn bộ target cache được ghi atomic
-  → Google lỗi/partial batch thì bỏ cả batch và fallback nhất quán bằng route projection/current speed
+  → Google lỗi/partial batch thì bỏ cả batch và fallback nhất quán bằng route projection/current speed;
+    pre-origin dùng direct distance đến origin
   → Tracking Service KHÔNG ghi đè TripStop.estimatedArrivalTime trong DB
+  → eta:batch:update phát STOP/STATION; legacy eta:update chỉ phát khi primary target là STOP
+  → GET /eta không chỉ target trả cache đầu tiên trong chain; GET /etas trả ordered cached targets;
+    cold cache không gọi provider đồng bộ
   → FE đọc GET /v1/tracking/trips/{tripId}/etas hoặc eta:batch:update; FE không tự tính ETA
 
 Delayed detection (Hangfire/BullMQ mỗi 5 phút):
@@ -5035,7 +5079,8 @@ Mọi key dùng pattern `<service>:<purpose>:<id>` để namespace per service. 
 | `tracking:latest:{tripId}` | Tracking | Last known GPS position per trip | 5 phút |
 | `tracking:gps_buffer:{tripId}` | Tracking | GPS trail buffer (list) trước batch write | đến khi flush |
 | `tracking:eta:{tripId}:{stopId}` | Tracking | Dynamic ETA cached | 60 giây |
-| `tracking:off_route_since:{tripId}` | Tracking | Off-route timer (start time) | đến khi clear |
+| `tracking:off_route_since:{tripId}` | Tracking | Off-route episode state (first detection, alert, realtime heartbeat) | 24 giờ hoặc route/terminal clear |
+| `tracking:off_route_lock:{tripId}` | Tracking | Owner-safe off-route transition/cleanup lock | 10 giây |
 | `tracking:active_trips` | Tracking | Set of active tripIds (membership) | — |
 | `tracking:approaching_notified:{tripId}:{bookingId}:w{1\|2}` | Tracking | Dedupe approaching alert (2 waves) | đến hết chuyến |
 | `notification:fcm_token_blacklist:{token}` | Notification | Cache invalid FCM tokens | 1 ngày |
@@ -5081,8 +5126,8 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
   - **Voucher:** `VOUCHER_NOT_FOUND`, `VOUCHER_EXPIRED`, `VOUCHER_NOT_APPLICABLE`, `VOUCHER_USAGE_LIMIT_REACHED`, `VOUCHER_USER_LIMIT_REACHED`, `VOUCHER_MIN_ORDER_NOT_MET`
   - **Payment:** `PAYMENT_INSUFFICIENT_WALLET`, `PAYMENT_VNPAY_ERROR`, `PAYMENT_TIMEOUT`, `PAYMENT_ALREADY_PROCESSED`, `PAYMENT_SIGNATURE_INVALID` (VNPay HMAC verify fail)
   - **Wallet:** `WALLET_INSUFFICIENT_BALANCE`, `WALLET_TOP_UP_FAILED`, `WALLET_TOP_UP_AMOUNT_TOO_LOW`
-  - **Trip:** `TRIP_NOT_FOUND`, `TRIP_NOT_EDITABLE`, `TRIP_VEHICLE_CONFLICT`, `TRIP_DRIVER_CONFLICT`, `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST`, `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`, `TRIP_VEHICLE_SWAP_TOO_LATE`, `TRIP_NOT_ACCEPTING_PARCEL` (Trip IN_PROGRESS — không nhận parcel mới), `TRIP_NOT_IN_PROGRESS`, `TRIP_STOP_NOT_ARRIVED`, `TRIP_STOP_ALREADY_DEPARTED`, `DRIVER_SCHEDULE_EDIT_TOO_LATE`
-  - **Parcel:** `PARCEL_NOT_FOUND`, `PARCEL_CAPACITY_EXCEEDED`, `PARCEL_PRICING_NOT_CONFIGURED`, `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, `PARCEL_NOT_TRANSFERABLE` (parcel ở status sai khi confirm transfer), `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` (cân lại > ước lượng, cần thanh toán thêm), `PARCEL_REVIEW_TIMEOUT` (EXTRA_LARGE auto-reject 24h)
+  - **Trip:** `TRIP_NOT_FOUND`, `TRIP_NOT_EDITABLE`, `TRIP_VEHICLE_CONFLICT`, `TRIP_DRIVER_CONFLICT`, `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST`, `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`, `TRIP_VEHICLE_SWAP_TOO_LATE`, `TRIP_NOT_ACCEPTING_PARCEL` (Trip IN_PROGRESS — không nhận parcel mới), `TRIP_NOT_IN_PROGRESS`, `TRIP_STOP_NOT_ARRIVED`, `TRIP_STOP_ALREADY_DEPARTED`, `DRIVER_SCHEDULE_EDIT_TOO_LATE`, `INCIDENT_NOT_FOUND`, `INCIDENT_ALREADY_RESOLVED`
+  - **Parcel:** `PARCEL_NOT_FOUND`, `PARCEL_CAPACITY_EXCEEDED`, `PARCEL_PRICING_NOT_CONFIGURED`, `PARCEL_QUOTE_INVALID`, `PARCEL_QUOTE_EXPIRED`, `PARCEL_QUOTE_STALE`, `PARCEL_QUOTE_MISMATCH`, `PARCEL_CARGO_RECOVERY_IN_PROGRESS`, `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, `PARCEL_NOT_TRANSFERABLE` (parcel ở status sai khi confirm transfer), `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` (cân lại > ước lượng, cần thanh toán thêm), `PARCEL_REVIEW_TIMEOUT` (chỉ record legacy PENDING_OPERATOR_REVIEW)
   - **Stop/Route:** `STOP_NOT_FOUND`, `STOP_REPLACEMENT_INVALID`, `STOP_REPLACEMENT_CYCLE` (replacedByStopId tạo cycle), `STOP_REPLACEMENT_DIFFERENT_OPERATOR`, `STOP_ALREADY_DISABLED`, `STOP_DISABLED_BOOKING_AFFECTED` (legacy/deprecated synchronous warning/count for DELETE; unrelated usages remain unchanged), `STOP_NOT_PICKUP_ALLOWED`, `STOP_NOT_DROPOFF_ALLOWED`, `ROUTE_NOT_FOUND`, `ROUTE_RETURN_NOT_CONFIGURED` (Route.returnRouteId null khi đặt round-trip)
   - **Station:** `STATION_NOT_FOUND`, `STATION_DUPLICATE_NEARBY` (warning khi operator tạo Station mới quá gần Station hiện có — gợi ý link thay vì tạo), `STATION_MERGE_CONFLICT` (merge vi phạm Route/domain invariant; không partial write)
   - **Invoice:** `INVOICE_NOT_FOUND`, `INVOICE_PDF_GENERATION_FAILED`
@@ -5091,7 +5136,7 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
   - **Subscription:** `SUBSCRIPTION_LIMIT_EXCEEDED` (vượt maxVehicles/maxRoutes/etc.), `SUBSCRIPTION_MODULE_DISABLED` (module flag = false, ví dụ thử dùng Parcel khi enableParcel=false), `SUBSCRIPTION_EXPIRED`, **`SUBSCRIPTION_PAYMENT_PENDING`** (operator đang có PENDING_PAYMENT, phải resolve trước khi upgrade tiếp)
   - **Settlement / Wallet (Platform & Operator):** `TRIP_SETTLEMENT_NOT_FOUND`, `TRIP_SETTLEMENT_ALREADY_SETTLED` (status = SETTLED/CANCELLED, admin manual retry không hợp lệ), `PLATFORM_WALLET_INSUFFICIENT_BALANCE` (PlatformWallet không đủ balance để refund/settle; alert System Admin). Note: `WALLET_INSUFFICIENT_BALANCE` đã có ở mục Wallet bên trên — dùng chung cho cả passenger Wallet và Operator Wallet adjust DEBIT (4.6 admin endpoint).
   - **Refund:** `REFUND_FAILURE_PERSISTED` (refund retry exhausted, Admin manual handle), `REFUND_RETRY_EXHAUSTED` (Hangfire job đã retry 5 lần)
-  - **Tracking:** `TRACKING_ACCESS_DENIED` (joinTripTracking unauthorized), `TRACKING_TRIP_NOT_ACTIVE` (trip chưa IN_PROGRESS)
+  - **Tracking:** `TRACKING_ACCESS_DENIED` (joinTripTracking unauthorized), `TRACKING_TRIP_NOT_ACTIVE` (trip chưa IN_PROGRESS), `TRACKING_ROUTE_CONTEXT_UNAVAILABLE` (opt-in route snapshot fail trước room join)
   - **RAG:** `RAG_DOCUMENT_NOT_APPROVED`, `RAG_ACCESS_DENIED_FOR_ROLE`
   - **Validation:** `VALIDATION_ERROR` (kèm `errors` array detail field-level)
   - **Generic:** `RESOURCE_NOT_FOUND`, `FORBIDDEN`, `RATE_LIMITED`, `REPORT_VALUE_OVERFLOW` (report aggregate ngoài Int64), `UPSTREAM_UNAVAILABLE`, `INTERNAL_ERROR`

@@ -2,6 +2,7 @@ using FluentAssertions;
 using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels.DepositPayment;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.UnitOfWork;
@@ -114,6 +115,126 @@ public sealed class ParcelDepositPaymentTests
             default!, default, default, default, default!, default!, default, default, default);
     }
 
+    [Fact]
+    public async Task StartDeposit_PaymentTransportFailure_PersistsReleaseForRetryWhenTripUnavailable()
+    {
+        var parcel = CreateParcel(depositRequired: 20_000);
+        var repository = Substitute.For<IParcelRepository>();
+        repository.GetByIdAsync(parcel.Id, Arg.Any<CancellationToken>()).Returns(parcel);
+        repository.ShouldRetainDepositCargoHoldAsync(parcel.Id, Arg.Any<CancellationToken>())
+            .Returns(false);
+        repository.TryClaimCargoRecoveryReleaseAsync(
+                parcel.Id,
+                parcel.Id,
+                TripId,
+                "DEPOSIT_PAYMENT_START_FAILED",
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(ReleaseOperation(parcel));
+        var trip = Substitute.For<ITripServiceClient, IIdempotentTripServiceClient>();
+        var idempotentTrip = (IIdempotentTripServiceClient)trip;
+        idempotentTrip.ReserveCargoAsync(
+                TripId,
+                parcel.Id,
+                parcel.EstimatedWeightKg,
+                parcel.EstimatedVolumeM3,
+                Arg.Any<Guid>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
+        idempotentTrip.ReleaseCargoAsync(
+                TripId,
+                parcel.Id,
+                parcel.EstimatedWeightKg,
+                parcel.EstimatedVolumeM3,
+                parcel.Id,
+                Arg.Any<CancellationToken>())
+            .Returns(new TripCargoOutcome(TripCargoOutcomeKind.TransportError, "trip unavailable"));
+        var payment = Substitute.For<IPaymentServiceClient>();
+        payment.ChargeParcelPaymentAsync(
+                Arg.Any<string>(),
+                Arg.Any<Guid>(),
+                Arg.Any<Guid>(),
+                Arg.Any<long>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<PaymentContextSnapshot?>(),
+                Arg.Any<DateTimeOffset?>(),
+                Arg.Any<string?>())
+            .Returns(new ChargeOutcome(ChargeOutcomeKind.TransportError, null, "payment unavailable"));
+
+        var act = () => CreateHandler(repository, trip, payment).Handle(
+            new StartParcelDepositPaymentCommand(
+                parcel.Id,
+                SenderId,
+                "WALLET",
+                Guid.NewGuid().ToString("D")),
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<ParcelDependencyUnavailableException>())
+            .Which.ErrorCode.Should().Be("PAYMENT_SERVICE_ERROR");
+        await repository.Received(1).TryClaimCargoRecoveryReleaseAsync(
+            parcel.Id,
+            parcel.Id,
+            TripId,
+            "DEPOSIT_PAYMENT_START_FAILED",
+            Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
+        await repository.DidNotReceive().TryCompleteCargoRecoveryReleaseAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StartDeposit_AssignRaceWithExistingOwner_DoesNotReleaseCargo()
+    {
+        var parcel = CreateParcel(depositRequired: 20_000);
+        var repository = Substitute.For<IParcelRepository>();
+        repository.GetByIdAsync(parcel.Id, Arg.Any<CancellationToken>()).Returns(parcel);
+        repository.TryAssignDepositPaymentIdAsync(
+                parcel.Id,
+                Arg.Any<Guid>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(false);
+        repository.ShouldRetainDepositCargoHoldAsync(parcel.Id, Arg.Any<CancellationToken>())
+            .Returns(true);
+        var trip = SuccessfulTripClient();
+        var payment = Substitute.For<IPaymentServiceClient>();
+        payment.ChargeParcelPaymentAsync(
+                Arg.Any<string>(),
+                Arg.Any<Guid>(),
+                Arg.Any<Guid>(),
+                Arg.Any<long>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<PaymentContextSnapshot?>(),
+                Arg.Any<DateTimeOffset?>(),
+                Arg.Any<string?>())
+            .Returns(new ChargeOutcome(
+                ChargeOutcomeKind.Success,
+                new ChargeResult(Guid.NewGuid(), "PENDING_REDIRECT", null),
+                null));
+
+        var act = () => CreateHandler(repository, trip, payment).Handle(
+            new StartParcelDepositPaymentCommand(
+                parcel.Id,
+                SenderId,
+                "WALLET",
+                Guid.NewGuid().ToString("D")),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<VietRide.Shared.Application.Exceptions.CodedConflictException>();
+        await trip.DidNotReceive().ReleaseCargoAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            Arg.Any<decimal>(),
+            Arg.Any<decimal>(),
+            Arg.Any<CancellationToken>());
+    }
+
     private static StartParcelDepositPaymentCommandHandler CreateHandler(
         IParcelRepository repository,
         ITripServiceClient trip,
@@ -184,4 +305,31 @@ public sealed class ParcelDepositPaymentTests
             Now.AddHours(1));
         return parcel;
     }
+
+    private static ParcelCargoRecoveryOperationSnapshot ReleaseOperation(ParcelEntity parcel)
+        => new(
+            parcel.Id,
+            parcel.Id,
+            parcel.ParcelCode,
+            OperatorId,
+            SenderId,
+            ParcelCargoRecoveryOperationType.RELEASE,
+            ParcelCargoRecoveryOperationStatus.PENDING,
+            TripId,
+            null,
+            null,
+            null,
+            "DEPOSIT_PAYMENT_START_FAILED",
+            0,
+            0,
+            ParcelStatus.PENDING_PAYMENT,
+            false,
+            Now,
+            null,
+            null,
+            parcel.EstimatedWeightKg,
+            parcel.EstimatedVolumeM3,
+            ParcelStatus.PENDING_PAYMENT,
+            TripId,
+            null);
 }

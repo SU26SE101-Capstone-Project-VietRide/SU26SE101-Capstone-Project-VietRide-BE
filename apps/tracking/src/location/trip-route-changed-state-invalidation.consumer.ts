@@ -8,7 +8,8 @@ import pino from 'pino';
 import { z } from 'zod';
 import { TRIP_DATA_PROVIDER, trackingEtaStateKey } from '../eta/eta.constants';
 import type { TripDataProvider } from '../eta/trip-data.provider';
-import { ROUTE_GEOMETRY_PROVIDER, trackingOffRouteSinceKey } from '../off-route/off-route.constants';
+import { ROUTE_GEOMETRY_PROVIDER } from '../off-route/off-route.constants';
+import { OffRouteService } from '../off-route/off-route.service';
 import type { RouteGeometryProvider } from '../off-route/route-geometry.provider';
 import { trackingEtaKey } from './location.constants';
 import { RouteStateGenerationRegistry } from '../route-state/route-state-generation.registry';
@@ -52,6 +53,7 @@ export class TripRouteChangedStateInvalidationConsumer implements OnModuleInit {
     @Inject(TRIP_DATA_PROVIDER) private readonly tripData: TripDataProvider,
     @Inject(ROUTE_GEOMETRY_PROVIDER) private readonly routeGeometry: RouteGeometryProvider,
     private readonly routeStateGeneration: RouteStateGenerationRegistry,
+    private readonly offRoute: OffRouteService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -109,11 +111,11 @@ export class TripRouteChangedStateInvalidationConsumer implements OnModuleInit {
     this.routeStateGeneration.invalidate(tripId);
     this.tripData.invalidateRouteStops(tripId);
     this.routeGeometry.invalidateRouteGeometry(tripId);
+    await this.offRoute.clearRuntimeState(tripId);
 
     const client = this.redis.getClient();
     await client.del(
       trackingEtaStateKey(tripId),
-      trackingOffRouteSinceKey(tripId),
       trackingTripDelayStateKey(tripId),
     );
 

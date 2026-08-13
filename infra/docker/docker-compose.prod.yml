@@ -274,6 +274,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       FIREBASE_WEB_STORAGE_BUCKET: ${FIREBASE_WEB_STORAGE_BUCKET:?FIREBASE_WEB_STORAGE_BUCKET is required in production}
+      PARCEL_QUOTE_TOKEN_SECRET: ${PARCEL_QUOTE_TOKEN_SECRET:?PARCEL_QUOTE_TOKEN_SECRET is required in production}
+      PARCEL_QUOTE_TTL_SECONDS: ${PARCEL_QUOTE_TTL_SECONDS:-600}
       INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET}
       ConnectionStrings__Default: 'Host=postgres;Port=5432;Database=vietride_parcel;Username=${POSTGRES_USER:-vietride};Password=${POSTGRES_PASSWORD};Search Path=vietride_parcel,public'
       REDIS_URL: redis:6379

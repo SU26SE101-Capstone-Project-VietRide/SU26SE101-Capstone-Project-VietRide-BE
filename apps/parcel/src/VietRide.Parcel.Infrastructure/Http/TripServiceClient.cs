@@ -335,6 +335,101 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
             pageSize,
             cancellationToken);
 
+    public async Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsForRoutesAsync(
+        Guid originStationId,
+        Guid destinationStationId,
+        DateOnly departureDate,
+        decimal estimatedWeightKg,
+        decimal estimatedVolumeM3,
+        ParcelSizeCategory sizeCategory,
+        IReadOnlyCollection<Guid> eligibleRouteIds,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient.PostAsJsonAsync(
+                "/internal/v1/trips/parcel-availability/search",
+                new
+                {
+                    originStationId,
+                    destinationStationId,
+                    departureDate,
+                    estimatedWeightKg,
+                    estimatedVolumeM3,
+                    sizeCategory = sizeCategory.ToString(),
+                    eligibleRouteIds = eligibleRouteIds.Distinct().ToArray(),
+                    page,
+                    pageSize,
+                },
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false);
+
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                return new ParcelTripSearchOutcome(
+                    ParcelTripSearchOutcomeKind.TransportError,
+                    null,
+                    0,
+                    page,
+                    pageSize,
+                    $"Trip parcel availability search returned {(int)response.StatusCode}.");
+            }
+
+            var paged = await response.Content
+                .ReadFromJsonAsync<PagedResult<TripAvailabilityItemDto>>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            if (paged is null)
+            {
+                return new ParcelTripSearchOutcome(
+                    ParcelTripSearchOutcomeKind.TransportError,
+                    null,
+                    0,
+                    page,
+                    pageSize,
+                    "Trip parcel availability search returned an invalid payload.");
+            }
+
+            var trips = paged.Items.Select(item => new ParcelTripDto(
+                item.TripId,
+                item.RouteId,
+                item.Status,
+                item.OperatorId,
+                item.OperatorName,
+                new TripStationDto(item.OriginStation.Id, item.OriginStation.Name),
+                new TripStationDto(item.DestinationStation.Id, item.DestinationStation.Name),
+                item.DepartureDateTime,
+                item.EstimatedArrivalTime,
+                item.AvailableCargoWeightKg,
+                item.AvailableCargoVolumeM3,
+                0)).ToArray();
+
+            return new ParcelTripSearchOutcome(
+                ParcelTripSearchOutcomeKind.Success,
+                trips,
+                (int)paged.TotalItems,
+                paged.Page,
+                paged.PageSize,
+                null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Trip parcel availability route-filtered search failed.");
+            return new ParcelTripSearchOutcome(
+                ParcelTripSearchOutcomeKind.TransportError,
+                null,
+                0,
+                page,
+                pageSize,
+                "Trip parcel availability route-filtered search transport failure.");
+        }
+    }
+
     public Task<TripCargoOutcome> ReserveCargoAsync(
         Guid tripId,
         Guid parcelId,

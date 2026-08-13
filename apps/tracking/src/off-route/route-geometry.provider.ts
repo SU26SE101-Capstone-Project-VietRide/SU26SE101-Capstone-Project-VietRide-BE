@@ -23,6 +23,7 @@ export type RouteGeometrySource = 'ROUTE_POLYLINE' | 'STOPS_ONLY';
 export interface RouteGeometrySnapshot {
   tripId: string;
   effectiveRouteId?: string;
+  tripStatus?: string;
   points: RouteGeometryPoint[];
   alertRecipientUserIds?: string[];
   geometrySource?: RouteGeometrySource;

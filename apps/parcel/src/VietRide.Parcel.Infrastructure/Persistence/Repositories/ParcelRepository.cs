@@ -297,12 +297,13 @@ internal sealed class ParcelRepository : IParcelRepository
     // ---- Payment deposit transitions (PENDING_PAYMENT) ----
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositSucceededAsync(
-        Guid parcelId, long depositAmount, DateTimeOffset now, CancellationToken ct)
+        Guid parcelId, Guid paymentId, long depositAmount, DateTimeOffset now, CancellationToken ct)
     {
         var expectedDepositAmount = Money.FromRaw(depositAmount);
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId
                 && p.Status == ParcelStatus.PENDING_PAYMENT
+                && p.DepositPaymentId == paymentId
                 && p.DepositRequiredVnd == expectedDepositAmount)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.RESERVED)
@@ -424,10 +425,12 @@ internal sealed class ParcelRepository : IParcelRepository
     }
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositFailedAsync(
-        Guid parcelId, DateTimeOffset now, CancellationToken ct)
+        Guid parcelId, Guid paymentId, DateTimeOffset now, CancellationToken ct)
     {
         var affected = await _db.Parcels
-            .Where(p => p.Id == parcelId && p.Status == ParcelStatus.PENDING_PAYMENT)
+            .Where(p => p.Id == parcelId
+                && p.Status == ParcelStatus.PENDING_PAYMENT
+                && p.DepositPaymentId == paymentId)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.EXPIRED)
                 .SetProperty(p => p.UpdatedAt, now), ct);
@@ -435,15 +438,28 @@ internal sealed class ParcelRepository : IParcelRepository
     }
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositExpiredAsync(
-        Guid parcelId, DateTimeOffset now, CancellationToken ct)
+        Guid parcelId, Guid paymentId, DateTimeOffset now, CancellationToken ct)
     {
         var affected = await _db.Parcels
-            .Where(p => p.Id == parcelId && p.Status == ParcelStatus.PENDING_PAYMENT)
+            .Where(p => p.Id == parcelId
+                && p.Status == ParcelStatus.PENDING_PAYMENT
+                && p.DepositPaymentId == paymentId)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.EXPIRED)
                 .SetProperty(p => p.UpdatedAt, now), ct);
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
+
+    public Task<bool> ShouldRetainDepositCargoHoldAsync(Guid parcelId, CancellationToken ct)
+        => _db.Parcels.AsNoTracking().AnyAsync(parcel =>
+            parcel.Id == parcelId
+            && ((parcel.Status == ParcelStatus.PENDING_PAYMENT && parcel.DepositPaymentId != null)
+                || parcel.Status == ParcelStatus.RESERVED
+                || parcel.Status == ParcelStatus.CHECKED_IN
+                || parcel.Status == ParcelStatus.PENDING_FINAL_PAYMENT
+                || parcel.Status == ParcelStatus.READY_TO_LOAD
+                || parcel.Status == ParcelStatus.LOADED
+                || parcel.Status == ParcelStatus.IN_TRANSIT), ct);
 
     // ---- Additional payment transitions (PENDING_ADDITIONAL_PAYMENT) ----
 
@@ -1100,16 +1116,43 @@ internal sealed class ParcelRepository : IParcelRepository
                 SELECT id
                 FROM vietride_parcel.parcels
                 WHERE status = CAST(@source_status AS vietride_parcel.parcel_status)
+                  AND deposit_payment_id IS NULL
                   AND created_at <= @cutoff
                 ORDER BY created_at
                 LIMIT @max_batch
+                FOR UPDATE SKIP LOCKED
+            ),
+            expired AS (
+                UPDATE vietride_parcel.parcels p
+                SET status = CAST(@target_status AS vietride_parcel.parcel_status),
+                    rejection_reason = 'PAYMENT_NOT_STARTED_TIMEOUT',
+                    rejected_at = @now,
+                    updated_at = @now
+                FROM candidates
+                WHERE p.id = candidates.id
+                  AND p.status = CAST(@source_status AS vietride_parcel.parcel_status)
+                  AND p.deposit_payment_id IS NULL
+                RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, p.status::text,
+                          p.deposit_amount, p.additional_amount, p.sender_user_id,
+                          p.recipient_user_id
+            ),
+            release_operations AS (
+                INSERT INTO vietride_parcel.parcel_cargo_recovery_operations
+                    (id, parcel_id, operator_id, operation_type, status, source_trip_id,
+                     target_trip_id, target_state, actor_user_id, reason, refund_amount_vnd,
+                     refund_due_vnd, source_status, is_status_override, claimed_at,
+                     created_at, updated_at)
+                SELECT expired.id, expired.id, expired.operator_id, 'RELEASE', 'PENDING',
+                       expired.trip_id, NULL, NULL, NULL, 'ORPHAN_PENDING_PAYMENT_TIMEOUT',
+                       0, 0, @source_status, FALSE, @now, @now, @now
+                FROM expired
+                ON CONFLICT DO NOTHING
+                RETURNING id
             )
-            UPDATE vietride_parcel.parcels p
-            SET status = CAST(@target_status AS vietride_parcel.parcel_status),
-                updated_at = @now
-            FROM candidates
-            WHERE p.id = candidates.id
-            RETURNING p.id, p.parcel_code, p.operator_id, p.trip_id, p.status::text, p.deposit_amount, p.additional_amount, p.sender_user_id, p.recipient_user_id;
+            SELECT expired.id, expired.parcel_code, expired.operator_id, expired.trip_id,
+                   expired.status, expired.deposit_amount, expired.additional_amount,
+                   expired.sender_user_id, expired.recipient_user_id
+            FROM expired;
             """,
             command =>
             {
@@ -1493,6 +1536,32 @@ internal sealed class ParcelRepository : IParcelRepository
             : null;
     }
 
+    public async Task<ParcelCargoRecoveryOperationSnapshot?> TryClaimCargoRecoveryReleaseAsync(
+        Guid operationId,
+        Guid parcelId,
+        Guid sourceTripId,
+        string reason,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        await _db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO vietride_parcel.parcel_cargo_recovery_operations
+                (id, parcel_id, operator_id, operation_type, status, source_trip_id,
+                 target_trip_id, target_state, actor_user_id, reason, refund_amount_vnd,
+                 refund_due_vnd, source_status, is_status_override, claimed_at, created_at,
+                 updated_at)
+            SELECT {operationId}, parcel.id, parcel.operator_id, 'RELEASE', 'PENDING',
+                   {sourceTripId}, NULL, NULL, NULL, {reason}, 0, 0,
+                   parcel.status::text, FALSE, {now}, {now}, {now}
+            FROM vietride_parcel.parcels AS parcel
+            WHERE parcel.id = {parcelId}
+              AND parcel.trip_id = {sourceTripId}
+            ON CONFLICT DO NOTHING;
+            """, ct);
+
+        return await GetCargoRecoveryOperationAsync(operationId, ct);
+    }
+
     public async Task<ParcelPaymentTransitionSnapshot?> TryCompleteCargoRecoveryTransferAsync(
         Guid operationId,
         DateTimeOffset now,
@@ -1610,6 +1679,22 @@ internal sealed class ParcelRepository : IParcelRepository
         return BuildSnapshot(await _db.Parcels
             .AsNoTracking()
             .SingleAsync(parcel => parcel.Id == operation.ParcelId, ct));
+    }
+
+    public async Task<bool> TryCompleteCargoRecoveryReleaseAsync(
+        Guid operationId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var affected = await _db.ParcelCargoRecoveryOperations
+            .Where(operation => operation.Id == operationId
+                && operation.OperationType == ParcelCargoRecoveryOperationType.RELEASE
+                && operation.Status == ParcelCargoRecoveryOperationStatus.PENDING)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(operation => operation.Status, ParcelCargoRecoveryOperationStatus.COMPLETED)
+                .SetProperty(operation => operation.CompletedAt, now)
+                .SetProperty(operation => operation.UpdatedAt, now), ct);
+        return affected > 0;
     }
 
     public async Task<bool> TryFailCargoRecoveryOperationAsync(

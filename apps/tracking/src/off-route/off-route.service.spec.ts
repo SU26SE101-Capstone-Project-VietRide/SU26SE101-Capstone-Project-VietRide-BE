@@ -4,8 +4,10 @@ import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
 import { RouteStateGenerationRegistry } from '../route-state/route-state-generation.registry';
 import {
   OFF_ROUTE_EVENT_TYPE,
+  OFF_ROUTE_LOCK_TTL_SECONDS,
   OFF_ROUTE_STATE_TTL_SECONDS,
   ROUTE_GEOMETRY_PROVIDER,
+  trackingOffRouteLockKey,
   trackingOffRouteSinceKey,
 } from './off-route.constants';
 import { OffRouteService } from './off-route.service';
@@ -14,35 +16,40 @@ import type { RouteGeometryProvider } from './route-geometry.provider';
 const TEST_TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const ALERT_RECIPIENT_USER_ID = '66666666-6666-4666-8666-666666666666';
 const FIRST_RECORDED_AT = '2026-06-04T10:00:00.000Z';
-const SHORT_DRIFT_RECORDED_AT = '2026-06-04T10:01:00.000Z';
+const EXACT_THRESHOLD_RECORDED_AT = '2026-06-04T10:02:00.000Z';
 const ALERT_RECORDED_AT = '2026-06-04T10:02:01.000Z';
 
 describe('OffRouteService', () => {
   let service: OffRouteService;
-  let redisGet: jest.MockedFunction<(key: string) => Promise<string | null>>;
-  let redisSet: jest.MockedFunction<(key: string, value: string, mode: string, ttl: number) => Promise<string>>;
-  let redisDel: jest.MockedFunction<(key: string) => Promise<number>>;
-  let outboxCreate: jest.MockedFunction<(args: unknown) => Promise<unknown>>;
+  let values: Map<string, string>;
+  let redisGet: jest.Mock;
+  let redisSet: jest.Mock;
+  let redisDel: jest.Mock;
+  let redisEval: jest.Mock;
+  let outboxUpsert: jest.Mock;
   let routeGeometryProvider: jest.Mocked<RouteGeometryProvider>;
   let routeStateGeneration: RouteStateGenerationRegistry;
 
   beforeEach(async () => {
-    redisGet = jest.fn(async (key: string) => {
-      void key;
-      return null;
-    });
-    redisSet = jest.fn(async (key: string, value: string, mode: string, ttl: number) => {
-      void key;
-      void value;
-      void mode;
-      void ttl;
+    values = new Map();
+    redisGet = jest.fn(async (key: string) => values.get(key) ?? null);
+    redisSet = jest.fn(async (...args: unknown[]) => {
+      const [key, value, , , condition] = args as [string, string, string, number, string?];
+      if (condition === 'NX' && values.has(key)) return null;
+      values.set(key, value);
       return 'OK';
     });
-    redisDel = jest.fn(async (key: string) => {
-      void key;
+    redisDel = jest.fn(async (...keys: string[]) => {
+      let deleted = 0;
+      for (const key of keys) deleted += values.delete(key) ? 1 : 0;
+      return deleted;
+    });
+    redisEval = jest.fn(async (_script: string, _keyCount: number, key: string, owner: string) => {
+      if (values.get(key) !== owner) return 0;
+      values.delete(key);
       return 1;
     });
-    outboxCreate = jest.fn(async (args: unknown) => args);
+    outboxUpsert = jest.fn(async (args: unknown) => args);
     routeGeometryProvider = {
       peekCachedRouteGeometry: jest.fn((tripId: string) => ({
         tripId,
@@ -52,14 +59,10 @@ describe('OffRouteService', () => {
           { latitude: 10.8, longitude: 106.6 },
         ],
       })),
-      getRouteGeometry: jest.fn(async (tripId: string) => ({
-        tripId,
-        alertRecipientUserIds: [ALERT_RECIPIENT_USER_ID],
-        points: [
-          { latitude: 10.7, longitude: 106.6 },
-          { latitude: 10.8, longitude: 106.6 },
-        ],
-      })),
+      getRouteGeometry: jest.fn(async (tripId: string) => {
+        void tripId;
+        return null;
+      }),
       invalidateRouteGeometry: jest.fn(),
     };
 
@@ -73,21 +76,15 @@ describe('OffRouteService', () => {
               get: redisGet,
               set: redisSet,
               del: redisDel,
+              eval: redisEval,
             })),
           },
         },
         {
           provide: TrackingPrismaService,
-          useValue: {
-            outboxEvent: {
-              create: outboxCreate,
-            },
-          },
+          useValue: { outboxEvent: { upsert: outboxUpsert } },
         },
-        {
-          provide: ROUTE_GEOMETRY_PROVIDER,
-          useValue: routeGeometryProvider,
-        },
+        { provide: ROUTE_GEOMETRY_PROVIDER, useValue: routeGeometryProvider },
         RouteStateGenerationRegistry,
       ],
     }).compile();
@@ -96,41 +93,36 @@ describe('OffRouteService', () => {
     routeStateGeneration = moduleRef.get(RouteStateGenerationRegistry);
   });
 
-  it('does not alert for short GPS drift', async () => {
-    redisGet.mockResolvedValueOnce(null).mockResolvedValueOnce(JSON.stringify({ firstDetectedAt: FIRST_RECORDED_AT }));
-
+  it('starts a timer and does not alert at exactly the continuous threshold', async () => {
     await expect(service.handleGpsUpdate(createOffRouteGps(FIRST_RECORDED_AT))).resolves.toBeNull();
-    await expect(service.handleGpsUpdate(createOffRouteGps(SHORT_DRIFT_RECORDED_AT))).resolves.toBeNull();
+    await expect(service.handleGpsUpdate(createOffRouteGps(EXACT_THRESHOLD_RECORDED_AT))).resolves.toBeNull();
 
+    expect(readState()).toEqual({ firstDetectedAt: FIRST_RECORDED_AT });
+    expect(outboxUpsert).not.toHaveBeenCalled();
     expect(redisSet).toHaveBeenCalledWith(
       trackingOffRouteSinceKey(TEST_TRIP_ID),
       JSON.stringify({ firstDetectedAt: FIRST_RECORDED_AT }),
       'EX',
       OFF_ROUTE_STATE_TTL_SECONDS,
-      'NX',
     );
-    expect(outboxCreate).not.toHaveBeenCalled();
   });
 
-  it('creates one alert after continuous off-route threshold', async () => {
-    redisGet
-      .mockResolvedValueOnce(JSON.stringify({ firstDetectedAt: FIRST_RECORDED_AT }))
-      .mockResolvedValueOnce(JSON.stringify({ firstDetectedAt: FIRST_RECORDED_AT, alertedAt: ALERT_RECORDED_AT }));
+  it('creates one alert and DEVIATED transition after the threshold', async () => {
+    seedState({ firstDetectedAt: FIRST_RECORDED_AT });
 
-    await expect(service.handleGpsUpdate(createOffRouteGps(ALERT_RECORDED_AT))).resolves.toEqual(
-      expect.objectContaining({
-        tripId: TEST_TRIP_ID,
-        latitude: 10.75,
-        longitude: 106.61,
-        detectedAt: ALERT_RECORDED_AT,
-      }),
-    );
-    await expect(service.handleGpsUpdate(createOffRouteGps('2026-06-04T10:03:00.000Z'))).resolves.toBeNull();
+    await expect(service.handleGpsUpdate(createOffRouteGps(ALERT_RECORDED_AT))).resolves.toEqual({
+      tripId: TEST_TRIP_ID,
+      status: 'DEVIATED',
+      distanceMeters: expect.any(Number),
+      updatedAt: ALERT_RECORDED_AT,
+    });
 
-    expect(outboxCreate).toHaveBeenCalledTimes(1);
-    expect(outboxCreate).toHaveBeenCalledWith({
-      data: {
+    expect(outboxUpsert).toHaveBeenCalledTimes(1);
+    expect(outboxUpsert).toHaveBeenCalledWith({
+      where: { dedupeKey: `off-route:${TEST_TRIP_ID}:${FIRST_RECORDED_AT}` },
+      create: {
         eventType: OFF_ROUTE_EVENT_TYPE,
+        dedupeKey: `off-route:${TEST_TRIP_ID}:${FIRST_RECORDED_AT}`,
         payload: {
           tripId: TEST_TRIP_ID,
           userIds: [ALERT_RECIPIENT_USER_ID],
@@ -141,49 +133,141 @@ describe('OffRouteService', () => {
           detectedAt: ALERT_RECORDED_AT,
         },
       },
+      update: {},
+    });
+    expect(readState()).toEqual({
+      firstDetectedAt: FIRST_RECORDED_AT,
+      alertedAt: ALERT_RECORDED_AT,
+      lastRealtimeEmittedAt: ALERT_RECORDED_AT,
     });
   });
 
-  it('clears Redis timer when vehicle returns to route', async () => {
-    await expect(service.handleGpsUpdate(createOnRouteGps())).resolves.toBeNull();
+  it('emits no heartbeat before 60 seconds and one heartbeat at 60 seconds', async () => {
+    seedState({
+      firstDetectedAt: FIRST_RECORDED_AT,
+      alertedAt: ALERT_RECORDED_AT,
+      lastRealtimeEmittedAt: ALERT_RECORDED_AT,
+    });
 
-    expect(redisDel).toHaveBeenCalledWith(trackingOffRouteSinceKey(TEST_TRIP_ID));
-    expect(redisSet).not.toHaveBeenCalled();
-    expect(outboxCreate).not.toHaveBeenCalled();
+    await expect(service.handleGpsUpdate(createOffRouteGps('2026-06-04T10:03:00.000Z')))
+      .resolves.toBeNull();
+    await expect(service.handleGpsUpdate(createOffRouteGps('2026-06-04T10:03:01.000Z')))
+      .resolves.toEqual({
+        tripId: TEST_TRIP_ID,
+        status: 'DEVIATED',
+        distanceMeters: expect.any(Number),
+        updatedAt: '2026-06-04T10:03:01.000Z',
+      });
+
+    expect(outboxUpsert).not.toHaveBeenCalled();
+    expect(readState()).toEqual(expect.objectContaining({
+      lastRealtimeEmittedAt: '2026-06-04T10:03:01.000Z',
+    }));
   });
 
-  it('does not write state or Outbox after its route generation is invalidated', async () => {
-    let resolveState: ((value: string | null) => void) | undefined;
-    redisGet.mockImplementationOnce(() => new Promise((resolve) => {
-      resolveState = resolve;
-    }));
+  it('clears a pre-alert timer without emitting restored', async () => {
+    seedState({ firstDetectedAt: FIRST_RECORDED_AT });
+
+    await expect(service.handleGpsUpdate(createOnRouteGps('2026-06-04T10:01:00.000Z')))
+      .resolves.toBeNull();
+
+    expect(values.has(trackingOffRouteSinceKey(TEST_TRIP_ID))).toBe(false);
+  });
+
+  it('emits ROUTE_RESTORED once after an alerted deviation', async () => {
+    seedState({
+      firstDetectedAt: FIRST_RECORDED_AT,
+      alertedAt: ALERT_RECORDED_AT,
+      lastRealtimeEmittedAt: ALERT_RECORDED_AT,
+    });
+
+    await expect(service.handleGpsUpdate(createOnRouteGps('2026-06-04T10:04:00.000Z')))
+      .resolves.toEqual({
+        tripId: TEST_TRIP_ID,
+        status: 'ROUTE_RESTORED',
+        distanceMeters: 0,
+        updatedAt: '2026-06-04T10:04:00.000Z',
+      });
+    await expect(service.handleGpsUpdate(createOnRouteGps('2026-06-04T10:04:05.000Z')))
+      .resolves.toBeNull();
+  });
+
+  it('allows only one concurrent evaluation to acquire the trip lock', async () => {
+    seedState({ firstDetectedAt: FIRST_RECORDED_AT });
+    let releaseRead: (() => void) | undefined;
+    redisGet.mockImplementationOnce(async (key: string) => {
+      await new Promise<void>((resolve) => { releaseRead = resolve; });
+      return values.get(key) ?? null;
+    });
+
+    const first = service.handleGpsUpdate(createOffRouteGps(ALERT_RECORDED_AT));
+    await Promise.resolve();
+    const second = service.handleGpsUpdate(createOffRouteGps(ALERT_RECORDED_AT));
+    await expect(second).resolves.toBeNull();
+    releaseRead?.();
+    await expect(first).resolves.toEqual(expect.objectContaining({ status: 'DEVIATED' }));
+
+    expect(outboxUpsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not write state or Outbox after route generation invalidation', async () => {
+    seedState({ firstDetectedAt: FIRST_RECORDED_AT });
+    let releaseRead: (() => void) | undefined;
+    let signalReadStarted: (() => void) | undefined;
+    const readStarted = new Promise<void>((resolve) => { signalReadStarted = resolve; });
+    redisGet.mockImplementationOnce(async (key: string) => {
+      signalReadStarted?.();
+      await new Promise<void>((resolve) => { releaseRead = resolve; });
+      return values.get(key) ?? null;
+    });
 
     const evaluation = service.handleGpsUpdate(createOffRouteGps(ALERT_RECORDED_AT));
-    await Promise.resolve();
+    await readStarted;
     routeStateGeneration.invalidate(TEST_TRIP_ID);
-    if (!resolveState) throw new Error('Off-route state read did not start');
-    resolveState(JSON.stringify({ firstDetectedAt: FIRST_RECORDED_AT }));
+    releaseRead?.();
 
     await expect(evaluation).resolves.toBeNull();
-    expect(redisSet).not.toHaveBeenCalled();
-    expect(outboxCreate).not.toHaveBeenCalled();
+    expect(outboxUpsert).not.toHaveBeenCalled();
   });
 
-  function createOffRouteGps(recordedAt: string) {
-    return {
-      tripId: TEST_TRIP_ID,
-      latitude: 10.75,
-      longitude: 106.61,
-      recordedAt,
-    };
+  it('fails open on cache miss and warms geometry asynchronously', async () => {
+    routeGeometryProvider.peekCachedRouteGeometry.mockReturnValueOnce(null);
+
+    await expect(service.handleGpsUpdate(createOffRouteGps(ALERT_RECORDED_AT))).resolves.toBeNull();
+
+    expect(routeGeometryProvider.getRouteGeometry).toHaveBeenCalledWith(TEST_TRIP_ID);
+    expect(redisSet).not.toHaveBeenCalled();
+  });
+
+  it('clears runtime state under the same per-trip lock', async () => {
+    seedState({ firstDetectedAt: FIRST_RECORDED_AT });
+
+    await expect(service.clearRuntimeState(TEST_TRIP_ID)).resolves.toBeUndefined();
+
+    expect(values.has(trackingOffRouteSinceKey(TEST_TRIP_ID))).toBe(false);
+    expect(redisSet).toHaveBeenCalledWith(
+      trackingOffRouteLockKey(TEST_TRIP_ID),
+      expect.any(String),
+      'EX',
+      OFF_ROUTE_LOCK_TTL_SECONDS,
+      'NX',
+    );
+  });
+
+  function seedState(state: Record<string, string>): void {
+    values.set(trackingOffRouteSinceKey(TEST_TRIP_ID), JSON.stringify(state));
   }
 
-  function createOnRouteGps() {
-    return {
-      tripId: TEST_TRIP_ID,
-      latitude: 10.75,
-      longitude: 106.6,
-      recordedAt: FIRST_RECORDED_AT,
-    };
+  function readState(): unknown {
+    const value = values.get(trackingOffRouteSinceKey(TEST_TRIP_ID));
+    return value ? JSON.parse(value) : null;
+  }
+
+  function createOffRouteGps(recordedAt: string) {
+    return { tripId: TEST_TRIP_ID, latitude: 10.75, longitude: 106.61, recordedAt };
+  }
+
+  function createOnRouteGps(recordedAt: string) {
+    return { tripId: TEST_TRIP_ID, latitude: 10.75, longitude: 106.6, recordedAt };
   }
 });

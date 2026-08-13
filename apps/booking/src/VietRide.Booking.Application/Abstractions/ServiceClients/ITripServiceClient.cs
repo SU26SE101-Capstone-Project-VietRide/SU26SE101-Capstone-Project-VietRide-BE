@@ -56,6 +56,11 @@ public sealed record TripStopSnapshot(
 /// <summary>Seat availability summary embedded in <see cref="TripSnapshot"/>.</summary>
 public sealed record TripSeatSummary(int TotalSeats, int AvailableSeats);
 
+public sealed record TripHistoryVehicleSummary(
+    Guid TripId,
+    string LicensePlate,
+    TripHistoryVehicleTypeSummary? VehicleType = null);
+
 public abstract record ShuttleRoadDistanceOutcome
 {
     private ShuttleRoadDistanceOutcome() { }
@@ -180,6 +185,11 @@ public sealed record RoundTripSeatConflict(string Field, string SeatNumber);
 /// </summary>
 public interface ITripServiceClient
 {
+    Task<IReadOnlyList<TripHistoryVehicleSummary>> GetHistoryVehicleSummariesAsync(
+        IReadOnlyCollection<Guid> tripIds,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<TripHistoryVehicleSummary>>([]);
+
     /// <summary>
     /// GET /internal/v1/trips/{tripId} — returns a trip snapshot for fare
     /// calculation and pickup/dropoff validation. Returns <c>null</c> if 404.

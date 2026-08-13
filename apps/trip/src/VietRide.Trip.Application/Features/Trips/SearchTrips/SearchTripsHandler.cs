@@ -388,6 +388,7 @@ public sealed class SearchTripsHandler : IRequestHandler<SearchTripsQuery, Searc
         return children
             .Where(location => Location.IsLeafType(location.Type))
             .Select(location => location.Id)
+            .Append(province.Id)
             .ToHashSet();
     }
 

@@ -104,6 +104,15 @@ public class BookingServiceClientInternalClientTests
                         bookingGroupId = (Guid?)null,
                         tripDirection = (string?)null,
                         routeName = "Route",
+                        vehicle = new
+                        {
+                            licensePlate = "51B-123.45",
+                            vehicleType = new
+                            {
+                                code = "LIMOUSINE",
+                                displayName = "Limousine",
+                            },
+                        },
                         tickets = Array.Empty<object>(),
                         paymentRedirectUrl = "https://sandbox.vnpayment.vn/ticket",
                     },
@@ -130,6 +139,10 @@ public class BookingServiceClientInternalClientTests
         result.Page!.Page.Should().Be(2);
         result.Page.Items.Should().ContainSingle().Which.PaymentRedirectUrl.Should()
             .Be("https://sandbox.vnpayment.vn/ticket");
+        result.Page.Items.Single().Vehicle.Should()
+            .BeEquivalentTo(new BookingHistoryVehicleDto(
+                "51B-123.45",
+                new BookingHistoryVehicleTypeDto("LIMOUSINE", "Limousine")));
         _handler.LastRequest!.RequestUri!.AbsolutePath.Should().Be("/internal/v1/bookings/history");
         _handler.LastRequest.RequestUri.Query.Should().Contain($"userId={userId:D}");
         _handler.LastRequest.RequestUri.Query.Should().Contain("status=CONFIRMED");

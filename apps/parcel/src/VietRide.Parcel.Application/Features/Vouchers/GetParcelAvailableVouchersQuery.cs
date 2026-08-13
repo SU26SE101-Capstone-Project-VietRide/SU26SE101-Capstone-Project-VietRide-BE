@@ -8,4 +8,5 @@ public sealed record GetParcelAvailableVouchersQuery(
     Guid TripId,
     string SizeCategory,
     string? PaymentMethod,
-    long? OrderAmount) : IRequest<IReadOnlyList<AvailableVoucherDto>>;
+    long? OrderAmount,
+    string? QuoteToken = null) : IRequest<IReadOnlyList<AvailableVoucherDto>>;

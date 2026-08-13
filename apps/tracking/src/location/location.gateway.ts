@@ -39,6 +39,10 @@ import { LocationService, type GpsUpdateEvent } from './location.service';
 import { TripShareRealtimePublisher } from '../trip-sharing/trip-share-realtime.publisher';
 import { OperatorTripProjectionProvider } from '../tracking-data/operator-trip-projection.provider';
 import type { RouteChangeProposalEvent } from '@vietride/contracts';
+import {
+  TripRouteContextService,
+  type PublicTripRouteContextDto,
+} from '../tracking-data/trip-route-context.service';
 
 interface TrackingSocket extends Socket {
   data: {
@@ -53,6 +57,8 @@ interface JoinTripTrackingAck {
   scope?: string;
   error?: string;
   message?: string;
+  routeContext?: PublicTripRouteContextDto;
+  routeVersion?: string;
 }
 
 interface GpsUpdateAck {
@@ -82,6 +88,7 @@ export class LocationGateway implements OnGatewayInit {
     private readonly shuttleService: ShuttleService,
     private readonly shuttleEtaService: ShuttleEtaService,
     private readonly tripShareRealtime: TripShareRealtimePublisher,
+    @Optional() private readonly tripRouteContext?: TripRouteContextService,
     @Optional() private readonly operatorTrips?: OperatorTripProjectionProvider,
   ) {}
 
@@ -200,6 +207,18 @@ export class LocationGateway implements OnGatewayInit {
       return { success: false, error: authorization.error ?? 'ACCESS_DENIED' };
     }
 
+    let routeSnapshot: Awaited<ReturnType<TripRouteContextService['getRouteContext']>> | undefined;
+    if (parsed.data.includeRouteSnapshot) {
+      if (!this.tripRouteContext) {
+        return { success: false, error: 'TRACKING_ROUTE_CONTEXT_UNAVAILABLE' };
+      }
+      try {
+        routeSnapshot = await this.tripRouteContext.getRouteContext(parsed.data.tripId);
+      } catch {
+        return { success: false, error: 'TRACKING_ROUTE_CONTEXT_UNAVAILABLE' };
+      }
+    }
+
     const room = trackingTripRoom(parsed.data.tripId);
     await socket.join(room);
     if (authorization.scope === 'DRIVER' || authorization.scope === 'ASSISTANT') {
@@ -210,6 +229,9 @@ export class LocationGateway implements OnGatewayInit {
       tripId: parsed.data.tripId,
       room,
       scope: authorization.scope,
+      ...(routeSnapshot
+        ? { routeContext: routeSnapshot.data, routeVersion: routeSnapshot.etag }
+        : {}),
     };
   }
 
@@ -348,7 +370,7 @@ export class LocationGateway implements OnGatewayInit {
       .emit('gps:update', transformFrontendTimestamps(event));
     void this.publishFleetGps(user, event);
     this.publishSharedGps(event);
-    void this.runDetection(event, result.rawEvent).catch((error) => {
+    void this.runDetection(user, event, result.rawEvent).catch((error) => {
       this.logger.error(
         `Tracking detection chain failed for trip ${event.tripId}: ${(error as Error).message}`,
       );
@@ -389,26 +411,44 @@ export class LocationGateway implements OnGatewayInit {
     }
   }
 
-  private async runDetection(event: GpsUpdateEvent, rawEvent: GpsUpdateEvent): Promise<void> {
-    await this.offRouteService.handleGpsUpdate(rawEvent);
+  private async runDetection(
+    user: TrackingUser,
+    event: GpsUpdateEvent,
+    rawEvent: GpsUpdateEvent,
+  ): Promise<void> {
+    const routeDeviation = await this.offRouteService.handleGpsUpdate(rawEvent);
+    if (routeDeviation) {
+      const payload = transformFrontendTimestamps(routeDeviation);
+      this.server
+        .to(trackingTripCrewRoom(event.tripId))
+        .emit('trip:routeDeviation', payload);
+      if (user.operatorId) {
+        this.server
+          .to(trackingOperatorFleetRoom(user.operatorId))
+          .emit('trip:routeDeviation', payload);
+      }
+    }
     const etaUpdate = await this.etaService.handleGpsUpdate(event);
     if (etaUpdate) {
-      const { etas, ...nextEtaUpdate } = etaUpdate;
-      const tripDelayEtaUpdate = await this.tripDelayService.handleEtaUpdate(nextEtaUpdate);
-      const { statusTransition, ...etaPayload } = tripDelayEtaUpdate;
-      this.server
-        .to(trackingTripRoom(event.tripId))
-        .emit('eta:update', transformFrontendTimestamps(etaPayload));
+      const { etas, ...primaryEtaUpdate } = etaUpdate;
       if (etas) {
         this.server.to(trackingTripRoom(event.tripId)).emit(
           'eta:batch:update',
           transformFrontendTimestamps({
             tripId: event.tripId,
             etas,
-            updatedAt: etaPayload.updatedAt,
+            updatedAt: primaryEtaUpdate.updatedAt,
           }),
         );
       }
+      if (primaryEtaUpdate.targetKind === 'STATION') return;
+
+      const nextEtaUpdate = primaryEtaUpdate;
+      const tripDelayEtaUpdate = await this.tripDelayService.handleEtaUpdate(nextEtaUpdate);
+      const { statusTransition, ...etaPayload } = tripDelayEtaUpdate;
+      this.server
+        .to(trackingTripRoom(event.tripId))
+        .emit('eta:update', transformFrontendTimestamps(etaPayload));
       this.publishSharedEta(etaPayload);
       if (statusTransition) {
         this.server.to(trackingTripRoom(event.tripId)).emit(

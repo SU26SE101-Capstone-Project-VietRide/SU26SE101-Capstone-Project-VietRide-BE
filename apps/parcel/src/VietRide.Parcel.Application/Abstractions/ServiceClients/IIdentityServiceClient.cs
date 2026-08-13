@@ -6,6 +6,11 @@ public interface IIdentityServiceClient
         Guid userId,
         CancellationToken cancellationToken = default);
 
+    Task<RecipientUserLookupOutcome> FindUserByEmailAsync(
+        string email,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(RecipientUserLookupOutcome.NotFound());
+
     Task<IdentityUserBatchOutcome> GetUsersAsync(
         IReadOnlyCollection<Guid> userIds,
         CancellationToken cancellationToken = default)

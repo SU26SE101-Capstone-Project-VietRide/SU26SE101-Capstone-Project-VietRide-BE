@@ -49,9 +49,10 @@ public sealed class AvailableTripsTests
             2.5m,
             200_000);
 
-        tripClient.SearchAvailableParcelTripsAsync(
+        tripClient.SearchAvailableParcelTripsForRoutesAsync(
                 OriginStationId, DestinationStationId, DepartureDate,
-                WeightKg, Arg.Any<ParcelSizeCategory>(), Page, PageSize,
+                WeightKg, Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(),
+                Arg.Any<IReadOnlyCollection<Guid>>(), Page, PageSize,
                 Arg.Any<CancellationToken>())
             .Returns(new ParcelTripSearchOutcome(
                 ParcelTripSearchOutcomeKind.Success,
@@ -60,10 +61,12 @@ public sealed class AvailableTripsTests
 
         var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,
             Money.FromRaw(150_000), Now);
+        fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
         fare.CreatedAt = Now;
         fare.UpdatedAt = Now;
         fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
             .Returns(fare);
+        fareRepo.QueryNoTracking().Returns(new[] { fare }.AsQueryable());
 
         var handler = new AvailableTripsQueryHandler(tripClient, identityClient, fareRepo);
         var query = new AvailableTripsQuery(
@@ -103,13 +106,14 @@ public sealed class AvailableTripsTests
         var policyRepo = Substitute.For<IParcelPricingPolicyRepository>();
         var tripDto = CreateTripDto(TripId, RouteId, "Test Operator", Departure, 50m, 2.5m);
 
-        tripClient.SearchAvailableParcelTripsAsync(
+        tripClient.SearchAvailableParcelTripsForRoutesAsync(
                 OriginStationId,
                 DestinationStationId,
                 DepartureDate,
                 1m,
                 0.001m,
                 ParcelSizeCategory.SMALL,
+                Arg.Any<IReadOnlyCollection<Guid>>(),
                 Page,
                 PageSize,
                 Arg.Any<CancellationToken>())
@@ -126,8 +130,10 @@ public sealed class AvailableTripsTests
             OperatorId,
             Money.FromRaw(150_000),
             Now);
+        fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
         fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.SMALL, Arg.Any<CancellationToken>())
             .Returns(fare);
+        fareRepo.QueryNoTracking().Returns(new[] { fare }.AsQueryable());
         policyRepo.GetSystemDecimalAsync(
                 "DIM_WEIGHT_FACTOR",
                 Arg.Any<decimal>(),
@@ -176,13 +182,18 @@ public sealed class AvailableTripsTests
         var identityClient = Substitute.For<IIdentityServiceClient>();
         var fareRepo = Substitute.For<IParcelRouteFareRepository>();
 
-        tripClient.SearchAvailableParcelTripsAsync(
+        tripClient.SearchAvailableParcelTripsForRoutesAsync(
                 Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(),
-                Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(), Arg.Any<int>(), Arg.Any<int>(),
+                Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(),
+                Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<int>(), Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
             .Returns(new ParcelTripSearchOutcome(
                 ParcelTripSearchOutcomeKind.TransportError,
                 null, 0, Page, PageSize, "upstream timeout"));
+        var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,
+            Money.FromRaw(150_000), Now);
+        fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
+        fareRepo.QueryNoTracking().Returns(new[] { fare }.AsQueryable());
 
         var handler = new AvailableTripsQueryHandler(tripClient, identityClient, fareRepo);
         var query = new AvailableTripsQuery(
@@ -195,7 +206,7 @@ public sealed class AvailableTripsTests
     }
 
     [Fact]
-    public async Task Handle_SkipsTrips_WithoutConfiguredFare()
+    public async Task Handle_FiltersTripsWithoutConfiguredFareBeforePagination()
     {
         var tripClient = Substitute.For<ITripServiceClient>();
         var identityClient = Substitute.For<IIdentityServiceClient>();
@@ -210,20 +221,24 @@ public sealed class AvailableTripsTests
             CreateTripDto(Guid.NewGuid(), routeWithoutFare, "Op B", Departure.AddHours(1), 20m, 1m),
         };
 
-        tripClient.SearchAvailableParcelTripsAsync(
+        tripClient.SearchAvailableParcelTripsForRoutesAsync(
                 Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(),
-                Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(), Arg.Any<int>(), Arg.Any<int>(),
+                Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(),
+                Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 1 && ids.Contains(routeWithFare)),
+                Arg.Any<int>(), Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
             .Returns(new ParcelTripSearchOutcome(
                 ParcelTripSearchOutcomeKind.Success,
-                trips, 2, Page, PageSize, null));
+                [trips[0]], 1, Page, PageSize, null));
 
         var fare = ParcelRouteFare.Create(routeWithFare, ParcelSizeCategory.MEDIUM, OperatorId,
             Money.FromRaw(150_000), Now);
+        fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
         fareRepo.FindByCompositeAsync(routeWithFare, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
             .Returns(fare);
         fareRepo.FindByCompositeAsync(routeWithoutFare, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
             .Returns((ParcelRouteFare?)null);
+        fareRepo.QueryNoTracking().Returns(new[] { fare }.AsQueryable());
 
         var handler = new AvailableTripsQueryHandler(tripClient, identityClient, fareRepo);
         var query = new AvailableTripsQuery(
@@ -234,7 +249,7 @@ public sealed class AvailableTripsTests
 
         result.Items.Should().ContainSingle();
         result.Items.Single().OperatorName.Should().Be("Op A");
-        result.TotalItems.Should().Be(2);
+        result.TotalItems.Should().Be(1);
     }
 
     [Fact]
@@ -250,9 +265,10 @@ public sealed class AvailableTripsTests
             new TripStationDto(DestinationStationId, "Bến đến"),
             Departure, EstimatedArrival, 50.0m, 2.5m, 200_000);
 
-        tripClient.SearchAvailableParcelTripsAsync(
+        tripClient.SearchAvailableParcelTripsForRoutesAsync(
                 Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(),
-                Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(), Arg.Any<int>(), Arg.Any<int>(),
+                Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(),
+                Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<int>(), Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
             .Returns(new ParcelTripSearchOutcome(
                 ParcelTripSearchOutcomeKind.Success,
@@ -267,8 +283,10 @@ public sealed class AvailableTripsTests
 
         var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,
             Money.FromRaw(150_000), Now);
+        fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
         fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
             .Returns(fare);
+        fareRepo.QueryNoTracking().Returns(new[] { fare }.AsQueryable());
 
         var handler = new AvailableTripsQueryHandler(tripClient, identityClient, fareRepo);
         var query = new AvailableTripsQuery(
@@ -296,9 +314,10 @@ public sealed class AvailableTripsTests
             new TripStationDto(DestinationStationId, "Bến đến"),
             Departure, EstimatedArrival, 50.0m, 2.5m, 200_000);
 
-        tripClient.SearchAvailableParcelTripsAsync(
+        tripClient.SearchAvailableParcelTripsForRoutesAsync(
                 Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(),
-                Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(), Arg.Any<int>(), Arg.Any<int>(),
+                Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(),
+                Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<int>(), Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
             .Returns(new ParcelTripSearchOutcome(
                 ParcelTripSearchOutcomeKind.Success,
@@ -312,8 +331,10 @@ public sealed class AvailableTripsTests
 
         var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,
             Money.FromRaw(150_000), Now);
+        fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
         fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
             .Returns(fare);
+        fareRepo.QueryNoTracking().Returns(new[] { fare }.AsQueryable());
 
         var handler = new AvailableTripsQueryHandler(tripClient, identityClient, fareRepo);
         var query = new AvailableTripsQuery(
@@ -358,9 +379,10 @@ public sealed class AvailableTripsTests
             new TripStationDto(DestinationStationId, "Bến đến"),
             Departure, EstimatedArrival, 50.0m, 2.5m, 200_000);
 
-        tripClient.SearchAvailableParcelTripsAsync(
+        tripClient.SearchAvailableParcelTripsForRoutesAsync(
                 Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(),
-                Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(), Arg.Any<int>(), Arg.Any<int>(),
+                Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(),
+                Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<int>(), Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
             .Returns(new ParcelTripSearchOutcome(
                 ParcelTripSearchOutcomeKind.Success,
@@ -374,8 +396,10 @@ public sealed class AvailableTripsTests
 
         var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,
             Money.FromRaw(150_000), Now);
+        fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
         fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
             .Returns(fare);
+        fareRepo.QueryNoTracking().Returns(new[] { fare }.AsQueryable());
 
         var handler = new AvailableTripsQueryHandler(tripClient, identityClient, fareRepo);
         var query = new AvailableTripsQuery(
@@ -400,9 +424,10 @@ public sealed class AvailableTripsTests
             new TripStationDto(DestinationStationId, "Bến đến"),
             Departure, EstimatedArrival, 50.0m, 2.5m, 200_000);
 
-        tripClient.SearchAvailableParcelTripsAsync(
+        tripClient.SearchAvailableParcelTripsForRoutesAsync(
                 Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(),
-                Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(), Arg.Any<int>(), Arg.Any<int>(),
+                Arg.Any<decimal>(), Arg.Any<decimal>(), Arg.Any<ParcelSizeCategory>(),
+                Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<int>(), Arg.Any<int>(),
                 Arg.Any<CancellationToken>())
             .Returns(new ParcelTripSearchOutcome(
                 ParcelTripSearchOutcomeKind.Success,
@@ -416,8 +441,10 @@ public sealed class AvailableTripsTests
 
         var fare = ParcelRouteFare.Create(RouteId, ParcelSizeCategory.MEDIUM, OperatorId,
             Money.FromRaw(150_000), Now);
+        fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
         fareRepo.FindByCompositeAsync(RouteId, ParcelSizeCategory.MEDIUM, Arg.Any<CancellationToken>())
             .Returns(fare);
+        fareRepo.QueryNoTracking().Returns(new[] { fare }.AsQueryable());
 
         var handler = new AvailableTripsQueryHandler(tripClient, identityClient, fareRepo);
         var query = new AvailableTripsQuery(

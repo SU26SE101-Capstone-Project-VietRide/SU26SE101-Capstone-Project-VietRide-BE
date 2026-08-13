@@ -5,6 +5,7 @@ using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Devices.GetActiveDeviceTokens;
 using VietRide.Identity.Application.Features.Devices.RemoveDeviceToken;
 using VietRide.Identity.Application.Features.InternalUsers.GetInternalUser;
+using VietRide.Identity.Application.Features.InternalUsers.GetInternalUserByEmail;
 using VietRide.Identity.Application.Features.InternalUsers.GetInternalUserByPhone;
 using VietRide.Shared.Web.Authentication;
 
@@ -46,6 +47,19 @@ public sealed class InternalUsersController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _mediator.Send(new GetInternalUserByPhoneQuery(phone), cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("by-email")]
+    [ProducesResponseType(typeof(GetInternalUserByEmailResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<GetInternalUserByEmailResponseDto>> GetUserByEmail(
+        [FromQuery] string email,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(new GetInternalUserByEmailQuery(email), cancellationToken);
         return Ok(result);
     }
 

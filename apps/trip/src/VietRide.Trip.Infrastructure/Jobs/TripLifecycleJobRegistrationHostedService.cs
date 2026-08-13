@@ -9,6 +9,7 @@ public sealed class TripLifecycleJobRegistrationHostedService : IHostedService
     public const string AutoBoardingJobId = "trip.auto-boarding";
     public const string AutoStartFallbackJobId = "trip.auto-start-fallback";
     public const string AutoCompletedFallbackJobId = "trip.auto-completed-fallback";
+    public const string EveryMinuteCron = "* * * * *";
     public const string EveryFifteenMinutesCron = "*/15 * * * *";
     public const string EveryFiveMinutesCron = "*/5 * * * *";
     private const string QueueName = "trip";
@@ -25,7 +26,7 @@ public sealed class TripLifecycleJobRegistrationHostedService : IHostedService
         Register<AutoBoardingJob>(
             AutoBoardingJobId,
             job => job.ScanAsync(CancellationToken.None),
-            EveryFifteenMinutesCron);
+            EveryMinuteCron);
         Register<AutoStartFallbackJob>(
             AutoStartFallbackJobId,
             job => job.ScanAsync(CancellationToken.None),

@@ -19,7 +19,7 @@ public sealed class TripLifecycleJobTests
 
         registrations.Select(item => (item.Id, item.Cron)).Should().BeEquivalentTo(
             [
-                (TripLifecycleJobRegistrationHostedService.AutoBoardingJobId, TripLifecycleJobRegistrationHostedService.EveryFifteenMinutesCron),
+                (TripLifecycleJobRegistrationHostedService.AutoBoardingJobId, TripLifecycleJobRegistrationHostedService.EveryMinuteCron),
                 (TripLifecycleJobRegistrationHostedService.AutoStartFallbackJobId, TripLifecycleJobRegistrationHostedService.EveryFiveMinutesCron),
                 (TripLifecycleJobRegistrationHostedService.AutoCompletedFallbackJobId, TripLifecycleJobRegistrationHostedService.EveryFifteenMinutesCron),
             ]);

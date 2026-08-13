@@ -33,5 +33,6 @@ import { EtaModule } from '../eta/eta.module';
     { provide: TRACKING_JWT_VERIFIER, useClass: JoseUserJwtVerifier },
     { provide: TRACKING_AUTHORIZATION_ADAPTER, useClass: HttpTrackingAuthorizationAdapter },
   ],
+  exports: [TripRouteContextService],
 })
 export class TrackingDataModule {}

@@ -26,6 +26,7 @@ export interface PublicRouteIntermediateStopDto extends PublicRoutePointDto {
 
 export interface PublicTripRouteContextDto {
   tripId: string;
+  tripStatus?: string;
   geometry: {
     source: 'ROUTE_POLYLINE';
     points: PublicRoutePointDto[];
@@ -76,6 +77,7 @@ export class TripRouteContextService {
       : null;
     const data: PublicTripRouteContextDto = {
       tripId: snapshot.tripId,
+      ...(snapshot.tripStatus ? { tripStatus: snapshot.tripStatus } : {}),
       geometry,
       originStation: mapStation(snapshot.originStation),
       intermediateStops: snapshot.intermediateStops
