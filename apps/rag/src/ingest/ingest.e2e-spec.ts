@@ -10,7 +10,7 @@ import { IngestService } from './ingest.service';
 
 const DOCUMENT_ID = '33333333-3333-3333-3333-333333333333';
 const EVENT_ID = '44444444-4444-4444-4444-444444444444';
-const EMBEDDING_DIMENSIONS = 2_048;
+const EMBEDDING_DIMENSIONS = 3_072;
 
 describe('IngestService (e2e)', () => {
   it('processes a pending ingest event end-to-end through mocked infrastructure', async () => {

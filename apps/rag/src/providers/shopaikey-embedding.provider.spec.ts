@@ -65,8 +65,49 @@ describe('ShopAiKeyEmbeddingProvider', () => {
       model: 'gemini-embedding-2-preview',
       input: 'query',
       encoding_format: 'float',
-      dimensions: RAG_EMBEDDING_DIMENSIONS,
     });
+  });
+
+  it('opens the circuit after three invalid vectors', async () => {
+    fetchMock.mockImplementation(async () =>
+      jsonResponse({ data: [{ embedding: [0.1] }] }),
+    );
+    const provider = new ShopAiKeyEmbeddingProvider(makeEnv());
+
+    await expect(provider.embed({ input: 'query-1' })).rejects.toMatchObject({
+      response: expect.objectContaining({ errorCode: 'RAG_PROVIDER_INVALID_RESPONSE' }),
+    });
+    await expect(provider.embed({ input: 'query-2' })).rejects.toMatchObject({
+      response: expect.objectContaining({ errorCode: 'RAG_PROVIDER_INVALID_RESPONSE' }),
+    });
+    await expect(provider.embed({ input: 'query-3' })).rejects.toMatchObject({
+      response: expect.objectContaining({ errorCode: 'RAG_PROVIDER_INVALID_RESPONSE' }),
+    });
+    await expect(provider.embed({ input: 'query-4' })).rejects.toMatchObject({
+      response: expect.objectContaining({ errorCode: 'RAG_PROVIDER_CIRCUIT_OPEN' }),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('resets consecutive failures only after a valid vector', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: [{ embedding: [0.1] }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ embedding: [0.1] }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ embedding: makeEmbedding() }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ embedding: [0.1] }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ embedding: makeEmbedding() }] }));
+    const provider = new ShopAiKeyEmbeddingProvider(makeEnv());
+
+    await expect(provider.embed({ input: 'query-1' })).rejects.toBeInstanceOf(Error);
+    await expect(provider.embed({ input: 'query-2' })).rejects.toBeInstanceOf(Error);
+    await expect(provider.embed({ input: 'query-3' })).resolves.toHaveLength(
+      RAG_EMBEDDING_DIMENSIONS,
+    );
+    await expect(provider.embed({ input: 'query-4' })).rejects.toBeInstanceOf(Error);
+    await expect(provider.embed({ input: 'query-5' })).resolves.toHaveLength(
+      RAG_EMBEDDING_DIMENSIONS,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 
   it('preserves the controlled rate-limit error code', async () => {

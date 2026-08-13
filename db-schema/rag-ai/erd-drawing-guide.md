@@ -38,14 +38,14 @@ Xem `_global/cross-service-references.md`.
 ## Drawing Tips
 
 1. Tách 3 cluster rõ: Knowledge base, Conversation/Feedback, Reliability.
-2. Note `KnowledgeChunk.embedding` là `halfvec(2048)` cho pgvector và ShopAIKey model `gemini-embedding-2-preview` qua API tương thích OpenAI.
+2. Note `KnowledgeChunk.embedding` là `halfvec(3072)` cho native output của ShopAIKey model `gemini-embedding-2-preview` qua API tương thích OpenAI.
 3. Note `KnowledgeDocument.storagePath` là Cloudinary public_id/path, không phải URL storage cũ.
 4. `RagMessage.citedChunkIds` và `MessageFeedback.chunkIds` là UUID[] logical reference, không vẽ line FK.
 
 ## Validation Checklist
 
 - [ ] 4 line cho 4 intra-service FK.
-- [ ] KnowledgeChunk hiển thị column `embedding halfvec(2048)` rõ.
+- [ ] KnowledgeChunk hiển thị column `embedding halfvec(3072)` rõ.
 - [ ] Note pgvector extension required.
 - [ ] Note Cloudinary storage path, không ghi URL storage cũ.
 - [ ] RagMessage.citedChunkIds và MessageFeedback.chunkIds note logical array reference.

@@ -11,14 +11,14 @@ NestJS service xử lý knowledge base ingestion và LLM streaming RAG. Ingest p
 - **Storage:** Cloudinary raw assets, DB chỉ lưu `storage_path`/metadata, không lưu signed URL dài hạn.
 - **Chat model hiện tại:** `gemini-3.5-flash` qua ShopAIKey
 - **Embedding model hiện tại:** `gemini-embedding-2-preview` qua ShopAIKey
-- **Embedding dimension hiện tại:** `2048`
+- **Embedding dimension hiện tại:** `3072` (native output của model)
 
 ## Entity List
 
 | Entity | Purpose | Key business fields |
 |---|---|---|
 | `KnowledgeDocument` | Metadata tài liệu upload. | `storageProvider`, `storagePath`, `fileType`, `accessLevel`, `category`, `documentType`, `audienceRoles`, `operatorId`, `status`, `ingestStatus` |
-| `KnowledgeChunk` | Đoạn text đã chunk + embedding. | `embedding halfvec(2048)`, `searchVector`, `operatorId`, `documentType`, unique `(documentId, chunkIndex)` |
+| `KnowledgeChunk` | Đoạn text đã chunk + embedding. | `embedding halfvec(3072)`, `searchVector`, `operatorId`, `documentType`, unique `(documentId, chunkIndex)` |
 | `RagConversation` | 1 session chat. | `userId`, `operatorId`, `role`, `summary`, `lastMessageAt` |
 | `RagMessage` | 1 turn USER/ASSISTANT. | `citedChunkIds` audit nội bộ, `tokensUsed` |
 | `MessageFeedback` | Feedback cho ASSISTANT message. | `rating`, `chunkIds`, `queryRewritten`, `responseLength` |
@@ -40,9 +40,9 @@ Rule retrieval production:
 
 ## Design Decisions
 
-- `KnowledgeChunk.embedding halfvec(2048)` là invariant của RAG và khớp output 2.048 chiều được yêu cầu từ ShopAIKey model `gemini-embedding-2-preview`. Nếu đổi sang model hoặc dimension khác phải migration và re-embed toàn bộ corpus.
+- `KnowledgeChunk.embedding halfvec(3072)` là invariant của RAG và khớp native output 3.072 chiều từ ShopAIKey model `gemini-embedding-2-preview`. Nếu đổi sang model hoặc dimension khác phải migration và re-embed toàn bộ corpus.
 - `KnowledgeChunk.search_vector` là `tsvector` để chuẩn bị hybrid search phía sau feature flag, không thay thế vector search ở Phase 2.
-- Tạo HNSW index `idx_knowledge_chunks_embedding_hnsw` với `halfvec_cosine_ops` để hỗ trợ vector search cho embedding 2048 chiều.
+- Tạo HNSW index `idx_knowledge_chunks_embedding_hnsw` với `halfvec_cosine_ops` để hỗ trợ vector search cho embedding 3.072 chiều.
 - `KnowledgeDocument.storage_path` lưu Cloudinary public_id/path. API mới tạo signed/controlled URL ngắn hạn khi cần preview.
 - `KnowledgeDocument.access_level + category` có CHECK constraint để tránh nhầm CSKH hành khách với policy nhà xe.
 - `KnowledgeDocument.operator_id` bắt buộc NULL với `PUBLIC`, tránh leak tài liệu passenger theo tenant sai.

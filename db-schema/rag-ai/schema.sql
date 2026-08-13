@@ -8,7 +8,7 @@
 -- Storage provider: Cloudinary raw assets.
 -- Chat provider: ShopAIKey OpenAI-compatible API, gemini-3.5-flash.
 -- Embedding model: ShopAIKey OpenAI-compatible API, gemini-embedding-2-preview.
--- Embedding dimension: 2048.
+-- Embedding dimension: 3072 (native ShopAIKey model output).
 -- =============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -168,7 +168,7 @@ CREATE TABLE knowledge_chunks (
     chunk_index INT NOT NULL,
     content TEXT NOT NULL,
     token_count INT NOT NULL,
-    embedding halfvec(2048) NOT NULL,
+    embedding halfvec(3072) NOT NULL,
     search_vector TSVECTOR NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_knowledge_chunks_chunk_index_non_negative CHECK (chunk_index >= 0),
@@ -388,7 +388,7 @@ CREATE TRIGGER trg_policy_audit_logs_immutable
 COMMENT ON COLUMN knowledge_documents.storage_path IS
     'Cloudinary public_id/path for raw document asset. Do not persist long-lived signed URLs.';
 COMMENT ON COLUMN knowledge_chunks.embedding IS
-    'halfvec(2048) for ShopAIKey gemini-embedding-2-preview; HNSW cosine index enabled.';
+    'halfvec(3072) for ShopAIKey gemini-embedding-2-preview native output; HNSW cosine index enabled.';
 COMMENT ON COLUMN knowledge_chunks.search_vector IS
     'PostgreSQL full-text search vector for optional hybrid search.';
 COMMENT ON COLUMN rag_messages.cited_chunk_ids IS

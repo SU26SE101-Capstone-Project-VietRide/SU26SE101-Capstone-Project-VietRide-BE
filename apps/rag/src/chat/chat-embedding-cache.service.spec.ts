@@ -33,7 +33,7 @@ describe('ChatEmbeddingCacheService', () => {
 
     expect(redis.set).toHaveBeenCalledWith(
       expect.stringMatching(
-        /^rag:chat:embedding:shopaikey:gemini-embedding-2-preview:2048:/,
+        /^rag:chat:embedding:shopaikey:gemini-embedding-2-preview:3072:/,
       ),
       '[0.1,0.2]',
       3600,
@@ -49,7 +49,7 @@ describe('ChatEmbeddingCacheService', () => {
     await service.set('xin chào', [0.1, 0.2]);
 
     expect(redis.set).toHaveBeenCalledWith(
-      expect.stringMatching(/^rag:chat:embedding:shopaikey:replacement-embedding-model:2048:/),
+      expect.stringMatching(/^rag:chat:embedding:shopaikey:replacement-embedding-model:3072:/),
       '[0.1,0.2]',
       3600,
     );
