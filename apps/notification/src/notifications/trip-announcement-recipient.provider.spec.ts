@@ -4,12 +4,30 @@ import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const OPERATOR_ID = '22222222-2222-4222-8222-222222222222';
 const DRIVER_ID = '33333333-3333-4333-8333-333333333333';
+const ASSISTANT_ID = '44444444-4444-4444-8444-444444444444';
 
 describe('TripAnnouncementRecipientProvider', () => {
   const originalFetch = global.fetch;
 
   afterEach(() => {
     global.fetch = originalFetch;
+  });
+
+  it('returns only the assigned Assistant when the operator matches', async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      jsonResponse({
+        operatorId: OPERATOR_ID,
+        driverUserId: DRIVER_ID,
+        assistantUserId: ASSISTANT_ID,
+      }),
+    );
+
+    await expect(
+      new TripAnnouncementRecipientProvider(createEnv()).resolveTripAssistantUserId(
+        TRIP_ID,
+        OPERATOR_ID,
+      ),
+    ).resolves.toBe(ASSISTANT_ID);
   });
 
   it('returns current crew only when the operator matches', async () => {

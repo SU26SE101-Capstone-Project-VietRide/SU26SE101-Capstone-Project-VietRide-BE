@@ -37,7 +37,32 @@ export class TripAnnouncementRecipientProvider {
     return snapshot.crewUserIds;
   }
 
+  async resolveTripAssistantUserId(
+    tripId: string,
+    operatorId: string,
+  ): Promise<string | null> {
+    const snapshot = await this.getTripSnapshot(tripId);
+    if (snapshot.operatorId !== operatorId) {
+      throw new NotFoundException({
+        errorCode: 'TRIP_NOT_FOUND',
+        detail: `Trip ${tripId} was not found`,
+      });
+    }
+    return snapshot.assistantUserId;
+  }
+
   async getTripRecipientSnapshot(tripId: string): Promise<TripRecipientSnapshot> {
+    const snapshot = await this.getTripSnapshot(tripId);
+    return {
+      operatorId: snapshot.operatorId,
+      crewUserIds: [snapshot.driverUserId, snapshot.assistantUserId].filter(
+        (value): value is string => Boolean(value),
+      ),
+      ...(snapshot.departureDateTime ? { departureDateTime: snapshot.departureDateTime } : {}),
+    };
+  }
+
+  private async getTripSnapshot(tripId: string): Promise<z.infer<typeof tripSnapshotSchema>> {
     const token = await this.signInternalJwt();
     const response = await fetch(
       new URL(`/internal/v1/trips/${tripId}`, this.env.TRIP_INTERNAL_BASE_URL),
@@ -60,14 +85,7 @@ export class TripAnnouncementRecipientProvider {
     }
     if (!response.ok) throw new Error(`TRIP_SNAPSHOT_LOOKUP_FAILED_${response.status}`);
 
-    const snapshot = tripSnapshotSchema.parse(await response.json());
-    return {
-      operatorId: snapshot.operatorId,
-      crewUserIds: [snapshot.driverUserId, snapshot.assistantUserId].filter(
-        (value): value is string => Boolean(value),
-      ),
-      ...(snapshot.departureDateTime ? { departureDateTime: snapshot.departureDateTime } : {}),
-    };
+    return tripSnapshotSchema.parse(await response.json());
   }
 
   private async signInternalJwt(): Promise<string> {

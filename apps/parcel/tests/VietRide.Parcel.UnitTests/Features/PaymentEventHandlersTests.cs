@@ -84,15 +84,25 @@ public sealed class PaymentEventHandlersTests
     {
         var repo = Substitute.For<IParcelRepository>();
         var clock = Substitute.For<IClock>();
+        var outbox = new RecordingOutbox();
         clock.UtcNow.Returns(Now);
         repo.TryMarkDepositSucceededAsync(ParcelId, PaymentId, 100_000, Now, Arg.Any<CancellationToken>())
-            .Returns(MakeSnapshot(ParcelStatus.PENDING));
+            .Returns(MakeSnapshot(ParcelStatus.RESERVED));
 
-        var handler = new ConfirmPaymentForParcelCommandHandler(repo, Outbox(), Stats(), Trip(), clock,
+        var handler = new ConfirmPaymentForParcelCommandHandler(repo, outbox, Stats(), Trip(), clock,
             Substitute.For<ILogger<ConfirmPaymentForParcelCommandHandler>>());
         var result = await handler.Handle(new ConfirmPaymentForParcelCommand(PaymentId, "PARCEL", ParcelId, 100_000), default);
 
         result.Should().BeTrue();
+        outbox.Events.Should().ContainSingle(evt => evt.EventType == ParcelOutboxEvents.Reserved);
+        using var payload = JsonDocument.Parse(outbox.Events.Single().PayloadJson);
+        payload.RootElement.GetProperty("parcelId").GetGuid().Should().Be(ParcelId);
+        payload.RootElement.GetProperty("parcelCode").GetString().Should().Be("VRP-001");
+        payload.RootElement.GetProperty("tripId").GetGuid().Should().NotBeEmpty();
+        payload.RootElement.GetProperty("operatorId").GetGuid().Should().NotBeEmpty();
+        payload.RootElement.GetProperty("senderUserId").GetGuid().Should().NotBeEmpty();
+        payload.RootElement.GetProperty("eventId").GetGuid().Should().NotBeEmpty();
+        payload.RootElement.GetProperty("occurredAt").GetDateTimeOffset().Should().Be(Now);
     }
 
     [Fact]
@@ -114,6 +124,7 @@ public sealed class PaymentEventHandlersTests
 
         result.Should().BeTrue();
         outbox.Events.Should().ContainSingle(evt => evt.EventType == ParcelOutboxEvents.PendingOperatorAction);
+        outbox.Events.Should().NotContain(evt => evt.EventType == ParcelOutboxEvents.Reserved);
     }
 
     [Fact]
