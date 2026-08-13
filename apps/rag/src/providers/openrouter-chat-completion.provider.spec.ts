@@ -25,6 +25,42 @@ describe('OpenRouterChatCompletionProvider', () => {
     await expect(provider.complete(makeRequest())).resolves.toBe('Câu trả lời');
   });
 
+  it('includes explicitly configured temperature and reasoning controls', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ choices: [{ message: { content: 'Câu trả lời' } }] }),
+    );
+    const provider = new OpenRouterChatCompletionProvider(makeEnv());
+
+    await provider.complete({
+      ...makeRequest(),
+      temperature: 0,
+      reasoning: { enabled: false },
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
+      model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+      messages: [{ role: 'user', content: 'Xin chào' }],
+      stream: false,
+      temperature: 0,
+      reasoning: { enabled: false },
+    });
+  });
+
+  it('omits temperature and reasoning when they are not configured', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ choices: [{ message: { content: 'Câu trả lời' } }] }),
+    );
+    const provider = new OpenRouterChatCompletionProvider(makeEnv());
+
+    await provider.complete(makeRequest());
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
+      model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+      messages: [{ role: 'user', content: 'Xin chào' }],
+      stream: false,
+    });
+  });
+
   it('preserves the controlled rate-limit error code', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ error: { code: 'rate_limit_exceeded' } }, 429));
     const provider = new OpenRouterChatCompletionProvider(makeEnv());

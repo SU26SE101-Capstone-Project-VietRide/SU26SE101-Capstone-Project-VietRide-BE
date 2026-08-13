@@ -7,6 +7,11 @@ export interface ChatCompletionRequest {
   messages: ChatMessage[];
   stream: boolean;
   signal?: AbortSignal;
+  temperature?: number;
+  reasoning?: {
+    enabled?: boolean;
+    effort?: 'low' | 'medium' | 'high';
+  };
 }
 
 export interface ChatCompletionProvider {

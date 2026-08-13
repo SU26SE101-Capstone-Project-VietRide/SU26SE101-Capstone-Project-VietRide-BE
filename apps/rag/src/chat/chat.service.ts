@@ -136,7 +136,12 @@ export class ChatService {
       conversation.summary,
       runtimeConfig,
     );
-    const stream = this.chatProvider.stream({ messages, stream: true });
+    const stream = this.chatProvider.stream({
+      messages,
+      stream: true,
+      temperature: 0,
+      reasoning: { enabled: false },
+    });
     return {
       conversation,
       userMessage,

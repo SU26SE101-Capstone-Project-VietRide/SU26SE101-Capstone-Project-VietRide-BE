@@ -128,6 +128,18 @@ describe('ChatService', () => {
     );
   });
 
+  it('disables sampling and reasoning for the primary streamed answer', async () => {
+    await service.prepareChat({ message: 'Tôi cần hỗ trợ' }, { sub: USER_ID, role: 'PASSENGER' });
+
+    expect(chatProvider.stream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stream: true,
+        temperature: 0,
+        reasoning: { enabled: false },
+      }),
+    );
+  });
+
   it('passes hybrid search flag to repository when enabled', async () => {
     service = new ChatService(
       repository,
