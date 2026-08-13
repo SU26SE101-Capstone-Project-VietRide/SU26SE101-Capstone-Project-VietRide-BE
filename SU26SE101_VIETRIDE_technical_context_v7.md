@@ -5152,9 +5152,9 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
 
 ### Authentication & Authorization — Business rules chi tiết
 
-**Password:** min 8 ký tự, phải có ít nhất 1 chữ cái + 1 chữ số. Hash bcrypt cost 12. Không lưu plaintext. Password change require verify mật khẩu cũ trước.
+**Password:** min 8 ký tự, phải có ít nhất 1 chữ cái + 1 chữ số. Hash bcrypt cost 12. Không lưu plaintext. `POST /v1/auth/change-password` áp dụng cho mọi role `ACTIVE` có local password, bắt buộc verify mật khẩu cũ, không chấp nhận mật khẩu mới trùng mật khẩu hiện tại, rồi revoke toàn bộ refresh token với `PASSWORD_CHANGE`, reset lockout counter, yêu cầu Firebase session revocation và buộc đăng nhập lại. `OPERATOR_ADMIN` vẫn được đổi mật khẩu trong restricted session khi Operator `SUSPENDED`.
 
-**Account lockout:** 5 lần sai password trong window 15 phút → `User.status = LOCKED` tự động. LOCKED không nhận reset link, không auto-unlock theo timeout — chỉ System Admin mở khóa thủ công. Login thành công reset counter. Lưu `failedLoginAttempts` + `lastFailedLoginAt` trên User entity; kiểm tra window trước mỗi lần increment.
+**Account lockout:** 5 lần sai password trong window 15 phút → `User.status = LOCKED` tự động. LOCKED không nhận reset link và không auto-unlock theo timeout. Mọi `LOCKED` user bắt buộc có `lockSource = AUTOMATIC_LOGIN_FAILURE | OPERATOR_ADMIN | SYSTEM_ADMIN | LEGACY_UNKNOWN`. System Admin có thể lock/unlock mọi User và lock của System Admin luôn có ưu tiên cao nhất. `OPERATOR_ADMIN` của Operator `APPROVED` chỉ được lock/unlock `DRIVER` hoặc `ASSISTANT` có cùng `operatorId`; cross-tenant và role khác trả tenant-masked `404`. Operator chỉ unlock được nguồn `AUTOMATIC_LOGIN_FAILURE` hoặc `OPERATOR_ADMIN`, không được gỡ `SYSTEM_ADMIN`/`LEGACY_UNKNOWN`. Login thành công reset counter. Lưu `failedLoginAttempts` + `lastFailedLoginAt` trên User entity; kiểm tra window trước mỗi lần increment.
 
 **Email OTP — 2 lớp bảo vệ:**
 - **Rate limit** (chống spam): tối đa 3 request/giờ per email. Redis key `otp_rate:{email}` TTL 1 giờ. OTP cũ tự invalidate khi tạo mới.
@@ -5172,9 +5172,9 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
 
 **Password reset flow:**
 
-`POST /v1/auth/forgot-password { email }` — public, luôn trả 200 (chống email enumeration). Chỉ gửi OTP nếu `User.status = ACTIVE` và `passwordHash NOT NULL` (Google-only account không có password, bỏ qua). INSERT `EmailVerificationToken { purpose=PASSWORD_RESET, code=6-digit OTP, expiresAt=now+5m }`. Rate limit: Redis `identity:pwd_reset_rate:{email}` max 3/giờ.
+`POST /v1/auth/forgot-password { email }` — public, luôn trả 200 (chống email enumeration). Áp dụng thống nhất cho `PASSENGER`, `DRIVER`, `ASSISTANT`, `OPERATOR_STAFF`, `OPERATOR_ADMIN`, `SYSTEM_ADMIN`; chỉ gửi OTP nếu `User.status = ACTIVE` và `passwordHash NOT NULL` (Google-only account không có password, bỏ qua). INSERT `EmailVerificationToken { purpose=PASSWORD_RESET, code=6-digit OTP, expiresAt=now+5m }`. Rate limit: Redis `identity:pwd_reset_rate:{email}` max 3/giờ.
 
-`POST /v1/auth/reset-password { email, code, newPassword }` — public. Lookup `PASSWORD_RESET` OTP hợp lệ (không expired, chưa dùng, failedAttempts < 5) cho email. Trong transaction: update passwordHash, mark token used, revoke tất cả RefreshToken của user (`revokedReason=PASSWORD_RESET`). Password reset **không unlock** LOCKED account — chỉ Admin unlock.
+`POST /v1/auth/reset-password { email, code, newPassword }` — public. Lookup `PASSWORD_RESET` OTP hợp lệ (không expired, chưa dùng, failedAttempts < 5) cho email. Trong transaction: update passwordHash, mark token used, reset DB + Redis failed-login counter và revoke tất cả RefreshToken của user (`revokedReason=PASSWORD_RESET`). Password reset **không unlock** LOCKED account; tài khoản `LOCKED` không nhận OTP.
 
 **Google OAuth + Email/password linking:**
 
@@ -5238,7 +5238,7 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **`TripSeat`** — Trạng thái từng ghế per trip: AVAILABLE | HELD | BOOKED | UNAVAILABLE.
 - **`TripStop`** — Snapshot từ RouteStop khi generate Trip. Có `estimatedArrivalTime` (static planned baseline; approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING` cascade có thể recompute, GPS/Tracking không update), `actualArrivalTime` (set bởi Assistant), status PENDING | ARRIVED | SKIPPED, copy `distanceFromOriginKm` + 2 allow flags.
 - **`TripStopFare`** — Exception override fare per trip per stop, với `source=TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`; existing rows backfill `TEMPLATE_SNAPSHOT`, nhưng Day 22 không tạo snapshot mới; chỉ explicit operator per-Trip override tạo `MANUAL_OVERRIDE`.
-- **`DriverSchedule`** — Assignment driver/assistant ↔ vehicle ↔ route theo recurring pattern (dayOfWeek + departureTime). Dùng để Hangfire generate Trip.
+- **`DriverSchedule`** — Assignment driver/assistant ↔ vehicle ↔ route theo recurring pattern (dayOfWeek + departureTime). Dùng để Hangfire generate Trip. Mọi create, activate hoặc đổi crew bắt buộc logical Identity user đúng tenant/role và `status = ACTIVE`; user `LOCKED` không được gán để chạy Trip.
 - **`ResourceReservation`** — Assignment source of truth cho Driver/Assistant/Vehicle của main Trip và ShuttleTrip. Snapshot planned interval + endpoint Station/coordinates; lifecycle `RESERVED | ACTIVE | RELEASED | CANCELLED`. Exactly one source (`tripId` xor `shuttleTripId`); sorted shared advisory locks plus PostgreSQL range exclusion protect concurrent writes. Vehicle-driver ownership được suy ra theo reservation, không lưu fixed/current driver trên Vehicle.
 - **`DriverScheduleAuditLog`** — Append-only local audit keyed to DriverSchedule; Day-22 action `DRIVER_SCHEDULE_EDITED`, metadata `{changedFields,before,after,requestId}`; actor là logical Identity user, không cross-DB FK.
 - **`TripGenerationSkipLog`** — Log khi Hangfire skip generate Trip (vd vượt `maxTripsPerMonth` của subscription).

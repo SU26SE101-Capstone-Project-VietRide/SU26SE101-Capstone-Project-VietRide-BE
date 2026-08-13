@@ -238,6 +238,43 @@ Error `400` - expired OTP:
 }
 ```
 
+### POST `/v1/auth/change-password`
+
+Auth: any authenticated `ACTIVE` user role with a local password. A suspended Operator's restricted
+`OPERATOR_ADMIN` session may call this endpoint. `Idempotency-Key` is required.
+
+Request:
+```json
+{
+  "currentPassword": "OldPassword123!",
+  "newPassword": "NewPassword123!"
+}
+```
+
+The new password must be 8..128 characters with at least one letter and one digit, and must differ
+from the current password. On success Identity resets DB/Redis login-lockout counters, revokes every
+active refresh token with `PASSWORD_CHANGE`, requests Firebase session revocation with reason
+`PASSWORD_CHANGED`, and writes `CHANGE_PASSWORD` ActivityLog. The caller must sign in again.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "userId": "uuid",
+    "sessionsRevoked": true
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
+}
+```
+
+Errors:
+- `401 AUTH_INVALID_CREDENTIALS` — current password is wrong or the account is Google-only.
+- `422 VALIDATION_ERROR` — new password is weak or matches the current password.
+- `422 USER_INVALID_STATUS_TRANSITION` — user is not `ACTIVE`.
+- Standard idempotency errors from BSOT §5.6.
+
 ### POST `/v1/auth/login`
 
 Auth: public.
@@ -6302,6 +6339,41 @@ Errors:
 - `422 SUBSCRIPTION_LIMIT_EXCEEDED` — creating the target role would exceed the current subscription limit.
 - `422 VALIDATION_ERROR` — invalid payload or role outside the allowed set.
 
+### POST `/v1/operator/users/{userId}/lock`
+
+Auth: `OPERATOR_ADMIN` of an `APPROVED` Operator. `Idempotency-Key` is required and the request has
+no body. The target lookup is tenant-masked and accepts only a `DRIVER` or `ASSISTANT` whose
+`operatorId` exactly equals the caller's claim. An `ACTIVE` target becomes `LOCKED` with
+`lockSource=OPERATOR_ADMIN`; active refresh tokens are revoked with `ADMIN_REVOKE`, Firebase session
+revocation is requested with `USER_LOCKED`, and `LOCK_USER` is audited. Repeating the action against
+an already locked target is ensure-locked success and never downgrades a `SYSTEM_ADMIN` lock.
+
+Response `200`:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": { "userId": "uuid", "status": "LOCKED", "statusChanged": true },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
+}
+```
+
+### POST `/v1/operator/users/{userId}/unlock`
+
+Auth and tenant/role masking are identical to operator lock. `Idempotency-Key` is required and the
+request has no body. The target must be `LOCKED` with `lockSource=OPERATOR_ADMIN` or
+`AUTOMATIC_LOGIN_FAILURE`; unlock restores `lockedFromStatus`, clears `lockSource`, resets DB/Redis
+lockout state and does not restore revoked tokens. `SYSTEM_ADMIN` and `LEGACY_UNKNOWN` locks return
+`403 FORBIDDEN` and remain unchanged.
+
+Response `200` uses the same shape with restored `status` and `statusChanged=true`.
+
+Both endpoints return:
+- `403 FORBIDDEN` — caller is not an operator admin, Operator is not `APPROVED`, or unlock attempts to override a platform/legacy lock.
+- `404 RESOURCE_NOT_FOUND` — target is missing, outside tenant, or not `DRIVER|ASSISTANT`.
+- `422 USER_INVALID_STATUS_TRANSITION` — requested transition is invalid.
+- Standard idempotency errors from BSOT §5.6.
+
 ### GET `/v1/operator/profile`
 
 Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF` for an approved Operator. For a suspended Operator, only
@@ -6400,7 +6472,7 @@ Response `200`:
 }
 ```
 
-`operatorId`, `avatarUrl` và `phone` có thể null. Trip DriverSchedule validation yêu cầu `operatorId` khớp operator caller cho `DRIVER`/`ASSISTANT`; Shuttle dispatch còn yêu cầu driver active có `displayName` và `phone` để snapshot vào assignment event.
+`operatorId`, `avatarUrl` và `phone` có thể null. Trip DriverSchedule create/activate/update-crew validation yêu cầu `operatorId` khớp operator caller, đúng role `DRIVER`/`ASSISTANT` và `status = ACTIVE`; user `LOCKED` bị từ chối bằng `422 VALIDATION_ERROR`. Shuttle dispatch còn yêu cầu driver active có `displayName` và `phone` để snapshot vào assignment event.
 
 Error `404` — `RESOURCE_NOT_FOUND`.
 
