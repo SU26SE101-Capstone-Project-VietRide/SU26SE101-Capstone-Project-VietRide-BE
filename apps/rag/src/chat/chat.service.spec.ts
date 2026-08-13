@@ -105,6 +105,16 @@ describe('ChatService', () => {
     chatProvider.stream.mockReturnValue(makeTokenStream(['Xin ', 'chào']));
   });
 
+  it('uses a default prompt that forbids exposing internal citation identifiers', () => {
+    const prompt = RAG_RUNTIME_CONFIG_DEFINITIONS.find(
+      (definition) => definition.key === 'chat.system_prompt',
+    )?.defaultValue;
+
+    expect(prompt).toContain('Không hiển thị chunk ID, UUID');
+    expect(prompt).toContain('Không tự thêm mục “Nguồn”');
+    expect(prompt).not.toContain('Only cite chunk IDs');
+  });
+
   it('uses PUBLIC-only retrieval for passenger callers', async () => {
     await service.prepareChat({ message: 'Tôi cần hỗ trợ' }, { sub: USER_ID, role: 'PASSENGER' });
 
@@ -114,6 +124,18 @@ describe('ChatService', () => {
         accessLevels: ['PUBLIC'],
         limit: 5,
         hybridSearchEnabled: false,
+      }),
+    );
+  });
+
+  it('disables sampling and reasoning for the primary streamed answer', async () => {
+    await service.prepareChat({ message: 'Tôi cần hỗ trợ' }, { sub: USER_ID, role: 'PASSENGER' });
+
+    expect(chatProvider.stream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stream: true,
+        temperature: 0,
+        reasoning: { enabled: false },
       }),
     );
   });
@@ -181,7 +203,7 @@ describe('ChatService', () => {
     expect(events).toContainEqual(
       expect.objectContaining({
         event: 'done',
-        data: expect.objectContaining({ citedChunkIds: [] }),
+        data: expect.objectContaining({ citations: [] }),
       }),
     );
   });
@@ -392,12 +414,61 @@ describe('ChatService', () => {
     expect(repository.createAssistantMessage).toHaveBeenCalledWith(CONVERSATION_ID, 'Xin chào', [
       CHUNK_ID,
     ]);
-    expect(events).toContainEqual(
+    const done = events.find((event) => event.event === 'done');
+    expect(done).toEqual({
+      event: 'done',
+      data: {
+        conversationId: CONVERSATION_ID,
+        userMessageId: USER_MESSAGE_ID,
+        assistantMessageId: ASSISTANT_MESSAGE_ID,
+        citations: [{ title: 'FAQ hành khách', section: 'Hỗ trợ' }],
+      },
+    });
+    expect(done?.data).not.toHaveProperty('citedChunkIds');
+  });
+
+  it('deduplicates friendly citations and keeps a nullable section', async () => {
+    repository.searchChunks.mockResolvedValue([
+      makeChunk({ id: CHUNK_ID }),
+      makeChunk({ id: SECOND_CHUNK_ID }),
+      makeChunk({
+        id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        documentTitle: 'Điều khoản VietRide',
+        sectionHeader: null,
+      }),
+    ]);
+
+    const prepared = await service.prepareChat(
+      { message: 'Tôi cần hỗ trợ' },
+      { sub: USER_ID, role: 'PASSENGER' },
+    );
+    const events = [];
+    for await (const event of service.streamPrepared(prepared)) events.push(event);
+
+    const done = events.find((event) => event.event === 'done');
+    expect(done?.data).toEqual(
       expect.objectContaining({
-        event: 'done',
-        data: expect.objectContaining({ assistantMessageId: ASSISTANT_MESSAGE_ID }),
+        citations: [
+          { title: 'FAQ hành khách', section: 'Hỗ trợ' },
+          { title: 'Điều khoản VietRide', section: null },
+        ],
       }),
     );
+  });
+
+  it('does not expose chunk or document identifiers in the provider context', async () => {
+    await service.prepareChat(
+      { message: 'Tôi cần hỗ trợ' },
+      { sub: USER_ID, role: 'PASSENGER' },
+    );
+
+    const providerMessages = chatProvider.stream.mock.calls[0]?.[0].messages ?? [];
+    const systemPrompt = providerMessages.find((message) => message.role === 'system')?.content ?? '';
+    expect(systemPrompt).toContain('Tiêu đề tài liệu: FAQ hành khách');
+    expect(systemPrompt).toContain('Mục: Hỗ trợ');
+    expect(systemPrompt).not.toContain(CHUNK_ID);
+    expect(systemPrompt).not.toContain('77777777-7777-7777-7777-777777777777');
+    expect(systemPrompt).not.toContain('[chunk:');
   });
 
   it('cites only chunks included in the provider context budget', async () => {

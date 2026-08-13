@@ -1,6 +1,6 @@
 # Cẩm nang VietRide dành cho nhà xe
 
-> Knowledge base dùng chung cho Nhân viên nhà xe và Quản trị viên nhà xe. Mọi câu trả lời phải phân biệt rõ quyền của hai vai trò.
+> Knowledge base dùng chung hoàn toàn cho nhóm Nhà xe. `OPERATOR_STAFF` và `OPERATOR_ADMIN` có cùng phạm vi tri thức và đều được gọi là “Nhà xe”.
 
 ## Metadata upload
 
@@ -15,54 +15,37 @@
 
 ## Quy tắc trả lời bắt buộc
 
-- Xác định người hỏi là Nhân viên hay Quản trị viên trước khi hướng dẫn thao tác có khác quyền.
+- Luôn gọi người dùng là “Nhà xe”; không phân chia Nhân viên và Quản trị viên trong câu trả lời.
 - Chỉ dùng dữ liệu và quy trình của đúng nhà xe người hỏi.
 - Dùng tiếng Việt tự nhiên; không đọc mã trạng thái, event, API, service, database, handler hoặc source path.
 - Không cung cấp thao tác chỉ dành cho System Admin.
 - Không tiết lộ dữ liệu riêng của nhà xe khác, hành khách khác hoặc tài khoản ngoài phạm vi.
-- Khi chưa đủ dữ liệu, xin mã nhà xe/chuyến/đặt chỗ/bưu kiện và thời điểm phù hợp; không xin access token, refresh token, OTP hoặc secret.
+- Trả lời trực tiếp đúng trọng tâm câu hỏi bằng quy tắc và hướng dẫn có trong tài liệu. Không tự mở rộng sang nội dung người dùng không hỏi.
+- Không yêu cầu hoặc mời Nhà xe gửi mã nhà xe, mã chuyến, mã đặt chỗ, mã bưu kiện, thời điểm, ảnh chụp, log hay dữ liệu khác để trợ lý “kiểm tra giúp”. Trợ lý tài liệu không trực tiếp tra cứu dữ liệu vận hành trong cuộc trò chuyện.
+- Nếu kết luận phụ thuộc dữ liệu hiện tại, nêu rõ giới hạn đó và hướng dẫn Nhà xe tự xem trên màn hình quản lý phù hợp; không giả vờ sẽ kiểm tra sau khi nhận mã.
 - Chỉ chuyển sang thông tin kỹ thuật khi người dùng chủ động debug hoặc hỏi mã lỗi.
+- Ưu tiên từ ngữ vận hành dễ hiểu. Không dùng từ viết tắt hoặc thuật ngữ nội bộ như “ETA”, “GPS”, “delayed alert”, “route proposal” trong câu trả lời thông thường; dùng “thời gian dự kiến đến”, “định vị”, “cảnh báo chuyến trễ” và “đề xuất đường đi khác”. Nếu cần nhắc thuật ngữ trên màn hình, giải thích tiếng Việt trước rồi mới đặt tên kỹ thuật trong ngoặc.
+- Không hiển thị chunk ID, UUID, document ID, đường dẫn source hoặc tự thêm mục “Nguồn”; ứng dụng hiển thị nguồn thân thiện riêng.
 
-## Phân biệt quyền Nhân viên và Quản trị viên nhà xe
+## Phạm vi chung của Nhà xe
 
-| Nhu cầu | Nhân viên nhà xe | Quản trị viên nhà xe |
-|---|---|---|
-| Xem hồ sơ nhà xe | Có | Có |
-| Sửa hồ sơ nhà xe | Không | Có |
-| Tạo tài xế, phụ xe hoặc nhân viên | Không | Có |
-| Quản lý gói thuê bao | Không | Có |
-| Xem danh mục loại xe | Có | Có |
-| Quản lý điểm dừng thuộc nhà xe | Có | Có |
-| Xem booking của nhà xe | Có | Có |
-| Quản lý voucher nhà xe | Không | Có |
-| Xem đồng ý tài trợ voucher | Có | Có |
-| Chấp nhận/từ chối tài trợ voucher | Không | Có |
-| Xem ví, giao dịch, đối soát cơ bản | Có | Có |
-| Xem phân tích doanh thu tổng hợp | Không | Có |
-| Xem hóa đơn thuê bao | Không | Có |
-| Xuất báo cáo vận hành | Có | Có |
-| Xem thống kê bưu kiện tổng hợp | Không | Có |
-| Cấu hình giá bưu kiện | Chỉ xem | Tạo/sửa theo quyền |
-| Xem sự cố chuyến | Có | Có |
-| Duyệt đề xuất đổi tuyến | Không | Có |
-| Kiểm tra trước khả dụng tài xế/xe | Không | Có |
-| Quản lý chính sách RAG của nhà xe | Không | Có |
-| Gửi thông báo chủ động | Có | Có |
-
-Nếu một chức năng cụ thể có quyền hẹp hơn bảng tổng quát, điều kiện của chức năng đó được ưu tiên. Không suy rằng quyền xem đồng nghĩa quyền sửa.
+Nhà xe được hướng dẫn thống nhất về hồ sơ, nhân sự, thuê bao, tuyến, điểm dừng, phương tiện,
+lịch, chuyến, đặt chỗ, voucher, báo cáo, ví, đối soát, hóa đơn, bưu kiện, sự cố, đổi tuyến,
+chính sách và thông báo. Không hỏi lại người dùng đang dùng role Nhà xe nào và không chia nội dung
+thành quyền xem/quyền sửa giữa hai enum kỹ thuật.
 
 ## Tài khoản và trạng thái nhà xe
 
 ### Khi nhà xe hoạt động bình thường
 
 - Người dùng nhà xe chỉ đăng nhập khi tài khoản hoạt động và nhà xe đã được duyệt.
-- Nhân viên, tài xế và phụ xe phải thuộc đúng nhà xe.
+- Người dùng vận hành, tài xế và phụ xe phải thuộc đúng nhà xe.
 - Phiên đăng nhập mang phạm vi nhà xe; thay ID trên yêu cầu không cho phép truy cập dữ liệu nhà xe khác.
 
 ### Khi nhà xe bị tạm ngưng
 
-- Nhân viên, tài xế và phụ xe không được đăng nhập hoặc làm mới phiên.
-- Quản trị viên nhà xe nhận phiên hạn chế để xem hồ sơ, xem thuê bao, làm mới phiên và đăng xuất.
+- Người dùng nhà xe có thể bị từ chối đăng nhập hoặc chỉ nhận phiên hạn chế khi nhà xe bị tạm ngưng.
+- Phiên hạn chế chỉ dùng để xem trạng thái, hồ sơ, thuê bao, làm mới phiên và đăng xuất.
 - Phiên hạn chế không cho sửa hồ sơ hoặc vận hành nghiệp vụ.
 - Khi nhà xe bị tạm ngưng, các phiên làm mới của toàn bộ người dùng nhà xe bị thu hồi.
 - Phiên truy cập cũ có thể còn quyền trước đó tối đa khoảng 15 phút vì trạng thái được chụp khi phát phiên.
@@ -74,15 +57,14 @@ Khi hỗ trợ, cần phân biệt tài khoản cá nhân bị khóa với cả 
 
 ### Hồ sơ nhà xe
 
-- Nhân viên và Quản trị viên đều được xem hồ sơ của đúng nhà xe.
-- Chỉ Quản trị viên được cập nhật hồ sơ.
+- Nhà xe được xem và cập nhật hồ sơ của đúng nhà xe.
 - Nhà xe phải đang được duyệt và hoạt động để sửa.
 - Hồ sơ có thông tin liên hệ, nhận diện và các chính sách vận hành.
-- Quản trị viên của nhà xe bị tạm ngưng chỉ được xem lý do/thời điểm tạm ngưng, không được sửa.
+- Khi nhà xe bị tạm ngưng, chỉ xem lý do/thời điểm tạm ngưng và không sửa hồ sơ.
 
 ### Tạo nhân sự
 
-Chỉ Quản trị viên được tạo tài xế, phụ xe hoặc nhân viên.
+Nhà xe được tạo tài xế, phụ xe hoặc người dùng vận hành.
 
 - Email, số điện thoại và vai trò phải hợp lệ.
 - Email/số điện thoại không được trùng.
@@ -91,7 +73,6 @@ Chỉ Quản trị viên được tạo tài xế, phụ xe hoặc nhân viên.
 - Khi mức sử dụng chạm hoặc vượt 80% lần đầu trong kỳ, hệ thống tạo cảnh báo và không gửi lặp cho cùng nguồn lực/kỳ.
 - Hai yêu cầu đồng thời khi chỉ còn một chỗ được xử lý để không vượt hạn mức.
 
-Nhân viên không được tạo thêm nhân sự dù có thể xem dữ liệu vận hành.
 
 ## Gói thuê bao và hạn mức
 
@@ -112,7 +93,7 @@ Giá trị mặc định trong hệ thống hiện tại:
 
 ### Nâng cấp gói
 
-Chỉ Quản trị viên thực hiện:
+Nhà xe thực hiện:
 
 - chọn gói trả phí đang hoạt động;
 - chọn chu kỳ tháng hoặc năm;
@@ -145,7 +126,7 @@ Thanh toán, kích hoạt gói và tạo file hóa đơn là ba mốc riêng. Ch
 ### Điểm dừng
 
 - Điểm dừng thuộc một nhà xe và có thể cho đón, cho trả hoặc cả hai.
-- Nhân viên và Quản trị viên chỉ thao tác điểm dừng của nhà xe mình.
+- Nhà xe chỉ thao tác điểm dừng thuộc đúng nhà xe mình.
 - Điểm dùng trong tuyến phải cho ít nhất một mục đích đón hoặc trả.
 - Khi ngừng một điểm, có thể chọn điểm thay thế đang hoạt động cùng nhà xe.
 - Không được tạo chuỗi thay thế vòng.
@@ -166,7 +147,7 @@ Nhà xe còn có thể quản lý hình tuyến, giá theo điểm và tuyến t
 
 ## Phụ thu
 
-- Nhân viên và Quản trị viên dùng cấu hình theo quyền của chức năng tương ứng.
+- Nhà xe dùng cấu hình của đúng nhà xe mình.
 - Phần trăm phụ thu từ 1 đến 100.
 - Ngày kết thúc không trước ngày bắt đầu.
 - Hai khoảng đang hoạt động của cùng nhà xe không được chồng nhau.
@@ -182,7 +163,7 @@ Nhà xe còn có thể quản lý hình tuyến, giá theo điểm và tuyến t
 - Các loại ghế hành khách gồm ghế thường, giường tầng trên, giường tầng dưới và VIP.
 - Sơ đồ được chụp vào chuyến để việc sửa xe sau đó không viết lại chuyến cũ.
 - Trạng thái xe và cờ hoạt động là hai điều kiện riêng; chỉ nhìn một tên trạng thái chưa đủ kết luận xe có thể phân công.
-- Nhân viên và Quản trị viên xem được danh mục loại xe.
+- Nhà xe xem được danh mục loại xe.
 
 Danh sách xe có thể hiển thị nhiệm vụ đang hoạt động và nhiệm vụ tiếp theo. Nhiệm vụ được giữ trước không tự nghĩa là chuyến đã bắt đầu.
 
@@ -212,7 +193,7 @@ Nếu xung đột hoặc hết hạn mức, chuyến bị bỏ qua và không gi
 
 ## Kiểm tra tài xế, phụ xe và xe
 
-Chỉ Quản trị viên dùng hai chức năng xem trước khả dụng cho lịch và xe trung chuyển.
+Nhà xe dùng hai chức năng xem trước khả dụng cho lịch và xe trung chuyển.
 
 Kết quả tính:
 
@@ -249,7 +230,7 @@ Nhánh khác là bị hủy trước khi chạy hoặc bị gián đoạn khi đ
 - Chỉ tài xế được phân công bắt đầu.
 - Tài xế hoặc phụ xe được phân công có thể hoàn tất chuyến đang chạy.
 - Trước khi bắt đầu, hệ thống kiểm tra tài xế, phụ xe và xe không còn hoạt động ở nhiệm vụ khác.
-- Bị chặn do tài nguyên còn bận sẽ tạo cảnh báo cho Quản trị viên nhưng không gửi lặp vô hạn.
+- Bị chặn do tài nguyên còn bận sẽ tạo cảnh báo cho Nhà xe nhưng không gửi lặp vô hạn.
 - Hệ thống có cơ chế tự chuyển sang cho khách lên xe, thử bắt đầu khi trễ và hoàn tất sau mốc dự kiến; các bước chạy theo đợt.
 
 ### Đến/rời điểm
@@ -258,6 +239,15 @@ Nhánh khác là bị hủy trước khi chạy hoặc bị gián đoạn khi đ
 - Rời điểm yêu cầu đã ghi nhận đến.
 - Hệ thống kiểm tra hành khách còn chờ; không gọi được dữ liệu Booking thì không cho rời.
 - Đến điểm cuối không tự hoàn tất chuyến.
+
+### Khi chuyến bị trễ hơn 30 phút
+
+- Hệ thống so ETA mới với thời gian dự kiến tại điểm dừng kế tiếp.
+- Chỉ trễ trên 30 phút mới được đánh dấu; đúng 30 phút chưa vượt ngưỡng.
+- Nhà xe và hành khách được thông báo khi hệ thống xác định đủ người nhận.
+- Tracking tiếp tục cập nhật ETA và gỡ trạng thái trễ khi cùng điểm dừng trở lại trong ngưỡng.
+- Nhà xe có thể theo dõi, gửi thông báo bổ sung hoặc quyết định đổi tuyến nếu crew đề xuất.
+- Không có hành động tự động đổi tuyến chỉ vì chuyến bị trễ.
 
 ### Hủy chuyến
 
@@ -296,7 +286,7 @@ Có xe thay:
 ### Đề xuất đổi tuyến
 
 - Driver/Assistant được phân công có thể gửi phương án.
-- Chỉ Quản trị viên đúng nhà xe được duyệt.
+- Chỉ Nhà xe sở hữu chuyến được duyệt đề xuất.
 - Phương án dựa trên tuyến nguồn đã thay đổi có thể hết hiệu lực.
 - Duyệt phương án tùy chỉnh tạo tuyến thay thế chính thức và áp vào chuyến.
 - Từ chối chỉ áp dụng đề xuất đang chờ.
@@ -306,7 +296,7 @@ Có xe thay:
 
 - Driver/Assistant chỉ báo khi chuyến đang chạy.
 - Có tối đa ba ảnh và vị trí hợp lệ.
-- Nhân viên và Quản trị viên xem được danh sách/chi tiết của nhà xe, lọc theo đang mở hoặc đã xử lý.
+- Nhà xe xem được danh sách/chi tiết sự cố của mình, lọc theo đang mở hoặc đã xử lý.
 - Hiện không tìm thấy thao tác thực tế để chuyển sự cố sang đã xử lý. Không hướng dẫn người dùng một nút resolve chưa tồn tại.
 
 ## Xe trung chuyển
@@ -342,33 +332,30 @@ Xe đón khách về bến phải hoàn tất trước giờ chuyến chính 30 
 
 ### Xem booking
 
-Nhân viên và Quản trị viên xem danh sách/chi tiết đặt chỗ của đúng nhà xe. Dữ liệu chuyến, người mua, giá và tổ phục vụ trong đặt chỗ cũ là ảnh chụp lịch sử; không thay bằng lịch hiện tại.
+Nhà xe xem danh sách/chi tiết đặt chỗ của mình. Dữ liệu chuyến, người mua, giá và tổ phục vụ trong đặt chỗ cũ là ảnh chụp lịch sử; không thay bằng lịch hiện tại.
 
 ### Thống kê và báo cáo
 
-- Nhân viên và Quản trị viên xem/xuất báo cáo đặt chỗ và hủy vé theo quyền.
+- Nhà xe xem và xuất báo cáo đặt chỗ, hủy vé.
 - Khoảng mặc định thường là 30 ngày theo giờ Việt Nam, tối đa 92 ngày cho file xuất.
 - Thống kê Booking chủ yếu là số lượng, không phải nguồn doanh thu chuẩn.
 - Không cộng tiền trong file booking để thay báo cáo tài chính.
 
 ### Voucher
 
-Chỉ Quản trị viên tạo, sửa, bật/tắt hoặc xóa mềm voucher nhà xe.
+Nhà xe tạo, sửa, bật/tắt hoặc xóa mềm voucher của mình.
 
 - Voucher nhà xe luôn do nhà xe tài trợ và chỉ dùng tại nhà xe đó.
 - Sau lượt dùng đầu tiên, các trường tiền và điều kiện quan trọng bị khóa hoặc chỉ được nới theo hướng an toàn.
-- Nhân viên và Quản trị viên xem danh sách đồng ý tài trợ voucher nền tảng.
-- Chỉ Quản trị viên chấp nhận/từ chối.
+- Nhà xe xem, chấp nhận hoặc từ chối yêu cầu đồng ý tài trợ voucher nền tảng.
 - Từ chối sau khi từng chấp nhận chỉ ảnh hưởng booking tương lai, không đảo giảm giá đã xác nhận.
 
 ## Bưu kiện của nhà xe
 
 ### Quyền chung
 
-- Nhân viên và Quản trị viên xem bưu kiện của đúng nhà xe.
-- Chỉ Quản trị viên xem thống kê bưu kiện tổng hợp.
-- Nhân viên và Quản trị viên có thể xuất báo cáo bưu kiện theo quyền hiện hành.
-- Chỉ Quản trị viên tạo, sửa hoặc cập nhật hàng loạt giá bưu kiện; Nhân viên chỉ xem.
+- Nhà xe xem bưu kiện, thống kê tổng hợp và xuất báo cáo bưu kiện của mình.
+- Nhà xe tạo, sửa hoặc cập nhật hàng loạt giá bưu kiện.
 
 ### Cấu hình giá
 
@@ -384,7 +371,7 @@ Chỉ Quản trị viên tạo, sửa, bật/tắt hoặc xóa mềm voucher nh�
 
 ### Khi vượt sức chứa
 
-Chỉ Quản trị viên hoặc người có quyền vượt sức chứa của đúng nhà xe được xử lý.
+Nhà xe xử lý trường hợp vượt sức chứa của đúng chuyến thuộc mình.
 
 - Đơn phải thực sự đang chờ vì vượt sức chứa hoặc giữ sức chứa thất bại.
 - Hệ thống gọi Trip kiểm tra lại; nếu vẫn bị từ chối, đơn không tiếp tục.
@@ -431,7 +418,7 @@ Có một chức năng xác nhận hoàn cho dữ liệu đang chờ đúng lo�
 - Thiếu tiền ở Ví nền tảng làm đối soát chưa hoàn tất và có thể tạo cảnh báo.
 - Số dư Ví nhà xe là tiền nội bộ; hệ thống hiện không có chức năng rút về ngân hàng.
 
-Nhân viên và Quản trị viên xem ví, giao dịch, đối soát và sổ tiền của đúng nhà xe. Chỉ Quản trị viên xem phân tích doanh thu tổng hợp. Chỉ Quản trị viên xem/tải hóa đơn thuê bao.
+Nhà xe xem ví, giao dịch, đối soát, sổ tiền, phân tích doanh thu tổng hợp và hóa đơn thuê bao của mình.
 
 ### Vì sao hai báo cáo lệch nhau
 
@@ -444,7 +431,7 @@ Nhân viên và Quản trị viên xem ví, giao dịch, đối soát và sổ t
 
 ### Chính sách nhà xe
 
-Chỉ Quản trị viên quản lý chính sách của nhà xe:
+Nhà xe quản lý chính sách của mình:
 
 - nội dung, tiêu đề, mô tả, đối tượng áp dụng và nhóm;
 - thay đổi nội dung làm tăng phiên bản;
@@ -452,11 +439,9 @@ Chỉ Quản trị viên quản lý chính sách của nhà xe:
 - cập nhật/xóa yêu cầu phiên bản đang thấy để tránh ghi đè thay đổi của người khác;
 - xóa là xóa mềm và vẫn giữ lịch sử kiểm toán.
 
-Nhân viên không được tạo, sửa hoặc xóa chính sách.
-
 ### Gửi thông báo chủ động
 
-Nhân viên và Quản trị viên có thể gửi thông báo:
+Nhà xe có thể gửi thông báo:
 
 - cho crew của một chuyến;
 - cho crew đang hoạt động trong nhà xe.
@@ -472,20 +457,15 @@ Tiêu đề dài 1–120 ký tự, nội dung 1–500 ký tự. Không có ngư�
 
 ## Khi cần hỗ trợ
 
-Xin tối thiểu:
+Trợ lý không thu thập dữ liệu để kiểm tra thay Nhà xe. Hãy trả lời phần quy tắc xác định được, rồi hướng dẫn Nhà xe xem trạng thái và cảnh báo trên màn hình quản lý tương ứng. Khi cần điều tra dữ liệu cụ thể, Nhà xe dùng kênh hỗ trợ kỹ thuật chính thức.
 
-- vai trò Nhân viên hay Quản trị viên;
-- mã nhà xe và mã đối tượng: chuyến, lịch, booking hoặc bưu kiện;
-- thời điểm thao tác;
-- mô tả dễ hiểu của lỗi.
-
-Chỉ xin mã lỗi/trace khi chuyển sang debug kỹ thuật. Không xin token hoặc secret.
+Nếu Nhà xe chủ động cung cấp mã lỗi hoặc dấu vết kỹ thuật thì có thể giải thích theo tài liệu. Không yêu cầu gửi thêm mã, token hoặc secret.
 
 ## Mẫu trả lời nhanh
 
-### “Tại sao Nhân viên không sửa được hồ sơ?”
+### “Nhà xe cập nhật hồ sơ thế nào?”
 
-Nhân viên được xem hồ sơ nhưng quyền cập nhật chỉ dành cho Quản trị viên nhà xe. Đây không phải lỗi dữ liệu.
+Nhà xe mở hồ sơ của chính mình và cập nhật khi tài khoản cùng nhà xe đang hoạt động. Nếu bị từ chối, hãy kiểm tra trạng thái tài khoản, trạng thái nhà xe và dữ liệu đang gửi.
 
 ### “Xem trước báo xe rảnh nhưng lúc tạo lại xung đột?”
 
@@ -493,7 +473,11 @@ Kết quả xem trước không giữ xe hoặc tài xế. Một yêu cầu khá
 
 ### “Chuyến bị chặn lúc bắt đầu”
 
-Tài xế, phụ xe hoặc xe có thể vẫn đang hoạt động ở nhiệm vụ khác. Chuyến được giữ ở trạng thái chưa chạy và Quản trị viên nhận cảnh báo để kiểm tra nhiệm vụ đang giữ tài nguyên.
+Tài xế, phụ xe hoặc xe có thể vẫn đang hoạt động ở nhiệm vụ khác. Chuyến được giữ ở trạng thái chưa chạy và Nhà xe nhận cảnh báo để kiểm tra nhiệm vụ đang giữ tài nguyên.
+
+### “Nếu chuyến trễ hơn 30 phút thì sao?”
+
+Khi thời gian dự kiến đến nơi chậm hơn lịch ban đầu trên 30 phút, hệ thống ghi nhận chuyến bị trễ và thông báo cho hành khách cùng Nhà xe. Nhà xe có thể tiếp tục theo dõi thời gian dự kiến, gửi thông báo bổ sung hoặc quyết định đổi đường đi khi tài xế hay phụ xe đề xuất; hệ thống không tự đổi đường đi. Nếu chỉ trễ đúng 30 phút thì chưa được tính là vượt ngưỡng.
 
 ### “Đã thanh toán nâng cấp nhưng chưa có hóa đơn”
 

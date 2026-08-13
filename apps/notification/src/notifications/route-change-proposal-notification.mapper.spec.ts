@@ -71,14 +71,11 @@ describe('route-change proposal notification mapper', () => {
       'EXPIRED',
       NotificationType.ROUTE_CHANGE_PROPOSAL_EXPIRED,
     ],
-  ] as const)('maps terminal %s to resolved recipients and the proposer', (routingKey, schema, status, type) => {
+  ] as const)('maps terminal %s only to the proposer', (routingKey, schema, status, type) => {
     const event = schema.parse(eventPayload(status));
 
     const notifications = mapRouteChangeProposalToNotifications(routingKey, event, [RECIPIENT_ID]);
-    expect(notifications.map((notification) => notification.userId)).toEqual([
-      RECIPIENT_ID,
-      PROPOSER_ID,
-    ]);
+    expect(notifications.map((notification) => notification.userId)).toEqual([PROPOSER_ID]);
     const notification = notifications.find((item) => item.userId === PROPOSER_ID);
 
     expect(notification).toMatchObject({

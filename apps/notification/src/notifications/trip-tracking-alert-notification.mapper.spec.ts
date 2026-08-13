@@ -5,6 +5,7 @@ import {
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
   TRIP_ASSIGNED_ROUTING_KEY,
+  TRIP_BOARDING_STARTED_ROUTING_KEY,
   TRIP_CREW_CHANGED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_STOP_DISABLED_ROUTING_KEY,
@@ -71,6 +72,28 @@ describe('mapTripTrackingAlertToNotifications maps stop disabled event for expli
     expect(notifications).toEqual([
       expect.objectContaining({ userId: USER_ID, type: NotificationType.TRIP_ASSIGNED }),
       expect.objectContaining({ userId: SECOND_USER_ID, type: NotificationType.TRIP_ASSIGNED }),
+    ]);
+  });
+
+  it('maps a recipient-less boarding fact to resolved passengers', () => {
+    const notifications = mapTripTrackingAlertToNotifications(
+      TRIP_BOARDING_STARTED_ROUTING_KEY,
+      {
+        tripId: TRIP_ID,
+        boardingStartedAt: '2026-07-12T01:00:00Z',
+      },
+      [USER_ID, USER_ID, SECOND_USER_ID],
+    );
+
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.TRIP_BOARDING_REMINDER,
+      }),
+      expect.objectContaining({
+        userId: SECOND_USER_ID,
+        type: NotificationType.TRIP_BOARDING_REMINDER,
+      }),
     ]);
   });
 

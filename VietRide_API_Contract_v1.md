@@ -5588,7 +5588,10 @@ Fields:
   Non-admin gửi `operatorId` trả 403. Khi reuse conversation đã có scope, không cần gửi lại;
   gửi `operatorId` khác scope cũ trả 403.
 
-Response: Server-Sent Events stream with assistant tokens and final cited chunk IDs.
+Response: Server-Sent Events stream with assistant tokens. Sự kiện `done` trả
+`conversationId`, `userMessageId`, `assistantMessageId` và `citations` thân thiện dạng
+`[{ "title": "...", "section": "..." | null }]`. Không trả chunk ID, document ID hoặc UUID
+nội bộ cho client. Các chunk ID vẫn chỉ được lưu nội bộ để audit và feedback.
 
 Error codes:
 - `RAG_OPERATOR_SCOPE_FORBIDDEN` (403): non-admin gửi `operatorId`.

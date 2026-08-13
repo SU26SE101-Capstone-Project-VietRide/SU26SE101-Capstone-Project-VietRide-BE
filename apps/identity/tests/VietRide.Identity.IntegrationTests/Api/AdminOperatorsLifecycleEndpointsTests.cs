@@ -163,7 +163,7 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
     }
 
     [Fact]
-    public async Task Reject_PendingOperator_Returns200PersistsRejectedCancelSubscriptionActivityLogAndNoOutbox()
+    public async Task Reject_PendingOperator_Returns200PersistsBusinessChangesAndOutboxAtomically()
     {
         await _factory.ResetAsync();
         await _factory.SeedSystemAdminAsync(SystemAdminId);
@@ -190,7 +190,19 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
         subscription.Status.Should().Be(SubscriptionStatus.CANCELLED);
         var activityLog = await db.ActivityLogs.SingleAsync(x => x.UserId == SystemAdminId && x.Action == ActivityLogAction.REJECT_OPERATOR);
         AssertActivityMetadata(activityLog.Metadata, operatorId, "SYSTEM_ADMIN_REJECT_OPERATOR");
-        (await db.Set<OutboxEvent>().CountAsync()).Should().Be(0);
+        var outboxEvent = await db.Set<OutboxEvent>().SingleAsync();
+        outboxEvent.EventType.Should().Be("identity.operator.rejected");
+        outboxEvent.Status.Should().Be(OutboxEventStatus.PENDING);
+        using var rejectedPayload = JsonDocument.Parse(outboxEvent.Payload);
+        rejectedPayload.RootElement.GetProperty("eventId").GetGuid().Should().Be(outboxEvent.Id);
+        rejectedPayload.RootElement.GetProperty("operatorId").GetGuid().Should().Be(operatorId);
+        rejectedPayload.RootElement.GetProperty("companyName").GetString().Should().Be(operatorEntity.Name);
+        rejectedPayload.RootElement.GetProperty("contactEmail").GetString().Should().Be(operatorEntity.ContactEmail);
+        rejectedPayload.RootElement.GetProperty("reason").GetString().Should().Be("Business registration documents are invalid.");
+        rejectedPayload.RootElement.GetProperty("occurredAt").GetDateTimeOffset()
+            .Should().BeCloseTo(operatorEntity.RejectedAt!.Value, TimeSpan.FromMilliseconds(1));
+        rejectedPayload.RootElement.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
+            ["eventId", "occurredAt", "operatorId", "companyName", "contactEmail", "reason"]);
     }
 
     [Fact]

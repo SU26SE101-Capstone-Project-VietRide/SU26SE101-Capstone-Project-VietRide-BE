@@ -117,6 +117,8 @@ export class OpenRouterChatCompletionProvider implements ChatCompletionProvider 
         model: this.env.OPENROUTER_CHAT_MODEL,
         messages: request.messages,
         stream: request.stream,
+        ...(request.temperature !== undefined && { temperature: request.temperature }),
+        ...(request.reasoning !== undefined && { reasoning: request.reasoning }),
       }),
       signal,
     };

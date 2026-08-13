@@ -1,9 +1,11 @@
 using System.Text.Json;
 using MediatR;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.Application.Features.Admin.RejectOperator;
@@ -14,17 +16,20 @@ public sealed class RejectOperatorCommandHandler : IRequestHandler<RejectOperato
     private readonly IOperatorSubscriptionRepository _operatorSubscriptions;
     private readonly IActivityLogRepository _activityLogs;
     private readonly IClock _clock;
+    private readonly IIntegrationEventOutbox _outbox;
 
     public RejectOperatorCommandHandler(
         IOperatorRepository operators,
         IOperatorSubscriptionRepository operatorSubscriptions,
         IActivityLogRepository activityLogs,
-        IClock clock)
+        IClock clock,
+        IIntegrationEventOutbox outbox)
     {
         _operators = operators;
         _operatorSubscriptions = operatorSubscriptions;
         _activityLogs = activityLogs;
         _clock = clock;
+        _outbox = outbox;
     }
 
     public async Task<RejectOperatorResponseDto> Handle(
@@ -55,6 +60,20 @@ public sealed class RejectOperatorCommandHandler : IRequestHandler<RejectOperato
 
         await _activityLogs.AddAsync(
             ActivityLog.Create(request.CallerUserId, ActivityLogAction.REJECT_OPERATOR, metadata),
+            cancellationToken);
+
+        var eventId = Guid.NewGuid();
+        var integrationEvent = new OperatorRejectedIntegrationEvent(
+            eventId,
+            rejectedAt,
+            operatorEntity.Id,
+            operatorEntity.Name,
+            operatorEntity.ContactEmail,
+            operatorEntity.RejectReason!);
+        await _outbox.EnqueueAsync(
+            eventId,
+            OperatorRejectedIntegrationEvent.EventType,
+            JsonSerializer.Serialize(integrationEvent),
             cancellationToken);
 
         return new RejectOperatorResponseDto(operatorEntity.Id, operatorEntity.RegistrationStatus.ToString());

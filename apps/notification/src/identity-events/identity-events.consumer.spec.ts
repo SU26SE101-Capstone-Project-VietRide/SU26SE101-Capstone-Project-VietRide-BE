@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import {
   IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+  IDENTITY_OPERATOR_REJECTED_ROUTING_KEY,
   IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
   IDENTITY_OTP_REQUESTED_ROUTING_KEY,
@@ -49,6 +50,7 @@ describe('IdentityEventsConsumer', () => {
     } as unknown as jest.Mocked<NotificationsService>;
     operatorRecipientProvider = {
       resolveOperatorRecipientUserIds: jest.fn(),
+      resolveOperatorRecipientEmails: jest.fn(),
     };
     systemAdminRecipientProvider = {
       resolveSystemAdminRecipientUserIds: jest.fn(),
@@ -79,6 +81,7 @@ describe('IdentityEventsConsumer', () => {
     expect(Object.keys(handlers).sort()).toEqual([
       IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
       IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
+      IDENTITY_OPERATOR_REJECTED_ROUTING_KEY,
       IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
       IDENTITY_OTP_REQUESTED_ROUTING_KEY,
       IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
@@ -87,6 +90,12 @@ describe('IdentityEventsConsumer', () => {
     expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
       'notification.identity.operator.approved',
       IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+      expect.any(Function),
+      { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
+      'notification.identity.operator.rejected',
+      IDENTITY_OPERATOR_REJECTED_ROUTING_KEY,
       expect.any(Function),
       { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
     );
@@ -281,9 +290,13 @@ describe('IdentityEventsConsumer', () => {
   it('creates operator approved notification for resolved operator admins', async () => {
     idempotency.begin.mockResolvedValue('acquired');
     operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    (operatorRecipientProvider.resolveOperatorRecipientEmails as jest.Mock).mockResolvedValue([
+      { userId: USER_ID, email: 'operator-admin@vietride.local' },
+    ]);
     notificationsService.createNotification.mockResolvedValue(
       createNotification(NotificationType.OPERATOR_APPROVED),
     );
+    notificationsService.enqueueEmail.mockResolvedValue({} as never);
 
     await consumer.handleOperatorApproved(
       {
@@ -305,10 +318,157 @@ describe('IdentityEventsConsumer', () => {
         dedupeKey: `${IDENTITY_OPERATOR_APPROVED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.OPERATOR_APPROVED}`,
       }),
     );
+    expect(operatorRecipientProvider.resolveOperatorRecipientEmails).toHaveBeenCalledWith(
+      OPERATOR_ID,
+      [USER_ID],
+    );
+    expect(notificationsService.enqueueEmail).toHaveBeenCalledWith({
+      notificationId: '99999999-9999-4999-8999-999999999999',
+      dedupeKey: `${IDENTITY_OPERATOR_APPROVED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:email`,
+      toEmail: 'operator-admin@vietride.local',
+      templateKey: EmailTemplateKey.OPERATOR_SUBSCRIPTION_NOTICE,
+      templateData: {
+        title: 'Nhà xe đã được duyệt',
+        message: 'Nhà xe của bạn đã được duyệt. Bạn có thể đăng nhập và bắt đầu vận hành.',
+      },
+    });
     expect(idempotency.markProcessed).toHaveBeenCalledWith(
       IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
       MESSAGE_ID,
     );
+  });
+
+  it('enqueues rejection email without creating in-app notification', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    notificationsService.enqueueEmail.mockResolvedValue({} as never);
+
+    await consumer.handleOperatorRejected(
+      {
+        eventId: EVENT_ID,
+        occurredAt: '2026-08-13T08:30:00+07:00',
+        operatorId: OPERATOR_ID,
+        companyName: 'Nhà xe Việt Ride',
+        contactEmail: 'operator@example.com',
+        reason: 'Hồ sơ đăng ký không hợp lệ.',
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(idempotency.begin).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_REJECTED_ROUTING_KEY,
+      EVENT_ID,
+      undefined,
+    );
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(notificationsService.enqueueEmail).toHaveBeenCalledWith({
+      dedupeKey: `${IDENTITY_OPERATOR_REJECTED_ROUTING_KEY}:${EVENT_ID}:email`,
+      toEmail: 'operator@example.com',
+      templateKey: EmailTemplateKey.OPERATOR_SUBSCRIPTION_NOTICE,
+      templateData: {
+        title: 'Đơn đăng ký nhà xe bị từ chối',
+        message: 'Đơn đăng ký của Nhà xe Việt Ride bị từ chối. Lý do: Hồ sơ đăng ký không hợp lệ. Bạn có thể gửi lại đơn mới nếu cần.',
+      },
+    });
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_REJECTED_ROUTING_KEY,
+      EVENT_ID,
+    );
+  });
+
+  it('marks malformed rejection payload processed without enqueueing email', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+
+    await expect(
+      consumer.handleOperatorRejected(
+        { eventId: EVENT_ID, operatorId: 'invalid' },
+        createMessage(MESSAGE_ID),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(notificationsService.enqueueEmail).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_REJECTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('releases rejection lock when email enqueue fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    notificationsService.enqueueEmail.mockRejectedValue(new Error('EMAIL_QUEUE_DOWN'));
+
+    await expect(
+      consumer.handleOperatorRejected(
+        {
+          eventId: EVENT_ID,
+          occurredAt: '2026-08-13T08:30:00+07:00',
+          operatorId: OPERATOR_ID,
+          companyName: 'Nhà xe Việt Ride',
+          contactEmail: 'operator@example.com',
+          reason: 'Hồ sơ đăng ký không hợp lệ.',
+        },
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('EMAIL_QUEUE_DOWN');
+
+    expect(idempotency.release).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_REJECTED_ROUTING_KEY,
+      EVENT_ID,
+    );
+    expect(idempotency.markProcessed).not.toHaveBeenCalled();
+  });
+
+  it('keeps approved in-app delivery when an active admin email is unavailable', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    (operatorRecipientProvider.resolveOperatorRecipientEmails as jest.Mock).mockResolvedValue([]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.OPERATOR_APPROVED),
+    );
+
+    await consumer.handleOperatorApproved(
+      {
+        eventId: EVENT_ID,
+        operatorId: OPERATOR_ID,
+        approvedAt: '2026-06-10T08:30:00+07:00',
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(1);
+    expect(notificationsService.enqueueEmail).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('releases approved event lock when email enqueue fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    (operatorRecipientProvider.resolveOperatorRecipientEmails as jest.Mock).mockResolvedValue([
+      { userId: USER_ID, email: 'operator-admin@vietride.local' },
+    ]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.OPERATOR_APPROVED),
+    );
+    notificationsService.enqueueEmail.mockRejectedValue(new Error('EMAIL_QUEUE_DOWN'));
+
+    await expect(
+      consumer.handleOperatorApproved(
+        {
+          eventId: EVENT_ID,
+          operatorId: OPERATOR_ID,
+          approvedAt: '2026-06-10T08:30:00+07:00',
+        },
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('EMAIL_QUEUE_DOWN');
+
+    expect(idempotency.release).toHaveBeenCalledWith(
+      IDENTITY_OPERATOR_APPROVED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.markProcessed).not.toHaveBeenCalled();
   });
 
   it('creates operator suspended notification for resolved operator admins', async () => {

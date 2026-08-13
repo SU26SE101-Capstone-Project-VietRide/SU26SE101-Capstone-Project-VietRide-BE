@@ -20,6 +20,7 @@ import {
   PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
   PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS,
   SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY,
+  SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY,
   TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
 } from './parcel-subscription-operator-events.constants';
 import { ParcelSubscriptionOperatorEventsConsumer } from './parcel-subscription-operator-events.consumer';
@@ -337,6 +338,77 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
         dedupeKey: `${SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED}`,
       }),
     );
+  });
+
+  it('creates trial-expiry in-app notifications and linked emails for operator admins', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    (operatorRecipientProvider.resolveOperatorRecipientEmails as jest.Mock).mockResolvedValue([
+      { userId: USER_ID, email: RECIPIENT_EMAIL },
+    ]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.SUBSCRIPTION_TRIAL_EXPIRING),
+    );
+    notificationsService.enqueueEmail.mockResolvedValue({} as never);
+
+    await consumer.handle(
+      SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY,
+      {
+        subscriptionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        operatorId: OPERATOR_ID,
+        expiresAt: '2026-08-16T02:00:00Z',
+        daysRemaining: 3,
+        occurredAt: '2026-08-13T02:00:00Z',
+      },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.enqueueEmail).toHaveBeenCalledWith({
+      notificationId: '99999999-9999-4999-8999-999999999999',
+      dedupeKey: `${SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:email`,
+      toEmail: RECIPIENT_EMAIL,
+      templateKey: EmailTemplateKey.OPERATOR_SUBSCRIPTION_NOTICE,
+      templateData: {
+        title: 'Gói dùng thử sắp hết hạn',
+        message: 'Gói dịch vụ sẽ hết hạn trong 3 ngày (2026-08-16T02:00:00Z). Nâng cấp ngay để không gián đoạn.',
+      },
+    });
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('releases trial-expiry lock when email enqueue fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    (operatorRecipientProvider.resolveOperatorRecipientEmails as jest.Mock).mockResolvedValue([
+      { userId: USER_ID, email: RECIPIENT_EMAIL },
+    ]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.SUBSCRIPTION_TRIAL_EXPIRING),
+    );
+    notificationsService.enqueueEmail.mockRejectedValue(new Error('EMAIL_QUEUE_DOWN'));
+
+    await expect(
+      consumer.handle(
+        SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY,
+        {
+          subscriptionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          operatorId: OPERATOR_ID,
+          expiresAt: '2026-08-16T02:00:00Z',
+          daysRemaining: 3,
+          occurredAt: '2026-08-13T02:00:00Z',
+        },
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('EMAIL_QUEUE_DOWN');
+
+    expect(idempotency.release).toHaveBeenCalledWith(
+      SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.markProcessed).not.toHaveBeenCalled();
   });
 
   it('creates voucher consent notification for operator recipients', async () => {

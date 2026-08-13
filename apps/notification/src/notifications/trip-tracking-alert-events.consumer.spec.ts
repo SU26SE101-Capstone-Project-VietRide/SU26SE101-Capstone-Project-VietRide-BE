@@ -8,6 +8,7 @@ import { BookingTripRecipientProvider } from './booking-trip-recipient.provider'
 import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
 import {
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
+  TRIP_BOARDING_STARTED_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
@@ -167,6 +168,56 @@ describe('TripTrackingAlertEventsConsumer subscribes all phase 5 routing keys', 
       }),
     );
     expect(idempotency.markProcessed).toHaveBeenCalledWith(TRIP_DELAYED_ROUTING_KEY, MESSAGE_ID);
+  });
+
+  it('resolves boarding reminder recipients from Booking and deduplicates passengers', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    bookingTripRecipients.resolveTripPassengerUserIds.mockResolvedValue([
+      USER_ID,
+      USER_ID,
+      SECOND_USER_ID,
+    ]);
+
+    await consumer.handle(
+      TRIP_BOARDING_STARTED_ROUTING_KEY,
+      { tripId: TRIP_ID, boardingStartedAt: '2026-07-27T03:00:00Z' },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(bookingTripRecipients.resolveTripPassengerUserIds).toHaveBeenCalledWith(TRIP_ID);
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(2);
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.TRIP_BOARDING_REMINDER,
+        dedupeKey: `${TRIP_BOARDING_STARTED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.TRIP_BOARDING_REMINDER}`,
+      }),
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      TRIP_BOARDING_STARTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('releases boarding processing lock when Booking recipient lookup fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    bookingTripRecipients.resolveTripPassengerUserIds.mockRejectedValue(
+      new Error('BOOKING_UNAVAILABLE'),
+    );
+
+    await expect(
+      consumer.handle(
+        TRIP_BOARDING_STARTED_ROUTING_KEY,
+        { tripId: TRIP_ID, boardingStartedAt: '2026-07-27T03:00:00Z' },
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('BOOKING_UNAVAILABLE');
+
+    expect(idempotency.release).toHaveBeenCalledWith(
+      TRIP_BOARDING_STARTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.markProcessed).not.toHaveBeenCalled();
   });
 
   it('resolves delayed recipients as active passengers plus operator admins', async () => {

@@ -20,9 +20,13 @@
 - Không nhắc tên service, controller, API, database, event, queue, handler hoặc đường dẫn source.
 - Không hướng dẫn hành khách thực hiện thao tác dành cho tài xế, phụ xe, nhà xe hoặc quản trị viên.
 - Không tự khẳng định số dư, vị trí xe, ghế trống, trạng thái vé hay bưu kiện hiện tại nếu chưa có dữ liệu thực tế.
-- Khi chưa đủ thông tin, nói “Mình chưa có đủ thông tin để xác định trường hợp của bạn” và xin đúng mã đặt chỗ, mã vé, mã bưu kiện hoặc thời điểm liên quan.
+- Trả lời trực tiếp đúng trọng tâm câu hỏi bằng quy tắc và hướng dẫn có trong tài liệu. Không tự mở rộng sang nội dung người dùng không hỏi.
+- Không yêu cầu hoặc mời hành khách gửi mã đặt chỗ, mã vé, mã bưu kiện, mã giao dịch, thời điểm, ảnh chụp hay dữ liệu cá nhân để trợ lý “kiểm tra giúp”. Trợ lý tài liệu không trực tiếp tra cứu hồ sơ trong cuộc trò chuyện.
+- Nếu kết luận phụ thuộc dữ liệu hiện tại, nêu rõ giới hạn đó và chỉ cách người dùng tự xem trên màn hình phù hợp hoặc liên hệ bộ phận hỗ trợ; không giả vờ sẽ kiểm tra sau khi nhận mã.
 - Không xin mật khẩu, mã OTP, access token, refresh token, chữ ký thanh toán hoặc token xác nhận giao hàng.
 - Chỉ nói mã lỗi hoặc thuật ngữ kỹ thuật khi hành khách chủ động gửi mã đó và muốn được giải thích.
+- Ưu tiên từ ngữ phổ thông mà hành khách hiểu ngay. Không dùng từ viết tắt hoặc thuật ngữ nội bộ như “ETA”, “GPS”, “booking”, “event” nếu chưa nói ý nghĩa bằng tiếng Việt; ví dụ dùng “thời gian dự kiến đến”, “vị trí xe” và “đặt chỗ”.
+- Không hiển thị chunk ID, UUID, document ID, đường dẫn source hoặc tự thêm mục “Nguồn”; ứng dụng hiển thị nguồn thân thiện riêng.
 
 ## Tài khoản và đăng nhập
 
@@ -155,7 +159,7 @@ Có một trường hợp cần thận trọng: nếu ví đã bị trừ nhưng
 - Do xác nhận có thể đến sau màn hình quay lại, vé có thể tạm thời vẫn hiển thị đang xử lý.
 - Nếu xác nhận thanh toán đến quá hạn, hệ thống không giữ ghế và có thể tạo yêu cầu hoàn tiền vào Ví VietRide.
 
-Khi VNPay báo thành công nhưng chưa có vé, hãy xin mã đặt chỗ hoặc mã phiên thanh toán và thời điểm thanh toán. Không yêu cầu người dùng tự gọi lại đường xác nhận thanh toán.
+Khi VNPay báo thành công nhưng chưa có vé, giải thích rằng màn hình thanh toán thành công chưa đủ xác nhận đã giữ ghế; hành khách cần xem trạng thái đặt chỗ và lịch sử Ví VietRide trong ứng dụng. Không yêu cầu người dùng tự gọi lại đường xác nhận thanh toán.
 
 ## Xem và thay đổi vé
 
@@ -200,7 +204,7 @@ Khoản hoàn được chuyển vào Ví VietRide, kể cả khi thanh toán ban
 
 Cách trả lời mặc định:
 
-> Bạn có thể hủy nếu vé vẫn đang chờ thanh toán, hoặc đã thanh toán nhưng chuyến chưa bắt đầu chạy. Với vé đã thanh toán, số tiền hoàn phụ thuộc chính sách nhà xe và thời điểm hủy; khoản hoàn sẽ chuyển vào Ví VietRide. Bạn gửi mã đặt chỗ để kiểm tra chính xác nhé.
+> Bạn có thể hủy nếu vé vẫn đang chờ thanh toán, hoặc đã thanh toán nhưng chuyến chưa bắt đầu chạy. Với vé đã thanh toán, số tiền hoàn phụ thuộc chính sách nhà xe và thời điểm hủy; khoản hoàn sẽ chuyển vào Ví VietRide. Số tiền cụ thể được hiển thị ở bước xác nhận hủy trong ứng dụng.
 
 ## Khi nhà xe thay đổi chuyến
 
@@ -256,7 +260,7 @@ Nếu điểm đón cũ không còn trên tuyến mới, hành khách được c
 - Yêu cầu trùng không cộng tiền hai lần.
 - Hệ thống đánh dấu yêu cầu nạp quá 10 phút là hết hạn khi lần quét chạy; đúng mốc 10 phút chưa chắc đã bị đổi ngay.
 
-Có khoảng thời gian lệch giữa hạn yêu cầu trong hệ thống và thời gian đường dẫn VNPay có thể còn dùng được. Nếu VNPay nhận tiền sau khi yêu cầu đã hết hạn, chưa đủ thông tin để khẳng định tiền sẽ tự được đối chiếu hoặc hoàn. Cần cung cấp mã giao dịch VNPay và kiểm tra lịch sử ví.
+Có khoảng thời gian lệch giữa hạn yêu cầu trong hệ thống và thời gian đường dẫn VNPay có thể còn dùng được. Nếu VNPay nhận tiền sau khi yêu cầu đã hết hạn, chưa đủ thông tin để khẳng định tiền sẽ tự được đối chiếu hoặc hoàn. Hành khách cần xem trạng thái giao dịch và lịch sử Ví VietRide trong ứng dụng; nếu vẫn chưa cập nhật thì liên hệ hỗ trợ qua kênh chính thức.
 
 ## Gửi bưu kiện
 
@@ -334,6 +338,16 @@ Không đọc mã trạng thái kỹ thuật cho hành khách.
 
 ## Theo dõi xe và chia sẻ vị trí
 
+### Khi chuyến bị trễ hơn 30 phút
+
+- Hệ thống so ETA mới với thời gian dự kiến tại điểm dừng kế tiếp.
+- Chỉ khi ETA mới muộn hơn trên 30 phút chuyến mới được ghi nhận là trễ; đúng 30 phút chưa vượt ngưỡng.
+- Hành khách và Nhà xe được thông báo khi hệ thống xác định đủ người nhận.
+- ETA tiếp tục cập nhật theo GPS; trạng thái trễ được gỡ khi cùng điểm dừng trở lại trong ngưỡng.
+- Hệ thống không tự đổi tuyến chỉ vì chuyến bị trễ; Nhà xe quyết định có cần thông báo thêm hoặc đổi tuyến.
+
+Nếu hỏi một chuyến cụ thể có đang trễ hay không, cần mã chuyến hoặc mã đặt chỗ và dữ liệu theo dõi hiện tại.
+
 ### Ai được xem
 
 Hành khách được xem vị trí chuyến khi sở hữu vé hoặc là người gửi/người nhận bưu kiện gắn với chuyến. Chỉ biết mã chuyến không tự tạo quyền xem.
@@ -385,18 +399,13 @@ Tài liệu này không tự biết:
 - chính sách hủy hiện hành của một nhà xe;
 - thời gian chính xác để email, thông báo hoặc tiền hoàn đến.
 
-Hãy xin tối thiểu:
-
-- mã đặt chỗ hoặc mã vé khi hỏi về chuyến/vé;
-- mã bưu kiện khi hỏi về hàng hóa;
-- thời điểm thanh toán hoặc hủy;
-- ảnh chụp thông báo lỗi đã che thông tin bí mật.
+Trợ lý không thu thập dữ liệu để kiểm tra thay người dùng. Hãy trả lời phần quy tắc xác định được, rồi hướng dẫn hành khách tự xem trạng thái vé, thanh toán, bưu kiện hoặc thông báo trong ứng dụng. Nếu vẫn cần hỗ trợ theo hồ sơ cụ thể, hành khách dùng kênh hỗ trợ chính thức của VietRide.
 
 ## Mẫu trả lời nhanh
 
 ### “Tôi hủy vé được không?”
 
-Bạn có thể hủy nếu vé vẫn đang chờ thanh toán, hoặc đã thanh toán nhưng chuyến chưa bắt đầu chạy. Nếu vé đã thanh toán, số tiền hoàn phụ thuộc chính sách nhà xe và thời điểm hủy. Bạn gửi mã đặt chỗ để kiểm tra chính xác nhé.
+Bạn có thể hủy nếu vé vẫn đang chờ thanh toán, hoặc đã thanh toán nhưng chuyến chưa bắt đầu chạy. Nếu vé đã thanh toán, số tiền hoàn phụ thuộc chính sách nhà xe và thời điểm hủy; số tiền cụ thể được hiển thị ở bước xác nhận hủy trong ứng dụng.
 
 ### “Hủy vé thì tiền về đâu?”
 
@@ -404,7 +413,7 @@ Khoản được hoàn sẽ chuyển vào Ví VietRide, kể cả khi bạn than
 
 ### “VNPay báo thành công nhưng chưa có vé?”
 
-Màn hình thanh toán thành công chưa đủ để xác nhận vé đã được giữ chỗ. Hệ thống còn phải nhận xác nhận thanh toán và hoàn tất giữ ghế. Bạn cung cấp mã đặt chỗ hoặc mã phiên thanh toán để kiểm tra nhé.
+Màn hình thanh toán thành công chưa đủ để xác nhận vé đã được giữ chỗ. Hệ thống còn phải nhận xác nhận thanh toán và hoàn tất giữ ghế. Bạn hãy xem trạng thái đặt chỗ và lịch sử Ví VietRide trong ứng dụng; nếu trạng thái vẫn chưa cập nhật thì liên hệ hỗ trợ qua kênh chính thức.
 
 ### “Không nhận thông báo có nghĩa thao tác thất bại?”
 
@@ -413,3 +422,7 @@ Không nhất thiết. Thao tác có thể đã thành công dù thông báo đ�
 ### “Trợ lý có biết xe đang ở đâu không?”
 
 Mình chỉ trả lời chính xác khi có dữ liệu vị trí hiện tại được hệ thống cho phép truy cập. Tài liệu hướng dẫn không tự biết xe đang ở đâu.
+
+### “Nếu chuyến trễ hơn 30 phút thì sao?”
+
+Khi thời gian dự kiến đến nơi chậm hơn lịch ban đầu trên 30 phút, hệ thống ghi nhận chuyến bị trễ và gửi thông báo cho hành khách cùng Nhà xe. Thời gian dự kiến vẫn tiếp tục được cập nhật theo vị trí xe; hệ thống không tự đổi tuyến. Nếu chỉ trễ đúng 30 phút thì chưa được tính là vượt ngưỡng.

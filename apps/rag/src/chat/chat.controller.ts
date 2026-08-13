@@ -51,7 +51,11 @@ export class ChatController {
       },
     },
   })
-  @ApiResponse({ status: 200, description: 'SSE text/event-stream. Events: token, done, error.' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'SSE text/event-stream. token carries content; done carries conversationId, userMessageId, assistantMessageId and friendly citations [{ title, section }]. Internal chunk UUIDs are never returned.',
+  })
   @ApiResponse({ status: 400, description: 'Invalid payload', schema: errorEnvelopeSchema(400, 'VALIDATION_FAILED', 'Validation failed', { fields: true }) })
   @ApiResponse({ status: 401, description: 'Missing or invalid access token', schema: errorEnvelopeSchema(401, 'UNAUTHORIZED', 'Missing or invalid access token') })
   @ApiResponse({ status: 403, description: 'Caller is not allowed to query RAG or the module is disabled', schema: ragChatForbiddenSchema })
