@@ -80,8 +80,8 @@ const tripCrewChangedPayloadSchema = z.object({
   vehiclePlateNumber: z.string().trim().min(1).nullable().optional(),
   departureDateTime: z.string().datetime({ offset: true }),
 });
-const boardingStartedPayloadSchema = baseTripAlertPayloadSchema.and(
-  z.object({ boardingStartedAt: z.string().datetime({ offset: true }).optional() }),
+const boardingStartedPayloadSchema = baseTripFieldsSchema.and(
+  z.object({ boardingStartedAt: z.string().datetime({ offset: true }) }),
 );
 
 const canonicalTripDelayedPayloadSchema = z
@@ -221,7 +221,11 @@ export function mapTripTrackingAlertToNotifications(
     case TRIP_CREW_CHANGED_ROUTING_KEY:
       return mapTripCrewChanged(tripCrewChangedPayloadSchema.parse(payload));
     case TRIP_BOARDING_STARTED_ROUTING_KEY:
-      return fanOut(boardingStartedPayloadSchema.parse(payload), mapBoardingStarted);
+      return fanOutResolved(
+        boardingStartedPayloadSchema.parse(payload),
+        resolvedRecipientUserIds,
+        mapBoardingStarted,
+      );
     case TRIP_ROUTE_CHANGED_ROUTING_KEY:
       return fanOutResolved(
         TripRouteChangedEventSchema.parse(payload),
@@ -273,6 +277,11 @@ export function parseTripRecipientResolutionRequest(
   payload: unknown,
 ): TripRecipientResolutionRequest | null {
   switch (routingKey) {
+    case TRIP_BOARDING_STARTED_ROUTING_KEY:
+      return {
+        tripId: boardingStartedPayloadSchema.parse(payload).tripId,
+        affectedBookingIds: [],
+      };
     case TRIP_DELAYED_ROUTING_KEY:
       return { tripId: tripDelayedPayloadSchema.parse(payload).tripId, affectedBookingIds: [] };
     case TRACKING_GPS_OFF_ROUTE_ROUTING_KEY:

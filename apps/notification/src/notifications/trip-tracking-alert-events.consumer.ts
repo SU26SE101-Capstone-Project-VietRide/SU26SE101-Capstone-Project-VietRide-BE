@@ -13,6 +13,7 @@ import type { OperatorRecipientProvider } from './operator-recipient.provider';
 import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 import {
   TRIP_CARGO_THRESHOLD_CROSSED_ROUTING_KEY,
+  TRIP_BOARDING_STARTED_ROUTING_KEY,
   TRIP_INCIDENT_REPORTED_ROUTING_KEY,
   TRIP_DELAYED_ROUTING_KEY,
   TRIP_ROUTE_CHANGED_ROUTING_KEY,
@@ -138,6 +139,10 @@ export class TripTrackingAlertEventsConsumer implements OnModuleInit {
   ): Promise<string[] | undefined> {
     const request = parseTripRecipientResolutionRequest(routingKey, payload);
     if (!request) return undefined;
+
+    if (routingKey === TRIP_BOARDING_STARTED_ROUTING_KEY) {
+      return this.bookingTripRecipients.resolveTripPassengerUserIds(request.tripId);
+    }
 
     if (routingKey === TRIP_DELAYED_ROUTING_KEY) {
       const snapshot = await this.tripRecipients.getTripRecipientSnapshot(request.tripId);
