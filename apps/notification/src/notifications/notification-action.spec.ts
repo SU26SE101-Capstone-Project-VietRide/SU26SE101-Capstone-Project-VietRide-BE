@@ -11,7 +11,6 @@ describe('resolveNotificationAction', () => {
     NotificationType.BOOKING_CONFIRMED,
     NotificationType.BOOKING_CANCELLED,
     NotificationType.BOOKING_DISRUPTED,
-    NotificationType.BOOKING_REFUNDED,
     NotificationType.PASSENGER_NO_SHOW,
   ])('maps %s to booking detail', (type) => {
     expect(resolveNotificationAction(type, { bookingId: BOOKING_ID })).toEqual({
@@ -117,15 +116,16 @@ describe('resolveNotificationAction', () => {
     });
   });
 
-  it.each([NotificationType.WALLET_CREDITED, NotificationType.WALLET_DEBITED])(
-    'maps %s to wallet',
-    (type) => {
-      expect(resolveNotificationAction(type, null)).toEqual({
-        type: 'OPEN_WALLET',
-        params: {},
-      });
-    },
-  );
+  it.each([
+    NotificationType.WALLET_CREDITED,
+    NotificationType.WALLET_DEBITED,
+    NotificationType.BOOKING_REFUNDED,
+  ])('maps %s to wallet', (type) => {
+    expect(resolveNotificationAction(type, null)).toEqual({
+      type: 'OPEN_WALLET',
+      params: {},
+    });
+  });
 
   it.each([
     NotificationType.SUBSCRIPTION_LIMIT_EXCEEDED,
