@@ -26,6 +26,7 @@ internal sealed class PasswordResetSessionExecutor : IPasswordResetSessionExecut
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
         var clock = scope.ServiceProvider.GetRequiredService<IClock>();
+        var lockoutCounter = scope.ServiceProvider.GetRequiredService<ILoginLockoutCounter>();
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var user = await db.Users
@@ -33,7 +34,7 @@ internal sealed class PasswordResetSessionExecutor : IPasswordResetSessionExecut
             .IgnoreQueryFilters()
             .SingleOrDefaultAsync(ct);
 
-        if (user is null || user.Status != UserStatus.ACTIVE)
+        if (user is null || user.Status != UserStatus.ACTIVE || user.PasswordHash is null)
         {
             await transaction.CommitAsync(ct);
             return new PasswordResetSessionResult(PasswordResetSessionStatus.INVALID_OTP);
@@ -74,6 +75,7 @@ internal sealed class PasswordResetSessionExecutor : IPasswordResetSessionExecut
             return new PasswordResetSessionResult(PasswordResetSessionStatus.INVALID_OTP);
         }
 
+        await lockoutCounter.ResetAsync(user.Id, ct);
         user.ResetPassword(passwordHash);
         token.MarkUsed(now);
 

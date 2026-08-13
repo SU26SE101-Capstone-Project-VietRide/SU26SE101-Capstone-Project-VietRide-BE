@@ -31,6 +31,13 @@ CREATE TYPE user_status AS ENUM (
     'DELETED'
 );
 
+CREATE TYPE user_lock_source AS ENUM (
+    'AUTOMATIC_LOGIN_FAILURE',
+    'OPERATOR_ADMIN',
+    'SYSTEM_ADMIN',
+    'LEGACY_UNKNOWN'
+);
+
 CREATE TYPE operator_registration_status AS ENUM (
     'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'
 );
@@ -43,7 +50,7 @@ CREATE TYPE oauth_provider AS ENUM ('GOOGLE');
 
 CREATE TYPE refresh_token_revoke_reason AS ENUM (
     'NORMAL_ROTATION', 'REUSE_DETECTED', 'USER_LOGOUT',
-    'ADMIN_REVOKE', 'PASSWORD_RESET'
+    'ADMIN_REVOKE', 'PASSWORD_RESET', 'PASSWORD_CHANGE'
 );
 
 CREATE TYPE device_platform AS ENUM ('IOS', 'ANDROID', 'WEB');
@@ -160,6 +167,7 @@ CREATE TABLE users (
     role user_role NOT NULL,
     status user_status NOT NULL DEFAULT 'PENDING_EMAIL_VERIFICATION',
     locked_from_status user_status NULL,
+    lock_source user_lock_source NULL,
     operator_id UUID NULL REFERENCES operators (id) ON DELETE RESTRICT,
     -- Account lockout tracking
     failed_login_attempts INT NOT NULL DEFAULT 0,
@@ -181,8 +189,10 @@ CREATE TABLE users (
         ),
     CONSTRAINT chk_users_locked_from_status
         CHECK (
-            (status = 'LOCKED' AND locked_from_status IN ('ACTIVE', 'PENDING_EMAIL_VERIFICATION'))
-            OR (status <> 'LOCKED' AND locked_from_status IS NULL)
+            (status = 'LOCKED'
+             AND locked_from_status IN ('ACTIVE', 'PENDING_EMAIL_VERIFICATION')
+             AND lock_source IS NOT NULL)
+            OR (status <> 'LOCKED' AND locked_from_status IS NULL AND lock_source IS NULL)
         )
 );
 
@@ -203,6 +213,8 @@ COMMENT ON COLUMN users.password_hash IS
     'bcrypt cost 12. NULL for Google-only accounts.';
 COMMENT ON COLUMN users.locked_from_status IS
     'Required origin for LOCKED users. Manual admin lock stores ACTIVE; password lockout may store ACTIVE or PENDING_EMAIL_VERIFICATION. Unlock restores this exact status.';
+COMMENT ON COLUMN users.lock_source IS
+    'Required for LOCKED users. SYSTEM_ADMIN lock cannot be unlocked by an OPERATOR_ADMIN; LEGACY_UNKNOWN is fail-safe and System-Admin-only.';
 
 -- -----------------------------------------------------------------------------
 -- oauth_identities

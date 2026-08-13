@@ -7,4 +7,5 @@ public enum RefreshTokenRevokeReason
     USER_LOGOUT,
     ADMIN_REVOKE,
     PASSWORD_RESET,
+    PASSWORD_CHANGE,
 }

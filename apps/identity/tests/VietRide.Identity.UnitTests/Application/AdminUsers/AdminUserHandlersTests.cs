@@ -160,6 +160,37 @@ public sealed class AdminUserHandlersTests
     }
 
     [Fact]
+    public async Task Lock_AutomaticLock_EscalatesSourceToSystemAdmin()
+    {
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var user = ActivePassenger();
+        user.RecordFailedLogin(clock, 5);
+        user.LockSource.Should().Be(UserLockSource.AUTOMATIC_LOGIN_FAILURE);
+        var users = Substitute.For<IUserRepository>();
+        users.GetByIdForUpdateAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        var handler = new LockUserCommandHandler(
+            users,
+            Substitute.For<IRefreshTokenRepository>(),
+            Substitute.For<IActivityLogRepository>(),
+            clock,
+            Substitute.For<IIntegrationEventOutbox>());
+
+        var result = await handler.Handle(
+            new LockUserCommand(
+                Guid.NewGuid(),
+                UserRole.SYSTEM_ADMIN.ToString(),
+                user.Id,
+                null,
+                null),
+            CancellationToken.None);
+
+        result.StatusChanged.Should().BeFalse();
+        user.Status.Should().Be(UserStatus.LOCKED);
+        user.LockSource.Should().Be(UserLockSource.SYSTEM_ADMIN);
+    }
+
+    [Fact]
     public async Task Unlock_PendingEmailLockout_RestoresPendingAndResetsRedis()
     {
         var clock = Substitute.For<IClock>();

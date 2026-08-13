@@ -5,7 +5,10 @@ using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Auth.ResendInitialPassword;
 using VietRide.Identity.Application.Features.OperatorUsers.CreateOperatorUser;
 using VietRide.Identity.Application.Features.OperatorUsers.ListOperatorUsers;
+using VietRide.Identity.Application.Features.OperatorUsers.LockOperatorUser;
+using VietRide.Identity.Application.Features.OperatorUsers.UnlockOperatorUser;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Identity.Api.Controllers;
 
@@ -113,6 +116,54 @@ public sealed class OperatorUsersController : ControllerBase
                 callerUserId,
                 callerRole,
                 callerOperatorId),
+            ct);
+
+        return Ok(result);
+    }
+
+    /// <summary>Locks a Driver or Assistant in the authenticated operator tenant.</summary>
+    [HttpPost("{userId:guid}/lock")]
+    [RequireIdempotency(AllowRequestBody = false)]
+    [ProducesResponseType(typeof(ApiResponse<LockOperatorUserResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Lock(Guid userId, CancellationToken ct)
+    {
+        var result = await _sender.Send(
+            new LockOperatorUserCommand(
+                CurrentUserClaims.GetUserId(User),
+                CurrentUserClaims.GetRole(User),
+                CurrentUserClaims.GetOperatorId(User),
+                userId,
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                Request.Headers.UserAgent.ToString()),
+            ct);
+
+        return Ok(result);
+    }
+
+    /// <summary>Unlocks a Driver or Assistant lock managed by the authenticated operator tenant.</summary>
+    [HttpPost("{userId:guid}/unlock")]
+    [RequireIdempotency(AllowRequestBody = false)]
+    [ProducesResponseType(typeof(ApiResponse<UnlockOperatorUserResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Unlock(Guid userId, CancellationToken ct)
+    {
+        var result = await _sender.Send(
+            new UnlockOperatorUserCommand(
+                CurrentUserClaims.GetUserId(User),
+                CurrentUserClaims.GetRole(User),
+                CurrentUserClaims.GetOperatorId(User),
+                userId,
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                Request.Headers.UserAgent.ToString()),
             ct);
 
         return Ok(result);

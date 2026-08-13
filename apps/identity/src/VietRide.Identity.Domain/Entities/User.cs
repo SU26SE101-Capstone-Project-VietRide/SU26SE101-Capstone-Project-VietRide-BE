@@ -26,6 +26,7 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     public UserRole Role { get; private set; }
     public UserStatus Status { get; private set; }
     public UserStatus? LockedFromStatus { get; private set; }
+    public UserLockSource? LockSource { get; private set; }
     public Guid? OperatorId { get; private set; }
 
     // Account lockout tracking — no LockedUntil column in schema.
@@ -255,6 +256,25 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     }
 
     /// <summary>
+    /// Replaces the local password for an active authenticated account.
+    /// The caller is responsible for verifying the current password first.
+    /// </summary>
+    public void ChangePassword(string passwordHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
+
+        if (Status != UserStatus.ACTIVE)
+        {
+            throw new InvalidUserStatusTransitionException(
+                Status.ToString(),
+                UserStatus.ACTIVE.ToString());
+        }
+
+        PasswordHash = passwordHash;
+        ResetFailedLogins();
+    }
+
+    /// <summary>
     /// Completes a Google-created profile by setting the already-normalized phone once.
     /// Existing phone changes must use the dedicated profile-update flow.
     /// </summary>
@@ -291,7 +311,8 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     /// <paramref name="failedAttemptsInWindow"/> is the Redis counter value for the
     /// 15-minute <c>identity:login_lockout:{userId}</c> window. When that windowed
     /// counter reaches >= 5 the status transitions permanently to LOCKED.
-    /// The lock is permanent — only a System Admin unlocks the account manually.
+    /// An automatic lock can be cleared by a System Admin or by the approved
+    /// OPERATOR_ADMIN that owns a DRIVER/ASSISTANT account.
     /// </summary>
     public void RecordFailedLogin(IClock clock, long failedAttemptsInWindow)
     {
@@ -319,6 +340,7 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
         if (failedAttemptsInWindow >= MaxFailedLoginAttempts)
         {
             LockedFromStatus = Status;
+            LockSource = UserLockSource.AUTOMATIC_LOGIN_FAILURE;
             Status = UserStatus.LOCKED;
         }
     }
@@ -349,10 +371,18 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
     /// <summary>
     /// Locks the account manually (e.g. Admin action). Status becomes LOCKED.
     /// </summary>
-    public bool Lock()
+    public bool Lock(UserLockSource source = UserLockSource.SYSTEM_ADMIN)
     {
+        if (source is UserLockSource.LEGACY_UNKNOWN or UserLockSource.AUTOMATIC_LOGIN_FAILURE)
+            throw new ArgumentOutOfRangeException(nameof(source), source, "Manual locks require an administrative source.");
+
         if (Status == UserStatus.LOCKED)
+        {
+            if (source == UserLockSource.SYSTEM_ADMIN && LockSource != UserLockSource.SYSTEM_ADMIN)
+                LockSource = UserLockSource.SYSTEM_ADMIN;
+
             return false;
+        }
 
         if (Status != UserStatus.ACTIVE)
         {
@@ -362,6 +392,7 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
         }
 
         LockedFromStatus = UserStatus.ACTIVE;
+        LockSource = source;
         Status = UserStatus.LOCKED;
         return true;
     }
@@ -383,6 +414,7 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
         var restoredStatus = LockedFromStatus.Value;
         Status = restoredStatus;
         LockedFromStatus = null;
+        LockSource = null;
         ResetFailedLogins();
         return restoredStatus;
     }
@@ -397,5 +429,6 @@ public sealed class User : BaseEntity<Guid>, ISoftDeletable
         DeletedAt = deletedAt;
         Status = UserStatus.DELETED;
         LockedFromStatus = null;
+        LockSource = null;
     }
 }

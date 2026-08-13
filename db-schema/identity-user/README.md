@@ -30,6 +30,8 @@ Identity & User Service quản lý **authentication, authorization, user profile
 - **`User.email` partial unique** trên `LOWER(email)` với điều kiện `deleted_at IS NULL` — cho phép tái dùng email sau soft delete (compliance + GDPR-style anonymization).
 - **`User.phone` partial unique** với `deleted_at IS NULL AND phone IS NOT NULL` — `SYSTEM_ADMIN` được phép có phone NULL; passenger Google OAuth ban đầu có phone NULL cho tới khi complete-profile.
 - **`User.operator_id` CHECK constraint** enforce role-operator consistency: DRIVER/ASSISTANT/OPERATOR_STAFF/OPERATOR_ADMIN bắt buộc có `operatorId`; PASSENGER/SYSTEM_ADMIN bắt buộc NULL. Tránh phải validate app-layer thuần.
+- **User lock provenance:** `users.lock_source` bắt buộc đúng lúc `status=LOCKED`; `SYSTEM_ADMIN` có precedence, còn `OPERATOR_ADMIN` chỉ quản lý lock của cùng-tenant `DRIVER`/`ASSISTANT` với source `OPERATOR_ADMIN` hoặc `AUTOMATIC_LOGIN_FAILURE`. Dữ liệu lock cũ được backfill `LEGACY_UNKNOWN` và chỉ System Admin mở.
+- **Password sessions:** self change revokes active refresh tokens với `PASSWORD_CHANGE`; OTP reset tiếp tục dùng `PASSWORD_RESET`. Cả hai đều giữ access JWT stateless hết hạn tự nhiên.
 - **`Operator.businessRegistrationNumber` + `Operator.taxCode` partial unique** trên `deleted_at IS NULL` — chống self-resubmit spam (re-register cùng số đăng ký kinh doanh sau khi REJECTED bị block trừ khi Admin reset).
 - **`RefreshToken.parentTokenId` self-FK** dùng `ON DELETE SET NULL` thay vì CASCADE để tránh phá chain audit (đôi khi cần giữ child record cho forensics).
 - **`OperatorSubscription.operatorId` UNIQUE** — 1 operator có đúng 1 subscription active tại 1 thời điểm; nâng cấp = update plan trên record này, không tạo record mới (lifecycle qua `status` machine).
