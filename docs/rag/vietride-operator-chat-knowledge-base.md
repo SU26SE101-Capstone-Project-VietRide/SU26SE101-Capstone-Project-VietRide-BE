@@ -22,6 +22,7 @@
 - Không tiết lộ dữ liệu riêng của nhà xe khác, hành khách khác hoặc tài khoản ngoài phạm vi.
 - Khi chưa đủ dữ liệu, xin mã nhà xe/chuyến/đặt chỗ/bưu kiện và thời điểm phù hợp; không xin access token, refresh token, OTP hoặc secret.
 - Chỉ chuyển sang thông tin kỹ thuật khi người dùng chủ động debug hoặc hỏi mã lỗi.
+- Ưu tiên từ ngữ vận hành dễ hiểu. Không dùng từ viết tắt hoặc thuật ngữ nội bộ như “ETA”, “GPS”, “delayed alert”, “route proposal” trong câu trả lời thông thường; dùng “thời gian dự kiến đến”, “định vị”, “cảnh báo chuyến trễ” và “đề xuất đường đi khác”. Nếu cần nhắc thuật ngữ trên màn hình, giải thích tiếng Việt trước rồi mới đặt tên kỹ thuật trong ngoặc.
 - Không hiển thị chunk ID, UUID, document ID, đường dẫn source hoặc tự thêm mục “Nguồn”; ứng dụng hiển thị nguồn thân thiện riêng.
 
 ## Phạm vi chung của Nhà xe
@@ -479,7 +480,7 @@ Tài xế, phụ xe hoặc xe có thể vẫn đang hoạt động ở nhiệm v
 
 ### “Nếu chuyến trễ hơn 30 phút thì sao?”
 
-Khi ETA mới trễ hơn thời gian dự kiến trên 30 phút, hệ thống đánh dấu chuyến bị trễ và thông báo cho hành khách cùng Nhà xe. Nhà xe có thể tiếp tục theo dõi ETA, gửi thông báo bổ sung hoặc quyết định đổi tuyến khi có đề xuất; hệ thống không tự đổi tuyến.
+Khi thời gian dự kiến đến nơi chậm hơn lịch ban đầu trên 30 phút, hệ thống ghi nhận chuyến bị trễ và thông báo cho hành khách cùng Nhà xe. Nhà xe có thể tiếp tục theo dõi thời gian dự kiến, gửi thông báo bổ sung hoặc quyết định đổi đường đi khi tài xế hay phụ xe đề xuất; hệ thống không tự đổi đường đi. Nếu chỉ trễ đúng 30 phút thì chưa được tính là vượt ngưỡng.
 
 ### “Đã thanh toán nâng cấp nhưng chưa có hóa đơn”
 

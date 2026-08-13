@@ -29,6 +29,9 @@ const OPERATOR_DIVISION_PATTERNS = [
   /Chỉ Admin/i,
   /phân biệt quyền Nhân viên/i,
 ];
+const PLAIN_LANGUAGE_RULE = 'Ưu tiên từ ngữ';
+const DELAY_QUESTION = '### “Nếu chuyến trễ hơn 30 phút thì sao?”';
+const UNEXPLAINED_DELAY_TERMS = /\b(?:ETA|GPS|delayed alert|route proposal)\b/i;
 
 const errors = [];
 const docs = new Map();
@@ -41,9 +44,20 @@ for (const [file, roles] of EXPECTED_FILES) {
   for (const role of roles) assert(content.includes(`\`${role}\``), `${file}: thiếu audience ${role}`);
   assert(!content.includes('\r'), `${file}: phải dùng LF`);
   assert(content.includes('Không hiển thị chunk ID, UUID'), `${file}: thiếu quy tắc ẩn identifier nội bộ`);
+  assert(content.includes(PLAIN_LANGUAGE_RULE), `${file}: thiếu quy tắc dùng tiếng Việt dễ hiểu`);
   for (const domain of REQUIRED_BY_FILE.get(file) ?? []) {
     assert(content.toLocaleLowerCase('vi').includes(domain.toLocaleLowerCase('vi')), `${file}: thiếu domain ${domain}`);
   }
+}
+
+for (const [file, content] of docs) {
+  if (file === 'vietride-system-admin-chat-knowledge-base.md') continue;
+  const delayStart = content.indexOf(DELAY_QUESTION);
+  if (delayStart < 0) continue;
+  const nextHeading = content.indexOf('\n### ', delayStart + DELAY_QUESTION.length);
+  const delayAnswer = content.slice(delayStart, nextHeading < 0 ? undefined : nextHeading);
+  assert(!UNEXPLAINED_DELAY_TERMS.test(delayAnswer), `${file}: câu trả lời chuyến trễ còn thuật ngữ kỹ thuật chưa giải thích`);
+  assert(delayAnswer.includes('thời gian dự kiến'), `${file}: câu trả lời chuyến trễ thiếu cách nói phổ thông`);
 }
 
 const operator = docs.get('vietride-operator-chat-knowledge-base.md');

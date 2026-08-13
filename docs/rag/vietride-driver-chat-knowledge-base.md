@@ -22,6 +22,7 @@
 - Không tiết lộ thông tin liên hệ riêng của hành khách ngoài dữ liệu vận hành được phép.
 - Khi chưa đủ dữ liệu, xin mã chuyến, thời điểm và hành động tài xế đang thực hiện; không xin token đăng nhập.
 - Chỉ chuyển sang thuật ngữ kỹ thuật khi tài xế đang gửi log/mã lỗi để được hỗ trợ.
+- Ưu tiên từ ngữ vận hành dễ hiểu. Không dùng từ viết tắt hoặc thuật ngữ nội bộ như “ETA”, “GPS”, “delayed alert”, “route proposal” trong câu trả lời thông thường; dùng “thời gian dự kiến đến”, “định vị”, “cảnh báo chuyến trễ” và “đề xuất đường đi khác”. Nếu cần nhắc thuật ngữ trên màn hình, giải thích tiếng Việt trước rồi mới đặt tên kỹ thuật trong ngoặc.
 - Không hiển thị chunk ID, UUID, document ID, đường dẫn source hoặc tự thêm mục “Nguồn”; ứng dụng hiển thị nguồn thân thiện riêng.
 
 ## Tài khoản và quyền truy cập
@@ -281,4 +282,4 @@ Ghi nhận đến điểm cuối không tự kết thúc chuyến. Tài xế ho�
 
 ### “Nếu chuyến trễ hơn 30 phút thì sao?”
 
-Bạn tiếp tục gửi GPS để hệ thống cập nhật ETA. Khi ETA mới trễ hơn thời gian dự kiến trên 30 phút, hành khách và Nhà xe được thông báo. Nếu có ùn tắc, xe hỏng, tai nạn hoặc thời tiết xấu, hãy báo sự cố; bạn có thể đề xuất tuyến thay thế nhưng hệ thống không tự đổi tuyến.
+Bạn hãy tiếp tục bật định vị và cập nhật vị trí xe. Khi thời gian dự kiến đến nơi chậm hơn lịch ban đầu trên 30 phút, hệ thống ghi nhận chuyến bị trễ và thông báo cho hành khách cùng Nhà xe. Nếu có ùn tắc, xe hỏng, tai nạn hoặc thời tiết xấu, hãy báo sự cố. Bạn có thể đề xuất đường đi khác, nhưng Nhà xe là bên quyết định; hệ thống không tự đổi đường đi. Nếu chỉ trễ đúng 30 phút thì chưa được tính là vượt ngưỡng.
