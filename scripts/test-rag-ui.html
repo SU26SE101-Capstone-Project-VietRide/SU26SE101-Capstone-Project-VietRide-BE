@@ -527,7 +527,7 @@
                             } else if (currentEvent === 'done') {
                                 // Finalize message
                                 DOM.convId.value = data.conversationId;
-                                finalizeAssistantMessage(assistantId, data.assistantMessageId, data.citedChunkIds);
+                                finalizeAssistantMessage(assistantId, data.assistantMessageId, data.citations);
                             } else if (currentEvent === 'error') {
                                 throw new Error(`[${data.code}] ${data.message}`);
                             }
@@ -583,7 +583,7 @@
         scrollToBottom();
     }
 
-    function finalizeAssistantMessage(wrapperId, actualMessageId, citedChunkIds) {
+    function finalizeAssistantMessage(wrapperId, actualMessageId, citations) {
         const wrapper = document.getElementById(wrapperId);
         if (!wrapper) return;
 
@@ -595,8 +595,8 @@
         meta.className = 'message-meta';
 
         let citationsHtml = '';
-        if (citedChunkIds && citedChunkIds.length > 0) {
-            citationsHtml = `<span><i class="ph ph-books"></i> ${citedChunkIds.length} sources cited</span>`;
+        if (citations && citations.length > 0) {
+            citationsHtml = `<span><i class="ph ph-books"></i> ${citations.length} nguồn tham khảo</span>`;
         }
 
         meta.innerHTML = `

@@ -29,7 +29,12 @@ import { ChatRateLimitService } from './chat-rate-limit.service';
 import { ChatRepository } from './chat.repository';
 import { ChatRerankService } from './chat-rerank.service';
 import { ChatSummaryService } from './chat-summary.service';
-import type { RagChatPreparedStream, RagChatSseEvent, RagRetrievedChunk } from './chat.types';
+import type {
+  RagChatPreparedStream,
+  RagChatSseEvent,
+  RagFriendlyCitation,
+  RagRetrievedChunk,
+} from './chat.types';
 
 const SYSTEM_ADMIN_ROLE = 'SYSTEM_ADMIN';
 const OPERATOR_SCOPED_ROLES = new Set(['DRIVER', 'ASSISTANT', 'OPERATOR_STAFF', 'OPERATOR_ADMIN']);
@@ -144,6 +149,7 @@ export class ChatService {
 
   async *streamPrepared(prepared: RagChatPreparedStream): AsyncIterable<RagChatSseEvent> {
     const citedChunkIds = prepared.chunks.map((chunk) => chunk.id);
+    const citations = this.buildFriendlyCitations(prepared.chunks);
     let assistantContent = '';
 
     try {
@@ -203,7 +209,7 @@ export class ChatService {
         conversationId: prepared.conversation.id,
         userMessageId: prepared.userMessage.id,
         assistantMessageId: assistantMessage.id,
-        citedChunkIds,
+        citations,
       },
     };
   }
@@ -361,14 +367,31 @@ export class ChatService {
     return chunks
       .map((chunk) =>
         [
-          `[chunk:${chunk.id}]`,
-          `documentTitle: ${chunk.documentTitle}`,
-          `sectionHeader: ${chunk.sectionHeader ?? ''}`,
-          `documentType: ${chunk.documentType}`,
+          `Tiêu đề tài liệu: ${chunk.documentTitle}`,
+          `Mục: ${chunk.sectionHeader ?? 'Không có tiêu đề mục'}`,
+          `Loại tài liệu: ${chunk.documentType}`,
           chunk.content,
         ].join('\n'),
       )
       .join('\n\n');
+  }
+
+  private buildFriendlyCitations(chunks: RagRetrievedChunk[]): RagFriendlyCitation[] {
+    const seen = new Set<string>();
+    const citations: RagFriendlyCitation[] = [];
+
+    for (const chunk of chunks) {
+      const citation = {
+        title: chunk.documentTitle,
+        section: chunk.sectionHeader,
+      };
+      const key = JSON.stringify([citation.title, citation.section]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      citations.push(citation);
+    }
+
+    return citations;
   }
 
   private selectContextChunks(chunks: RagRetrievedChunk[]): RagRetrievedChunk[] {

@@ -22,6 +22,7 @@
 - Không tiết lộ thông tin liên hệ riêng của hành khách ngoài dữ liệu vận hành được phép.
 - Khi chưa đủ dữ liệu, xin mã chuyến, thời điểm và hành động tài xế đang thực hiện; không xin token đăng nhập.
 - Chỉ chuyển sang thuật ngữ kỹ thuật khi tài xế đang gửi log/mã lỗi để được hỗ trợ.
+- Không hiển thị chunk ID, UUID, document ID, đường dẫn source hoặc tự thêm mục “Nguồn”; ứng dụng hiển thị nguồn thân thiện riêng.
 
 ## Tài khoản và quyền truy cập
 
@@ -155,6 +156,15 @@ Thông báo vắng mặt hiện cho biết vé không được hoàn tiền.
 
 Không tự đoán thời gian đến khi hệ thống không có đủ dữ liệu.
 
+### Khi chuyến bị trễ hơn 30 phút
+
+- Hệ thống so ETA mới với thời gian dự kiến của điểm dừng kế tiếp.
+- Trễ trên 30 phút mới được đánh dấu; đúng 30 phút chưa vượt ngưỡng.
+- Hành khách và Nhà xe được thông báo khi hệ thống xác định đủ người nhận.
+- Tài xế tiếp tục gửi GPS để ETA và trạng thái trễ được cập nhật.
+- Nếu nguyên nhân là ùn tắc, xe hỏng, tai nạn hoặc thời tiết, tài xế báo sự cố và có thể đề xuất tuyến thay thế.
+- Nhà xe quyết định áp dụng tuyến thay thế; hệ thống không tự đổi tuyến chỉ vì phát hiện trễ.
+
 ## Báo sự cố
 
 - Tài xế được phân công chỉ báo sự cố khi chuyến đang chạy.
@@ -268,3 +278,7 @@ Ghi nhận đến điểm cuối không tự kết thúc chuyến. Tài xế ho�
 ### “GPS gửi thành công nhưng chưa thấy thời gian dự kiến”
 
 Điểm vị trí có thể đã được nhận trong khi bước tính thời gian dự kiến đang chậm hoặc thiếu dữ liệu tuyến. Việc này không nhất thiết có nghĩa vị trí bị mất.
+
+### “Nếu chuyến trễ hơn 30 phút thì sao?”
+
+Bạn tiếp tục gửi GPS để hệ thống cập nhật ETA. Khi ETA mới trễ hơn thời gian dự kiến trên 30 phút, hành khách và Nhà xe được thông báo. Nếu có ùn tắc, xe hỏng, tai nạn hoặc thời tiết xấu, hãy báo sự cố; bạn có thể đề xuất tuyến thay thế nhưng hệ thống không tự đổi tuyến.

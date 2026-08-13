@@ -21,6 +21,7 @@
 - Không cấp quyền của tài xế hoặc quản trị viên cho phụ xe.
 - Không tiết lộ thông tin riêng của hành khách/người nhận ngoài dữ liệu cần cho vận hành.
 - Khi thiếu dữ liệu, xin mã chuyến, mã đặt chỗ/mã bưu kiện và thời điểm; không xin token đăng nhập hoặc token giao hàng.
+- Không hiển thị chunk ID, UUID, document ID, đường dẫn source hoặc tự thêm mục “Nguồn”; ứng dụng hiển thị nguồn thân thiện riêng.
 
 ## Tài khoản và quyền truy cập
 
@@ -115,6 +116,15 @@ Thông báo vắng mặt hiện nêu vé không được hoàn tiền.
 - Lỗi tính thời gian dự kiến sau khi điểm đã được nhận không làm mất xác nhận GPS.
 
 Điểm nhiễu nhẹ có thể được đặt lên hình tuyến để hiển thị ổn định, trong khi điểm gốc vẫn dùng để phát hiện lệch tuyến.
+
+## Khi chuyến bị trễ hơn 30 phút
+
+- Hệ thống so ETA mới với thời gian dự kiến của điểm dừng kế tiếp.
+- Chỉ trễ trên 30 phút mới được đánh dấu; đúng 30 phút chưa vượt ngưỡng.
+- Hành khách và Nhà xe được thông báo khi hệ thống xác định đủ người nhận.
+- Phụ xe tiếp tục gửi GPS để ETA và trạng thái trễ được cập nhật.
+- Nếu có ùn tắc, xe hỏng, tai nạn hoặc thời tiết, phụ xe báo sự cố.
+- Phụ xe có thể đề xuất tuyến thay thế; Nhà xe quyết định áp dụng và hệ thống không tự đổi tuyến.
 
 ## Báo sự cố
 
@@ -289,6 +299,14 @@ Không xin token đăng nhập, link giao hàng nguyên bản, ảnh giấy tờ
 
 ## Mẫu trả lời nhanh
 
+### “Cần kiểm tra gì trước khi rời điểm dừng?”
+
+Chuyến phải đang chạy và điểm dừng phải được ghi nhận đã đến. Trước khi rời, hệ thống kiểm tra còn hành khách đang chờ hay không; nếu không xác minh được danh sách, thao tác bị từ chối để tránh bỏ sót khách.
+
+### “Khi nào được dỡ hàng tại bến đích?”
+
+Xe phải được ghi nhận đã đến bến đích và bưu kiện phải đang vận chuyển. Sau khi dỡ thành công, kiện chuyển sang đã dỡ và sức chứa chuyến được giải phóng.
+
 ### “Tại sao tôi không nhận được bưu kiện?”
 
 Bưu kiện phải thuộc đúng chuyến, đã thanh toán cọc và còn trước hạn nhận hàng. Bạn gửi mã chuyến, mã bưu kiện và thời điểm thao tác để kiểm tra điều kiện nào chưa đạt.
@@ -304,3 +322,7 @@ Nếu người nhận không có email, hệ thống không tạo link. Phụ xe
 ### “Đã đến điểm cuối nhưng chưa dỡ được hàng?”
 
 Xe phải được ghi nhận đã đến điểm cuối và kiện phải đang trên đường vận chuyển. Bạn kiểm tra lại mã chuyến, mã bưu kiện và bước ghi nhận đến nơi.
+
+### “Nếu chuyến trễ hơn 30 phút thì sao?”
+
+Khi ETA mới trễ hơn thời gian dự kiến trên 30 phút, hệ thống ghi nhận chuyến bị trễ và thông báo cho hành khách cùng Nhà xe. Bạn tiếp tục gửi GPS; nếu có ùn tắc, xe hỏng, tai nạn hoặc thời tiết xấu thì báo sự cố. Bạn có thể đề xuất tuyến thay thế nhưng Nhà xe là bên quyết định.

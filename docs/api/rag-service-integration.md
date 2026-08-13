@@ -105,8 +105,13 @@ event: token
 data: {"content":"Chính"}
 
 event: done
-data: {"conversationId":"11111111-1111-1111-1111-111111111111","userMessageId":"33333333-3333-3333-3333-333333333333","assistantMessageId":"44444444-4444-4444-4444-444444444444","citedChunkIds":[]}
+data: {"conversationId":"11111111-1111-1111-1111-111111111111","userMessageId":"33333333-3333-3333-3333-333333333333","assistantMessageId":"44444444-4444-4444-4444-444444444444","citations":[{"title":"Cẩm nang VietRide dành cho hành khách","section":"Hủy vé và hoàn tiền"}]}
 ```
+
+`citations` là metadata nguồn thân thiện dành cho giao diện. `title` luôn có, `section` có thể
+`null`, và các cặp `title + section` trùng nhau được loại bỏ. API không trả chunk ID, document ID
+hoặc UUID nội bộ. Mobile không được dựng mục `Nguồn: <UUID>`; khi không có nguồn, API trả
+`citations: []`.
 
 - **Lỗi thường gặp**: `VALIDATION_FAILED`, `INSUFFICIENT_ROLE`, `RAG_OPERATOR_SCOPE_REQUIRED`, `RAG_OPERATOR_SCOPE_FORBIDDEN`, `RAG_CONVERSATION_NOT_FOUND`, `RAG_CONVERSATION_FORBIDDEN`, `RAG_RATE_LIMIT_EXCEEDED`, `RAG_PROVIDER_UNAVAILABLE`.
 

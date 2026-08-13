@@ -20,6 +20,11 @@ export interface RagRetrievedChunk {
   distance: number;
 }
 
+export interface RagFriendlyCitation {
+  title: string;
+  section: string | null;
+}
+
 export interface RagChatPreparedStream {
   conversation: RagConversation;
   userMessage: RagMessage;
@@ -61,7 +66,7 @@ export type RagChatSseEvent =
         conversationId: string;
         userMessageId: string;
         assistantMessageId: string;
-        citedChunkIds: string[];
+        citations: RagFriendlyCitation[];
       };
     }
   | {

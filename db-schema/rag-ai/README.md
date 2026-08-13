@@ -20,7 +20,7 @@ NestJS service xử lý knowledge base ingestion và LLM streaming RAG. Ingest p
 | `KnowledgeDocument` | Metadata tài liệu upload. | `storageProvider`, `storagePath`, `fileType`, `accessLevel`, `category`, `documentType`, `audienceRoles`, `operatorId`, `status`, `ingestStatus` |
 | `KnowledgeChunk` | Đoạn text đã chunk + embedding. | `embedding halfvec(2048)`, `searchVector`, `operatorId`, `documentType`, unique `(documentId, chunkIndex)` |
 | `RagConversation` | 1 session chat. | `userId`, `operatorId`, `role`, `summary`, `lastMessageAt` |
-| `RagMessage` | 1 turn USER/ASSISTANT. | `citedChunkIds`, `tokensUsed` |
+| `RagMessage` | 1 turn USER/ASSISTANT. | `citedChunkIds` audit nội bộ, `tokensUsed` |
 | `MessageFeedback` | Feedback cho ASSISTANT message. | `rating`, `chunkIds`, `queryRewritten`, `responseLength` |
 | `OutboxEvent` | Outbox để trigger ingest/publish event. | `eventType`, `payload`, `status`, `retryCount` |
 | `Policy` | Chính sách generic cho platform hoặc một operator tenant. | `operatorId`, `policyType`, `category`, `version`, `active`, `deletedAt` |
@@ -50,6 +50,8 @@ Rule retrieval production:
 - `Policy.operator_id` là logical tenant key: `NULL` cho platform và UUID cho operator; không tạo FK sang Identity.
 - `PolicyAuditLog` được ghi cùng transaction với Policy và trigger DB chặn UPDATE/DELETE để giữ audit bất biến.
 - `RagMessage.cited_chunk_ids` dùng `UUID[]` để audit citation đơn giản, không enforce FK.
+- API chat không trả `cited_chunk_ids` cho client. SSE `done` chỉ trả metadata thân thiện
+  `citations[{ title, section }]`; UUID tiếp tục được giữ nội bộ cho feedback và điều tra.
 - `MessageFeedback.rating` chỉ nhận `-1` hoặc `1`.
 
 ## Index Strategy

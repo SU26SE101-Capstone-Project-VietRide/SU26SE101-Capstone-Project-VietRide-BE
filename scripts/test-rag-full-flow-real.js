@@ -10,6 +10,7 @@ const DEFAULT_PHONE = '+84900000001';
 const DEFAULT_QUESTION = 'Quy dinh hanh ly la gi?';
 const REQUEST_TIMEOUT_MS = 60_000;
 const CHAT_TIMEOUT_MS = 180_000;
+const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i;
 
 loadEnvFile(process.env.RAG_FULL_FLOW_ENV_FILE ?? '.env.rag-full-flow');
 loadEnvFile('.env');
@@ -50,9 +51,9 @@ async function main() {
   await testNegativeAuth();
   const doneData = await testRagChat(accessToken);
   if (DB_MODE === 'direct') {
-    verifyCitedChunks(doneData.citedChunkIds);
+    verifyPersistedCitedChunks(doneData.assistantMessageId, doneData.citations);
   } else {
-    pass(`DB_MODE=manual: skipped DB verification for ${doneData.citedChunkIds.length} cited chunks.`);
+    pass(`DB_MODE=manual: skipped DB verification for ${doneData.citations.length} friendly citations.`);
   }
 
   pass('RAG real deploy full-flow automation passed.');
@@ -219,27 +220,35 @@ async function testRagChat(accessToken) {
   assert(events.some((event) => event.event === 'token' && event.data?.content), 'RAG SSE must include at least one token event with content.');
   const done = events.find((event) => event.event === 'done');
   assert(done, 'RAG SSE must include done event.');
-  assert(Array.isArray(done.data?.citedChunkIds), 'RAG done event must include citedChunkIds array.');
-  assert(done.data.citedChunkIds.length > 0, 'RAG done citedChunkIds must not be empty.');
-  pass(`RAG chat returned SSE token + done with ${done.data.citedChunkIds.length} cited chunks.`);
+  assert(Array.isArray(done.data?.citations), 'RAG done event must include citations array.');
+  assert(done.data.citations.length > 0, 'RAG done citations must not be empty.');
+  assert(!Object.hasOwn(done.data, 'citedChunkIds'), 'RAG done event must not expose citedChunkIds.');
+  done.data.citations.forEach((citation) => {
+    assert(typeof citation.title === 'string' && citation.title.length > 0, 'Citation title is required.');
+    assert(citation.section === null || typeof citation.section === 'string', 'Citation section must be string or null.');
+    assert(!UUID_PATTERN.test(citation.title), 'Citation title must not expose a UUID.');
+    assert(citation.section === null || !UUID_PATTERN.test(citation.section), 'Citation section must not expose a UUID.');
+  });
+  pass(`RAG chat returned SSE token + done with ${done.data.citations.length} friendly citations.`);
   return done.data;
 }
 
-function verifyCitedChunks(citedChunkIds) {
+function verifyPersistedCitedChunks(assistantMessageId, citations) {
   const rows = psqlRows(
     RAG_DATABASE_URL,
-    `select id::text, document_title, left(regexp_replace(content, '\\s+', ' ', 'g'), 180) as snippet
-       from vietride_rag.knowledge_chunks
-      where id = any(:'chunkIds'::uuid[])
-      order by document_title, id;`,
-    { chunkIds: `{${citedChunkIds.join(',')}}` },
+    `select c.id::text, c.document_title, c.section_header
+       from vietride_rag.rag_messages m
+       join vietride_rag.knowledge_chunks c on c.id = any(m.cited_chunk_ids)
+      where m.id = :'assistantMessageId'::uuid
+      order by c.document_title, c.section_header, c.id;`,
+    { assistantMessageId },
   );
-  assert(rows.length === citedChunkIds.length, `Expected ${citedChunkIds.length} cited chunks in DB, found ${rows.length}.`);
-  rows.forEach((row) => {
-    const [id, title, snippet] = row;
-    console.log(`[CITED] ${id} | ${title} | ${snippet}`);
+  assert(rows.length > 0, 'Assistant message must retain internal citedChunkIds for audit.');
+  const friendlyKeys = new Set(citations.map((citation) => JSON.stringify([citation.title, citation.section])));
+  rows.forEach(([, title, section]) => {
+    assert(friendlyKeys.has(JSON.stringify([title, section || null])), `Missing friendly citation for ${title}.`);
   });
-  pass('All citedChunkIds exist in RAG DB.');
+  pass('Internal citedChunkIds remain auditable without being exposed to the client.');
 }
 
 async function fetchWithTimeout(url, init, timeoutMs) {

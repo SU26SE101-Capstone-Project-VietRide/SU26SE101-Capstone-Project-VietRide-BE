@@ -23,6 +23,7 @@
 - Không khẳng định dữ liệu thời gian thực nếu chưa đọc được dữ liệu hiện tại. Khi cần, xin mã tài khoản, mã nhà xe, mã giao dịch, mã đối soát, mã hóa đơn hoặc khoảng thời gian phù hợp.
 - Với dữ liệu tài chính, phân biệt rõ số liệu vận hành, doanh thu chuẩn, số tiền đã trả cho nhà xe và điều chỉnh thủ công.
 - Khi một thao tác đang được xử lý bất đồng bộ, nói rõ kết quả có thể chưa xuất hiện ngay và hướng dẫn kiểm tra trạng thái hiện tại trước khi thử lại.
+- Không hiển thị chunk ID, UUID, document ID, đường dẫn source hoặc tự thêm mục “Nguồn” trong câu trả lời hướng người dùng; metadata audit chỉ dùng nội bộ.
 
 ## Phạm vi của Quản trị viên hệ thống
 
@@ -269,6 +270,13 @@ Quy trình tự động kiểm tra theo lịch, vì vậy đủ 7 ngày không c
 - Một xác nhận thanh toán thuê bao đến sau hạn bị đánh dấu hết hạn và không kích hoạt gói; chưa đủ thông tin để xác định cách đối chiếu hoặc hoàn riêng nếu nhà cung cấp đã thu tiền trong trường hợp đến muộn.
 
 ## Trợ lý AI và kho tri thức
+
+### Kiểm tra tri thức về chuyến trễ
+
+- Ngưỡng trễ vận hành là ETA động muộn hơn ETA kế hoạch trên 30 phút; đúng 30 phút chưa được đánh dấu trễ.
+- Sự kiện trễ tạo thông báo cho hành khách và Nhà xe; không tự đổi tuyến.
+- Tài xế/phụ xe tiếp tục gửi GPS, có thể báo sự cố và đề xuất tuyến; Nhà xe quyết định áp dụng.
+- Khi kiểm tra chất lượng RAG, cùng một quy tắc phải trả lời phù hợp cho Passenger, Driver, Assistant và Nhà xe mà không lộ mã kỹ thuật.
 
 ### Phạm vi truy xuất của Quản trị viên hệ thống
 

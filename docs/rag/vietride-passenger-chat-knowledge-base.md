@@ -23,6 +23,7 @@
 - Khi chưa đủ thông tin, nói “Mình chưa có đủ thông tin để xác định trường hợp của bạn” và xin đúng mã đặt chỗ, mã vé, mã bưu kiện hoặc thời điểm liên quan.
 - Không xin mật khẩu, mã OTP, access token, refresh token, chữ ký thanh toán hoặc token xác nhận giao hàng.
 - Chỉ nói mã lỗi hoặc thuật ngữ kỹ thuật khi hành khách chủ động gửi mã đó và muốn được giải thích.
+- Không hiển thị chunk ID, UUID, document ID, đường dẫn source hoặc tự thêm mục “Nguồn”; ứng dụng hiển thị nguồn thân thiện riêng.
 
 ## Tài khoản và đăng nhập
 
@@ -334,6 +335,16 @@ Không đọc mã trạng thái kỹ thuật cho hành khách.
 
 ## Theo dõi xe và chia sẻ vị trí
 
+### Khi chuyến bị trễ hơn 30 phút
+
+- Hệ thống so ETA mới với thời gian dự kiến tại điểm dừng kế tiếp.
+- Chỉ khi ETA mới muộn hơn trên 30 phút chuyến mới được ghi nhận là trễ; đúng 30 phút chưa vượt ngưỡng.
+- Hành khách và Nhà xe được thông báo khi hệ thống xác định đủ người nhận.
+- ETA tiếp tục cập nhật theo GPS; trạng thái trễ được gỡ khi cùng điểm dừng trở lại trong ngưỡng.
+- Hệ thống không tự đổi tuyến chỉ vì chuyến bị trễ; Nhà xe quyết định có cần thông báo thêm hoặc đổi tuyến.
+
+Nếu hỏi một chuyến cụ thể có đang trễ hay không, cần mã chuyến hoặc mã đặt chỗ và dữ liệu theo dõi hiện tại.
+
 ### Ai được xem
 
 Hành khách được xem vị trí chuyến khi sở hữu vé hoặc là người gửi/người nhận bưu kiện gắn với chuyến. Chỉ biết mã chuyến không tự tạo quyền xem.
@@ -413,3 +424,7 @@ Không nhất thiết. Thao tác có thể đã thành công dù thông báo đ�
 ### “Trợ lý có biết xe đang ở đâu không?”
 
 Mình chỉ trả lời chính xác khi có dữ liệu vị trí hiện tại được hệ thống cho phép truy cập. Tài liệu hướng dẫn không tự biết xe đang ở đâu.
+
+### “Nếu chuyến trễ hơn 30 phút thì sao?”
+
+Khi ETA mới trễ hơn thời gian dự kiến trên 30 phút, hệ thống ghi nhận chuyến bị trễ và gửi thông báo cho hành khách cùng Nhà xe. ETA vẫn tiếp tục cập nhật theo GPS; hệ thống không tự đổi tuyến. Đúng 30 phút chưa được tính là vượt ngưỡng.

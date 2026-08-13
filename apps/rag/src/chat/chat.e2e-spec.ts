@@ -159,7 +159,10 @@ describe('ChatController (e2e)', () => {
     expect(response.headers.get('content-type')).toContain('text/event-stream');
     expect(body).toContain('event: token');
     expect(body).toContain('event: done');
-    expect(body).toContain(CHUNK_ID);
+    expect(body).toContain('"citations"');
+    expect(body).toContain('FAQ hành khách');
+    expect(body).not.toContain(CHUNK_ID);
+    expect(body).not.toContain('citedChunkIds');
     expect(repository.searchChunks).toHaveBeenCalledWith(
       expect.objectContaining({ accessLevels: ['PUBLIC'] }),
     );
