@@ -69,7 +69,9 @@ describe('ShopAiKeyEmbeddingProvider', () => {
   });
 
   it('opens the circuit after three invalid vectors', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: [{ embedding: [0.1] }] }));
+    fetchMock.mockImplementation(async () =>
+      jsonResponse({ data: [{ embedding: [0.1] }] }),
+    );
     const provider = new ShopAiKeyEmbeddingProvider(makeEnv());
 
     await expect(provider.embed({ input: 'query-1' })).rejects.toMatchObject({
