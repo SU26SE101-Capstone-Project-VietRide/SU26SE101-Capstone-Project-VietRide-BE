@@ -9,6 +9,7 @@ using VietRide.Parcel.Application.Features.ParcelRouteFares.List;
 using VietRide.Parcel.Application.Features.ParcelRouteFares.Update;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 
 namespace VietRide.Parcel.Api.Controllers;
 
@@ -53,20 +54,24 @@ public sealed class OperatorParcelRouteFaresController : ControllerBase
     }
 
     [HttpGet]
+    [AllowedQueryParameters("routeId", "sizeCategory", "page", "pageSize", "search")]
     [Authorize(Roles = $"{AdminRole},{StaffRole}")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<ParcelRouteFareResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<PagedResult<ParcelRouteFareResponse>>> ListAsync(
         [FromQuery] Guid? routeId,
         [FromQuery] string? sizeCategory,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
+        [FromQuery] string? search = null,
         CancellationToken cancellationToken = default)
     {
         var operatorId = GetRequiredOperatorId();
 
         var result = await _mediator.Send(
-            new ListParcelRouteFaresQuery(operatorId, routeId, sizeCategory, page, pageSize),
+            new ListParcelRouteFaresQuery(operatorId, routeId, sizeCategory, page, pageSize, search),
             cancellationToken);
 
         return Ok(result);
