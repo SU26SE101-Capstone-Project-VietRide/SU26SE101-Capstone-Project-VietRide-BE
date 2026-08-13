@@ -1,4 +1,5 @@
 import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import pino from 'pino';
 import { ENV_TOKEN } from '../app/tokens';
 import type { Env } from '../config/env.schema';
 import { RAG_EMBEDDING_DIMENSIONS } from '../embedding/embedding.constants';
@@ -13,6 +14,7 @@ const CIRCUIT_BREAKER_OPEN_MS = 60_000;
 
 @Injectable()
 export class ShopAiKeyEmbeddingProvider implements EmbeddingProvider {
+  private readonly logger = pino({ name: ShopAiKeyEmbeddingProvider.name });
   private consecutiveFailures = 0;
   private circuitOpenUntil = 0;
 
@@ -32,7 +34,6 @@ export class ShopAiKeyEmbeddingProvider implements EmbeddingProvider {
         model: this.env.SHOPAIKEY_EMBEDDING_MODEL,
         input: request.input,
         encoding_format: 'float',
-        dimensions: RAG_EMBEDDING_DIMENSIONS,
       }),
       signal: controller.signal,
     };
@@ -54,19 +55,32 @@ export class ShopAiKeyEmbeddingProvider implements EmbeddingProvider {
         });
       }
 
-      this.recordSuccess();
       const body = (await response.json()) as ShopAiKeyEmbeddingResponse;
       const embedding = body.data?.[0]?.embedding;
       if (
-        embedding?.length !== RAG_EMBEDDING_DIMENSIONS ||
+        !Array.isArray(embedding) ||
+        embedding.length !== RAG_EMBEDDING_DIMENSIONS ||
         embedding.some((value) => !Number.isFinite(value))
       ) {
         this.recordFailure(502);
+        this.logger.warn(
+          {
+            model: this.env.SHOPAIKEY_EMBEDDING_MODEL,
+            httpStatus: response.status,
+            requestId: response.headers.get('x-request-id') ?? undefined,
+            errorCode: 'RAG_PROVIDER_INVALID_RESPONSE',
+            hasData: Array.isArray(body.data),
+            expectedDimensions: RAG_EMBEDDING_DIMENSIONS,
+            actualDimensions: Array.isArray(embedding) ? embedding.length : null,
+          },
+          'ShopAIKey embedding provider returned an invalid vector',
+        );
         throw new ServiceUnavailableException({
           errorCode: 'RAG_PROVIDER_INVALID_RESPONSE',
           detail: 'ShopAIKey embedding provider returned an invalid vector',
         });
       }
+      this.recordSuccess();
       return embedding;
     } catch (error) {
       if (error instanceof ServiceUnavailableException) throw error;

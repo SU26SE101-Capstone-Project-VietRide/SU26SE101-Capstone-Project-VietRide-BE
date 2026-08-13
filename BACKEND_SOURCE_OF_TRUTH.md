@@ -1104,7 +1104,7 @@ Realtime state (last position, ETA cache, off-route timer) → Redis only.
 
 #### RAG AI (`vietride_rag`)
 
-`KnowledgeDocument` (Cloudinary raw asset metadata) · `KnowledgeChunk` (`halfvec(2048)`, HNSW cosine) · `RagConversation` · `RagMessage` · `OutboxEvent`. Chat và embedding đều gọi ShopAIKey qua API tương thích OpenAI; model canonical lần lượt là `gemini-3.5-flash` và `gemini-embedding-2-preview`, với dimension 2.048 cố định trong code.
+`KnowledgeDocument` (Cloudinary raw asset metadata) · `KnowledgeChunk` (`halfvec(3072)`, HNSW cosine) · `RagConversation` · `RagMessage` · `OutboxEvent`. Chat và embedding đều gọi ShopAIKey qua API tương thích OpenAI; model canonical lần lượt là `gemini-3.5-flash` và `gemini-embedding-2-preview`, với native dimension 3.072 cố định trong code.
 
 ### 4.3 Cross-service logical FK
 
@@ -1125,7 +1125,7 @@ Tham chiếu `db-schema/_global/cross-service-references.md` cho danh sách đ�
 - **`departureTime`:** `TIME` (no TZ), semantic calendar `Asia/Ho_Chi_Minh`; KHÔNG lưu `Asia/Ho_Chi_Minh` hoặc `+07:00` vào DB.
 - **UUID:** `UUID DEFAULT gen_random_uuid()`.
 - **JSON config:** `JSONB`.
-- **pgvector embedding:** `halfvec(2048)` — chỉ trong `vietride_rag`; HNSW index dùng `halfvec_cosine_ops`.
+- **pgvector embedding:** `halfvec(3072)` — chỉ trong `vietride_rag`; HNSW index dùng `halfvec_cosine_ops`.
 - **Soft delete:** `deleted_at timestamptz` (canonical marker) cho Operator, User, Station, Stop, Route, Vehicle. Partial unique index `WHERE deleted_at IS NULL`. `is_active boolean` là **activation flag riêng biệt** (không phải soft-delete) cho Operator, Station, Stop, Route, Vehicle — `User` không có `is_active` (dùng `status` enum). Xem ADR 0003 + markers `ISoftDeletable`/`IActivatable`.
 - **Audit columns:** `created_at TIMESTAMPTZ DEFAULT now()` + `updated_at TIMESTAMPTZ DEFAULT now()` + trigger `trg_set_updated_at` cho UPDATE.
 - **Optimistic concurrency:** `row_version INT DEFAULT 0` cho `wallets`, `platform_wallets`, `operator_wallets`, `operator_trip_settlements`.
@@ -3719,7 +3719,7 @@ permitted.
 
 | Queue / Job | Trigger | Worker logic |
 |---|---|---|
-| `rag:document-ingest` | Enqueued on KnowledgeDocument APPROVED | Download Cloudinary raw asset → parse → chunk → call ShopAIKey embedding model `gemini-embedding-2-preview` with `dimensions=2048` → validate 2.048 dimensions → INSERT `halfvec(2048)` KnowledgeChunk |
+| `rag:document-ingest` | Enqueued on KnowledgeDocument APPROVED | Download Cloudinary raw asset → parse → chunk → call ShopAIKey embedding model `gemini-embedding-2-preview` at its native output → validate 3.072 dimensions → INSERT `halfvec(3072)` KnowledgeChunk |
 | `rag:outbox-publisher` | Repeatable every 5s | Outbox poll |
 
 ### 10.3 Retry & DLQ conventions
@@ -4127,7 +4127,7 @@ Mock qua interface đã định nghĩa ở `Application/Abstractions/`:
 | Firebase FCM | `IFcmPushClient` (Notification) | NSubstitute mock |
 | SendGrid | `ISendGridEmailClient` (Notification) | NSubstitute mock |
 | Google Maps Directions | `IGoogleDirectionsClient` (Tracking) | NSubstitute mock |
-| ShopAIKey chat / embedding | `ChatCompletionProvider`, `EmbeddingProvider` (RAG) | Jest mock `fetch` hoặc provider test double; assert OpenAI-compatible payload, model ID, numeric vector và đúng 2.048 dimensions |
+| ShopAIKey chat / embedding | `ChatCompletionProvider`, `EmbeddingProvider` (RAG) | Jest mock `fetch` hoặc provider test double; assert OpenAI-compatible payload, model ID, numeric vector và đúng 3.072 dimensions |
 | RabbitMQ broker | `IEventPublisher` (Outbox-aware) | Unit: mock; Integration: Testcontainers real broker |
 | Inter-service HTTP | `ITripServiceClient`, `IIdentityServiceClient`, ... | NSubstitute mock; integration WireMock.NET hoặc real service |
 | Clock | `IClock` | NSubstitute return fixed UTC |

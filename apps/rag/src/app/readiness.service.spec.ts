@@ -45,7 +45,7 @@ describe('ReadinessService', () => {
     redisClient.ping.mockResolvedValue('PONG');
     rabbit.createChannel.mockResolvedValue(channel as never);
     channel.close.mockResolvedValue(undefined);
-    embeddingProbe.probe.mockResolvedValue(2048);
+    embeddingProbe.probe.mockResolvedValue(3072);
     chatProvider.complete.mockResolvedValue('ok');
     knowledgeDocumentCount.mockResolvedValue(0);
   });
