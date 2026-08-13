@@ -1,7 +1,7 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import { EmailTemplateKey } from '../generated/notification-prisma-client';
 import { RABBITMQ_PREFETCH_ONE } from './core-events.constants';
 import { MessageIdempotencyService } from './message-idempotency.service';
@@ -13,6 +13,7 @@ import {
   OPERATOR_RECIPIENT_PROVIDER,
   INVOICE_ISSUED_ROUTING_KEY,
   PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS,
+  SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY,
 } from './parcel-subscription-operator-events.constants';
 import {
   mapParcelSubscriptionOperatorEventToNotifications,
@@ -88,23 +89,30 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
       );
       let invoice: InvoiceIssuedPayload | null = null;
       let invoiceEmailByUserId: ReadonlyMap<string, string> = new Map();
+      const requiresOperatorEmail =
+        routingKey === INVOICE_ISSUED_ROUTING_KEY ||
+        routingKey === SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY;
       if (routingKey === INVOICE_ISSUED_ROUTING_KEY) {
         invoice = InvoiceIssuedPayloadSchema.parse(payload);
+      }
+      if (requiresOperatorEmail) {
         const resolveEmails = this.operatorRecipientProvider.resolveOperatorRecipientEmails;
         if (!resolveEmails) {
           throw new Error('OPERATOR_RECIPIENT_EMAIL_PROVIDER_NOT_CONFIGURED');
         }
         const recipientProfiles = await resolveEmails.call(
           this.operatorRecipientProvider,
-          invoice.operatorId,
+          getOperatorId(payload),
           notifications.map((notification) => notification.userId),
         );
         invoiceEmailByUserId = new Map(
           recipientProfiles.map((recipient) => [recipient.userId, recipient.email]),
         );
-        notifications = notifications.filter((notification) =>
-          invoiceEmailByUserId.has(notification.userId),
-        );
+        if (routingKey === INVOICE_ISSUED_ROUTING_KEY) {
+          notifications = notifications.filter((notification) =>
+            invoiceEmailByUserId.has(notification.userId),
+          );
+        }
       }
       if (notifications.length === 0) {
         this.logger.warn(
@@ -131,6 +139,14 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
         await this.enqueueInvoiceEmails(
           messageId,
           invoice,
+          invoiceEmailByUserId,
+          createdNotifications,
+        );
+      }
+      if (routingKey === SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY) {
+        await this.enqueueTrialExpiryEmails(
+          messageId,
+          parseTrialExpiryEmailPayload(payload),
           invoiceEmailByUserId,
           createdNotifications,
         );
@@ -181,6 +197,52 @@ export class ParcelSubscriptionOperatorEventsConsumer implements OnModuleInit {
       }),
     );
   }
+
+  private async enqueueTrialExpiryEmails(
+    messageId: string,
+    payload: TrialExpiryEmailPayload,
+    emailByUserId: ReadonlyMap<string, string>,
+    notifications: Awaited<ReturnType<NotificationsService['createNotification']>>[],
+  ): Promise<void> {
+    await Promise.all(
+      notifications.map(async (notification) => {
+        const toEmail = emailByUserId.get(notification.userId);
+        if (!toEmail) return;
+        await this.notificationsService.enqueueEmail({
+          notificationId: notification.id,
+          dedupeKey: `${SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY}:${messageId}:${notification.userId}:email`,
+          toEmail,
+          templateKey: EmailTemplateKey.OPERATOR_SUBSCRIPTION_NOTICE,
+          templateData: {
+            title: 'Gói dùng thử sắp hết hạn',
+            message: `Gói dịch vụ sẽ hết hạn trong ${payload.daysRemaining} ngày (${payload.expiresAt}). Nâng cấp ngay để không gián đoạn.`,
+          },
+        });
+      }),
+    );
+  }
+}
+
+const TrialExpiryEmailPayloadSchema = z
+  .object({
+    expiresAt: z.string().datetime({ offset: true }),
+    daysRemaining: z.number().int().nonnegative(),
+  })
+  .passthrough();
+
+type TrialExpiryEmailPayload = z.infer<typeof TrialExpiryEmailPayloadSchema>;
+
+function getOperatorId(payload: unknown): string {
+  if (typeof payload !== 'object' || payload === null || !('operatorId' in payload)) {
+    throw new Error('OPERATOR_ID_REQUIRED_FOR_EMAIL');
+  }
+  const operatorId = (payload as { operatorId?: unknown }).operatorId;
+  if (typeof operatorId !== 'string') throw new Error('OPERATOR_ID_REQUIRED_FOR_EMAIL');
+  return operatorId;
+}
+
+function parseTrialExpiryEmailPayload(payload: unknown): TrialExpiryEmailPayload {
+  return TrialExpiryEmailPayloadSchema.parse(payload);
 }
 
 function getCanonicalMessageId(payload: unknown): string | undefined {
