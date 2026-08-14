@@ -68,13 +68,24 @@ internal sealed class UserRepository : IUserRepository
         UserStatus? status,
         Guid? operatorId,
         CancellationToken ct = default)
+        => await ListAdminUsersFilteredAsync(
+            options, role, status, operatorId, ct: ct);
+
+    public async Task<PagedResult<User>> ListAdminUsersFilteredAsync(
+        QueryOptions options,
+        UserRole? role,
+        UserStatus? status,
+        Guid? operatorId,
+        DateTimeOffset? fromUtc = null,
+        DateTimeOffset? toUtcExclusive = null,
+        CancellationToken ct = default)
     {
         IQueryable<User> query;
         if (!string.IsNullOrWhiteSpace(options.Search))
         {
-            var searchPattern = $"%{options.Search.Trim()}%";
+            var searchPattern = $"%{EscapeLike(options.Search.Trim())}%";
             query = _db.Users
-                .FromSqlInterpolated($"SELECT * FROM vietride_identity.users WHERE email ILIKE {searchPattern} OR display_name ILIKE {searchPattern} OR phone ILIKE {searchPattern}")
+                .FromSqlInterpolated($"SELECT * FROM vietride_identity.users WHERE email ILIKE {searchPattern} ESCAPE '\\' OR display_name ILIKE {searchPattern} ESCAPE '\\' OR phone ILIKE {searchPattern} ESCAPE '\\'")
                 .AsNoTracking();
         }
         else
@@ -93,6 +104,12 @@ internal sealed class UserRepository : IUserRepository
 
         if (operatorId.HasValue)
             query = query.Where(user => user.OperatorId == operatorId.Value);
+
+        if (fromUtc.HasValue)
+            query = query.Where(user => user.CreatedAt >= fromUtc.Value);
+
+        if (toUtcExclusive.HasValue)
+            query = query.Where(user => user.CreatedAt < toUtcExclusive.Value);
 
         var totalItems = await query.LongCountAsync(ct);
         var items = await ApplySort(query, options.SortBy, options.SortDir)
@@ -200,6 +217,23 @@ internal sealed class UserRepository : IUserRepository
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<Guid>> SearchUserIdsAsync(
+        string search,
+        int limit,
+        CancellationToken ct = default)
+    {
+        var normalized = search.Trim();
+        return await _db.Database.SqlQuery<Guid>($@"
+SELECT id AS ""Value""
+FROM vietride_identity.users
+WHERE deleted_at IS NULL
+  AND (strpos(lower(unaccent(display_name)), lower(unaccent({normalized}))) > 0
+       OR strpos(phone, {normalized}) > 0)
+ORDER BY id
+LIMIT {limit}")
+            .ToListAsync(ct);
+    }
+
     public async Task<User> AddAsync(User entity, CancellationToken ct)
     {
         await _db.Users.AddAsync(entity, ct);
@@ -229,6 +263,11 @@ internal sealed class UserRepository : IUserRepository
             return null;
         }
     }
+
+    private static string EscapeLike(string value)
+        => value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 
     private static IOrderedQueryable<User> ApplySort(
         IQueryable<User> query,

@@ -13,4 +13,6 @@ public sealed record ListUsersQuery(
     int? Page,
     int? PageSize,
     string? SortBy,
-    string? SortDir) : IQuery<PagedResult<AdminUserListItemDto>>;
+    string? SortDir,
+    DateOnly? From = null,
+    DateOnly? To = null) : IQuery<PagedResult<AdminUserListItemDto>>;

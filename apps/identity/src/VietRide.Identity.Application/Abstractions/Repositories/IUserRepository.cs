@@ -47,6 +47,16 @@ public interface IUserRepository : IRepository<User, Guid>
         CancellationToken ct = default)
         => throw new NotSupportedException("Admin user listing is not implemented by this repository.");
 
+    Task<PagedResult<User>> ListAdminUsersFilteredAsync(
+        QueryOptions options,
+        UserRole? role,
+        UserStatus? status,
+        Guid? operatorId,
+        DateTimeOffset? fromUtc = null,
+        DateTimeOffset? toUtcExclusive = null,
+        CancellationToken ct = default)
+        => ListAdminUsersAsync(options, role, status, operatorId, ct);
+
     Task<PagedResult<User>> ListOperatorUsersAsync(
         QueryOptions options,
         Guid? operatorId,
@@ -72,4 +82,10 @@ public interface IUserRepository : IRepository<User, Guid>
         IReadOnlyCollection<Guid> userIds,
         CancellationToken ct = default)
         => throw new NotSupportedException("Internal user batch lookup is not implemented by this repository.");
+
+    Task<IReadOnlyList<Guid>> SearchUserIdsAsync(
+        string search,
+        int limit,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Internal user search is not implemented by this repository.");
 }
