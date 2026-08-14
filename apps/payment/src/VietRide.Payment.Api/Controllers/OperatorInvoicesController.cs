@@ -6,6 +6,7 @@ using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Features.Invoices;
 using VietRide.Payment.Application.Features.Management;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 
 namespace VietRide.Payment.Api.Controllers;
 
@@ -19,6 +20,7 @@ public sealed class OperatorInvoicesController : ControllerBase
     public OperatorInvoicesController(ISender sender) => _sender = sender;
 
     [HttpGet]
+    [AllowedQueryParameters("page", "pageSize", "status", "from", "to", "sortBy", "sortDir", "search")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<InvoiceListItemDto>>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<InvoiceListItemDto>>> List(
         [FromQuery] int page = 1,
@@ -28,9 +30,10 @@ public sealed class OperatorInvoicesController : ControllerBase
         [FromQuery] DateTimeOffset? to = null,
         [FromQuery] string? sortBy = null,
         [FromQuery] string sortDir = "desc",
+        [FromQuery] string? search = null,
         CancellationToken cancellationToken = default)
         => Ok(await _sender.Send(new ListOperatorInvoicesQuery(
-            GetOperatorId(), new PageOptions(page, pageSize, sortBy, sortDir, from, to), status), cancellationToken));
+            GetOperatorId(), new PageOptions(page, pageSize, sortBy, sortDir, from, to), status, search), cancellationToken));
 
     [HttpGet("{invoiceId:guid}")]
     [ProducesResponseType(typeof(ApiResponse<InvoiceDetailDto>), StatusCodes.Status200OK)]
