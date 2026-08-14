@@ -11,5 +11,12 @@ public sealed record ListDriverSchedulesQuery(
     Guid? DriverUserId,
     bool? IsActive,
     string? Search = null,
-    Guid? VehicleTypeId = null)
+    Guid? VehicleTypeId = null,
+    int? DayOfWeek = null,
+    TimeOnly? DepartureFrom = null,
+    TimeOnly? DepartureTo = null,
+    DateOnly? EffectiveAt = null,
+    Guid? AssistantUserId = null,
+    string? SortBy = null,
+    string? SortDir = null)
     : IRequest<PagedResult<DriverScheduleDetailDto>>;

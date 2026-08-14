@@ -81,7 +81,7 @@ public sealed class OperatorRoutesController : ControllerBase
         => Ok(await mediator.Send(ToFullCommand(GetRequiredOperatorId(), id, request), cancellationToken));
 
     [HttpGet]
-    [AllowedQueryParameters("page", "pageSize", "search", "isActive")]
+    [AllowedQueryParameters("page", "pageSize", "search", "isActive", "originStationId", "destinationStationId", "sortBy", "sortDir")]
     [Authorize(Roles = OperatorReadRoles)]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<RouteListItemDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -91,10 +91,16 @@ public sealed class OperatorRoutesController : ControllerBase
         [FromQuery] int? pageSize,
         [FromQuery] string? search,
         [FromQuery] bool? isActive,
+        [FromQuery] Guid? originStationId,
+        [FromQuery] Guid? destinationStationId,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
         CancellationToken cancellationToken)
     {
         return Ok(await mediator.Send(
-            new ListRoutesQuery(GetRequiredOperatorId(), page, pageSize, search, isActive),
+            new ListRoutesQuery(
+                GetRequiredOperatorId(), page, pageSize, search, isActive,
+                originStationId, destinationStationId, sortBy, sortDir),
             cancellationToken));
     }
 

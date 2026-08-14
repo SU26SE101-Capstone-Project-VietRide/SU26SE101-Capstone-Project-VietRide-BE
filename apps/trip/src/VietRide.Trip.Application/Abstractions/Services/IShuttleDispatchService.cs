@@ -11,6 +11,12 @@ public interface IShuttleDispatchService
         int pageSize,
         CancellationToken cancellationToken);
 
+    Task<PagedResult<ShuttleRequestTripGroup>> GetPendingFilteredAsync(
+        Guid operatorId, int page, int pageSize, DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtcExclusive, Guid? mainTripId, string? search,
+        IReadOnlyCollection<Guid> passengerUserIds, CancellationToken cancellationToken)
+        => GetPendingAsync(operatorId, page, pageSize, cancellationToken);
+
     Task<PagedResult<OperatorShuttleTripListItemDto>> GetHistoryAsync(
         Guid operatorId,
         int page,

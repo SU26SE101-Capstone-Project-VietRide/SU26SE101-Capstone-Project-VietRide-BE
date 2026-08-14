@@ -82,6 +82,38 @@ internal sealed class IncidentRepository : IIncidentRepository
         return PagedResult<OperatorIncidentReadRow>.Create(items, page, pageSize, totalItems);
     }
 
+    public async Task<PagedResult<OperatorIncidentReadRow>> ListOperatorIncidentsFilteredAsync(
+        Guid operatorId, Guid? tripId, IncidentCategory? category, bool? resolved,
+        DateTimeOffset? fromUtc, DateTimeOffset? toUtcExclusive, string? search,
+        IReadOnlyCollection<Guid> reporterUserIds, Guid? reportedByUserId,
+        string sortBy, string sortDir, int page, int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = BuildOperatorProjectionQuery(operatorId);
+        if (tripId.HasValue) query = query.Where(row => row.TripId == tripId.Value);
+        if (category.HasValue) query = query.Where(row => row.Category == category.Value);
+        if (resolved.HasValue) query = resolved.Value ? query.Where(row => row.ResolvedAt != null) : query.Where(row => row.ResolvedAt == null);
+        if (fromUtc.HasValue) query = query.Where(row => row.ReportedAt >= fromUtc.Value);
+        if (toUtcExclusive.HasValue) query = query.Where(row => row.ReportedAt < toUtcExclusive.Value);
+        if (reportedByUserId.HasValue) query = query.Where(row => row.ReportedByUserId == reportedByUserId.Value);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var pattern = $"%{EscapeLike(search.Trim())}%";
+            query = query.Where(row => (row.Description != null && EF.Functions.ILike(row.Description, pattern, "\\"))
+                || reporterUserIds.Contains(row.ReportedByUserId));
+        }
+
+        var total = await query.LongCountAsync(cancellationToken);
+        var descending = sortDir.Equals("desc", StringComparison.OrdinalIgnoreCase);
+        var ordered = sortBy == "resolvedAt"
+            ? descending ? query.OrderByDescending(row => row.ResolvedAt) : query.OrderBy(row => row.ResolvedAt)
+            : descending ? query.OrderByDescending(row => row.ReportedAt) : query.OrderBy(row => row.ReportedAt);
+        ordered = descending ? ordered.ThenByDescending(row => row.IncidentId) : ordered.ThenBy(row => row.IncidentId);
+        var projections = await ordered.Skip((page - 1) * pageSize).Take(pageSize).ToArrayAsync(cancellationToken);
+        return PagedResult<OperatorIncidentReadRow>.Create(
+            projections.Select(MapReadRow).ToArray(), page, pageSize, total);
+    }
+
     public async Task<OperatorIncidentReadRow?> GetOperatorIncidentAsync(
         Guid operatorId,
         Guid incidentId,
@@ -173,6 +205,11 @@ internal sealed class IncidentRepository : IIncidentRepository
             row.OriginStationName,
             row.DestinationStationId,
             row.DestinationStationName);
+
+    private static string EscapeLike(string value)
+        => value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 
     private sealed class OperatorIncidentProjection
     {

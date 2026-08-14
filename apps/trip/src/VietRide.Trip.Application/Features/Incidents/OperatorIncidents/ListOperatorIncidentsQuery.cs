@@ -11,5 +11,9 @@ public sealed record ListOperatorIncidentsQuery(
     DateOnly? From,
     DateOnly? To,
     int? Page,
-    int? PageSize)
+    int? PageSize,
+    string? Search = null,
+    Guid? ReportedByUserId = null,
+    string? SortBy = null,
+    string? SortDir = null)
     : IRequest<PagedResult<OperatorIncidentDto>>;

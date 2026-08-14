@@ -7,4 +7,6 @@ public sealed record ListStopsQuery(
     Guid OperatorId,
     int? Page,
     int? PageSize,
-    string? Search) : IRequest<PagedResult<StopDto>>;
+    string? Search,
+    bool? IsActive = null,
+    Guid? RouteId = null) : IRequest<PagedResult<StopDto>>;
