@@ -33,7 +33,7 @@ namespace VietRide.Booking.Infrastructure.Migrations
                     FROM vietride_booking.bookings b
                     INNER JOIN vietride_booking.passengers p ON p.booking_id = b.id
                     INNER JOIN first_mark_no_show h ON h.booking_id = b.id
-                    WHERE p.boarding_status = 'NO_SHOW'::public.passenger_boarding_status
+                    WHERE p.boarding_status = 'NO_SHOW'
                     GROUP BY b.id, b.operator_id, b.trip_id, h.occurred_at
                 ), legacy_no_show AS (
                     SELECT operator_id, stat_date, trip_id, SUM(passenger_count)::integer AS passenger_count
