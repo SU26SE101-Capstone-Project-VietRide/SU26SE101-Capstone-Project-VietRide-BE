@@ -5,6 +5,7 @@ using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Domain.Exceptions;
 
 namespace VietRide.Trip.Application.Features.Internal.Trips.Cargo;
 
@@ -51,9 +52,13 @@ public sealed class CargoMutationCommandHandler : IRequestHandler<CargoMutationC
                     _ => throw new CodedValidationException("INVALID_CARGO_ACTION", "Cargo action is invalid."),
                 };
             }
-            catch (InvalidOperationException ex)
+            catch (TripCargoCapacityExceededException ex)
             {
                 throw new CodedConflictException("TRIP_CARGO_CAPACITY_EXCEEDED", ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new CodedConflictException("TRIP_CARGO_STATE_INVALID", ex.Message);
             }
             catch (ArgumentOutOfRangeException ex)
             {

@@ -749,6 +749,9 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
 
             request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey.ToString("D"));
             using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var conflictErrorCode = response.StatusCode == HttpStatusCode.Conflict
+                ? await ReadErrorCodeAsync(response, cancellationToken).ConfigureAwait(false)
+                : null;
             return response.StatusCode switch
             {
                 HttpStatusCode.OK => new TripCargoOutcome(
@@ -758,7 +761,19 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
                         .ReadFromJsonAsync<TripCargoCapacitySnapshot>(JsonOptions, cancellationToken)
                         .ConfigureAwait(false)),
                 HttpStatusCode.NotFound => new TripCargoOutcome(TripCargoOutcomeKind.TripNotFound, null),
-                HttpStatusCode.Conflict => new TripCargoOutcome(TripCargoOutcomeKind.CapacityExceeded, "Trip cargo capacity would be exceeded."),
+                HttpStatusCode.Conflict when conflictErrorCode == "TRIP_CARGO_CAPACITY_EXCEEDED"
+                    => new TripCargoOutcome(
+                        TripCargoOutcomeKind.CapacityExceeded,
+                        "Trip cargo capacity would be exceeded."),
+                HttpStatusCode.Conflict when conflictErrorCode == "TRIP_CARGO_STATE_INVALID"
+                    => new TripCargoOutcome(
+                        TripCargoOutcomeKind.InvalidState,
+                        "Trip cargo is not in a state that allows this operation."),
+                HttpStatusCode.Conflict => new TripCargoOutcome(
+                    TripCargoOutcomeKind.TransportError,
+                    string.IsNullOrWhiteSpace(conflictErrorCode)
+                        ? "Trip cargo endpoint returned an unknown conflict."
+                        : $"Trip cargo endpoint returned unresolved error '{conflictErrorCode}'."),
                 _ => new TripCargoOutcome(TripCargoOutcomeKind.TransportError,
                     $"Trip cargo endpoint returned status {(int)response.StatusCode}."),
             };

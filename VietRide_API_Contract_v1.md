@@ -3984,6 +3984,7 @@ Response `200`:
 Decision notes:
 - Reweigh is allowed only from `CHECKED_IN`; backend derives actual size and all money values.
 - Task reweigh owns estimated reservation → actual reservation. If capacity cannot be updated, status becomes `PENDING_OPERATOR_ACTION` with `pendingActionType=CAPACITY_EXCEEDED` and a `pendingActionResumeStatus`.
+- A Trip cargo state conflict returns `409 TRIP_CARGO_STATE_INVALID`; Parcel remains `CHECKED_IN` and must not misclassify the failure as capacity exceeded or persist `PENDING_OPERATOR_ACTION`.
 - Tolerance never waives settlement. A positive balance produces `PENDING_FINAL_PAYMENT`; otherwise the Parcel becomes `READY_TO_LOAD`.
 - A positive `refundDueVnd` enqueues an idempotent Outbox refund but does not block `READY_TO_LOAD`.
 

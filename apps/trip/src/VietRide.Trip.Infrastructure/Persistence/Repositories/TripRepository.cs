@@ -13,6 +13,7 @@ using VietRide.Trip.Application.Features.Internal.Trips.BatchTripSummaries;
 using VietRide.Trip.Application.Features.OperatorReports;
 using VietRide.Trip.Application.Features.Trips.ListOperatorTrips;
 using VietRide.Trip.Domain.Entities;
+using VietRide.Trip.Domain.Exceptions;
 
 namespace VietRide.Trip.Infrastructure.Persistence.Repositories;
 
@@ -1094,12 +1095,12 @@ internal sealed class TripRepository : ITripRepository
         if (trip.MaxCargoWeightKg.HasValue
             && trip.EstimatedPassengerLuggageKg + reservedWeightKg + loadedWeightKg > trip.MaxCargoWeightKg.Value)
         {
-            throw new InvalidOperationException("Trip cargo weight capacity would be exceeded.");
+            throw new TripCargoCapacityExceededException("Trip cargo weight capacity would be exceeded.");
         }
 
         if (trip.MaxCargoVolumeM3.HasValue && reservedVolumeM3 + loadedVolumeM3 > trip.MaxCargoVolumeM3.Value)
         {
-            throw new InvalidOperationException("Trip cargo volume capacity would be exceeded.");
+            throw new TripCargoCapacityExceededException("Trip cargo volume capacity would be exceeded.");
         }
     }
 }

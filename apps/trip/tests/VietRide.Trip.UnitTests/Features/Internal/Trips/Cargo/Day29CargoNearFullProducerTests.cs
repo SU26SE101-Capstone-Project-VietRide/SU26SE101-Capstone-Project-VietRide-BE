@@ -1,11 +1,13 @@
 using System.Text.Json;
 using FluentAssertions;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
 using VietRide.Trip.Domain.Entities;
+using VietRide.Trip.Domain.Exceptions;
 using TripEntity = VietRide.Trip.Domain.Entities.Trip;
 
 namespace VietRide.Trip.UnitTests.Features.Internal.Trips.Cargo;
@@ -57,12 +59,42 @@ public sealed class Day29CargoNearFullProducerTests
         fixture.Outbox.Messages.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task RemeasureLoadedCargo_MapsStateConflictWithoutClaimingCapacityExceeded()
+    {
+        var fixture = new Fixture(
+            new TripCargoMutationResult(Guid.NewGuid(), 0, 0, 30, 0.0034m, 500, 5, 6, false, Guid.NewGuid()),
+            new InvalidOperationException("Only reserved cargo can be remeasured."));
+
+        var action = () => fixture.Handler.Handle(fixture.Command("remeasure"), default);
+
+        var exception = await action.Should().ThrowAsync<CodedConflictException>();
+        exception.Which.ErrorCode.Should().Be("TRIP_CARGO_STATE_INVALID");
+        exception.Which.Message.Should().Be("Only reserved cargo can be remeasured.");
+        fixture.UnitOfWork.Calls.Should().Equal("begin", "rollback");
+        fixture.Outbox.Messages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CapacityFailure_RemainsCapacityExceeded()
+    {
+        var fixture = new Fixture(
+            new TripCargoMutationResult(Guid.NewGuid(), 0, 0, 30, 0.0034m, 30, 5, 100, false, Guid.NewGuid()),
+            new TripCargoCapacityExceededException("Trip cargo weight capacity would be exceeded."));
+
+        var action = () => fixture.Handler.Handle(fixture.Command("remeasure"), default);
+
+        var exception = await action.Should().ThrowAsync<CodedConflictException>();
+        exception.Which.ErrorCode.Should().Be("TRIP_CARGO_CAPACITY_EXCEEDED");
+        fixture.UnitOfWork.Calls.Should().Equal("begin", "rollback");
+    }
+
     private sealed class Fixture
     {
-        public Fixture(TripCargoMutationResult result)
+        public Fixture(TripCargoMutationResult result, Exception? remeasureException = null)
         {
             Result = result;
-            Repository = new FakeRepository(result);
+            Repository = new FakeRepository(result, remeasureException);
             Outbox = new FakeOutbox();
             UnitOfWork = new FakeUnitOfWork();
             Handler = new CargoMutationCommandHandler(Repository, Outbox, UnitOfWork, new FixedClock());
@@ -128,10 +160,16 @@ public sealed class Day29CargoNearFullProducerTests
             => EnqueueAsync(Guid.NewGuid(), eventType, payloadJson, ct);
     }
 
-    private sealed class FakeRepository(TripCargoMutationResult result) : ITripRepository
+    private sealed class FakeRepository(
+        TripCargoMutationResult result,
+        Exception? remeasureException) : ITripRepository
     {
         public Task<TripCargoMutationResult?> LoadCargoAsync(Guid tripId, Guid parcelId, decimal weightKg, decimal volumeM3, bool allowCapacityOverflow, DateTimeOffset now, CancellationToken cancellationToken) => Task.FromResult<TripCargoMutationResult?>(result);
         public Task<TripCargoMutationResult?> ReleaseCargoAsync(Guid tripId, Guid parcelId, DateTimeOffset now, CancellationToken cancellationToken) => Task.FromResult<TripCargoMutationResult?>(result);
+        public Task<TripCargoMutationResult?> RemeasureReservedCargoAsync(Guid tripId, Guid parcelId, decimal weightKg, decimal volumeM3, bool allowCapacityOverflow, DateTimeOffset now, CancellationToken cancellationToken)
+            => remeasureException is null
+                ? Task.FromResult<TripCargoMutationResult?>(result)
+                : Task.FromException<TripCargoMutationResult?>(remeasureException);
         public Task<TripEntity?> GetByIdAsync(Guid id, CancellationToken ct) => throw new NotSupportedException();
         public Task<TripEntity> AddAsync(TripEntity entity, CancellationToken ct) => throw new NotSupportedException();
         public void Update(TripEntity entity) => throw new NotSupportedException();

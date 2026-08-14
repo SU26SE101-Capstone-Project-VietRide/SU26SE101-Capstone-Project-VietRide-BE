@@ -119,6 +119,13 @@ public sealed class ReweighParcelCommandHandler
             operationId,
             cancellationToken);
 
+        if (capacityOutcome.Kind == TripCargoOutcomeKind.InvalidState)
+        {
+            throw new CodedConflictException(
+                "TRIP_CARGO_STATE_INVALID",
+                capacityOutcome.ErrorMessage ?? "Trip cargo is not in a state that allows reweighing.");
+        }
+
         var capacityAccepted = capacityOutcome.Kind == TripCargoOutcomeKind.Success;
         if (!capacityAccepted && capacityOutcome.Kind != TripCargoOutcomeKind.CapacityExceeded)
         {
