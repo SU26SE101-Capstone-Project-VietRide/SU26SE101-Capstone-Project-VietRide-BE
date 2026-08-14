@@ -10,4 +10,8 @@ public sealed record ListParcelRouteFaresQuery(
     string? SizeCategory,
     int Page,
     int PageSize,
-    string? Search = null) : IQuery<PagedResult<ParcelRouteFareResponse>>;
+    string? Search = null,
+    string? SortBy = null,
+    string? SortDir = null,
+    DateOnly? EffectiveAt = null,
+    string? Status = null) : IQuery<PagedResult<ParcelRouteFareResponse>>;

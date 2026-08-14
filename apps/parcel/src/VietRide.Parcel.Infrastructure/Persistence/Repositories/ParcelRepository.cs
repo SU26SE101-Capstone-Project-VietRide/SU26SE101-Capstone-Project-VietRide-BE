@@ -2070,6 +2070,58 @@ internal sealed class ParcelRepository : IParcelRepository
         return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
     }
 
+    public async Task<PagedResult<ParcelEntity>> ListByOperatorFilteredAsync(
+        Guid operatorId,
+        ParcelStatus? status,
+        Guid? tripId,
+        PendingActionType? pendingActionType,
+        string? search,
+        IReadOnlyCollection<Guid> senderUserIds,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtcExclusive,
+        string dateField,
+        ParcelSizeCategory? sizeCategory,
+        Guid? routeId,
+        string sortBy,
+        string sortDir,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        var normalizedSearch = search?.Trim();
+        var query = string.IsNullOrEmpty(normalizedSearch)
+            ? _db.Parcels.AsNoTracking()
+            : _db.Parcels.FromSqlInterpolated($"""
+                SELECT parcel.*
+                FROM vietride_parcel.parcels AS parcel
+                WHERE strpos(lower(unaccent(parcel.parcel_code)), lower(unaccent({normalizedSearch}))) > 0
+                   OR strpos(lower(unaccent(parcel.recipient_name)), lower(unaccent({normalizedSearch}))) > 0
+                   OR strpos(parcel.recipient_phone, {normalizedSearch}) > 0
+                   OR parcel.sender_user_id = ANY ({senderUserIds.ToArray()})
+                """).AsNoTracking();
+        query = query.Where(parcel => parcel.OperatorId == operatorId);
+        if (status.HasValue) query = query.Where(parcel => parcel.Status == status.Value);
+        if (tripId.HasValue) query = query.Where(parcel => parcel.TripId == tripId.Value);
+        if (pendingActionType.HasValue) query = query.Where(parcel => parcel.PendingActionType == pendingActionType.Value);
+        if (sizeCategory.HasValue)
+            query = query.Where(parcel => (parcel.ActualSizeCategory ?? parcel.EstimatedSizeCategory) == sizeCategory.Value);
+        if (routeId.HasValue) query = query.Where(parcel => parcel.TripSnapshotRouteId == routeId.Value);
+        var useDeadline = dateField.Equals("finalPaymentDeadline", StringComparison.OrdinalIgnoreCase);
+        if (fromUtc.HasValue)
+            query = useDeadline ? query.Where(p => p.FinalPaymentDeadline >= fromUtc) : query.Where(p => p.CreatedAt >= fromUtc);
+        if (toUtcExclusive.HasValue)
+            query = useDeadline ? query.Where(p => p.FinalPaymentDeadline < toUtcExclusive) : query.Where(p => p.CreatedAt < toUtcExclusive);
+
+        var total = await query.LongCountAsync(ct);
+        var descending = sortDir.Equals("desc", StringComparison.OrdinalIgnoreCase);
+        var ordered = sortBy.Equals("finalPaymentDeadline", StringComparison.OrdinalIgnoreCase)
+            ? descending ? query.OrderByDescending(p => p.FinalPaymentDeadline) : query.OrderBy(p => p.FinalPaymentDeadline)
+            : descending ? query.OrderByDescending(p => p.CreatedAt) : query.OrderBy(p => p.CreatedAt);
+        ordered = descending ? ordered.ThenByDescending(p => p.Id) : ordered.ThenBy(p => p.Id);
+        var items = await ordered.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
+    }
+
     public async Task<OperatorParcelDetailData?> GetOperatorDetailAsync(
         Guid parcelId,
         Guid operatorId,

@@ -490,6 +490,25 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
         int pageSize,
         CancellationToken ct);
 
+    Task<PagedResult<ParcelEntity>> ListByOperatorFilteredAsync(
+        Guid operatorId,
+        ParcelStatus? status,
+        Guid? tripId,
+        PendingActionType? pendingActionType,
+        string? search,
+        IReadOnlyCollection<Guid> senderUserIds,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtcExclusive,
+        string dateField,
+        ParcelSizeCategory? sizeCategory,
+        Guid? routeId,
+        string sortBy,
+        string sortDir,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+        => ListByOperatorAsync(operatorId, status, tripId, pendingActionType, page, pageSize, ct);
+
     // ---- Phase 7: Delivery Token ----
 
     /// <summary>

@@ -3,7 +3,9 @@ using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Time;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
 namespace VietRide.Parcel.Application.Features.Parcels.OperatorList;
@@ -29,16 +31,50 @@ public sealed class GetOperatorParcelsQueryHandler
         GetOperatorParcelsQuery query,
         CancellationToken cancellationToken)
     {
-        var status = ParseOptional<ParcelStatus>(query.Status);
-        var pendingActionType = ParseOptional<PendingActionType>(query.PendingActionType);
-        var page = await _parcelRepository.ListByOperatorAsync(
-            query.OperatorId,
-            status,
-            query.TripId,
-            pendingActionType,
-            query.Page,
-            query.PageSize,
-            cancellationToken);
+        var status = ParseOptional<ParcelStatus>(query.Status, "status");
+        var pendingActionType = ParseOptional<PendingActionType>(query.PendingActionType, "pendingActionType");
+        if (query.Page < 1 || query.PageSize is < 1 or > 100)
+            throw new CodedValidationException("VALIDATION_ERROR", "Invalid paging values.");
+        if (query.Search?.Length > 100)
+            throw new CodedValidationException("VALIDATION_ERROR", "search must not exceed 100 characters.");
+        if (query.From.HasValue && query.To.HasValue && query.From > query.To)
+            throw new CodedValidationException("VALIDATION_ERROR", "from must be on or before to.");
+        var dateField = string.IsNullOrWhiteSpace(query.DateField) ? "createdAt" : query.DateField.Trim();
+        if (dateField is not ("createdAt" or "finalPaymentDeadline"))
+            throw new CodedValidationException("VALIDATION_ERROR", "dateField must be createdAt or finalPaymentDeadline.");
+        var sortBy = string.IsNullOrWhiteSpace(query.SortBy) ? "createdAt" : query.SortBy.Trim();
+        if (sortBy is not ("createdAt" or "finalPaymentDeadline"))
+            throw new BadRequestException("INVALID_SORT_FIELD", "sortBy must be createdAt or finalPaymentDeadline.");
+        var sortDir = string.IsNullOrWhiteSpace(query.SortDir) ? "desc" : query.SortDir.Trim();
+        if (sortDir is not ("asc" or "desc"))
+            throw new CodedValidationException("VALIDATION_ERROR", "sortDir must be asc or desc.");
+        var sizeCategory = ParseOptional<ParcelSizeCategory>(query.SizeCategory, "sizeCategory");
+        var fromUtc = query.From.HasValue ? BusinessTime.ToUtc(query.From.Value, TimeOnly.MinValue) : (DateTimeOffset?)null;
+        var toUtc = query.To.HasValue ? BusinessTime.ToUtc(query.To.Value.AddDays(1), TimeOnly.MinValue) : (DateTimeOffset?)null;
+
+        IReadOnlyCollection<Guid> senderIds = [];
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            var outcome = await _identityService.SearchUserIdsAsync(query.Search.Trim(), cancellationToken);
+            if (outcome.Kind == IdentityUserSearchOutcomeKind.TooBroad)
+                throw new CodedValidationException("SEARCH_TOO_BROAD", "Search matched more than 1,000 users.");
+            if (outcome.Kind != IdentityUserSearchOutcomeKind.Success)
+                throw new ParcelDependencyUnavailableException("UPSTREAM_UNAVAILABLE", "Identity user search is unavailable.");
+            senderIds = outcome.UserIds;
+        }
+
+        var hasExtendedFilters = !string.IsNullOrWhiteSpace(query.Search) || query.From.HasValue
+            || query.To.HasValue || !string.IsNullOrWhiteSpace(query.DateField)
+            || !string.IsNullOrWhiteSpace(query.SizeCategory) || query.RouteId.HasValue
+            || !string.IsNullOrWhiteSpace(query.SortBy) || !string.IsNullOrWhiteSpace(query.SortDir);
+        var page = hasExtendedFilters
+            ? await _parcelRepository.ListByOperatorFilteredAsync(
+                query.OperatorId, status, query.TripId, pendingActionType, query.Search, senderIds,
+                fromUtc, toUtc, dateField, sizeCategory, query.RouteId, sortBy, sortDir,
+                query.Page, query.PageSize, cancellationToken)
+            : await _parcelRepository.ListByOperatorAsync(
+                query.OperatorId, status, query.TripId, pendingActionType,
+                query.Page, query.PageSize, cancellationToken);
 
         if (page.Items.Count == 0)
         {
@@ -199,7 +235,13 @@ public sealed class GetOperatorParcelsQueryHandler
         return dictionary;
     }
 
-    private static TEnum? ParseOptional<TEnum>(string? value)
+    private static TEnum? ParseOptional<TEnum>(string? value, string fieldName)
         where TEnum : struct, Enum
-        => Enum.TryParse<TEnum>(value, ignoreCase: true, out var parsed) ? parsed : null;
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        if (!Enum.TryParse<TEnum>(value.Trim(), ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
+            throw new CodedValidationException("VALIDATION_ERROR", $"{fieldName} is invalid.");
+        return parsed;
+    }
 }

@@ -38,7 +38,7 @@ public sealed class UiGapOperatorParcelHttpE2ETests
             $"Bearer {CreateJwt(OperatorId)}");
 
         using var listResponse = await client.GetAsync(
-            "/v1/operator/parcels?page=1&pageSize=20&operatorId=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+            "/v1/operator/parcels?page=1&pageSize=20");
 
         var listBody = await listResponse.Content.ReadAsStringAsync();
         listResponse.StatusCode.Should().Be(HttpStatusCode.OK, listBody);

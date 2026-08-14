@@ -15,6 +15,7 @@ using VietRide.Parcel.Application.Features.Parcels.ResendDeliveryEmail;
 using VietRide.Parcel.Application.Features.Parcels.Review;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 
 namespace VietRide.Parcel.Api.Controllers;
 
@@ -31,6 +32,7 @@ public sealed class OperatorParcelsController : ControllerBase
     }
 
     [HttpGet]
+    [AllowedQueryParameters("status", "tripId", "pendingActionType", "page", "pageSize", "search", "from", "to", "dateField", "sizeCategory", "routeId", "sortBy", "sortDir")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<OperatorParcelListItemResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
@@ -40,6 +42,14 @@ public sealed class OperatorParcelsController : ControllerBase
         [FromQuery] string? pendingActionType,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
+        [FromQuery] string? search = null,
+        [FromQuery] DateOnly? from = null,
+        [FromQuery] DateOnly? to = null,
+        [FromQuery] string? dateField = null,
+        [FromQuery] string? sizeCategory = null,
+        [FromQuery] Guid? routeId = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDir = null,
         CancellationToken cancellationToken = default)
     {
         var operatorId = CurrentUserClaims.GetOperatorId(User)
@@ -51,7 +61,15 @@ public sealed class OperatorParcelsController : ControllerBase
                 tripId,
                 pendingActionType,
                 page,
-                pageSize),
+                pageSize,
+                search,
+                from,
+                to,
+                dateField,
+                sizeCategory,
+                routeId,
+                sortBy,
+                sortDir),
             cancellationToken);
         return Ok(result);
     }
