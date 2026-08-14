@@ -5,6 +5,7 @@ public enum TripCargoOutcomeKind
     Success,
     TripNotFound,
     CapacityExceeded,
+    InvalidState,
     TransportError,
 }
 

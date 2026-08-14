@@ -409,6 +409,55 @@ public class TripServiceClientInternalClientTests
         json.RootElement.GetProperty("pageSize").GetInt32().Should().Be(10);
     }
 
+    [Fact]
+    public async Task RemeasureCargoAsync_MapsStateConflictWithoutClaimingCapacityExceeded()
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            success = false,
+            statusCode = 409,
+            error = new
+            {
+                code = "TRIP_CARGO_STATE_INVALID",
+                message = "Only reserved cargo can be remeasured.",
+            },
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.Conflict, body);
+
+        var result = await client.RemeasureCargoAsync(
+            TripId,
+            Guid.NewGuid(),
+            30m,
+            0.0034m);
+
+        result.Kind.Should().Be(TripCargoOutcomeKind.InvalidState);
+        result.ErrorMessage.Should().Be("Trip cargo is not in a state that allows this operation.");
+    }
+
+    [Fact]
+    public async Task RemeasureCargoAsync_MapsOnlyCapacityCodeToCapacityExceeded()
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            success = false,
+            statusCode = 409,
+            error = new
+            {
+                code = "TRIP_CARGO_CAPACITY_EXCEEDED",
+                message = "Trip cargo weight capacity would be exceeded.",
+            },
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.Conflict, body);
+
+        var result = await client.RemeasureCargoAsync(
+            TripId,
+            Guid.NewGuid(),
+            30m,
+            0.0034m);
+
+        result.Kind.Should().Be(TripCargoOutcomeKind.CapacityExceeded);
+    }
+
     private TripServiceClient BuildClient(HttpStatusCode status, string body)
     {
         _handler = new FakeMessageHandler(status, body);

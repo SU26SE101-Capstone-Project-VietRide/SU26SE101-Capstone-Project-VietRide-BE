@@ -8,6 +8,7 @@ using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Application.Features.Parcels.Reweigh;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
@@ -133,6 +134,47 @@ public sealed class ReweighParcelIdempotencyTests
             "Actual cargo exceeds capacity.",
             Now,
             Arg.Any<CancellationToken>());
+        fixture.Outbox.Events.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_InvalidTripCargoState_DoesNotPersistFalseCapacityAction()
+    {
+        var fixture = CreateFixture(
+            depositPaidVnd: 400,
+            loadCutoffAt: Now.AddHours(1),
+            cargoOutcome: new TripCargoOutcome(
+                TripCargoOutcomeKind.InvalidState,
+                "Only reserved cargo can be remeasured."));
+
+        var action = () => fixture.Handler.Handle(
+            CreateCommand(Guid.NewGuid(), actualWeightKg: 30m),
+            CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<CodedConflictException>();
+        exception.Which.ErrorCode.Should().Be("TRIP_CARGO_STATE_INVALID");
+        exception.Which.Message.Should().Be("Only reserved cargo can be remeasured.");
+        await fixture.ParcelRepository.DidNotReceiveWithAnyArgs().TrySettleReweighAsync(
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default,
+            default);
         fixture.Outbox.Events.Should().BeEmpty();
     }
 
