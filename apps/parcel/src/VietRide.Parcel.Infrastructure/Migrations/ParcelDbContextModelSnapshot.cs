@@ -662,6 +662,10 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                     b.HasIndex("OperatorId", "Status")
                         .HasDatabaseName("idx_parcels_operator_id_status");
 
+                    b.HasIndex("OperatorId", "TripSnapshotRouteId")
+                        .HasDatabaseName("idx_parcels_operator_route_snapshot")
+                        .HasFilter("trip_snapshot_route_id IS NOT NULL");
+
                     b.HasIndex("RecipientUserId", "CreatedAt")
                         .IsDescending(false, true)
                         .HasDatabaseName("idx_parcels_recipient_user_id_created_at")
@@ -677,6 +681,13 @@ namespace VietRide.Parcel.Infrastructure.Migrations
 
                     b.HasIndex("TripId", "Status")
                         .HasDatabaseName("idx_parcels_trip_id_status");
+
+                    b.HasIndex("OperatorId", "CreatedAt", "Id")
+                        .HasDatabaseName("idx_parcels_operator_created_at");
+
+                    b.HasIndex("OperatorId", "FinalPaymentDeadline", "Id")
+                        .HasDatabaseName("idx_parcels_operator_final_payment_deadline")
+                        .HasFilter("final_payment_deadline IS NOT NULL");
 
                     b.ToTable("parcels", "vietride_parcel", t =>
                         {

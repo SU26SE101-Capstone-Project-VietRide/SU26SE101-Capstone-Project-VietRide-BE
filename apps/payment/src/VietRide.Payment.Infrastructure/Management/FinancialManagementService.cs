@@ -305,23 +305,53 @@ internal sealed class FinancialManagementService : IFinancialManagementService
 
     public async Task<PagedResult<InvoiceListItemDto>> ListInvoicesAsync(
         Guid operatorId, PageOptions options, string? status, CancellationToken ct)
+        => await ListInvoicesFilteredAsync(operatorId, options, status, null, ct);
+
+    public async Task<PagedResult<InvoiceListItemDto>> ListInvoicesFilteredAsync(
+        Guid operatorId, PageOptions options, string? status, string? search, CancellationToken ct)
     {
-        ValidatePage(options, ["issuedAt", "createdAt", "amount", "invoiceNumber"]);
+        if (options.Page < 1 || options.PageSize is < 1 or > 100
+            || options.SortDir is not ("asc" or "desc"))
+            throw new CodedValidationException("VALIDATION_ERROR", "Invalid pagination or sort direction.");
+        if (options.From.HasValue && options.To.HasValue && options.From > options.To)
+            throw new CodedValidationException("VALIDATION_ERROR", "The from date must not be after the to date.");
+        if (!string.IsNullOrWhiteSpace(options.SortBy)
+            && !new[] { "issuedAt", "createdAt", "amount", "invoiceNumber" }.Contains(options.SortBy))
+            throw new BadRequestException("INVALID_SORT_FIELD", $"Unsupported sort field '{options.SortBy}'.");
         var query = _db.Invoices.AsNoTracking().Where(item => item.OperatorId == operatorId);
-        if (ParseOptional<InvoiceStatus>(status) is { } parsedStatus)
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            if (!Enum.TryParse<InvoiceStatus>(status.Trim(), false, out var parsedStatus)
+                || !Enum.IsDefined(parsedStatus))
+                throw new CodedValidationException("VALIDATION_ERROR", "status is invalid.");
             query = query.Where(item => item.Status == parsedStatus);
+        }
+        var normalizedSearch = NormalizeOptionalSearch(search);
+        if (normalizedSearch is not null)
+        {
+            var pattern = $"%{EscapeLike(normalizedSearch)}%";
+            if (Guid.TryParse(normalizedSearch, out var paymentId))
+            {
+                query = query.Where(item => EF.Functions.ILike(item.InvoiceNumber, pattern, "\\")
+                    || item.PaymentId == paymentId);
+            }
+            else
+            {
+                query = query.Where(item => EF.Functions.ILike(item.InvoiceNumber, pattern, "\\"));
+            }
+        }
         query = ApplyDates(query, options);
         var total = await query.LongCountAsync(ct);
         query = (options.SortBy ?? "createdAt", IsAscending(options)) switch
         {
-            ("issuedAt", true) => query.OrderBy(item => item.IssuedAt),
-            ("issuedAt", false) => query.OrderByDescending(item => item.IssuedAt),
-            ("amount", true) => query.OrderBy(item => item.Amount),
-            ("amount", false) => query.OrderByDescending(item => item.Amount),
-            ("invoiceNumber", true) => query.OrderBy(item => item.InvoiceNumber),
-            ("invoiceNumber", false) => query.OrderByDescending(item => item.InvoiceNumber),
-            ("createdAt", true) => query.OrderBy(item => item.CreatedAt),
-            _ => query.OrderByDescending(item => item.CreatedAt),
+            ("issuedAt", true) => query.OrderBy(item => item.IssuedAt).ThenBy(item => item.Id),
+            ("issuedAt", false) => query.OrderByDescending(item => item.IssuedAt).ThenByDescending(item => item.Id),
+            ("amount", true) => query.OrderBy(item => item.Amount).ThenBy(item => item.Id),
+            ("amount", false) => query.OrderByDescending(item => item.Amount).ThenByDescending(item => item.Id),
+            ("invoiceNumber", true) => query.OrderBy(item => item.InvoiceNumber).ThenBy(item => item.Id),
+            ("invoiceNumber", false) => query.OrderByDescending(item => item.InvoiceNumber).ThenByDescending(item => item.Id),
+            ("createdAt", true) => query.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id),
+            _ => query.OrderByDescending(item => item.CreatedAt).ThenByDescending(item => item.Id),
         };
         var rows = await query.Skip(Offset(options)).Take(options.PageSize).ToListAsync(ct);
         var items = rows.Select(ToInvoiceListItem).ToList();
@@ -1156,6 +1186,16 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         var normalized = search.Trim();
         if (normalized.Length is < 2 or > 100)
             throw new BadRequestException("INVALID_FILTER", "Search must contain between 2 and 100 characters.");
+        return normalized;
+    }
+
+    private static string? NormalizeOptionalSearch(string? search)
+    {
+        var normalized = search?.Trim();
+        if (string.IsNullOrEmpty(normalized))
+            return null;
+        if (normalized.Length > 100)
+            throw new CodedValidationException("VALIDATION_ERROR", "Search must not exceed 100 characters.");
         return normalized;
     }
 

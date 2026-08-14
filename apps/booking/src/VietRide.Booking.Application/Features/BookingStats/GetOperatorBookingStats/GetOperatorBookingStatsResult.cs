@@ -2,4 +2,5 @@ namespace VietRide.Booking.Application.Features.BookingStats.GetOperatorBookingS
 
 public sealed record GetOperatorBookingStatsResult(
     IReadOnlyList<GetOperatorBookingStatsItemResult> Items,
-    int TotalBookings);
+    int TotalBookings,
+    int NoShowPassengerCount);

@@ -60,8 +60,8 @@ internal sealed class StopRepository : IStopRepository
                 SELECT *
                 FROM vietride_trip.stops
                 WHERE deleted_at IS NULL
-                  AND (unaccent(name) ILIKE unaccent('%' || {normalized} || '%')
-                    OR unaccent(address) ILIKE unaccent('%' || {normalized} || '%'))
+                  AND (strpos(lower(unaccent(name)), lower(unaccent({normalized}))) > 0
+                    OR strpos(lower(unaccent(address)), lower(unaccent({normalized}))) > 0)
                 """)
             .AsNoTracking();
     }

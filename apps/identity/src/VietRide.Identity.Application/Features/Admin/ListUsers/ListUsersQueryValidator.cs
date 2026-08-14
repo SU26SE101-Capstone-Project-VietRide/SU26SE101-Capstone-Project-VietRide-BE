@@ -16,7 +16,7 @@ public sealed class ListUsersQueryValidator : AbstractValidator<ListUsersQuery>
     public ListUsersQueryValidator()
     {
         RuleFor(query => query.CallerRole).NotEmpty();
-        RuleFor(query => query.Search).MaximumLength(255);
+        RuleFor(query => query.Search).MaximumLength(100);
         RuleFor(query => query.Page).GreaterThan(0).When(query => query.Page.HasValue);
         RuleFor(query => query.PageSize).InclusiveBetween(1, 100).When(query => query.PageSize.HasValue);
         RuleFor(query => query.Role)
@@ -30,5 +30,8 @@ public sealed class ListUsersQueryValidator : AbstractValidator<ListUsersQuery>
                 || direction.Equals("asc", StringComparison.OrdinalIgnoreCase)
                 || direction.Equals("desc", StringComparison.OrdinalIgnoreCase))
             .WithMessage("SortDir must be 'asc' or 'desc'.");
+        RuleFor(query => query)
+            .Must(query => !query.From.HasValue || !query.To.HasValue || query.From <= query.To)
+            .WithMessage("from must be on or before to.");
     }
 }

@@ -484,6 +484,12 @@ namespace VietRide.Booking.Infrastructure.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("total_no_show");
 
+                    b.Property<int>("TotalNoShowPassengers")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("total_no_show_passengers");
+
                     b.Property<long>("TotalRefunded")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")

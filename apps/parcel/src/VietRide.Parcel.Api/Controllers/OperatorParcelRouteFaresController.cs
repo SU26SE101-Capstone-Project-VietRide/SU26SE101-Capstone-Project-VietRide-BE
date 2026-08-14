@@ -6,6 +6,7 @@ using VietRide.Parcel.Api.Filters;
 using VietRide.Parcel.Application.Features.ParcelRouteFares.Batch;
 using VietRide.Parcel.Application.Features.ParcelRouteFares.Create;
 using VietRide.Parcel.Application.Features.ParcelRouteFares.List;
+using VietRide.Parcel.Application.Features.ParcelRouteFares.Summary;
 using VietRide.Parcel.Application.Features.ParcelRouteFares.Update;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
@@ -54,7 +55,7 @@ public sealed class OperatorParcelRouteFaresController : ControllerBase
     }
 
     [HttpGet]
-    [AllowedQueryParameters("routeId", "sizeCategory", "page", "pageSize", "search")]
+    [AllowedQueryParameters("routeId", "sizeCategory", "page", "pageSize", "search", "sortBy", "sortDir", "effectiveAt", "status")]
     [Authorize(Roles = $"{AdminRole},{StaffRole}")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<ParcelRouteFareResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -66,16 +67,31 @@ public sealed class OperatorParcelRouteFaresController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         [FromQuery] string? search = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDir = null,
+        [FromQuery] DateOnly? effectiveAt = null,
+        [FromQuery] string? status = null,
         CancellationToken cancellationToken = default)
     {
         var operatorId = GetRequiredOperatorId();
 
         var result = await _mediator.Send(
-            new ListParcelRouteFaresQuery(operatorId, routeId, sizeCategory, page, pageSize, search),
+            new ListParcelRouteFaresQuery(
+                operatorId, routeId, sizeCategory, page, pageSize, search,
+                sortBy, sortDir, effectiveAt, status),
             cancellationToken);
 
         return Ok(result);
     }
+
+    [HttpGet("summary")]
+    [AllowedQueryParameters]
+    [Authorize(Roles = $"{AdminRole},{StaffRole}")]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<ParcelRouteFareSummaryItem>>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<ParcelRouteFareSummaryItem>>> SummaryAsync(
+        CancellationToken cancellationToken)
+        => Ok(await _mediator.Send(
+            new GetParcelRouteFareSummaryQuery(GetRequiredOperatorId()), cancellationToken));
 
     [HttpPatch("{routeId:guid}/{sizeCategory}")]
     [Authorize(Roles = AdminRole)]

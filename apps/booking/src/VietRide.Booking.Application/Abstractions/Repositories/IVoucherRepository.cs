@@ -1,3 +1,5 @@
+using VietRide.Booking.Application.Features.Vouchers.GetVoucherSummary;
+using VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
@@ -49,7 +51,20 @@ public interface IVoucherRepository : IRepository<Voucher, Guid>
         string sortDir,
         CancellationToken ct = default,
         string? search = null,
-        string? service = null);
+        string? service = null,
+        VoucherType? type = null,
+        DateTimeOffset? validFromInclusive = null,
+        DateTimeOffset? validUntilExclusive = null);
+
+    Task<IReadOnlyDictionary<Guid, int>> GetUsageCountsAsync(
+        IReadOnlyCollection<Guid> voucherIds,
+        CancellationToken ct = default);
+
+    Task<VoucherSummaryResult> GetSummaryAsync(
+        Guid? ownerOperatorId,
+        bool platformOnly,
+        DateTimeOffset now,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Adds an <see cref="OperatorVoucherConsent"/> to the change tracker (same transaction as the voucher).

@@ -50,9 +50,33 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         int page,
         int pageSize,
         CancellationToken cancellationToken)
+        => await GetPendingFilteredAsync(
+            operatorId, page, pageSize, null, null, null, null, [], cancellationToken);
+
+    public async Task<PagedResult<ShuttleRequestTripGroup>> GetPendingFilteredAsync(
+        Guid operatorId,
+        int page,
+        int pageSize,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtcExclusive,
+        Guid? mainTripId,
+        string? search,
+        IReadOnlyCollection<Guid> passengerUserIds,
+        CancellationToken cancellationToken)
     {
-        var directionQuery = _db.ShuttlePassengers.AsNoTracking()
-            .Where(passenger => passenger.Status == ShuttlePassenger.PendingAssignmentStatus)
+        var passengerQuery = _db.ShuttlePassengers.AsNoTracking()
+            .Where(passenger => passenger.Status == ShuttlePassenger.PendingAssignmentStatus);
+        if (fromUtc.HasValue) passengerQuery = passengerQuery.Where(passenger => passenger.CreatedAt >= fromUtc.Value);
+        if (toUtcExclusive.HasValue) passengerQuery = passengerQuery.Where(passenger => passenger.CreatedAt < toUtcExclusive.Value);
+        if (mainTripId.HasValue) passengerQuery = passengerQuery.Where(passenger => passenger.MainTripId == mainTripId.Value);
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var pattern = $"%{EscapeLike(search.Trim())}%";
+            passengerQuery = passengerQuery.Where(passenger => EF.Functions.ILike(passenger.PickupAddress, pattern, "\\")
+                || (passenger.PassengerUserId.HasValue && passengerUserIds.Contains(passenger.PassengerUserId.Value)));
+        }
+
+        var directionQuery = passengerQuery
             .Join(_db.Trips.AsNoTracking().Where(trip => trip.OperatorId == operatorId),
                 passenger => passenger.MainTripId,
                 trip => trip.Id,
@@ -92,9 +116,8 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         var stations = await _db.Stations.AsNoTracking()
             .Where(station => stationIds.Contains(station.Id))
             .ToDictionaryAsync(station => station.Id, cancellationToken);
-        var manifests = await _db.ShuttlePassengers.AsNoTracking()
-            .Where(passenger => tripIds.Contains(passenger.MainTripId)
-                && passenger.Status == ShuttlePassenger.PendingAssignmentStatus)
+        var manifests = await passengerQuery
+            .Where(passenger => tripIds.Contains(passenger.MainTripId))
             .ToArrayAsync(cancellationToken);
         var passengerProfiles = await GetIdentityProfilesOrThrowAsync(
             manifests.Select(manifest => manifest.PassengerUserId),
@@ -1251,5 +1274,10 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         => _db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({resource + ':' + id.ToString("N")}, 0))",
             cancellationToken);
+
+    private static string EscapeLike(string value)
+        => value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 
 }

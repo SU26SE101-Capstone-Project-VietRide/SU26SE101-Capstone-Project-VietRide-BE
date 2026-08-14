@@ -4,12 +4,15 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Features.Admin.ApproveOperator;
 using VietRide.Identity.Application.Features.Admin.CreateOperator;
+using VietRide.Identity.Application.Features.Admin.ExportOperators;
 using VietRide.Identity.Application.Features.Admin.GetOperatorDetail;
+using VietRide.Identity.Application.Features.Admin.GetOperatorSummary;
 using VietRide.Identity.Application.Features.Admin.ListOperators;
 using VietRide.Identity.Application.Features.Admin.ReactivateOperator;
 using VietRide.Identity.Application.Features.Admin.RejectOperator;
 using VietRide.Identity.Application.Features.Admin.SuspendOperator;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 
 namespace VietRide.Identity.Api.Controllers;
 
@@ -27,6 +30,7 @@ public sealed class AdminOperatorsController : ControllerBase
 
     /// <summary>Lists operators for System Admin review and operations.</summary>
     [HttpGet]
+    [AllowedQueryParameters("page", "pageSize", "search", "sortBy", "sortDir", "status", "isActive", "from", "to", "dateField")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<OperatorListItemDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -38,6 +42,10 @@ public sealed class AdminOperatorsController : ControllerBase
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] string? status,
+        [FromQuery] bool? isActive,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        [FromQuery] string? dateField,
         CancellationToken cancellationToken)
     {
         var response = await _sender.Send(
@@ -48,10 +56,42 @@ public sealed class AdminOperatorsController : ControllerBase
                 search,
                 sortBy,
                 sortDir,
-                status),
+                status,
+                isActive,
+                from,
+                to,
+                dateField),
             cancellationToken);
 
         return Ok(response);
+    }
+
+    [HttpGet("summary")]
+    [AllowedQueryParameters]
+    [ProducesResponseType(typeof(ApiResponse<AdminOperatorSummaryDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<AdminOperatorSummaryDto>> GetSummary(CancellationToken cancellationToken)
+        => Ok(await _sender.Send(
+            new GetOperatorSummaryQuery(CurrentUserClaims.GetRole(User)), cancellationToken));
+
+    [HttpGet("export")]
+    [AllowedQueryParameters("search", "sortBy", "sortDir", "status", "isActive", "from", "to", "dateField")]
+    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Export(
+        [FromQuery] string? search,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
+        [FromQuery] string? status,
+        [FromQuery] bool? isActive,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to,
+        [FromQuery] string? dateField,
+        CancellationToken cancellationToken)
+    {
+        var result = await _sender.Send(new ExportOperatorsQuery(
+            CurrentUserClaims.GetRole(User), search, sortBy, sortDir, status,
+            isActive, from, to, dateField), cancellationToken);
+        return File(result.Content, result.ContentType, result.FileName);
     }
 
     /// <summary>Returns the complete operator profile for System Admin detail views.</summary>

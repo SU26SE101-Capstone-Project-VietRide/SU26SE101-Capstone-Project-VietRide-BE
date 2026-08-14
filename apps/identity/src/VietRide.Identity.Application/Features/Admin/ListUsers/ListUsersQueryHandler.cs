@@ -4,6 +4,7 @@ using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Identity.Application.Features.Admin.ListUsers;
 
@@ -46,12 +47,28 @@ public sealed class ListUsersQueryHandler : IRequestHandler<ListUsersQuery, Page
             SortDir = string.IsNullOrWhiteSpace(request.SortDir) ? "desc" : request.SortDir,
         };
 
-        var page = await _users.ListAdminUsersAsync(
-            options,
-            ParseEnum<UserRole>(request.Role),
-            ParseEnum<UserStatus>(request.Status),
-            request.OperatorId,
-            cancellationToken);
+        DateTimeOffset? fromUtc = request.From.HasValue
+            ? BusinessTime.ToUtc(request.From.Value, TimeOnly.MinValue)
+            : null;
+        DateTimeOffset? toUtcExclusive = request.To.HasValue
+            ? BusinessTime.ToUtc(request.To.Value.AddDays(1), TimeOnly.MinValue)
+            : null;
+
+        var page = request.From.HasValue || request.To.HasValue
+            ? await _users.ListAdminUsersFilteredAsync(
+                options,
+                ParseEnum<UserRole>(request.Role),
+                ParseEnum<UserStatus>(request.Status),
+                request.OperatorId,
+                fromUtc,
+                toUtcExclusive,
+                cancellationToken)
+            : await _users.ListAdminUsersAsync(
+                options,
+                ParseEnum<UserRole>(request.Role),
+                ParseEnum<UserStatus>(request.Status),
+                request.OperatorId,
+                cancellationToken);
 
         return PagedResult<AdminUserListItemDto>.Create(
             page.Items.Select(ToDto).ToArray(),

@@ -1,4 +1,5 @@
 using MediatR;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.DriverSchedules;
@@ -30,22 +31,44 @@ public sealed class ListRoutesHandler : IRequestHandler<ListRoutesQuery, PagedRe
     {
         var page = request.Page ?? DefaultPage;
         var pageSize = Math.Min(request.PageSize ?? DefaultPageSize, MaxPageSize);
+        if (page < 1 || pageSize < 1)
+            throw new CodedValidationException("VALIDATION_ERROR", "Invalid paging values.");
+        if (request.Search?.Trim().Length > 100)
+            throw new CodedValidationException("VALIDATION_ERROR", "search must not exceed 100 characters.");
         var query = routeRepository.QueryNoTracking()
             .Where(route => route.OperatorId == request.OperatorId && route.DeletedAt == null);
 
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
-            var search = request.Search.Trim();
-            query = query.Where(route => route.Name.Contains(search));
+            var normalizedSearch = request.Search.Trim().ToLowerInvariant();
+            query = query.Where(route => route.Name.ToLower().Contains(normalizedSearch));
         }
 
         if (request.IsActive.HasValue)
             query = query.Where(route => route.IsActive == request.IsActive.Value);
 
+        if (request.OriginStationId.HasValue)
+            query = query.Where(route => route.OriginStationId == request.OriginStationId.Value);
+        if (request.DestinationStationId.HasValue)
+            query = query.Where(route => route.DestinationStationId == request.DestinationStationId.Value);
+
+        var sortBy = string.IsNullOrWhiteSpace(request.SortBy) ? "name" : request.SortBy.Trim();
+        if (sortBy is not ("name" or "totalDistanceKm" or "estimatedDurationMinutes"))
+            throw new BadRequestException("INVALID_SORT_FIELD", "Unsupported route sort field.");
+        var sortDir = string.IsNullOrWhiteSpace(request.SortDir) ? "asc" : request.SortDir.Trim();
+        if (sortDir is not ("asc" or "desc"))
+            throw new CodedValidationException("VALIDATION_ERROR", "sortDir must be asc or desc.");
+        var descending = sortDir == "desc";
+
         var totalItems = query.LongCount();
-        var routes = query
-            .OrderBy(route => route.Name)
-            .ThenBy(route => route.Id)
+        var ordered = sortBy switch
+        {
+            "totalDistanceKm" => descending ? query.OrderByDescending(route => route.TotalDistanceKm) : query.OrderBy(route => route.TotalDistanceKm),
+            "estimatedDurationMinutes" => descending ? query.OrderByDescending(route => route.EstimatedDurationMinutes) : query.OrderBy(route => route.EstimatedDurationMinutes),
+            _ => descending ? query.OrderByDescending(route => route.Name) : query.OrderBy(route => route.Name),
+        };
+        ordered = descending ? ordered.ThenByDescending(route => route.Id) : ordered.ThenBy(route => route.Id);
+        var routes = ordered
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToList();
@@ -102,4 +125,5 @@ public sealed class ListRoutesHandler : IRequestHandler<ListRoutesQuery, PagedRe
             stations[route.DestinationStationId])).ToList();
         return PagedResult<RouteListItemDto>.Create(items, page, pageSize, totalItems);
     }
+
 }

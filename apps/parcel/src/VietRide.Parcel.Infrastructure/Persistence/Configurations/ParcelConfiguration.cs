@@ -448,6 +448,17 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
         builder.HasIndex(x => new { x.OperatorId, x.Status })
             .HasDatabaseName("idx_parcels_operator_id_status");
 
+        builder.HasIndex(x => new { x.OperatorId, x.CreatedAt, x.Id })
+            .HasDatabaseName("idx_parcels_operator_created_at");
+
+        builder.HasIndex(x => new { x.OperatorId, x.TripSnapshotRouteId })
+            .HasDatabaseName("idx_parcels_operator_route_snapshot")
+            .HasFilter("trip_snapshot_route_id IS NOT NULL");
+
+        builder.HasIndex(x => new { x.OperatorId, x.FinalPaymentDeadline, x.Id })
+            .HasDatabaseName("idx_parcels_operator_final_payment_deadline")
+            .HasFilter("final_payment_deadline IS NOT NULL");
+
         builder.HasIndex(x => new { x.CreatedAt, x.Id })
             .HasDatabaseName("idx_parcels_trip_snapshot_backfill")
             .HasFilter(

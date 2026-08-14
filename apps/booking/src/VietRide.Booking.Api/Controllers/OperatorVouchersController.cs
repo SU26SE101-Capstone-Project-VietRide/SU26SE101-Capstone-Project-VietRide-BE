@@ -7,6 +7,7 @@ using VietRide.Booking.Application.Features.OperatorVouchers.CreateOperatorVouch
 using VietRide.Booking.Application.Features.OperatorVouchers.DeleteOperatorVoucher;
 using VietRide.Booking.Application.Features.OperatorVouchers.SetOperatorVoucherActive;
 using VietRide.Booking.Application.Features.OperatorVouchers.UpdateOperatorVoucher;
+using VietRide.Booking.Application.Features.Vouchers.GetVoucherSummary;
 using VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Filters;
@@ -93,7 +94,7 @@ public sealed class OperatorVouchersController : ControllerBase
     /// Optional filters: isActive. sortBy whitelist is validated by Application.
     /// </remarks>
     [HttpGet]
-    [AllowedQueryParameters("isActive", "search", "service", "page", "pageSize", "sortBy", "sortDir")]
+    [AllowedQueryParameters("isActive", "search", "service", "type", "validAt", "page", "pageSize", "sortBy", "sortDir")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<VoucherListItem>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ListVouchers(
@@ -120,11 +121,23 @@ public sealed class OperatorVouchersController : ControllerBase
                 SortDir = request.SortDir,
             },
             Search: request.Search,
-            Service: request.Service);
+            Service: request.Service,
+            Type: request.Type,
+            ValidAt: request.ValidAt);
 
         var result = await _sender.Send(query, ct);
 
         return Ok(result);
+    }
+
+    [HttpGet("summary")]
+    [AllowedQueryParameters]
+    [ProducesResponseType(typeof(ApiResponse<VoucherSummaryResult>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetSummary(CancellationToken ct)
+    {
+        var (_, callerOperatorId) = GetCallerIds();
+        return Ok(await _sender.Send(
+            new GetVoucherSummaryQuery(callerOperatorId, PlatformOnly: false), ct));
     }
 
     /// <summary>Partial update of operator-owned voucher fields (freeze-on-first-use, Q6).</summary>

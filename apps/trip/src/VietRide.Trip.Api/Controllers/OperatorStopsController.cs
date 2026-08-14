@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
@@ -51,6 +52,7 @@ public sealed class OperatorStopsController : ControllerBase
     }
 
     [HttpGet]
+    [AllowedQueryParameters("page", "pageSize", "search", "isActive", "routeId")]
     [Authorize(Roles = OperatorReadRoles)]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<StopDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -59,10 +61,12 @@ public sealed class OperatorStopsController : ControllerBase
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
         [FromQuery] string? search,
+        [FromQuery] bool? isActive,
+        [FromQuery] Guid? routeId,
         CancellationToken cancellationToken)
     {
         return Ok(await mediator.Send(
-            new ListStopsQuery(GetRequiredOperatorId(), page, pageSize, search),
+            new ListStopsQuery(GetRequiredOperatorId(), page, pageSize, search, isActive, routeId),
             cancellationToken));
     }
 

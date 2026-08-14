@@ -9,4 +9,8 @@ public sealed record ListOperatorsQuery(
     string? Search,
     string? SortBy,
     string? SortDir,
-    string? Status) : IRequest<VietRide.Shared.Kernel.Primitives.PagedResult<OperatorListItemDto>>;
+    string? Status,
+    bool? IsActive = null,
+    DateOnly? From = null,
+    DateOnly? To = null,
+    string? DateField = null) : IRequest<VietRide.Shared.Kernel.Primitives.PagedResult<OperatorListItemDto>>;

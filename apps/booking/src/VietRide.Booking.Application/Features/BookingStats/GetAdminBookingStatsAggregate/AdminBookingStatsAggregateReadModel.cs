@@ -8,4 +8,5 @@ public sealed record AdminBookingStatsAggregateReadModel(
     long TotalRevenue,
     int TotalCancellations,
     int TotalNoShows,
-    int TotalCompleted);
+    int TotalCompleted,
+    int NoShowPassengerCount = 0);

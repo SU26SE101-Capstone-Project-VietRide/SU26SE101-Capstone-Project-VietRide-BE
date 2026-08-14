@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.Stations;
@@ -25,13 +26,19 @@ public sealed class OperatorStationsController : ControllerBase
     }
 
     [HttpGet]
+    [AllowedQueryParameters("page", "pageSize", "search", "isActive", "supportsShuttle", "sortBy", "sortDir")]
     [Authorize(Roles = OperatorRoles)]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<OperatorStationDto>>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResult<OperatorStationDto>>> GetAsync([FromQuery] int? page, [FromQuery] int? pageSize, [FromQuery] string? search, CancellationToken cancellationToken)
+    public async Task<ActionResult<PagedResult<OperatorStationDto>>> GetAsync(
+        [FromQuery] int? page, [FromQuery] int? pageSize, [FromQuery] string? search,
+        [FromQuery] bool? isActive, [FromQuery] bool? supportsShuttle,
+        [FromQuery] string? sortBy, [FromQuery] string? sortDir,
+        CancellationToken cancellationToken)
     {
         var operatorId = CurrentUserClaims.GetOperatorId(User)
             ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage operator stations.");
-        return Ok(await mediator.Send(new ListOperatorStationsQuery(operatorId, page, pageSize, search), cancellationToken));
+        return Ok(await mediator.Send(new ListOperatorStationsQuery(
+            operatorId, page, pageSize, search, isActive, supportsShuttle, sortBy, sortDir), cancellationToken));
     }
 
     [HttpPost]
