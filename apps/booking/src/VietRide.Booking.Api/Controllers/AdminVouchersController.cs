@@ -6,6 +6,7 @@ using VietRide.Booking.Api.Controllers.Requests;
 using VietRide.Booking.Application.Features.AdminVouchers.DeleteAdminVoucher;
 using VietRide.Booking.Application.Features.AdminVouchers.UpdateAdminVoucher;
 using VietRide.Booking.Application.Features.Vouchers.CreateVoucher;
+using VietRide.Booking.Application.Features.Vouchers.GetVoucherSummary;
 using VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Filters;
@@ -95,11 +96,11 @@ public sealed class AdminVouchersController : ControllerBase
     /// Read-only — no Idempotency-Key required.
     /// Optional filters: fundingType (VIETRIDE_FUNDED | OPERATOR_FUNDED), isActive.
     /// sortBy whitelist: createdAt (default), validFrom, validUntil, code, name, isActive.
-    /// Non-whitelisted sortBy → 422 INVALID_SORT_FIELD.
+    /// Non-whitelisted sortBy → 400 INVALID_SORT_FIELD.
     /// Returns only non-soft-deleted vouchers.
     /// </remarks>
     [HttpGet]
-    [AllowedQueryParameters("fundingType", "isActive", "search", "service", "page", "pageSize", "sortBy", "sortDir")]
+    [AllowedQueryParameters("fundingType", "isActive", "search", "service", "type", "validAt", "page", "pageSize", "sortBy", "sortDir")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<VoucherListItem>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ListVouchers(
@@ -128,12 +129,21 @@ public sealed class AdminVouchersController : ControllerBase
                 SortDir = request.SortDir,
             },
             Search: request.Search,
-            Service: request.Service);
+            Service: request.Service,
+            Type: request.Type,
+            ValidAt: request.ValidAt);
 
         var result = await _sender.Send(query, ct);
 
         return Ok(result);
     }
+
+    [HttpGet("summary")]
+    [AllowedQueryParameters]
+    [ProducesResponseType(typeof(ApiResponse<VoucherSummaryResult>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetSummary(CancellationToken ct)
+        => Ok(await _sender.Send(
+            new GetVoucherSummaryQuery(OwnerOperatorId: null, PlatformOnly: true), ct));
 
     /// <summary>Partially updates a platform-owned voucher.</summary>
     /// <remarks>

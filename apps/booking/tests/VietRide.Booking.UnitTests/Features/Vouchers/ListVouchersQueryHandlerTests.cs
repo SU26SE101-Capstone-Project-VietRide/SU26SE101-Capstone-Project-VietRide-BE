@@ -5,6 +5,7 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 
@@ -149,10 +150,9 @@ public class ListVouchersQueryHandlerTests
     // -----------------------------------------------------------------------
 
     [Fact]
-    public void Validator_InvalidSortBy_FailsWithInvalidSortField()
+    public async Task Handler_InvalidSortBy_ThrowsBadRequestWithInvalidSortField()
     {
         // Arrange
-        var validator = new ListVouchersQueryValidator();
         var query = new ListVouchersQuery(
             OwnerOperatorId: null,
             PlatformOnly: true,
@@ -161,11 +161,11 @@ public class ListVouchersQueryHandlerTests
             Options: new QueryOptions { Page = 1, PageSize = 20, SortBy = "nonExistentField" });
 
         // Act
-        var result = validator.Validate(query);
+        var act = () => BuildSut().Handle(query, CancellationToken.None);
 
         // Assert
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.ErrorCode == "INVALID_SORT_FIELD");
+        var exception = await act.Should().ThrowAsync<BadRequestException>();
+        exception.Which.ErrorCode.Should().Be("INVALID_SORT_FIELD");
     }
 
     [Fact]

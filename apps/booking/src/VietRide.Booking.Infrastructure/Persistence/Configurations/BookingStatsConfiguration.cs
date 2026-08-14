@@ -58,6 +58,11 @@ internal sealed class BookingStatsConfiguration : IEntityTypeConfiguration<Booki
             .HasDefaultValue(0)
             .IsRequired();
 
+        builder.Property(x => x.TotalNoShowPassengers)
+            .HasColumnName("total_no_show_passengers")
+            .HasDefaultValue(0)
+            .IsRequired();
+
         builder.Property(x => x.TotalCompleted)
             .HasColumnName("total_completed")
             .HasDefaultValue(0)

@@ -15,6 +15,10 @@ public sealed class ListVouchersRequest
 
     public string? Service { get; init; }
 
+    public string? Type { get; init; }
+
+    public DateOnly? ValidAt { get; init; }
+
     public int Page { get; init; } = 1;
 
     public int PageSize { get; init; } = 20;

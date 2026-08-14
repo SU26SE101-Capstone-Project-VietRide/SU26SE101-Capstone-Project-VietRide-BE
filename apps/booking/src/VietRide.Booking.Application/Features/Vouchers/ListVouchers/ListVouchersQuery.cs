@@ -21,4 +21,6 @@ public sealed record ListVouchersQuery(
     bool? IsActive,
     QueryOptions Options,
     string? Search = null,
-    string? Service = null) : IRequest<PagedResult<VoucherListItem>>;
+    string? Service = null,
+    string? Type = null,
+    DateOnly? ValidAt = null) : IRequest<PagedResult<VoucherListItem>>;
