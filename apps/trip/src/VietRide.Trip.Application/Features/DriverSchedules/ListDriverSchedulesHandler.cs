@@ -1,4 +1,6 @@
 using MediatR;
+using Microsoft.EntityFrameworkCore;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -21,10 +23,26 @@ public sealed class ListDriverSchedulesHandler(
     {
         var page = request.Page ?? 1;
         var pageSize = Math.Min(request.PageSize ?? 20, 100);
+        if (page < 1 || pageSize < 1)
+            throw new CodedValidationException("VALIDATION_ERROR", "Invalid paging values.");
+        if (request.Search?.Trim().Length > 100)
+            throw new CodedValidationException("VALIDATION_ERROR", "search must not exceed 100 characters.");
         var query = repository.QueryNoTracking().Where(x => x.OperatorId == request.OperatorId);
         if (request.RouteId.HasValue) query = query.Where(x => x.RouteId == request.RouteId.Value);
         if (request.DriverUserId.HasValue) query = query.Where(x => x.DriverUserId == request.DriverUserId.Value);
         if (request.IsActive.HasValue) query = query.Where(x => x.IsActive == request.IsActive.Value);
+        if (request.AssistantUserId.HasValue) query = query.Where(x => x.AssistantUserId == request.AssistantUserId.Value);
+        if (request.DayOfWeek is < 1 or > 7)
+            throw new CodedValidationException("VALIDATION_ERROR", "dayOfWeek must be between 1 and 7.");
+        if (request.DepartureFrom.HasValue && request.DepartureTo.HasValue && request.DepartureFrom > request.DepartureTo)
+            throw new CodedValidationException("VALIDATION_ERROR", "departureFrom must be on or before departureTo.");
+        if (request.DayOfWeek.HasValue)
+            query = query.Where(x => EF.Functions.JsonContains(x.DayOfWeek, $"[{request.DayOfWeek.Value}]"));
+        if (request.DepartureFrom.HasValue) query = query.Where(x => x.DepartureTime >= request.DepartureFrom.Value);
+        if (request.DepartureTo.HasValue) query = query.Where(x => x.DepartureTime <= request.DepartureTo.Value);
+        if (request.EffectiveAt.HasValue)
+            query = query.Where(x => x.ValidFrom <= request.EffectiveAt.Value
+                && (!x.ValidUntil.HasValue || x.ValidUntil >= request.EffectiveAt.Value));
         if (request.VehicleTypeId.HasValue)
         {
             var vehicleTypeMatchIds = vehicleRepository.QueryNoTracking()
@@ -64,8 +82,19 @@ public sealed class ListDriverSchedulesHandler(
                 || crewUserIds.Contains(schedule.DriverUserId)
                 || (schedule.AssistantUserId.HasValue && crewUserIds.Contains(schedule.AssistantUserId.Value)));
         }
+        var sortBy = string.IsNullOrWhiteSpace(request.SortBy) ? "departureTime" : request.SortBy.Trim();
+        if (sortBy is not ("departureTime" or "effectiveFrom"))
+            throw new BadRequestException("INVALID_SORT_FIELD", "sortBy must be departureTime or effectiveFrom.");
+        var sortDir = string.IsNullOrWhiteSpace(request.SortDir) ? "asc" : request.SortDir.Trim();
+        if (sortDir is not ("asc" or "desc"))
+            throw new CodedValidationException("VALIDATION_ERROR", "sortDir must be asc or desc.");
+        var descending = sortDir == "desc";
         var total = query.LongCount();
-        var schedules = query.OrderBy(x => x.DepartureTime).ThenBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize).ToList();
+        var ordered = sortBy == "effectiveFrom"
+            ? descending ? query.OrderByDescending(x => x.ValidFrom) : query.OrderBy(x => x.ValidFrom)
+            : descending ? query.OrderByDescending(x => x.DepartureTime) : query.OrderBy(x => x.DepartureTime);
+        ordered = descending ? ordered.ThenByDescending(x => x.Id) : ordered.ThenBy(x => x.Id);
+        var schedules = ordered.Skip((page - 1) * pageSize).Take(pageSize).ToList();
         var routes = routeRepository.QueryNoTracking().Where(x => x.OperatorId == request.OperatorId && schedules.Select(s => s.RouteId).Contains(x.Id)).ToList();
         var stationIds = routes.SelectMany(x => new[] { x.OriginStationId, x.DestinationStationId }).Distinct().ToArray();
         var stations = stationRepository.QueryNoTracking().Where(x => stationIds.Contains(x.Id)).ToList().ToDictionary(x => x.Id, StationMapper.ToDto);

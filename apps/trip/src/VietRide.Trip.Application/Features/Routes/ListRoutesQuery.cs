@@ -8,4 +8,8 @@ public sealed record ListRoutesQuery(
     int? Page,
     int? PageSize,
     string? Search,
-    bool? IsActive = null) : IRequest<PagedResult<RouteListItemDto>>;
+    bool? IsActive = null,
+    Guid? OriginStationId = null,
+    Guid? DestinationStationId = null,
+    string? SortBy = null,
+    string? SortDir = null) : IRequest<PagedResult<RouteListItemDto>>;

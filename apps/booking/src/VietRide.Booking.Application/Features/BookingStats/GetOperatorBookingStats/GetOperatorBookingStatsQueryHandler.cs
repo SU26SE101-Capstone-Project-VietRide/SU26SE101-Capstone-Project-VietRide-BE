@@ -50,7 +50,8 @@ public sealed class GetOperatorBookingStatsQueryHandler
 
         return new GetOperatorBookingStatsResult(
             items,
-            items.Sum(item => item.TotalBookings));
+            items.Sum(item => item.TotalBookings),
+            items.Sum(item => item.NoShowPassengerCount));
     }
 
     private static IReadOnlyList<GetOperatorBookingStatsItemResult> BuildMonthlyItems(
@@ -68,6 +69,7 @@ public sealed class GetOperatorBookingStatsQueryHandler
                     group.Sum(row => row.TotalCancellations),
                     TotalNoShows: null,
                     TotalPartialNoShows: null,
+                    group.Sum(row => row.NoShowPassengerCount),
                     group.Sum(row => row.TotalCompleted)));
 
         return BookingStatsQueryRules
@@ -79,6 +81,7 @@ public sealed class GetOperatorBookingStatsQueryHandler
                 TotalCancellations: 0,
                 TotalNoShows: null,
                 TotalPartialNoShows: null,
+                NoShowPassengerCount: 0,
                 TotalCompleted: 0))
             .ToList();
     }
@@ -91,5 +94,6 @@ public sealed class GetOperatorBookingStatsQueryHandler
             row.TotalCancellations,
             row.TotalNoShows,
             TotalPartialNoShows: 0,
+            row.NoShowPassengerCount,
             row.TotalCompleted);
 }

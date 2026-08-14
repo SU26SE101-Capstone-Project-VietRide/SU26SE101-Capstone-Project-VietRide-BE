@@ -38,6 +38,22 @@ public interface IIdentityInternalClient
         CancellationToken cancellationToken = default) =>
         Task.FromResult(IdentityCrewSearchResult.Failure("Identity crew search is not implemented."));
 
+    Task<IdentityUserIdSearchResult> SearchUserIdsAsync(
+        string search,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(IdentityUserIdSearchResult.Failure("Identity user search is not implemented."));
+
+}
+
+public sealed record IdentityUserIdSearchResult(
+    bool Succeeded,
+    bool TooBroad,
+    IReadOnlyList<Guid> UserIds,
+    string? Message)
+{
+    public static IdentityUserIdSearchResult Success(IReadOnlyList<Guid> ids) => new(true, false, ids, null);
+    public static IdentityUserIdSearchResult Broad() => new(false, true, [], null);
+    public static IdentityUserIdSearchResult Failure(string message) => new(false, false, [], message);
 }
 
 public sealed record IdentityCrewProfile(Guid UserId, string DisplayName, string Role);

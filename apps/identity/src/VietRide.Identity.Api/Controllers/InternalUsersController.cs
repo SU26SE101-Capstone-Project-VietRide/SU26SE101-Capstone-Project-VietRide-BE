@@ -7,7 +7,10 @@ using VietRide.Identity.Application.Features.Devices.RemoveDeviceToken;
 using VietRide.Identity.Application.Features.InternalUsers.GetInternalUser;
 using VietRide.Identity.Application.Features.InternalUsers.GetInternalUserByEmail;
 using VietRide.Identity.Application.Features.InternalUsers.GetInternalUserByPhone;
+using VietRide.Identity.Application.Features.InternalUsers.SearchInternalUsers;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
+using VietRide.Shared.Web.Filters;
 
 namespace VietRide.Identity.Api.Controllers;
 
@@ -62,6 +65,16 @@ public sealed class InternalUsersController : ControllerBase
         var result = await _mediator.Send(new GetInternalUserByEmailQuery(email), cancellationToken);
         return Ok(result);
     }
+
+    [HttpGet("search")]
+    [AllowedQueryParameters("search")]
+    [ProducesResponseType(typeof(SearchInternalUsersResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<SearchInternalUsersResponseDto>> SearchUsers(
+        [FromQuery] string search,
+        CancellationToken cancellationToken)
+        => Ok(await _mediator.Send(new SearchInternalUsersQuery(search), cancellationToken));
 
     [HttpGet("{userId:guid}")]
     [ProducesResponseType(typeof(GetInternalUserResponseDto), StatusCodes.Status200OK)]

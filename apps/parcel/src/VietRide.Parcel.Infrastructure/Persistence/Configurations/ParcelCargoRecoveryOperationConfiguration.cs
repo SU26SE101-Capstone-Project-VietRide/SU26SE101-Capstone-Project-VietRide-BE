@@ -20,10 +20,8 @@ internal sealed class ParcelCargoRecoveryOperationConfiguration
                 "status IN ('PENDING', 'COMPLETED', 'FAILED')");
             table.HasCheckConstraint(
                 "chk_parcel_cargo_recovery_target",
-                """
-                (operation_type = 'TRANSFER' AND target_trip_id IS NOT NULL AND target_state = 'RESERVED')
-                OR (operation_type IN ('RETURN', 'RELEASE') AND target_trip_id IS NULL AND target_state IS NULL)
-                """);
+                "(operation_type = 'TRANSFER' AND target_trip_id IS NOT NULL AND target_state = 'RESERVED')\n"
+                + "OR (operation_type IN ('RETURN', 'RELEASE') AND target_trip_id IS NULL AND target_state IS NULL)");
             table.HasCheckConstraint(
                 "chk_parcel_cargo_recovery_amounts",
                 "refund_amount_vnd >= 0 AND refund_due_vnd >= 0");

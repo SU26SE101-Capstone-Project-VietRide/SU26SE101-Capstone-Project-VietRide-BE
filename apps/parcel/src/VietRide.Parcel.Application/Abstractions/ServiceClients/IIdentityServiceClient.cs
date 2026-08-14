@@ -16,6 +16,11 @@ public interface IIdentityServiceClient
         CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Identity user batch lookup is not implemented by this client.");
 
+    Task<IdentityUserSearchOutcome> SearchUserIdsAsync(
+        string search,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Identity user search is not implemented by this client.");
+
     Task<OperatorLookupOutcome> GetOperatorInfoAsync(
         Guid operatorId,
         CancellationToken cancellationToken = default);
@@ -25,6 +30,23 @@ public interface IIdentityServiceClient
         bool requireParcelModule,
         CancellationToken cancellationToken = default)
         => Task.FromResult(SubscriptionWriteEligibilityOutcome.Allowed());
+}
+
+public enum IdentityUserSearchOutcomeKind
+{
+    Success,
+    TooBroad,
+    TransportError,
+}
+
+public sealed record IdentityUserSearchOutcome(
+    IdentityUserSearchOutcomeKind Kind,
+    IReadOnlyList<Guid> UserIds,
+    string? ErrorMessage)
+{
+    public static IdentityUserSearchOutcome Success(IReadOnlyList<Guid> ids) => new(IdentityUserSearchOutcomeKind.Success, ids, null);
+    public static IdentityUserSearchOutcome TooBroad() => new(IdentityUserSearchOutcomeKind.TooBroad, [], null);
+    public static IdentityUserSearchOutcome TransportFailure(string message) => new(IdentityUserSearchOutcomeKind.TransportError, [], message);
 }
 
 public sealed record SubscriptionWriteEligibilityOutcome(

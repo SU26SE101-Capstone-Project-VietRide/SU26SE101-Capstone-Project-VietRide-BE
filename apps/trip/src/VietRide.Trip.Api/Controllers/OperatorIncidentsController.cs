@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Features.Incidents.OperatorIncidents;
@@ -23,6 +24,7 @@ public sealed class OperatorIncidentsController : ControllerBase
     }
 
     [HttpGet]
+    [AllowedQueryParameters("tripId", "category", "status", "from", "to", "page", "pageSize", "search", "reportedByUserId", "sortBy", "sortDir")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<OperatorIncidentDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
@@ -34,6 +36,10 @@ public sealed class OperatorIncidentsController : ControllerBase
         [FromQuery] DateOnly? to,
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
+        [FromQuery] string? search,
+        [FromQuery] Guid? reportedByUserId,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
         CancellationToken cancellationToken)
         => Ok(await mediator.Send(
             new ListOperatorIncidentsQuery(
@@ -44,7 +50,11 @@ public sealed class OperatorIncidentsController : ControllerBase
                 from,
                 to,
                 page,
-                pageSize),
+                pageSize,
+                search,
+                reportedByUserId,
+                sortBy,
+                sortDir),
             cancellationToken));
 
     [HttpGet("{incidentId:guid}")]

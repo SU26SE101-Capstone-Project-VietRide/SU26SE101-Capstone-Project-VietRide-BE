@@ -1,3 +1,4 @@
+using VietRide.Identity.Application.Features.Admin.GetOperatorSummary;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
@@ -25,6 +26,29 @@ public interface IOperatorRepository : IRepository<Operator, Guid>
         QueryOptions options,
         OperatorRegistrationStatus? status,
         CancellationToken cancellationToken = default);
+
+    Task<PagedResult<Operator>> ListFilteredAsync(
+        QueryOptions options,
+        OperatorRegistrationStatus? status,
+        bool? isActive = null,
+        DateTimeOffset? fromUtc = null,
+        DateTimeOffset? toUtcExclusive = null,
+        string dateField = "createdAt",
+        CancellationToken cancellationToken = default)
+        => ListAsync(options, status, cancellationToken);
+
+    Task<IReadOnlyList<Operator>> ListForExportAsync(
+        QueryOptions options,
+        OperatorRegistrationStatus? status,
+        bool? isActive,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtcExclusive,
+        string dateField,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Operator export is not implemented by this repository.");
+
+    Task<AdminOperatorSummaryDto> GetSummaryAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(new AdminOperatorSummaryDto(0, 0, 0, 0, 0, 0));
 
     Task<IReadOnlyList<Operator>> ListSummariesByIdsAsync(
         IReadOnlyCollection<Guid> operatorIds,

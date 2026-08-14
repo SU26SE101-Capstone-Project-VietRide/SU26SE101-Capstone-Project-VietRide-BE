@@ -5,6 +5,7 @@
 -- =============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "unaccent";
 
 -- =============================================================================
 -- ENUMS
@@ -202,6 +203,12 @@ CREATE INDEX idx_parcels_recipient_user_id_created_at
     ON parcels (recipient_user_id, created_at DESC) WHERE recipient_user_id IS NOT NULL;
 CREATE INDEX idx_parcels_trip_id_status ON parcels (trip_id, status);
 CREATE INDEX idx_parcels_operator_id_status ON parcels (operator_id, status);
+CREATE INDEX idx_parcels_operator_created_at ON parcels (operator_id, created_at, id);
+CREATE INDEX idx_parcels_operator_route_snapshot ON parcels (operator_id, trip_snapshot_route_id)
+    WHERE trip_snapshot_route_id IS NOT NULL;
+CREATE INDEX idx_parcels_operator_final_payment_deadline
+    ON parcels (operator_id, final_payment_deadline, id)
+    WHERE final_payment_deadline IS NOT NULL;
 CREATE INDEX idx_parcels_trip_snapshot_backfill ON parcels (created_at, id)
     WHERE trip_snapshot_route_id IS NULL
        OR trip_snapshot_route_name IS NULL

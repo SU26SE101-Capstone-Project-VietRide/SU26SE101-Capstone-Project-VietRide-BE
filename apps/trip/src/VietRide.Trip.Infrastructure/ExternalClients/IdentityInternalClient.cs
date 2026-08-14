@@ -11,6 +11,7 @@ namespace VietRide.Trip.Infrastructure.ExternalClients;
 /// </summary>
 public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscriptionQuotaClient
 {
+    private sealed record UserIdSearchPayload(IReadOnlyList<Guid> UserIds);
     private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private readonly HttpClient _httpClient;
@@ -240,6 +241,40 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
         {
             return IdentityCrewSearchResult.Failure(
                 "Identity crew search failed due to transport or circuit-breaker failure.");
+        }
+    }
+
+    public async Task<IdentityUserIdSearchResult> SearchUserIdsAsync(
+        string search,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                $"/internal/v1/users/search?search={Uri.EscapeDataString(search.Trim())}", cancellationToken);
+            if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+            {
+                var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                return error.Contains("SEARCH_TOO_BROAD", StringComparison.Ordinal)
+                    ? IdentityUserIdSearchResult.Broad()
+                    : IdentityUserIdSearchResult.Failure("Identity rejected user search.");
+            }
+            if (response.StatusCode != HttpStatusCode.OK)
+                return IdentityUserIdSearchResult.Failure("Identity user search failed.");
+            var payload = await response.Content.ReadFromJsonAsync<UserIdSearchPayload>(JsonOptions, cancellationToken);
+            if (payload?.UserIds is not { Count: <= 1000 } ids
+                || ids.Any(id => id == Guid.Empty)
+                || ids.Distinct().Count() != ids.Count)
+                return IdentityUserIdSearchResult.Failure("Identity returned an invalid user search payload.");
+            return IdentityUserIdSearchResult.Success(ids);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return IdentityUserIdSearchResult.Failure("Identity user search transport failure.");
         }
     }
 

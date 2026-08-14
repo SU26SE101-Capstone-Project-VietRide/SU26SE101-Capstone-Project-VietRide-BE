@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
@@ -54,16 +55,23 @@ public sealed class OperatorShuttleController : ControllerBase
     }
 
     [HttpGet("shuttle-requests")]
+    [AllowedQueryParameters("page", "pageSize", "from", "to", "mainTripId", "search")]
     [Authorize(Roles = "OPERATOR_STAFF,OPERATOR_ADMIN")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<ShuttleRequestTripGroup>>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<ShuttleRequestTripGroup>>> GetRequests(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
+        [FromQuery] DateOnly? from = null,
+        [FromQuery] DateOnly? to = null,
+        [FromQuery] Guid? mainTripId = null,
+        [FromQuery] string? search = null,
         CancellationToken cancellationToken = default)
     {
         var operatorId = GetOperatorId();
         return Ok(await _sender.Send(
-            new GetShuttleRequestsQuery(operatorId, Math.Max(1, page), Math.Clamp(pageSize, 1, 100)),
+            new GetShuttleRequestsQuery(
+                operatorId, Math.Max(1, page), Math.Clamp(pageSize, 1, 100),
+                from, to, mainTripId, search),
             cancellationToken));
     }
 

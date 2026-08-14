@@ -27,7 +27,7 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
     }
 
     [HttpGet]
-    [AllowedQueryParameters("page", "pageSize", "routeId", "driverUserId", "isActive", "search", "vehicleTypeId")]
+    [AllowedQueryParameters("page", "pageSize", "routeId", "driverUserId", "isActive", "search", "vehicleTypeId", "dayOfWeek", "departureFrom", "departureTo", "effectiveAt", "assistantUserId", "sortBy", "sortDir")]
     [Authorize(Roles = "OPERATOR_STAFF,OPERATOR_ADMIN")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<DriverScheduleDetailDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -35,12 +35,17 @@ public sealed class OperatorDriverSchedulesController : ControllerBase
         [FromQuery] int? page, [FromQuery] int? pageSize, [FromQuery] Guid? routeId,
         [FromQuery] Guid? driverUserId, [FromQuery] bool? isActive,
         [FromQuery] string? search, [FromQuery] Guid? vehicleTypeId,
+        [FromQuery] int? dayOfWeek, [FromQuery] TimeOnly? departureFrom,
+        [FromQuery] TimeOnly? departureTo, [FromQuery] DateOnly? effectiveAt,
+        [FromQuery] Guid? assistantUserId, [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
         CancellationToken cancellationToken)
     {
         var operatorId = CurrentUserClaims.GetOperatorId(User)
             ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required to manage driver schedules.");
         return Ok(await sender.Send(new ListDriverSchedulesQuery(
-            operatorId, page, pageSize, routeId, driverUserId, isActive, search, vehicleTypeId), cancellationToken));
+            operatorId, page, pageSize, routeId, driverUserId, isActive, search, vehicleTypeId,
+            dayOfWeek, departureFrom, departureTo, effectiveAt, assistantUserId, sortBy, sortDir), cancellationToken));
     }
 
     [HttpPost]

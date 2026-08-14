@@ -23,4 +23,5 @@ public sealed record VoucherListItem(
     bool IsActive,
     DateTimeOffset ValidFrom,
     DateTimeOffset ValidUntil,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    int UsedCount);

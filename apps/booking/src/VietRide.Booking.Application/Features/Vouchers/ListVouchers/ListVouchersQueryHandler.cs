@@ -1,7 +1,9 @@
 using MediatR;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 
@@ -12,6 +14,11 @@ namespace VietRide.Booking.Application.Features.Vouchers.ListVouchers;
 public sealed class ListVouchersQueryHandler
     : IRequestHandler<ListVouchersQuery, PagedResult<VoucherListItem>>
 {
+    private static readonly HashSet<string> AllowedSortFields =
+    [
+        "createdAt", "validFrom", "validUntil", "code", "name", "isActive", "usedCount",
+    ];
+
     private readonly IVoucherRepository _vouchers;
 
     public ListVouchersQueryHandler(IVoucherRepository vouchers)
@@ -23,10 +30,22 @@ public sealed class ListVouchersQueryHandler
         ListVouchersQuery request,
         CancellationToken cancellationToken)
     {
+        if (!string.IsNullOrWhiteSpace(request.Options.SortBy)
+            && !AllowedSortFields.Contains(request.Options.SortBy))
+            throw new BadRequestException("INVALID_SORT_FIELD", "Unsupported voucher sort field.");
+
         // Parse optional fundingType string (already validated by FluentValidation)
         VoucherFundingType? fundingType = null;
         if (!string.IsNullOrEmpty(request.FundingType))
             fundingType = Enum.Parse<VoucherFundingType>(request.FundingType, ignoreCase: true);
+
+        VoucherType? type = null;
+        if (!string.IsNullOrWhiteSpace(request.Type))
+            type = Enum.Parse<VoucherType>(request.Type, ignoreCase: true);
+
+        var validity = request.ValidAt.HasValue
+            ? BusinessTime.GetUtcDayRange(request.ValidAt.Value)
+            : (UtcRange?)null;
 
         var (items, total) = await _vouchers.ListAsync(
             ownerOperatorId: request.OwnerOperatorId,
@@ -39,31 +58,37 @@ public sealed class ListVouchersQueryHandler
             sortDir: request.Options.SortDir,
             ct: cancellationToken,
             search: request.Search,
-            service: request.Service?.Trim().ToUpperInvariant());
+            service: request.Service?.Trim().ToUpperInvariant(),
+            type: type,
+            validFromInclusive: validity?.FromUtc,
+            validUntilExclusive: validity?.ToUtcExclusive);
 
-        var mapped = items
-            .Select(v => new VoucherListItem(
-                Id: v.Id,
-                Code: v.Code,
-                Name: v.Name,
-                Type: v.Type.ToString(),
-                Value: v.Value,
-                MinOrderAmount: v.MinOrderAmount.Amount,
-                MaxDiscountAmount: v.MaxDiscountAmount?.Amount,
-                TotalUsageLimit: v.TotalUsageLimit,
-                PerUserLimit: v.PerUserLimit,
-                NewUserOnly: v.NewUserOnly,
-                ApplicableServices: v.ApplicableServices,
-                ApplicablePaymentMethods: v.ApplicablePaymentMethods,
-                ApplicableOperatorIds: v.ApplicableOperatorIds,
-                ApplicableRouteIds: v.ApplicableRouteIds,
-                FundingType: v.FundingType.ToString(),
-                OwnerOperatorId: v.OwnerOperatorId,
-                IsActive: v.IsActive,
-                ValidFrom: v.ValidFrom,
-                ValidUntil: v.ValidUntil,
-                CreatedAt: v.CreatedAt))
-            .ToList();
+        var usageCounts = await _vouchers.GetUsageCountsAsync(
+            items.Select(item => item.Id).ToArray(),
+            cancellationToken) ?? new Dictionary<Guid, int>();
+
+        var mapped = items.Select(v => new VoucherListItem(
+            v.Id,
+            v.Code,
+            v.Name,
+            v.Type.ToString(),
+            v.Value,
+            v.MinOrderAmount.Amount,
+            v.MaxDiscountAmount?.Amount,
+            v.TotalUsageLimit,
+            v.PerUserLimit,
+            v.NewUserOnly,
+            v.ApplicableServices,
+            v.ApplicablePaymentMethods,
+            v.ApplicableOperatorIds,
+            v.ApplicableRouteIds,
+            v.FundingType.ToString(),
+            v.OwnerOperatorId,
+            v.IsActive,
+            v.ValidFrom,
+            v.ValidUntil,
+            v.CreatedAt,
+            usageCounts.GetValueOrDefault(v.Id))).ToList();
 
         return PagedResult<VoucherListItem>.Create(
             mapped,

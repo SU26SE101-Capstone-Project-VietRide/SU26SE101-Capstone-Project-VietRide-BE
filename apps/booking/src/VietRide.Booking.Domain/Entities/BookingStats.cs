@@ -16,6 +16,7 @@ public sealed class BookingStats : BaseEntity<Guid>
     public int TotalConfirmed { get; private set; }
     public int TotalCancelled { get; private set; }
     public int TotalNoShow { get; private set; }
+    public int TotalNoShowPassengers { get; private set; }
     public int TotalCompleted { get; private set; }
     public Money TotalRevenue { get; private set; }
     public Money TotalRefunded { get; private set; }
@@ -57,7 +58,8 @@ public sealed class BookingStats : BaseEntity<Guid>
         int totalCompleted,
         Money totalRevenue,
         Money totalRefunded,
-        int totalSeatsBooked)
+        int totalSeatsBooked,
+        int totalNoShowPassengers = 0)
     {
         EnsureNonNegative(totalBookings, nameof(totalBookings));
         EnsureNonNegative(totalConfirmed, nameof(totalConfirmed));
@@ -67,6 +69,7 @@ public sealed class BookingStats : BaseEntity<Guid>
         EnsureNonNegative(totalRevenue.Amount, nameof(totalRevenue));
         EnsureNonNegative(totalRefunded.Amount, nameof(totalRefunded));
         EnsureNonNegative(totalSeatsBooked, nameof(totalSeatsBooked));
+        EnsureNonNegative(totalNoShowPassengers, nameof(totalNoShowPassengers));
 
         TotalBookings = totalBookings;
         TotalConfirmed = totalConfirmed;
@@ -76,6 +79,7 @@ public sealed class BookingStats : BaseEntity<Guid>
         TotalRevenue = totalRevenue;
         TotalRefunded = totalRefunded;
         TotalSeatsBooked = totalSeatsBooked;
+        TotalNoShowPassengers = totalNoShowPassengers;
     }
 
     private static string? NormalizeOperatorName(string? operatorName)

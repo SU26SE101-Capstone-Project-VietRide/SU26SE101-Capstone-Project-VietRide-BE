@@ -5390,3 +5390,13 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
   gửi Driver hiện tại, Assistant hiện tại và người đề xuất, có dedupe.
 - Fleet tracking, ETA next-stop, DriverSchedule deactivate/soft-delete và proposal socket events
   tuân theo API Contract extension cùng ngày.
+
+## Điều chỉnh search/filter và thống kê no-show — 2026-08-14
+
+- Search/filter của các danh sách vận hành phải chạy phía server trước count và phân trang; tenant
+  luôn lấy từ JWT. Khoảng ngày dùng ngày nghiệp vụ Asia/Ho_Chi_Minh và bao gồm cả hai đầu.
+- Hàng đợi shuttle-request chỉ biểu diễn yêu cầu đang chờ/chưa gán; lịch sử đã gán hoặc đã hủy thuộc
+  shuttle-trip, không tạo trạng thái giả trên queue.
+- `booking_stats.total_no_show` tiếp tục đếm booking no-show. Trường mới
+  `total_no_show_passengers` đếm số hành khách thực tế mới được đánh dấu no-show và phải được cập
+  nhật nguyên tử, idempotent với lần chuyển trạng thái hành khách.

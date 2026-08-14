@@ -1865,7 +1865,7 @@ Response `200`:
 
 Auth: `SYSTEM_ADMIN`.
 
-Query: `fundingType?` (`VIETRIDE_FUNDED` | `OPERATOR_FUNDED`), `isActive?` (bool), `search?` (case-insensitive contains on code/name), `service?` (`BOOKING|PARCEL`, array membership), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `422 INVALID_SORT_FIELD`). `ownerOperatorId` is not supported on this endpoint and must not expose operator-owned vouchers. `applicableServices` in each item contains `BOOKING`, `PARCEL`, or both. v1 returns only active (non-soft-deleted) vouchers (respects EF `HasQueryFilter(deleted_at == null)`); `includeDeleted` not supported in v1.
+Query: `fundingType?` (`VIETRIDE_FUNDED` | `OPERATOR_FUNDED`), `isActive?` (bool), `search?` (case-insensitive contains on code/name), `service?` (`BOOKING|PARCEL`, array membership), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `400 INVALID_SORT_FIELD`). `ownerOperatorId` is not supported on this endpoint and must not expose operator-owned vouchers. `applicableServices` in each item contains `BOOKING`, `PARCEL`, or both. v1 returns only active (non-soft-deleted) vouchers (respects EF `HasQueryFilter(deleted_at == null)`); `includeDeleted` not supported in v1.
 
 Response `200`:
 ```json
@@ -1969,7 +1969,7 @@ Auth: `OPERATOR_ADMIN`.
 
 Lists vouchers owned by the caller operator. The service takes `operatorId` from the authenticated JWT claim and always filters `ownerOperatorId = caller.operatorId`; client-supplied `ownerOperatorId` is not accepted. Read-only — no Idempotency-Key.
 
-Query: `isActive?` (bool), `search?` (case-insensitive contains on code/name), `service?` (`BOOKING|PARCEL`, array membership), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `422 INVALID_SORT_FIELD`). No `fundingType` query in v1. v1 returns only non-soft-deleted vouchers.
+Query: `isActive?` (bool), `search?` (case-insensitive contains on code/name), `service?` (`BOOKING|PARCEL`, array membership), plus standard `QueryOptions` paging/sort (`page`/`pageSize` clamped 1..100, `sortBy` whitelisted — default `createdAt` `desc`; non-whitelisted → `400 INVALID_SORT_FIELD`). No `fundingType` query in v1. v1 returns only non-soft-deleted vouchers.
 
 Response `200`: same paged `VoucherListItem` shape as `GET /v1/admin/vouchers`, with `ownerOperatorId` populated. `applicableServices` identifies whether the voucher applies to `BOOKING`, `PARCEL`, or both.
 
@@ -9911,3 +9911,45 @@ This section supersedes older endpoint descriptions where they conflict.
   `isActive=true`, preserves subscription/approval/suspension metadata, and does not restore
   revoked refresh tokens. Invalid state returns `422 VALIDATION_ERROR`.
 - RAG chat HTTP 429 advertises the canonical error code `RAG_RATE_LIMIT_EXCEEDED`.
+
+## 2026-08-14 Search/filter and summary extension
+
+All date-only ranges in this extension are inclusive Asia/Ho_Chi_Minh business dates. Search is
+trimmed, limited to 100 characters, and applied before count/paging. Every touched list rejects
+unknown query keys with `422 VALIDATION_ERROR`; sort fields remain explicit allow-lists.
+
+- `GET /v1/operator/vouchers` additionally accepts `type=PERCENT_OFF|FIXED_AMOUNT` and
+  `validAt=date`; `sortBy` additionally accepts `usedCount`. A selected `validAt` matches a
+  voucher whose validity window overlaps that business date. Each item adds `usedCount`.
+- `GET /v1/admin/vouchers/summary` and `GET /v1/operator/vouchers/summary` return
+  `{total,active,booking,parcel,expiringIn7Days}`. Admin is platform-only; operator is scoped from
+  the JWT. These endpoints accept no query parameters.
+- `GET /v1/operator/booking-stats` adds `noShowPassengerCount` to every date/month bucket and to
+  the top-level response. Existing `totalNoShows` remains a booking count.
+- `GET /v1/operator/parcel-route-fares` additionally accepts `sortBy=priceVnd|effectiveFrom`,
+  `sortDir=asc|desc`, `effectiveAt=date`, and `status=ACTIVE|SCHEDULED|EXPIRED`. `effectiveAt`
+  alone means ACTIVE for that date. `GET /v1/operator/parcel-route-fares/summary` returns
+  `[{routeId,configuredSizeCategories,hasActiveWindow,hasScheduledWindow}]` for the caller tenant.
+- `GET /v1/operator/parcels` additionally accepts `search`, `from`, `to`,
+  `dateField=createdAt|finalPaymentDeadline`, `sizeCategory`, `routeId`, and
+  `sortBy=createdAt|finalPaymentDeadline` plus `sortDir`. Search covers parcel code, recipient
+  name/phone, and sender name/phone. More than 1,000 sender matches returns
+  `422 SEARCH_TOO_BROAD`; Identity failure returns `503 UPSTREAM_UNAVAILABLE`.
+- Trip operator lists add the following parameters: stations `isActive`, `supportsShuttle`,
+  `sortBy=name|createdAt|updatedAt`, `sortDir`; stops `isActive`, `routeId`; driver schedules
+  `dayOfWeek=1..7`, `departureFrom`, `departureTo`, `effectiveAt`, `assistantUserId`,
+  `sortBy=departureTime|effectiveFrom`, `sortDir`; incidents `search`, `reportedByUserId`,
+  `sortBy=reportedAt|resolvedAt`, `sortDir`; routes `originStationId`, `destinationStationId`,
+  `sortBy=name|totalDistanceKm|estimatedDurationMinutes`, `sortDir`; pending shuttle requests
+  `from`, `to`, `mainTripId`, `search`. Shuttle `status` and `unassignedOnly` are not supported
+  because this resource is intrinsically the pending/unassigned queue.
+- `GET /v1/admin/operators` additionally accepts `isActive`, `from`, `to`, and
+  `dateField=createdAt|approvedAt`. `GET /v1/admin/operators/summary` accepts no query and returns
+  `{total,pending,approved,suspended,rejected,active}`. `GET /v1/admin/operators/export` accepts
+  the list filters/sort except paging and returns UTF-8 BOM RFC-4180 CSV. `GET /v1/admin/users`
+  additionally accepts `from` and `to` over `createdAt`.
+- `GET /v1/operator/invoices` additionally accepts `search`, matching `invoiceNumber` by
+  case-insensitive contains and exact `paymentId` when the value is a UUID.
+- `GET /internal/v1/users/search?search=` requires Internal JWT and is not exposed by Gateway.
+  Success is raw `{userIds:[uuid...]}` for at most 1,000 non-deleted display-name/phone matches;
+  more matches returns ADR-0004 `422 SEARCH_TOO_BROAD` without a partial list.

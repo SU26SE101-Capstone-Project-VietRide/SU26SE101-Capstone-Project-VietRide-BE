@@ -12,6 +12,7 @@ using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Serialization;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Shared.Persistence.Outbox;
 using BookingEntity = VietRide.Booking.Domain.Entities.Booking;
 
@@ -71,6 +72,19 @@ public sealed class NoShowDetectionJob(
                 booking.Status,
                 now,
                 BookingStatusHistorySource.MarkNoShow), cancellationToken);
+            var statDate = BusinessTime.ToLocalDate(now);
+            var statsId = Guid.NewGuid();
+            await db.Database.ExecuteSqlInterpolatedAsync($@"
+INSERT INTO vietride_booking.booking_stats (
+    id, operator_id, stat_date, trip_id, total_no_show_passengers, updated_at
+)
+VALUES (
+    {statsId}, {booking.OperatorId}, {statDate}, {booking.TripId}, {newlyMarked.Count}, now()
+)
+ON CONFLICT (operator_id, stat_date, COALESCE(trip_id, '00000000-0000-0000-0000-000000000000'::uuid))
+DO UPDATE SET
+    total_no_show_passengers = booking_stats.total_no_show_passengers + EXCLUDED.total_no_show_passengers,
+    updated_at = now();", cancellationToken);
             var eventId = DeriveEventId(booking.Id, booking.Status);
             var evt = new BookingPassengerNoShowMarkedIntegrationEvent(
                 eventId,

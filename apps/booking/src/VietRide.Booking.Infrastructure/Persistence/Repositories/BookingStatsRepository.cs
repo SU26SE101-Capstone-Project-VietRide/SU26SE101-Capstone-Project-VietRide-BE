@@ -77,6 +77,7 @@ INSERT INTO vietride_booking.booking_stats (
     total_confirmed,
     total_cancelled,
     total_no_show,
+    total_no_show_passengers,
     total_completed,
     total_revenue,
     total_refunded,
@@ -93,6 +94,7 @@ VALUES (
     {delta.TotalConfirmed},
     {delta.TotalCancelled},
     {delta.TotalNoShow},
+    {delta.TotalNoShowPassengers},
     {delta.TotalCompleted},
     {delta.TotalRevenue.Amount},
     {delta.TotalRefunded.Amount},
@@ -106,6 +108,7 @@ DO UPDATE SET
     total_confirmed = booking_stats.total_confirmed + EXCLUDED.total_confirmed,
     total_cancelled = booking_stats.total_cancelled + EXCLUDED.total_cancelled,
     total_no_show = booking_stats.total_no_show + EXCLUDED.total_no_show,
+    total_no_show_passengers = booking_stats.total_no_show_passengers + EXCLUDED.total_no_show_passengers,
     total_completed = booking_stats.total_completed + EXCLUDED.total_completed,
     total_revenue = booking_stats.total_revenue + EXCLUDED.total_revenue,
     total_refunded = booking_stats.total_refunded + EXCLUDED.total_refunded,
@@ -130,6 +133,7 @@ SELECT
     COALESCE(SUM(total_revenue), 0)::bigint AS ""TotalRevenue"",
     COALESCE(SUM(total_cancelled), 0)::integer AS ""TotalCancellations"",
     COALESCE(SUM(total_no_show), 0)::integer AS ""TotalNoShows"",
+    COALESCE(SUM(total_no_show_passengers), 0)::integer AS ""NoShowPassengerCount"",
     COALESCE(SUM(total_completed), 0)::integer AS ""TotalCompleted""
 FROM vietride_booking.booking_stats
 WHERE operator_id = {operatorId}
@@ -150,6 +154,7 @@ SELECT
     COALESCE(SUM(total_revenue), 0)::bigint AS ""TotalRevenue"",
     COALESCE(SUM(total_cancelled), 0)::integer AS ""TotalCancellations"",
     COALESCE(SUM(total_no_show), 0)::integer AS ""TotalNoShows"",
+    COALESCE(SUM(total_no_show_passengers), 0)::integer AS ""NoShowPassengerCount"",
     COALESCE(SUM(total_completed), 0)::integer AS ""TotalCompleted""
 FROM vietride_booking.booking_stats
 WHERE operator_id = {operatorId}
@@ -179,6 +184,7 @@ SELECT
     COALESCE(SUM(total_revenue), 0)::bigint AS ""TotalRevenue"",
     COALESCE(SUM(total_cancelled), 0)::integer AS ""TotalCancellations"",
     COALESCE(SUM(total_no_show), 0)::integer AS ""TotalNoShows"",
+    COALESCE(SUM(total_no_show_passengers), 0)::integer AS ""NoShowPassengerCount"",
     COALESCE(SUM(total_completed), 0)::integer AS ""TotalCompleted""
 FROM vietride_booking.booking_stats
 WHERE stat_date >= {from}::date
@@ -216,6 +222,7 @@ SELECT
     COALESCE(SUM(filtered.total_revenue), 0)::bigint AS ""TotalRevenue"",
     COALESCE(SUM(filtered.total_cancelled), 0)::integer AS ""TotalCancellations"",
     COALESCE(SUM(filtered.total_no_show), 0)::integer AS ""TotalNoShows"",
+    COALESCE(SUM(filtered.total_no_show_passengers), 0)::integer AS ""NoShowPassengerCount"",
     COALESCE(SUM(filtered.total_completed), 0)::integer AS ""TotalCompleted""
 FROM filtered
 LEFT JOIN names
@@ -251,6 +258,7 @@ SELECT
     COALESCE(SUM(filtered.total_revenue), 0)::bigint AS ""TotalRevenue"",
     COALESCE(SUM(filtered.total_cancelled), 0)::integer AS ""TotalCancellations"",
     COALESCE(SUM(filtered.total_no_show), 0)::integer AS ""TotalNoShows"",
+    COALESCE(SUM(filtered.total_no_show_passengers), 0)::integer AS ""NoShowPassengerCount"",
     COALESCE(SUM(filtered.total_completed), 0)::integer AS ""TotalCompleted""
 FROM filtered
 LEFT JOIN names
@@ -272,7 +280,8 @@ ORDER BY COALESCE(names.operator_name, '')")
             row.TotalRevenue,
             row.TotalCancellations,
             row.TotalNoShows,
-            row.TotalCompleted);
+            row.TotalCompleted,
+            row.NoShowPassengerCount);
 
     private static OperatorBookingStatsReadModel ToOperatorReadModel(OperatorBookingStatsSqlRow row)
         => new(
@@ -282,7 +291,8 @@ ORDER BY COALESCE(names.operator_name, '')")
             row.TotalRevenue,
             row.TotalCancellations,
             row.TotalNoShows,
-            row.TotalCompleted);
+            row.TotalCompleted,
+            row.NoShowPassengerCount);
 
     private sealed class OperatorBookingStatsSqlRow
     {
@@ -292,6 +302,7 @@ ORDER BY COALESCE(names.operator_name, '')")
         public long TotalRevenue { get; set; }
         public int TotalCancellations { get; set; }
         public int TotalNoShows { get; set; }
+        public int NoShowPassengerCount { get; set; }
         public int TotalCompleted { get; set; }
     }
 
@@ -304,6 +315,7 @@ ORDER BY COALESCE(names.operator_name, '')")
         public long TotalRevenue { get; set; }
         public int TotalCancellations { get; set; }
         public int TotalNoShows { get; set; }
+        public int NoShowPassengerCount { get; set; }
         public int TotalCompleted { get; set; }
     }
 }

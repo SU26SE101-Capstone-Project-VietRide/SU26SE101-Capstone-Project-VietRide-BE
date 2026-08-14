@@ -322,6 +322,7 @@ CREATE TABLE booking_stats (
     total_confirmed INT NOT NULL DEFAULT 0,
     total_cancelled INT NOT NULL DEFAULT 0,
     total_no_show INT NOT NULL DEFAULT 0,
+    total_no_show_passengers INT NOT NULL DEFAULT 0,
     total_completed INT NOT NULL DEFAULT 0,
     total_revenue BIGINT NOT NULL DEFAULT 0,
     total_refunded BIGINT NOT NULL DEFAULT 0,

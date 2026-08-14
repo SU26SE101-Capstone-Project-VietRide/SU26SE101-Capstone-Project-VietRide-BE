@@ -9,4 +9,5 @@ public sealed record GetOperatorBookingStatsItemResult(
     int TotalCancellations,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? TotalNoShows,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? TotalPartialNoShows,
+    int NoShowPassengerCount,
     int TotalCompleted);

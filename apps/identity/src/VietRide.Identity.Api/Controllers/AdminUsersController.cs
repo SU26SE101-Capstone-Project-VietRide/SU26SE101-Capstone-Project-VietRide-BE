@@ -7,6 +7,7 @@ using VietRide.Identity.Application.Features.Admin.ListUsers;
 using VietRide.Identity.Application.Features.Admin.LockUser;
 using VietRide.Identity.Application.Features.Admin.UnlockUser;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Filters;
 using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Identity.Api.Controllers;
@@ -29,6 +30,7 @@ public sealed class AdminUsersController : ControllerBase
 
     /// <summary>Lists users across the platform without exposing authentication secrets.</summary>
     [HttpGet]
+    [AllowedQueryParameters("search", "role", "status", "operatorId", "includeDeleted", "page", "pageSize", "sortBy", "sortDir", "from", "to")]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<AdminUserListItemDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -43,6 +45,8 @@ public sealed class AdminUsersController : ControllerBase
         [FromQuery] int? pageSize = null,
         [FromQuery] string? sortBy = null,
         [FromQuery] string? sortDir = null,
+        [FromQuery] DateOnly? from = null,
+        [FromQuery] DateOnly? to = null,
         CancellationToken ct = default)
     {
         var result = await _sender.Send(
@@ -56,7 +60,9 @@ public sealed class AdminUsersController : ControllerBase
                 page,
                 pageSize,
                 sortBy,
-                sortDir),
+                sortDir,
+                from,
+                to),
             ct);
 
         return Ok(result);

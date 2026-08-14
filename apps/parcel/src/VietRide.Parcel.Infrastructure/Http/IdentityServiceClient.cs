@@ -9,6 +9,7 @@ namespace VietRide.Parcel.Infrastructure.Http;
 
 public sealed class IdentityServiceClient : IIdentityServiceClient
 {
+    private sealed record IdentityUserSearchPayload(IReadOnlyList<Guid> UserIds);
     private static readonly JsonSerializerOptions JsonOptions = UtcJson.Options;
 
     private readonly HttpClient _httpClient;
@@ -175,6 +176,44 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
             _logger.LogError(ex, "IdentityServiceClient.GetUsersAsync failed.");
             return IdentityUserBatchOutcome.TransportFailure(
                 $"Identity user batch transport failure: {ex.Message}");
+        }
+    }
+
+    public async Task<IdentityUserSearchOutcome> SearchUserIdsAsync(
+        string search,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                $"/internal/v1/users/search?search={Uri.EscapeDataString(search.Trim())}",
+                cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.UnprocessableEntity)
+            {
+                var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                return error.Contains("SEARCH_TOO_BROAD", StringComparison.Ordinal)
+                    ? IdentityUserSearchOutcome.TooBroad()
+                    : IdentityUserSearchOutcome.TransportFailure("Identity rejected user search.");
+            }
+            if (response.StatusCode != HttpStatusCode.OK)
+                return IdentityUserSearchOutcome.TransportFailure($"Identity user search returned {(int)response.StatusCode}.");
+
+            var payload = await response.Content.ReadFromJsonAsync<IdentityUserSearchPayload>(
+                JsonOptions, cancellationToken).ConfigureAwait(false);
+            if (payload?.UserIds is null || payload.UserIds.Count > 1000
+                || payload.UserIds.Any(id => id == Guid.Empty)
+                || payload.UserIds.Distinct().Count() != payload.UserIds.Count)
+                return IdentityUserSearchOutcome.TransportFailure("Identity user search returned an invalid payload.");
+            return IdentityUserSearchOutcome.Success(payload.UserIds);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "IdentityServiceClient.SearchUserIdsAsync failed.");
+            return IdentityUserSearchOutcome.TransportFailure("Identity user search transport failure.");
         }
     }
 

@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.72.1
+> **Phiên bản:** 1.73.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-13
+> **Cập nhật lần cuối:** 2026-08-14
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1788,6 +1788,7 @@ phát integration event.
 | | `REPORT_VALUE_OVERFLOW` | 500 | Report source/orchestrator gặp count hoặc BIGINT/NUMERIC aggregate ngoài phạm vi Int64; không wrap, saturate hoặc trả partial |
 | | `REPORT_RANGE_INVALID` | 422 | Operator report range không phải ngày Asia/Ho_Chi_Minh hợp lệ, đảo chiều hoặc vượt 92 ngày inclusive |
 | | `UPSTREAM_UNAVAILABLE` | 502 or 503 by boundary | `502` only for Gateway/proxy and legacy pass-through endpoints; `503` for an in-service fail-closed orchestration explicitly documented by its endpoint, including Parcel email issuance, Platform Report sources, Admin Dashboard and Revenue facades. An endpoint MUST list the applicable status and never choose dynamically for the same failure class. |
+| | `SEARCH_TOO_BROAD` | 422 | A bounded cross-service search matched more IDs than the documented safe limit. The caller must narrow the search; the service must not return a partial ID list or page against a truncated candidate set. |
 | | `INTERNAL_ERROR` | 500 | Unhandled exception (Sentry capture) |
 
 **Day-23 exact resolver mapping — POST
@@ -4168,6 +4169,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.73.0** | 2026-08-14 | Codex | **MINOR** — Add the approved P0–P2 FE search/filter contract across Booking, Parcel, Trip, Identity and Payment: tenant-safe filters and deterministic sorting, voucher/operator/fare summaries, operator CSV export, internal accent-insensitive user search capped at 1,000 IDs, Parcel sender orchestration, and passenger-level no-show statistics. Register `SEARCH_TOO_BROAD` as HTTP 422 and add reversible Booking/Identity/Parcel migrations; no dependency, Gateway route, integration event or P3/global-list normalization change. |
 | **1.72.1** | 2026-08-13 | Codex | **PATCH** — Close the Identity→Trip crew-assignment gap found by real Docker E2E: DriverSchedule create, activation and crew update now require the logical Identity Driver/Assistant to remain `ACTIVE`; `LOCKED` users are rejected with `422 VALIDATION_ERROR` before schedule/trip persistence. No endpoint, schema, dependency, event or inventory change. |
 | **1.72.0** | 2026-08-13 | Codex | **MINOR** — Add tenant-masked Operator Admin lock/unlock for same-tenant Driver/Assistant with persisted lock-source precedence and legacy-safe backfill; add authenticated all-role local password change with global session revocation; align forgot/reset eligibility and lockout reset semantics. Adds three UUID-v4-required mutations, raising the canonical inventory from 212/191/21 to 215/194/21; adds one reversible Identity migration, no dependency or new routing key. |
 | **1.71.0** | 2026-08-13 | Codex | **MINOR** — Close FE seat-map/search-filter gaps: preserve immutable Trip layout aisles; add tenant-safe filters/search for schedules, vehicles, routes, admin locations/stations, vouchers, operator bookings, admin financial reads and Parcel fares; add Station summary plus Internal-JWT crew/route searches; and introduce endpoint-scoped unknown-query rejection with `422 VALIDATION_ERROR`. DriverSchedule remains recurring-only (`isOneTime` absent), Vehicle keeps separate status/isActive, and booking search uses buyer snapshots without new passenger PII. No migration, dependency, Gateway route, event, or RAG runtime change. |
@@ -4348,4 +4350,17 @@ PR fail nếu bất kỳ step nào fail.
 
 ---
 
-**End of Backend Source of Truth v1.0.0**
+## 2026-08-14 search/filter extension
+
+The public and internal contract is frozen by `VietRide_API_Contract_v1.md` section
+"2026-08-14 Search/filter and summary extension". Filters execute before count/paging, tenant
+identity is taken only from JWT, date-only ranges use Asia/Ho_Chi_Minh business-day boundaries,
+and every touched list uses `AllowedQueryParametersAttribute`. Identity user search is capped at
+1,000 IDs and callers propagate exact `SEARCH_TOO_BROAD`; every other unusable Identity response
+for these read orchestrations maps to documented `503 UPSTREAM_UNAVAILABLE`.
+
+BookingStats additionally persists `total_no_show_passengers`. The no-show detector increments it
+only by passengers newly transitioned to `NO_SHOW`, atomically with its existing writes. Replays
+with no new passenger transition add zero. Existing `total_no_show` remains the booking count.
+
+**End of Backend Source of Truth v1.73.0**

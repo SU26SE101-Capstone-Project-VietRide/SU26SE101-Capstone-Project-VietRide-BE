@@ -82,11 +82,11 @@ internal sealed class StationRepository : IStationRepository
                     SELECT *
                     FROM vietride_trip.stations
                     WHERE deleted_at IS NULL
-                      AND (unaccent(name) ILIKE unaccent('%' || {normalized} || '%')
-                        OR unaccent(city) ILIKE unaccent('%' || {normalized} || '%')
-                        OR unaccent(ward) ILIKE unaccent('%' || {normalized} || '%')
-                        OR unaccent(address_street) ILIKE unaccent('%' || {normalized} || '%')
-                        OR unaccent(slug) ILIKE unaccent('%' || {normalized} || '%'))
+                      AND (strpos(lower(unaccent(name)), lower(unaccent({normalized}))) > 0
+                        OR strpos(lower(unaccent(city)), lower(unaccent({normalized}))) > 0
+                        OR strpos(lower(unaccent(ward)), lower(unaccent({normalized}))) > 0
+                        OR strpos(lower(unaccent(address_street)), lower(unaccent({normalized}))) > 0
+                        OR strpos(lower(unaccent(slug)), lower(unaccent({normalized}))) > 0)
                     """)
                 .AsNoTracking()
             : _dbContext.Stations
@@ -94,7 +94,7 @@ internal sealed class StationRepository : IStationRepository
                     SELECT *
                     FROM vietride_trip.stations
                     WHERE deleted_at IS NULL
-                      AND unaccent(name) ILIKE unaccent('%' || {normalized} || '%')
+                      AND strpos(lower(unaccent(name)), lower(unaccent({normalized}))) > 0
                     """)
                 .AsNoTracking();
     }
