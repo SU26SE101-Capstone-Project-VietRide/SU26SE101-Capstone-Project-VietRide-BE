@@ -61,7 +61,17 @@ public class CreateBookingCommandHandlerTests
 
     private readonly IBookingRepository _bookings = Substitute.For<IBookingRepository>();
     private readonly IBookingStatusHistoryRepository _statusHistory = Substitute.For<IBookingStatusHistoryRepository>();
-    private readonly ITripServiceClient _tripClient = Substitute.For<ITripServiceClient>();
+    private readonly ITripServiceClient _tripClient = CreateTripClient();
+
+    private static ITripServiceClient CreateTripClient()
+    {
+        var tripClient = Substitute.For<ITripServiceClient>();
+        tripClient.GetHistoryVehicleSummariesAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns([]);
+        return tripClient;
+    }
     private readonly IPaymentServiceClient _paymentClient = Substitute.For<IPaymentServiceClient>();
     private readonly IBookingService _bookingService = Substitute.For<IBookingService>();
     private readonly IVoucherService _voucherService = Substitute.For<IVoucherService>();
@@ -108,6 +118,38 @@ public class CreateBookingCommandHandlerTests
             PaymentReturnMode: string.Equals(paymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase)
                 ? "MOBILE_SDK"
                 : null);
+
+    [Fact]
+    public async Task Handle_WalletPayment_AttachesHistoryVehicleDtoFromTrip()
+    {
+        _clock.UtcNow.Returns(new DateTimeOffset(2026, 7, 11, 1, 2, 3, TimeSpan.Zero));
+        _tripClient.GetTripSnapshotAsync(TripId, default, default).ReturnsForAnyArgs(ValidTrip);
+        _tripClient.LockSeatsAsync(default, default!, default, default!, default, default)
+            .ReturnsForAnyArgs(new LockSeatsOutcome.Success(LockData));
+        _tripClient.GetHistoryVehicleSummariesAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns([
+                new TripHistoryVehicleSummary(
+                    TripId,
+                    "51B-123.45",
+                    new TripHistoryVehicleTypeSummary("LIMOUSINE", "Limousine")),
+            ]);
+        _bookings.AddAsync(Arg.Any<BookingEntity>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<BookingEntity>());
+        _paymentClient.ChargeAsync(default!, default, default, default, default!, default!, default)
+            .ReturnsForAnyArgs(new ChargeOutcome.Success(new ChargeResult(PaymentId, "SUCCEEDED", null)));
+        _tripClient.BookSeatsAsync(default, default, default, default!, default)
+            .ReturnsForAnyArgs(true);
+
+        var result = await BuildSut().Handle(
+            BuildCommand(seatCount: 1, paymentMethod: "WALLET"),
+            CancellationToken.None);
+
+        result.Vehicle.Should().BeEquivalentTo(new VietRide.Booking.Application.Features.Bookings.History.BookingHistoryVehicleDto(
+            "51B-123.45",
+            new VietRide.Booking.Application.Features.Bookings.History.BookingHistoryVehicleTypeDto(
+                "LIMOUSINE",
+                "Limousine")));
+    }
 
     [Fact]
     public async Task Handle_WhenVnPayReturnModeIsMissing_RequiresMobileAppUpdateBeforeSideEffects()
@@ -197,6 +239,7 @@ public class CreateBookingCommandHandlerTests
             Arg.Any<CancellationToken>());
         _ = _clock.Received(1).UtcNow;
         await _tripClient.Received(1).GetTripSnapshotAsync(TripId, now, Arg.Any<CancellationToken>());
+        result.Vehicle.Should().BeNull();
 
         // Confirm outbox was enqueued exactly once
         await _outbox.Received(1)

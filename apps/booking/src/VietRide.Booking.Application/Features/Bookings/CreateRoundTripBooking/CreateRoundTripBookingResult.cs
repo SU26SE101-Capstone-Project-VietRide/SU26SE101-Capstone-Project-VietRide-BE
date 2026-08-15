@@ -2,6 +2,7 @@ namespace VietRide.Booking.Application.Features.Bookings.CreateRoundTripBooking;
 
 using System.Text.Json.Serialization;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
+using VietRide.Booking.Application.Features.Bookings.History;
 
 /// <summary>
 /// Response DTO for POST /v1/bookings/round-trip (201 Created).
@@ -54,7 +55,8 @@ public sealed record CreateRoundTripBookingResult
         string BookingCode,
         long TotalAmount,
         long DiscountAmount,
-        IReadOnlyList<RoundTripTicketResult> Tickets);
+        IReadOnlyList<RoundTripTicketResult> Tickets,
+        BookingHistoryVehicleDto? Vehicle = null);
 
     public sealed record RoundTripTicketResult(
         Guid TicketId,

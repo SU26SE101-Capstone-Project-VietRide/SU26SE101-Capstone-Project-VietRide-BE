@@ -5,6 +5,7 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Events;
+using VietRide.Booking.Application.Features.Bookings.History;
 using VietRide.Booking.Application.Exceptions;
 using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
@@ -409,7 +410,8 @@ public sealed class CreateBookingCommandHandler
                 PaymentRedirectUrl: paymentRedirectUrl,
                 Tickets: ToTicketResults(booking),
                 PaymentReturnMode: chargeSuccess.Data.PaymentReturnMode,
-                VnPaySdk: chargeSuccess.Data.VnPaySdk);
+                VnPaySdk: chargeSuccess.Data.VnPaySdk,
+                Vehicle: await ResolveVehicleAsync(request.TripId, cancellationToken));
         }
 
         // -----------------------------------------------------------------------
@@ -522,7 +524,31 @@ public sealed class CreateBookingCommandHandler
             DiscountAmount: booking.DiscountAmount.Amount,
             PaymentId: chargeSuccess.Data.PaymentId,
             PaymentRedirectUrl: paymentRedirectUrl,
-            Tickets: ToTicketResults(booking));
+            Tickets: ToTicketResults(booking),
+            Vehicle: await ResolveVehicleAsync(request.TripId, cancellationToken));
+    }
+
+    private async Task<BookingHistoryVehicleDto?> ResolveVehicleAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var summaries = await _tripClient.GetHistoryVehicleSummariesAsync(
+                [tripId],
+                cancellationToken) ?? [];
+            var summary = summaries.SingleOrDefault(item =>
+                item.TripId == tripId && !string.IsNullOrWhiteSpace(item.LicensePlate));
+            return BookingHistoryVehicleMapping.FromSummary(summary);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private static PaymentContextSnapshot CreatePaymentContext(

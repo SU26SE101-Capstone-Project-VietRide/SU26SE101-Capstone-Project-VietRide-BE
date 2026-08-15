@@ -5,6 +5,7 @@ using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Events;
+using VietRide.Booking.Application.Features.Bookings.History;
 using VietRide.Booking.Application.Exceptions;
 using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
@@ -433,6 +434,10 @@ public sealed class CreateRoundTripBookingCommandHandler
             paymentDueAt,
             cancellationToken);
 
+        var vehicles = await ResolveVehiclesAsync(
+            [request.Outbound.TripId, request.Return.TripId],
+            cancellationToken);
+
         if (string.Equals(request.PaymentMethod, "VNPAY", StringComparison.OrdinalIgnoreCase))
         {
             return BuildResult(bookingGroupId, outboundBooking, returnBooking, grandTotal.Amount,
@@ -440,7 +445,9 @@ public sealed class CreateRoundTripBookingCommandHandler
                 "PENDING_PAYMENT",
                 payment.RedirectUrl,
                 payment.PaymentReturnMode,
-                payment.VnPaySdk);
+                payment.VnPaySdk,
+                vehicles.GetValueOrDefault(request.Outbound.TripId),
+                vehicles.GetValueOrDefault(request.Return.TripId));
         }
 
         await BookConfirmAndPublishAsync(
@@ -470,7 +477,9 @@ public sealed class CreateRoundTripBookingCommandHandler
             returnBooking.Id);
 
         return BuildResult(bookingGroupId, outboundBooking, returnBooking, grandTotal.Amount,
-            null, "CONFIRMED", null);
+            null, "CONFIRMED", null,
+            outboundVehicle: vehicles.GetValueOrDefault(request.Outbound.TripId),
+            returnVehicle: vehicles.GetValueOrDefault(request.Return.TripId));
     }
 
     // -----------------------------------------------------------------------
@@ -1086,6 +1095,36 @@ public sealed class CreateRoundTripBookingCommandHandler
             cancellationToken);
     }
 
+    private async Task<IReadOnlyDictionary<Guid, BookingHistoryVehicleDto>> ResolveVehiclesAsync(
+        IReadOnlyCollection<Guid> tripIds,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var summaries = await _tripClient.GetHistoryVehicleSummariesAsync(
+                tripIds,
+                cancellationToken) ?? [];
+            return summaries
+                .Select(summary => (
+                    summary.TripId,
+                    Vehicle: BookingHistoryVehicleMapping.FromSummary(summary)))
+                .Where(item =>
+                    item.Vehicle is not null
+                    && tripIds.Contains(item.TripId))
+                .GroupBy(item => item.TripId)
+                .Where(group => group.Count() == 1)
+                .ToDictionary(group => group.Key, group => group.Single().Vehicle!);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return new Dictionary<Guid, BookingHistoryVehicleDto>();
+        }
+    }
+
     private static CreateRoundTripBookingResult BuildResult(
         Guid bookingGroupId,
         BookingEntity outboundBooking,
@@ -1095,7 +1134,9 @@ public sealed class CreateRoundTripBookingCommandHandler
         string status,
         string? paymentRedirectUrl,
         string? paymentReturnMode = null,
-        VnPaySdkMetadata? vnPaySdk = null)
+        VnPaySdkMetadata? vnPaySdk = null,
+        BookingHistoryVehicleDto? outboundVehicle = null,
+        BookingHistoryVehicleDto? returnVehicle = null)
         => new(
             bookingGroupId,
             new CreateRoundTripBookingResult.RoundTripBookingResult(
@@ -1103,13 +1144,15 @@ public sealed class CreateRoundTripBookingCommandHandler
                 outboundBooking.BookingCode.Value,
                 outboundBooking.TotalAmount.Amount,
                 outboundBooking.DiscountAmount.Amount,
-                ToTicketResults(outboundBooking)),
+                ToTicketResults(outboundBooking),
+                outboundVehicle),
             new CreateRoundTripBookingResult.RoundTripBookingResult(
                 returnBooking.Id,
                 returnBooking.BookingCode.Value,
                 returnBooking.TotalAmount.Amount,
                 returnBooking.DiscountAmount.Amount,
-                ToTicketResults(returnBooking)),
+                ToTicketResults(returnBooking),
+                returnVehicle),
             grandTotal,
             paymentId,
             status,

@@ -1350,11 +1350,17 @@ Response `201`:
         "discountAmount": 50000,
         "paidAmount": 350000
       }
-    ]
+    ],
+    "vehicle": {
+      "licensePlate": "51B-123.45",
+      "vehicleType": { "code": "LIMOUSINE", "displayName": "Limousine" }
+    }
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
+
+`vehicle` uses the same DTO as booking/passenger history (`licensePlate` + nullable `vehicleType`). Booking reads it from Trip after the booking is created and fail-opens to `null` if the plate is missing or Trip is unavailable. Create does not invent a vehicle type or plate.
 
 For VNPay, Booking passes the exact Trip seat-lock `expiresAt` as Payment `dueAt`. If the deadline
 has already passed during checkout, the request fails with `422 PAYMENT_DEADLINE_PASSED` and
@@ -1404,8 +1410,8 @@ Response `201`:
   "statusCode": 201,
   "data": {
     "bookingGroupId": "uuid",
-    "outbound": { "bookingId": "uuid", "bookingCode": "VR-20260518-ABCD1234", "totalAmount": 350000, "discountAmount": 50000, "tickets": [{ "ticketId": "uuid", "ticketCode": "VT-20260518-ABCDEFGH", "seatNumber": "A01", "status": "PENDING_PAYMENT", "fareAmount": 400000, "discountAmount": 50000, "paidAmount": 350000 }] },
-    "return": { "bookingId": "uuid", "bookingCode": "VR-20260519-EFGH5678", "totalAmount": 350000, "discountAmount": 50000, "tickets": [{ "ticketId": "uuid", "ticketCode": "VT-20260519-HGFEDCBA", "seatNumber": "A01", "status": "PENDING_PAYMENT", "fareAmount": 400000, "discountAmount": 50000, "paidAmount": 350000 }] },
+    "outbound": { "bookingId": "uuid", "bookingCode": "VR-20260518-ABCD1234", "totalAmount": 350000, "discountAmount": 50000, "tickets": [{ "ticketId": "uuid", "ticketCode": "VT-20260518-ABCDEFGH", "seatNumber": "A01", "status": "PENDING_PAYMENT", "fareAmount": 400000, "discountAmount": 50000, "paidAmount": 350000 }], "vehicle": { "licensePlate": "51B-123.45", "vehicleType": { "code": "LIMOUSINE", "displayName": "Limousine" } } },
+    "return": { "bookingId": "uuid", "bookingCode": "VR-20260519-EFGH5678", "totalAmount": 350000, "discountAmount": 50000, "tickets": [{ "ticketId": "uuid", "ticketCode": "VT-20260519-HGFEDCBA", "seatNumber": "A01", "status": "PENDING_PAYMENT", "fareAmount": 400000, "discountAmount": 50000, "paidAmount": 350000 }], "vehicle": { "licensePlate": "51C-678.90", "vehicleType": { "code": "SLEEPER", "displayName": "Sleeper" } } },
     "grandTotal": 700000,
     "paymentId": "uuid",
     "status": "PENDING_PAYMENT",
