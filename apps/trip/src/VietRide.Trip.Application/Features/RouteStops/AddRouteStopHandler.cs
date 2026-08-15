@@ -1,8 +1,10 @@
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Stops;
 using VietRide.Trip.Domain.Entities;
 
@@ -14,20 +16,26 @@ public sealed class AddRouteStopHandler : IRequestHandler<AddRouteStopCommand, R
     private readonly IRouteRepository routeRepository;
     private readonly IRouteStopRepository routeStopRepository;
     private readonly IStopRepository stopRepository;
+    private readonly ITripStopSnapshotSyncService snapshotSync;
     private readonly IUnitOfWork unitOfWork;
+    private readonly IClock clock;
 
     public AddRouteStopHandler(
         IIdentityInternalClient identityInternalClient,
         IRouteRepository routeRepository,
         IRouteStopRepository routeStopRepository,
         IStopRepository stopRepository,
-        IUnitOfWork unitOfWork)
+        ITripStopSnapshotSyncService snapshotSync,
+        IUnitOfWork unitOfWork,
+        IClock clock)
     {
         this.identityInternalClient = identityInternalClient;
         this.routeRepository = routeRepository;
         this.routeStopRepository = routeStopRepository;
         this.stopRepository = stopRepository;
+        this.snapshotSync = snapshotSync;
         this.unitOfWork = unitOfWork;
+        this.clock = clock;
     }
 
     public async Task<RouteStopDto> Handle(AddRouteStopCommand request, CancellationToken cancellationToken)
@@ -63,13 +71,32 @@ public sealed class AddRouteStopHandler : IRequestHandler<AddRouteStopCommand, R
             request.DistanceFromOriginKm,
             request.AllowPickup,
             request.AllowDropoff);
+        var targetStops = routeStopRepository.QueryNoTracking()
+            .Where(item => item.RouteId == route.Id)
+            .Append(routeStop)
+            .OrderBy(item => item.OrderIndex)
+            .ToArray();
+        var now = clock.UtcNow;
+        var preflight = await snapshotSync.PreflightAsync(
+            route.Id,
+            request.OperatorId,
+            now,
+            cancellationToken);
 
-        await routeStopRepository.AddAsync(routeStop, cancellationToken);
-        route.SetPathGeometry(null);
-        routeRepository.Update(route);
-        await unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return RouteStopMapper.ToDto(routeStop);
+        return await unitOfWork.ExecuteInTransactionAsync(async () =>
+        {
+            await routeStopRepository.AddAsync(routeStop, cancellationToken);
+            route.SetPathGeometry(null);
+            routeRepository.Update(route);
+            await snapshotSync.SynchronizeAsync(
+                preflight,
+                targetStops,
+                request.ActorUserId,
+                "ADD_STOP",
+                now,
+                cancellationToken);
+            return RouteStopMapper.ToDto(routeStop);
+        }, cancellationToken);
     }
 
     private async Task ValidateStopBelongsToOperatorAsync(Guid operatorId, Guid stopId, CancellationToken cancellationToken)

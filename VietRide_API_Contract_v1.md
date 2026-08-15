@@ -5388,6 +5388,16 @@ Response `200` dùng ADR 0004 envelope; `data` có shape cố định:
   "route": {
     "originName": "Bến xe Miền Đông",
     "destinationName": "Bến xe Đà Lạt",
+    "origin": { "latitude": 10.8142, "longitude": 106.7108 },
+    "destination": { "latitude": 11.9404, "longitude": 108.4583 },
+    "stops": [
+      {
+        "name": "Trạm dừng Bảo Lộc",
+        "latitude": 11.5475,
+        "longitude": 107.8078,
+        "sequence": 1
+      }
+    ],
     "geometry": {
       "type": "LineString",
       "coordinates": [[106.6981, 10.7812], [106.7124, 10.7935]]
@@ -5402,8 +5412,16 @@ Response `200` dùng ADR 0004 envelope; `data` có shape cố định:
 }
 ```
 
+`route.origin` và `route.destination` chỉ chứa `{ latitude, longitude }`, lấy lần lượt từ
+`originStation` và `destinationStation`; mỗi trường trả `null` khi station không có tọa độ hợp lệ.
+Hai object này không chứa station ID. `STOPS_ONLY` vẫn trả terminal coordinates hợp lệ nhưng giữ
+`route.geometry: null`; Tracking không dựng đường thẳng giả giữa hai terminal.
+
 `lastUpdatedAt`, `vehicle.location`, `route.geometry` và `eta` có thể là `null`; `heading`,
-`speedKph`, `eta.delayMinutes` cũng nullable. Không dựng GPS, geometry hoặc ETA giả. Response luôn có:
+`speedKph`, `eta.delayMinutes` cũng nullable. `route.stops` luôn là mảng, lấy từ ordered
+`TripStop` snapshot, lọc tọa độ không hợp lệ và giới hạn tối đa 100 phần tử; chuyến không có điểm
+dừng trả `stops: []`. Mỗi phần tử chỉ gồm `name`, `latitude`, `longitude`, `sequence`, không chứa
+ID nội bộ. Không dựng GPS, geometry, điểm dừng hoặc ETA giả. Response luôn có:
 
 ```http
 Cache-Control: no-store
@@ -9837,6 +9855,17 @@ This section supersedes older field and endpoint descriptions where they conflic
 - `POST /v1/operator/routes/full` and `PUT /v1/operator/routes/{id}/full` require a UUID-v4
   `Idempotency-Key`. They atomically write the Route, optional geometry, and the complete ordered
   RouteStop collection. Full update cannot change origin or destination.
+- `POST /v1/operator/routes/{id}/stops`, `DELETE /v1/operator/routes/{id}/stops/{stopId}` and
+  `PUT /v1/operator/routes/{id}/full` synchronize the resulting RouteStop collection into existing
+  TripStop snapshots only for future `SCHEDULED` Trips on the main Route that have no active
+  `PENDING_PAYMENT|CONFIRMED` Booking and no visible `HELD|BOOKED` TripSeat. `BOARDING`,
+  `IN_PROGRESS`, terminal and AlternativeRoute Trips keep their prior snapshot. Retained manual
+  TripStop fares remain unchanged; fares for removed stops are deleted. Each changed Trip writes a
+  `TRIP_STOP_SNAPSHOT_SYNCED` audit with the authenticated actor user ID.
+- The Booking impact check is a best-effort cross-service preflight, not a distributed lock. A
+  Booking that read the old Trip snapshot but has not yet acquired a seat hold can race with the
+  RouteStop commit. Strict prevention requires a future TripStop snapshot version/reservation
+  protocol between Booking snapshot reads, seat locking and RouteStop mutations.
 - When a precision-5 Google polyline is present, the server derives route distance and duration
   (55 km/h, duration rounded up to a minute) and derives missing stop cumulative metrics by
   projection onto the nearest polyline segment. Client-provided stop metrics take precedence.

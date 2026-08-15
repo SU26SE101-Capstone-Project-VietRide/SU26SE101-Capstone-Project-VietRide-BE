@@ -75,6 +75,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IIncidentRepository, IncidentRepository>();
         services.AddScoped<IRouteChangeProposalRepository, RouteChangeProposalRepository>();
         services.AddScoped<ITripRouteChangeService, TripRouteChangeService>();
+        services.AddScoped<ITripStopSnapshotSyncService, TripStopSnapshotSyncService>();
         services.AddScoped<IRouteChangeProposalService, RouteChangeProposalService>();
         services.AddScoped<IRouteChangeProposalLifecycleService, RouteChangeProposalLifecycleService>();
         if (backgroundWorkersEnabled)

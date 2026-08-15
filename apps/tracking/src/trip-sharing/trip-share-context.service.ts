@@ -5,13 +5,18 @@ import type {
   DetailedRouteGeometryProvider,
   RouteGeometrySnapshot,
 } from '../off-route/route-geometry.provider';
-import { sanitizeRouteGeometryPoints } from '../tracking-data/route-geometry-sanitizer';
+import {
+  isValidRouteCoordinate,
+  sanitizeRouteGeometryPoints,
+} from '../tracking-data/route-geometry-sanitizer';
 import type { TripShareAccessContext } from './trip-share-access.service';
 import type {
   TripShareContextDto,
+  TripSharePublicCoordinateDto,
   TripSharePublicEtaDto,
   TripSharePublicGeometryDto,
   TripSharePublicLocationDto,
+  TripSharePublicStopDto,
 } from './trip-share-context.dto';
 import { TripShareRouteStopsProvider } from './trip-share-route-stops.provider';
 import {
@@ -21,6 +26,7 @@ import {
 
 const TERMINAL_STOP_STATUSES = new Set(['COMPLETED', 'ARRIVED', 'SKIPPED']);
 const SECONDS_PER_MINUTE = 60;
+const MAXIMUM_PUBLIC_ROUTE_STOPS = 100;
 
 @Injectable()
 export class TripShareContextService {
@@ -64,6 +70,9 @@ export class TripShareContextService {
         route: {
           originName: route.originStation.name,
           destinationName: route.destinationStation.name,
+          origin: this.mapCoordinate(route.originStation),
+          destination: this.mapCoordinate(route.destinationStation),
+          stops: this.mapStops(route),
           geometry: this.mapGeometry(route),
         },
         eta,
@@ -104,6 +113,29 @@ export class TripShareContextService {
       type: 'LineString',
       coordinates: points.map((point) => [point.longitude, point.latitude]),
     };
+  }
+
+  private mapCoordinate(
+    coordinate: { latitude: number; longitude: number },
+  ): TripSharePublicCoordinateDto | null {
+    if (!isValidRouteCoordinate(coordinate)) return null;
+    return {
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+    };
+  }
+
+  private mapStops(snapshot: RouteGeometrySnapshot): TripSharePublicStopDto[] {
+    return [...(snapshot.intermediateStops ?? [])]
+      .filter((stop) => isValidRouteCoordinate(stop) && stop.sequence > 0)
+      .sort((left, right) => left.sequence - right.sequence)
+      .slice(0, MAXIMUM_PUBLIC_ROUTE_STOPS)
+      .map((stop) => ({
+        name: stop.name,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        sequence: stop.sequence,
+      }));
   }
 
   private findNextStop(stops: TripStopSnapshot[]): TripStopSnapshot | null {

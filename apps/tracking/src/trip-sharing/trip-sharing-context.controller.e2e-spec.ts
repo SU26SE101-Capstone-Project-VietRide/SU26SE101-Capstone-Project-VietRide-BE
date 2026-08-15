@@ -130,6 +130,11 @@ describe('TripSharePublicController (e2e)', () => {
         route: {
           originName: 'Origin',
           destinationName: 'Destination',
+          origin: { latitude: 10, longitude: 106 },
+          destination: { latitude: 10.2, longitude: 106.2 },
+          stops: [
+            { name: 'Intermediate stop', latitude: 10.1, longitude: 106.1, sequence: 1 },
+          ],
           geometry: { type: 'LineString', coordinates: [[106, 10], [106.2, 10.2]] },
         },
       },
@@ -206,7 +211,14 @@ describe('TripSharePublicController (e2e)', () => {
     expect(response.body.data).toMatchObject({
       lastUpdatedAt: null,
       vehicle: { location: null },
-      route: { originName: 'Origin', destinationName: 'Destination', geometry: null },
+      route: {
+        originName: 'Origin',
+        destinationName: 'Destination',
+        origin: { latitude: 10, longitude: 106 },
+        destination: { latitude: 10.2, longitude: 106.2 },
+        stops: [{ name: 'Intermediate stop', latitude: 10.1, longitude: 106.1, sequence: 1 }],
+        geometry: null,
+      },
       eta: null,
     });
   });
@@ -263,7 +275,15 @@ function createRoute(overrides: Record<string, unknown> = {}): Record<string, un
     geometrySource: 'ROUTE_POLYLINE',
     points: [{ latitude: 10, longitude: 106 }, { latitude: 10.2, longitude: 106.2 }],
     originStation: { stationId: ORIGIN_ID, name: 'Origin', latitude: 10, longitude: 106 },
-    intermediateStops: [],
+    intermediateStops: [
+      {
+        stopId: STOP_ID,
+        name: 'Intermediate stop',
+        sequence: 1,
+        latitude: 10.1,
+        longitude: 106.1,
+      },
+    ],
     destinationStation: {
       stationId: DESTINATION_ID,
       name: 'Destination',

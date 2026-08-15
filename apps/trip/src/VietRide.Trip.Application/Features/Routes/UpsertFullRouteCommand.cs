@@ -1,9 +1,12 @@
 using MediatR;
+using VietRide.Shared.Application.Behaviors;
 
 namespace VietRide.Trip.Application.Features.Routes;
 
+[SkipTransaction]
 public sealed record UpsertFullRouteCommand(
     Guid OperatorId,
+    Guid ActorUserId,
     Guid? RouteId,
     string? Name,
     Guid OriginStationId,

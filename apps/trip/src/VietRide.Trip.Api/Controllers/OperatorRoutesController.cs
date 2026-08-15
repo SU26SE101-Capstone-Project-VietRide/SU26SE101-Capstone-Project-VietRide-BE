@@ -64,7 +64,13 @@ public sealed class OperatorRoutesController : ControllerBase
         [FromBody] FullRouteRequest request,
         CancellationToken cancellationToken)
     {
-        var response = await mediator.Send(ToFullCommand(GetRequiredOperatorId(), null, request), cancellationToken);
+        var response = await mediator.Send(
+            ToFullCommand(
+                GetRequiredOperatorId(),
+                CurrentUserClaims.GetUserId(User),
+                null,
+                request),
+            cancellationToken);
         return StatusCode(StatusCodes.Status201Created, response);
     }
 
@@ -78,7 +84,13 @@ public sealed class OperatorRoutesController : ControllerBase
         Guid id,
         [FromBody] FullRouteRequest request,
         CancellationToken cancellationToken)
-        => Ok(await mediator.Send(ToFullCommand(GetRequiredOperatorId(), id, request), cancellationToken));
+        => Ok(await mediator.Send(
+            ToFullCommand(
+                GetRequiredOperatorId(),
+                CurrentUserClaims.GetUserId(User),
+                id,
+                request),
+            cancellationToken));
 
     [HttpGet]
     [AllowedQueryParameters("page", "pageSize", "search", "isActive", "originStationId", "destinationStationId", "sortBy", "sortDir")]
@@ -183,6 +195,7 @@ public sealed class OperatorRoutesController : ControllerBase
         var response = await mediator.Send(
             new AddRouteStopCommand(
                 GetRequiredOperatorId(),
+                CurrentUserClaims.GetUserId(User),
                 id,
                 request.StopId,
                 request.OrderIndex,
@@ -206,7 +219,13 @@ public sealed class OperatorRoutesController : ControllerBase
         Guid stopId,
         CancellationToken cancellationToken)
     {
-        await mediator.Send(new RemoveRouteStopCommand(GetRequiredOperatorId(), id, stopId), cancellationToken);
+        await mediator.Send(
+            new RemoveRouteStopCommand(
+                GetRequiredOperatorId(),
+                CurrentUserClaims.GetUserId(User),
+                id,
+                stopId),
+            cancellationToken);
         return Ok(new Dictionary<string, bool> { ["deleted"] = true });
     }
 
@@ -301,9 +320,14 @@ public sealed class OperatorRoutesController : ControllerBase
             request.EstimatedDurationFromOriginMinutes,
             request.DistanceFromOriginKm);
 
-    private static UpsertFullRouteCommand ToFullCommand(Guid operatorId, Guid? routeId, FullRouteRequest request)
+    private static UpsertFullRouteCommand ToFullCommand(
+        Guid operatorId,
+        Guid actorUserId,
+        Guid? routeId,
+        FullRouteRequest request)
         => new(
             operatorId,
+            actorUserId,
             routeId,
             request.Name,
             request.OriginStationId,

@@ -36,6 +36,41 @@ export class TripShareContextEnvelopeSwaggerDto {
         properties: {
           originName: { type: 'string' },
           destinationName: { type: 'string' },
+          origin: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              latitude: { type: 'number', minimum: -90, maximum: 90 },
+              longitude: { type: 'number', minimum: -180, maximum: 180 },
+            },
+            required: ['latitude', 'longitude'],
+            additionalProperties: false,
+          },
+          destination: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              latitude: { type: 'number', minimum: -90, maximum: 90 },
+              longitude: { type: 'number', minimum: -180, maximum: 180 },
+            },
+            required: ['latitude', 'longitude'],
+            additionalProperties: false,
+          },
+          stops: {
+            type: 'array',
+            maxItems: 100,
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                latitude: { type: 'number', minimum: -90, maximum: 90 },
+                longitude: { type: 'number', minimum: -180, maximum: 180 },
+                sequence: { type: 'integer', minimum: 1 },
+              },
+              required: ['name', 'latitude', 'longitude', 'sequence'],
+              additionalProperties: false,
+            },
+          },
           geometry: {
             type: 'object',
             nullable: true,

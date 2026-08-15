@@ -74,6 +74,35 @@ public sealed class TripStop : BaseEntity<Guid>
         EstimatedArrivalTime = estimatedArrivalTime;
     }
 
+    public bool SynchronizeSnapshot(
+        int orderIndex,
+        DateTimeOffset estimatedArrivalTime,
+        bool allowPickup,
+        bool allowDropoff,
+        decimal? distanceFromOriginKm)
+    {
+        EnsurePending(nameof(SynchronizeSnapshot));
+        ValidatePositive(orderIndex, nameof(orderIndex));
+        ValidatePickupOrDropoff(allowPickup, allowDropoff);
+        ValidateOptionalNonNegative(distanceFromOriginKm, nameof(distanceFromOriginKm));
+
+        if (OrderIndex == orderIndex
+            && EstimatedArrivalTime == estimatedArrivalTime
+            && AllowPickup == allowPickup
+            && AllowDropoff == allowDropoff
+            && DistanceFromOriginKm == distanceFromOriginKm)
+        {
+            return false;
+        }
+
+        OrderIndex = orderIndex;
+        EstimatedArrivalTime = estimatedArrivalTime;
+        AllowPickup = allowPickup;
+        AllowDropoff = allowDropoff;
+        DistanceFromOriginKm = distanceFromOriginKm;
+        return true;
+    }
+
     private void EnsurePending(string operation)
     {
         if (Status != TripStopStatus.PENDING)
