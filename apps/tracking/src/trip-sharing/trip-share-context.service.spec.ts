@@ -76,6 +76,8 @@ describe('TripShareContextService', () => {
       route: {
         originName: 'Origin',
         destinationName: 'Destination',
+        origin: { latitude: 10, longitude: 106 },
+        destination: { latitude: 10.2, longitude: 106.2 },
         stops: [
           { name: 'Next stop', latitude: 10.1, longitude: 106.1, sequence: 1 },
         ],
@@ -109,6 +111,8 @@ describe('TripShareContextService', () => {
     expect(result.route).toEqual({
       originName: 'Origin',
       destinationName: 'Destination',
+      origin: { latitude: 10, longitude: 106 },
+      destination: { latitude: 10.2, longitude: 106.2 },
       stops: [{ name: 'Next stop', latitude: 10.1, longitude: 106.1, sequence: 1 }],
       geometry: null,
     });
@@ -132,6 +136,26 @@ describe('TripShareContextService', () => {
     const result = await service.getContext(ACCESS);
 
     expect(result.route.geometry).toBeNull();
+  });
+
+  it('returns null terminal coordinates when station coordinates are invalid', async () => {
+    routeProvider.getDetailedRouteGeometry.mockResolvedValueOnce({
+      kind: 'ok',
+      snapshot: createRoute({
+        originStation: { stationId: ORIGIN_ID, name: 'Origin', latitude: 91, longitude: 106 },
+        destinationStation: {
+          stationId: DESTINATION_ID,
+          name: 'Destination',
+          latitude: 10.2,
+          longitude: 181,
+        },
+      }),
+    });
+
+    const result = await service.getContext(ACCESS);
+
+    expect(result.route.origin).toBeNull();
+    expect(result.route.destination).toBeNull();
   });
 
   it('orders, sanitizes and bounds anonymous route stops without exposing IDs', async () => {

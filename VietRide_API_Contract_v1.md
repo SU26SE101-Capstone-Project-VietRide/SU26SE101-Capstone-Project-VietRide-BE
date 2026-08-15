@@ -5388,6 +5388,8 @@ Response `200` dùng ADR 0004 envelope; `data` có shape cố định:
   "route": {
     "originName": "Bến xe Miền Đông",
     "destinationName": "Bến xe Đà Lạt",
+    "origin": { "latitude": 10.8142, "longitude": 106.7108 },
+    "destination": { "latitude": 11.9404, "longitude": 108.4583 },
     "stops": [
       {
         "name": "Trạm dừng Bảo Lộc",
@@ -5409,6 +5411,11 @@ Response `200` dùng ADR 0004 envelope; `data` có shape cố định:
   }
 }
 ```
+
+`route.origin` và `route.destination` chỉ chứa `{ latitude, longitude }`, lấy lần lượt từ
+`originStation` và `destinationStation`; mỗi trường trả `null` khi station không có tọa độ hợp lệ.
+Hai object này không chứa station ID. `STOPS_ONLY` vẫn trả terminal coordinates hợp lệ nhưng giữ
+`route.geometry: null`; Tracking không dựng đường thẳng giả giữa hai terminal.
 
 `lastUpdatedAt`, `vehicle.location`, `route.geometry` và `eta` có thể là `null`; `heading`,
 `speedKph`, `eta.delayMinutes` cũng nullable. `route.stops` luôn là mảng, lấy từ ordered

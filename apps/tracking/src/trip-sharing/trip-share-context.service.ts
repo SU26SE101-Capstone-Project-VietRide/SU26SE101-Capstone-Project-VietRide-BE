@@ -12,6 +12,7 @@ import {
 import type { TripShareAccessContext } from './trip-share-access.service';
 import type {
   TripShareContextDto,
+  TripSharePublicCoordinateDto,
   TripSharePublicEtaDto,
   TripSharePublicGeometryDto,
   TripSharePublicLocationDto,
@@ -69,6 +70,8 @@ export class TripShareContextService {
         route: {
           originName: route.originStation.name,
           destinationName: route.destinationStation.name,
+          origin: this.mapCoordinate(route.originStation),
+          destination: this.mapCoordinate(route.destinationStation),
           stops: this.mapStops(route),
           geometry: this.mapGeometry(route),
         },
@@ -109,6 +112,16 @@ export class TripShareContextService {
     return {
       type: 'LineString',
       coordinates: points.map((point) => [point.longitude, point.latitude]),
+    };
+  }
+
+  private mapCoordinate(
+    coordinate: { latitude: number; longitude: number },
+  ): TripSharePublicCoordinateDto | null {
+    if (!isValidRouteCoordinate(coordinate)) return null;
+    return {
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
     };
   }
 

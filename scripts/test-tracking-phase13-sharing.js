@@ -400,7 +400,18 @@ function exactKeys(value, expected, path) {
 function assertPublicContext(data) {
   exactKeys(data, ['status', 'expiresAt', 'lastUpdatedAt', 'vehicle', 'route', 'eta'], 'context');
   exactKeys(data.vehicle, ['location'], 'context.vehicle');
-  exactKeys(data.route, ['originName', 'destinationName', 'stops', 'geometry'], 'context.route');
+  exactKeys(
+    data.route,
+    ['originName', 'destinationName', 'origin', 'destination', 'stops', 'geometry'],
+    'context.route',
+  );
+  for (const terminal of ['origin', 'destination']) {
+    const coordinate = data.route[terminal];
+    if (!coordinate) continue;
+    exactKeys(coordinate, ['latitude', 'longitude'], `context.route.${terminal}`);
+    assert(Number.isFinite(coordinate.latitude), `context.route.${terminal}.latitude was invalid`);
+    assert(Number.isFinite(coordinate.longitude), `context.route.${terminal}.longitude was invalid`);
+  }
   assert(Array.isArray(data.route.stops), 'context.route.stops was not an array');
   assert(data.route.stops.length <= 100, 'context.route.stops exceeded the public limit');
   for (const [index, stop] of data.route.stops.entries()) {

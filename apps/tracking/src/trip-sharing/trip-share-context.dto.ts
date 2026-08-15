@@ -11,6 +11,11 @@ export interface TripSharePublicGeometryDto {
   coordinates: [number, number][];
 }
 
+export interface TripSharePublicCoordinateDto {
+  latitude: number;
+  longitude: number;
+}
+
 export interface TripSharePublicStopDto {
   name: string;
   latitude: number;
@@ -33,6 +38,8 @@ export interface TripShareContextDto {
   route: {
     originName: string;
     destinationName: string;
+    origin: TripSharePublicCoordinateDto | null;
+    destination: TripSharePublicCoordinateDto | null;
     stops: TripSharePublicStopDto[];
     geometry: TripSharePublicGeometryDto | null;
   };

@@ -553,6 +553,9 @@ capability link; người nhận không cần tài khoản và không nhìn th�
   đầu/cuối, GeoJSON `LineString` và ETA. GPS, geometry hoặc ETA chưa có phải trả `null`, không dựng
   dữ liệu giả. Cấm phát `tripId`, grant/token/hash, mọi internal ID, Booking/Ticket/seat, PII,
   driver/assistant/operator data và GPS history.
+- Map công khai nhận thêm `route.origin` và `route.destination` dạng `{ latitude, longitude } | null`
+  từ station snapshot đã kiểm tra tọa độ, không phát station ID. `STOPS_ONLY` vẫn giữ
+  `route.geometry: null`; không dựng đường thẳng giả giữa hai terminal.
 
 ### Realtime công khai
 

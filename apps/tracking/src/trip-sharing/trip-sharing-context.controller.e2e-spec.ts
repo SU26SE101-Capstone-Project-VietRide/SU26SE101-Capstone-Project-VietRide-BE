@@ -130,6 +130,8 @@ describe('TripSharePublicController (e2e)', () => {
         route: {
           originName: 'Origin',
           destinationName: 'Destination',
+          origin: { latitude: 10, longitude: 106 },
+          destination: { latitude: 10.2, longitude: 106.2 },
           stops: [
             { name: 'Intermediate stop', latitude: 10.1, longitude: 106.1, sequence: 1 },
           ],
@@ -212,6 +214,8 @@ describe('TripSharePublicController (e2e)', () => {
       route: {
         originName: 'Origin',
         destinationName: 'Destination',
+        origin: { latitude: 10, longitude: 106 },
+        destination: { latitude: 10.2, longitude: 106.2 },
         stops: [{ name: 'Intermediate stop', latitude: 10.1, longitude: 106.1, sequence: 1 }],
         geometry: null,
       },
