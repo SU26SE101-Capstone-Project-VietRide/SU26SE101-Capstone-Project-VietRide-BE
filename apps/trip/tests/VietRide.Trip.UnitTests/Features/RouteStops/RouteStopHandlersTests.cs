@@ -7,11 +7,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Api.Controllers;
 using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.RouteStops;
 using VietRide.Trip.Domain.Entities;
 
@@ -21,6 +23,7 @@ public sealed class RouteStopHandlersTests
 {
     private static readonly Guid OperatorId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid OtherOperatorId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    private static readonly Guid ActorUserId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
 
     [Fact]
     public async Task AddRouteStop_AddsRouteStop_WhenRouteAndStopBelongToOperator()
@@ -129,7 +132,9 @@ public sealed class RouteStopHandlersTests
         var routeStopRepository = new FakeRouteStopRepository([routeStop]);
         var handler = CreateRemoveHandler(new FakeRouteRepository([route]), routeStopRepository);
 
-        await handler.Handle(new RemoveRouteStopCommand(OperatorId, route.Id, stop.Id), CancellationToken.None);
+        await handler.Handle(
+            new RemoveRouteStopCommand(OperatorId, ActorUserId, route.Id, stop.Id),
+            CancellationToken.None);
 
         routeStopRepository.Entities.Should().BeEmpty();
         route.PathPolyline.Should().BeNull();
@@ -177,7 +182,7 @@ public sealed class RouteStopHandlersTests
         int orderIndex = 1,
         bool allowPickup = true,
         bool allowDropoff = false)
-        => new(OperatorId, routeId, stopId, orderIndex, 20, 5m, allowPickup, allowDropoff);
+        => new(OperatorId, ActorUserId, routeId, stopId, orderIndex, 20, 5m, allowPickup, allowDropoff);
 
     private static AddRouteStopHandler CreateAddHandler(
         FakeRouteRepository routeRepository,
@@ -189,7 +194,9 @@ public sealed class RouteStopHandlersTests
             routeRepository,
             routeStopRepository,
             stopRepository,
-            new FakeUnitOfWork());
+            new FakeSnapshotSyncService(),
+            new FakeUnitOfWork(),
+            new FrozenClock());
 
     private static RemoveRouteStopHandler CreateRemoveHandler(
         FakeRouteRepository routeRepository,
@@ -199,7 +206,9 @@ public sealed class RouteStopHandlersTests
             new FakeIdentityInternalClient(eligibility ?? OperatorWriteEligibilityValidation.Allowed()),
             routeRepository,
             routeStopRepository,
-            new FakeUnitOfWork());
+            new FakeSnapshotSyncService(),
+            new FakeUnitOfWork(),
+            new FrozenClock());
 
     private static Route CreateRoute(Guid operatorId)
         => Route.Create(operatorId, "Da Nang to Hue", Guid.NewGuid(), Guid.NewGuid(), Money.FromRaw(250000), 100m, 180);
@@ -216,6 +225,7 @@ public sealed class RouteStopHandlersTests
             {
                 User = new ClaimsPrincipal(new ClaimsIdentity([
                     new Claim("operatorId", OperatorId.ToString()),
+                    new Claim(ClaimTypes.NameIdentifier, ActorUserId.ToString()),
                 ], "TestAuth")),
             },
         };
@@ -349,6 +359,30 @@ public sealed class RouteStopHandlersTests
         public Task RollbackAsync(CancellationToken ct) => Task.CompletedTask;
 
         public Task<int> SaveChangesAsync(CancellationToken ct) => Task.FromResult(1);
+    }
+
+    private sealed class FakeSnapshotSyncService : ITripStopSnapshotSyncService
+    {
+        public Task<TripStopSnapshotSyncPreflight> PreflightAsync(
+            Guid routeId,
+            Guid operatorId,
+            DateTimeOffset now,
+            CancellationToken cancellationToken)
+            => Task.FromResult(new TripStopSnapshotSyncPreflight(routeId, operatorId, []));
+
+        public Task SynchronizeAsync(
+            TripStopSnapshotSyncPreflight preflight,
+            IReadOnlyList<RouteStop> targetStops,
+            Guid actorUserId,
+            string sourceMutation,
+            DateTimeOffset now,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+    }
+
+    private sealed class FrozenClock : IClock
+    {
+        public DateTimeOffset UtcNow => new(2026, 8, 15, 0, 0, 0, TimeSpan.Zero);
     }
 
     private sealed class CapturingMediator : IMediator

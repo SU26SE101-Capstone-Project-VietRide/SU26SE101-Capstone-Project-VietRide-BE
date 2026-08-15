@@ -9848,6 +9848,17 @@ This section supersedes older field and endpoint descriptions where they conflic
 - `POST /v1/operator/routes/full` and `PUT /v1/operator/routes/{id}/full` require a UUID-v4
   `Idempotency-Key`. They atomically write the Route, optional geometry, and the complete ordered
   RouteStop collection. Full update cannot change origin or destination.
+- `POST /v1/operator/routes/{id}/stops`, `DELETE /v1/operator/routes/{id}/stops/{stopId}` and
+  `PUT /v1/operator/routes/{id}/full` synchronize the resulting RouteStop collection into existing
+  TripStop snapshots only for future `SCHEDULED` Trips on the main Route that have no active
+  `PENDING_PAYMENT|CONFIRMED` Booking and no visible `HELD|BOOKED` TripSeat. `BOARDING`,
+  `IN_PROGRESS`, terminal and AlternativeRoute Trips keep their prior snapshot. Retained manual
+  TripStop fares remain unchanged; fares for removed stops are deleted. Each changed Trip writes a
+  `TRIP_STOP_SNAPSHOT_SYNCED` audit with the authenticated actor user ID.
+- The Booking impact check is a best-effort cross-service preflight, not a distributed lock. A
+  Booking that read the old Trip snapshot but has not yet acquired a seat hold can race with the
+  RouteStop commit. Strict prevention requires a future TripStop snapshot version/reservation
+  protocol between Booking snapshot reads, seat locking and RouteStop mutations.
 - When a precision-5 Google polyline is present, the server derives route distance and duration
   (55 km/h, duration rounded up to a minute) and derives missing stop cumulative metrics by
   projection onto the nearest polyline segment. Client-provided stop metrics take precedence.

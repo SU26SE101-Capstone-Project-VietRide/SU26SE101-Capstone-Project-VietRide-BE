@@ -1,9 +1,11 @@
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Common.Geometry;
 using VietRide.Trip.Application.Features.Stops;
 using VietRide.Trip.Domain.Entities;
@@ -18,7 +20,9 @@ public sealed class UpsertFullRouteHandler : IRequestHandler<UpsertFullRouteComm
     private readonly IRouteStopRepository routeStops;
     private readonly IStationRepository stations;
     private readonly IStopRepository stops;
+    private readonly ITripStopSnapshotSyncService snapshotSync;
     private readonly IUnitOfWork unitOfWork;
+    private readonly IClock clock;
 
     public UpsertFullRouteHandler(
         IIdentityInternalClient identityClient,
@@ -27,7 +31,9 @@ public sealed class UpsertFullRouteHandler : IRequestHandler<UpsertFullRouteComm
         IRouteStopRepository routeStops,
         IStationRepository stations,
         IStopRepository stops,
-        IUnitOfWork unitOfWork)
+        ITripStopSnapshotSyncService snapshotSync,
+        IUnitOfWork unitOfWork,
+        IClock clock)
     {
         this.identityClient = identityClient;
         this.operatorStations = operatorStations;
@@ -35,7 +41,9 @@ public sealed class UpsertFullRouteHandler : IRequestHandler<UpsertFullRouteComm
         this.routeStops = routeStops;
         this.stations = stations;
         this.stops = stops;
+        this.snapshotSync = snapshotSync;
         this.unitOfWork = unitOfWork;
+        this.clock = clock;
     }
 
     public async Task<RouteDto> Handle(UpsertFullRouteCommand request, CancellationToken cancellationToken)
@@ -84,21 +92,6 @@ public sealed class UpsertFullRouteHandler : IRequestHandler<UpsertFullRouteComm
                     request.ReturnRouteId);
             }
 
-            var duplicate = await routes.FindDuplicateWithTransactionLockAsync(
-                request.OperatorId,
-                request.Name!,
-                request.OriginStationId,
-                request.DestinationStationId,
-                request.RouteId,
-                cancellationToken);
-            if (duplicate is not null)
-            {
-                throw new CodedConflictException(
-                    "ROUTE_DUPLICATED",
-                    "A Route with the same normalized name and station pair already exists.",
-                    [new ValidationError("existingRouteId", duplicate.Id.ToString("D"))]);
-            }
-
             if (isNew)
             {
                 quota = quotaClient is null ? null : await quotaClient.ClaimQuotaAllocationAsync(
@@ -145,17 +138,7 @@ public sealed class UpsertFullRouteHandler : IRequestHandler<UpsertFullRouteComm
                 route.Deactivate();
             else if (request.IsActive == true)
                 route.Activate();
-            if (isNew)
-                await routes.AddAsync(route, cancellationToken);
-            else
-                routes.Update(route);
-
-            var existingRouteStops = routeStops.Query().Where(item => item.RouteId == route.Id).ToArray();
-            foreach (var existing in existingRouteStops)
-                routeStops.Remove(existing);
-            if (existingRouteStops.Length > 0)
-                await unitOfWork.SaveChangesAsync(cancellationToken);
-
+            var targetRouteStops = new List<RouteStop>();
             foreach (var input in request.Stops.OrderBy(item => item.OrderIndex))
             {
                 var projected = polyline is null
@@ -173,18 +156,72 @@ public sealed class UpsertFullRouteHandler : IRequestHandler<UpsertFullRouteComm
                         [new ValidationError("stops", "Each stop needs duration metrics without a polyline.")]);
                 }
 
-                await routeStops.AddAsync(RouteStop.Create(
+                targetRouteStops.Add(RouteStop.Create(
                     route.Id,
                     input.StopId,
                     input.OrderIndex,
                     stopDurationMinutes.Value,
                     stopDistanceKm,
                     input.AllowPickup,
-                    input.AllowDropoff), cancellationToken);
+                    input.AllowDropoff));
             }
 
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-            var response = RouteDetailsProjector.Project(route, stations, routeStops, stops);
+            var now = clock.UtcNow;
+            var preflight = isNew
+                ? null
+                : await snapshotSync.PreflightAsync(
+                    route.Id,
+                    request.OperatorId,
+                    now,
+                    cancellationToken);
+
+            var response = await unitOfWork.ExecuteInTransactionAsync(async () =>
+            {
+                var duplicate = await routes.FindDuplicateWithTransactionLockAsync(
+                    request.OperatorId,
+                    request.Name!,
+                    request.OriginStationId,
+                    request.DestinationStationId,
+                    request.RouteId,
+                    cancellationToken);
+                if (duplicate is not null)
+                {
+                    throw new CodedConflictException(
+                        "ROUTE_DUPLICATED",
+                        "A Route with the same normalized name and station pair already exists.",
+                        [new ValidationError("existingRouteId", duplicate.Id.ToString("D"))]);
+                }
+
+                if (isNew)
+                    await routes.AddAsync(route, cancellationToken);
+                else
+                    routes.Update(route);
+
+                var existingRouteStops = routeStops.Query()
+                    .Where(item => item.RouteId == route.Id)
+                    .ToArray();
+                foreach (var existing in existingRouteStops)
+                    routeStops.Remove(existing);
+                if (existingRouteStops.Length > 0)
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                foreach (var target in targetRouteStops)
+                    await routeStops.AddAsync(target, cancellationToken);
+
+                if (preflight is not null)
+                {
+                    await snapshotSync.SynchronizeAsync(
+                        preflight,
+                        targetRouteStops,
+                        request.ActorUserId,
+                        "FULL_UPDATE",
+                        now,
+                        cancellationToken);
+                }
+
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                return RouteDetailsProjector.Project(route, stations, routeStops, stops);
+            }, cancellationToken);
             completed = true;
             return response;
         }
