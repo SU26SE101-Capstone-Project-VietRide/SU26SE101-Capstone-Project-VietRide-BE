@@ -3,6 +3,7 @@ import type { Policy, Prisma } from '../generated/rag-prisma-client';
 import { Prisma as PrismaRuntime } from '../generated/rag-prisma-client';
 import { RagPrismaService } from '../prisma/rag-prisma.service';
 import type { ListPoliciesQueryDto } from './dto/list-policies.dto';
+import type { ListPublishedPoliciesQueryDto } from './dto/list-published-policies.dto';
 import type {
   CreatePolicyPersistenceInput,
   DeletePolicyPersistenceInput,
@@ -38,6 +39,34 @@ export class PoliciesRepository {
   async findById(policyId: string, operatorId: string | null): Promise<Policy | null> {
     return this.prisma.policy.findFirst({
       where: { id: policyId, operatorId, deletedAt: null },
+    });
+  }
+
+  async listPublished(
+    operatorId: string | null,
+    query: ListPublishedPoliciesQueryDto,
+  ): Promise<{ items: Policy[]; totalItems: number }> {
+    const where = this.toPublishedListWhere(operatorId, query);
+    const orderBy = [
+      { [query.sortBy]: query.sortDir },
+      { id: query.sortDir },
+    ] as Prisma.PolicyOrderByWithRelationInput[];
+    const skip = (query.page - 1) * query.pageSize;
+    const [items, totalItems] = await this.prisma.$transaction([
+      this.prisma.policy.findMany({ where, orderBy, skip, take: query.pageSize }),
+      this.prisma.policy.count({ where }),
+    ]);
+    return { items, totalItems };
+  }
+
+  async findPublishedById(policyId: string): Promise<Policy | null> {
+    return this.prisma.policy.findFirst({
+      where: {
+        id: policyId,
+        policyType: 'FOR_USER',
+        active: true,
+        deletedAt: null,
+      },
     });
   }
 
@@ -152,6 +181,35 @@ export class PoliciesRepository {
               { description: { contains: query.search, mode: 'insensitive' } },
               { content: { contains: query.search, mode: 'insensitive' } },
               { category: { contains: query.search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+  }
+
+  private toPublishedListWhere(
+    operatorId: string | null,
+    query: ListPublishedPoliciesQueryDto,
+  ): Prisma.PolicyWhereInput {
+    return {
+      ...(operatorId === null
+        ? { operatorId: null }
+        : { OR: [{ operatorId: null }, { operatorId }] }),
+      policyType: 'FOR_USER',
+      active: true,
+      deletedAt: null,
+      ...(query.category ? { category: query.category } : {}),
+      ...(query.search
+        ? {
+            AND: [
+              {
+                OR: [
+                  { title: { contains: query.search, mode: 'insensitive' } },
+                  { description: { contains: query.search, mode: 'insensitive' } },
+                  { content: { contains: query.search, mode: 'insensitive' } },
+                  { category: { contains: query.search, mode: 'insensitive' } },
+                ],
+              },
             ],
           }
         : {}),

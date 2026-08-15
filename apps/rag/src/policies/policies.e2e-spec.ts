@@ -18,6 +18,7 @@ import { IdentityPolicyActorProvider } from './identity-policy-actor.provider';
 import { OperatorPoliciesController } from './operator-policies.controller';
 import { PoliciesRepository } from './policies.repository';
 import { PoliciesService } from './policies.service';
+import { PublishedPoliciesController } from './published-policies.controller';
 
 const SECRET = 'test-secret-min-32-chars-aaaaaaaaaaaaaaaa';
 const ADMIN_ID = '11111111-1111-4111-8111-111111111111';
@@ -37,6 +38,8 @@ describe('Policies controllers (e2e)', () => {
     repository = {
       list: jest.fn(),
       findById: jest.fn(),
+      listPublished: jest.fn(),
+      findPublishedById: jest.fn(),
       createWithAudit: jest.fn(),
       updateWithAudit: jest.fn(),
       softDeleteWithAudit: jest.fn(),
@@ -62,7 +65,11 @@ describe('Policies controllers (e2e)', () => {
       }),
     };
     const moduleRef = await Test.createTestingModule({
-      controllers: [AdminPoliciesController, OperatorPoliciesController],
+      controllers: [
+        AdminPoliciesController,
+        OperatorPoliciesController,
+        PublishedPoliciesController,
+      ],
       providers: [
         PoliciesService,
         InternalJwtAuthGuard,
@@ -108,6 +115,11 @@ describe('Policies controllers (e2e)', () => {
     });
     repository.list.mockResolvedValue({ items: [makePolicy()], totalItems: 1 });
     repository.findById.mockResolvedValue(makePolicy());
+    repository.listPublished.mockResolvedValue({
+      items: [makePolicy(), makePolicy({ operatorId: OPERATOR_ID })],
+      totalItems: 2,
+    });
+    repository.findPublishedById.mockResolvedValue(makePolicy());
     repository.createWithAudit.mockImplementation(async (input) =>
       makePolicy({
         operatorId: input.operatorId,
@@ -149,6 +161,76 @@ describe('Policies controllers (e2e)', () => {
       null,
       expect.objectContaining({ page: 1, pageSize: 20 }),
     );
+  });
+
+  it.each(['PASSENGER', 'DRIVER', 'ASSISTANT', 'OPERATOR_STAFF', 'OPERATOR_ADMIN', 'SYSTEM_ADMIN'])(
+    'allows authenticated %s to list published platform and operator Policies',
+    async (role) => {
+      const response = await fetch(
+        `${baseUrl}/v1/policies?operatorId=${OPERATOR_ID}&page=1&pageSize=20`,
+        {
+          headers: { 'X-Internal-Auth': await token(`${role.toLowerCase()}-1`, role) },
+        },
+      );
+      const body = (await response.json()) as {
+        data: { items: Array<Record<string, unknown>> };
+      };
+
+      expect(response.status).toBe(200);
+      expect(body).toMatchObject({
+        success: true,
+        data: {
+          items: [{ id: POLICY_ID, operatorId: null }, { operatorId: OPERATOR_ID }],
+          totalItems: 2,
+        },
+      });
+      expect(body.data.items[0]).not.toHaveProperty('createdBy');
+      expect(body.data.items[0]).not.toHaveProperty('active');
+      expect(body.data.items[0]).not.toHaveProperty('policyType');
+      expect(repository.listPublished).toHaveBeenCalledWith(
+        OPERATOR_ID,
+        expect.objectContaining({ operatorId: OPERATOR_ID, page: 1, pageSize: 20 }),
+      );
+    },
+  );
+
+  it('requires authentication and validates consumer Policy queries', async () => {
+    const anonymous = await fetch(`${baseUrl}/v1/policies`);
+    const invalid = await fetch(`${baseUrl}/v1/policies?operatorId=not-a-uuid`, {
+      headers: { 'X-Internal-Auth': await token('passenger-1', 'PASSENGER') },
+    });
+    const invalidPage = await fetch(`${baseUrl}/v1/policies?page=0`, {
+      headers: { 'X-Internal-Auth': await token('passenger-1', 'PASSENGER') },
+    });
+    const invalidSort = await fetch(`${baseUrl}/v1/policies?sortBy=active`, {
+      headers: { 'X-Internal-Auth': await token('passenger-1', 'PASSENGER') },
+    });
+
+    expect(anonymous.status).toBe(401);
+    expect(await anonymous.json()).toMatchObject({ error: { code: 'UNAUTHORIZED' } });
+    expect(invalid.status).toBe(422);
+    expect(await invalid.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    expect(invalidPage.status).toBe(422);
+    expect(await invalidPage.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    expect(invalidSort.status).toBe(422);
+    expect(await invalidSort.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    expect(repository.listPublished).not.toHaveBeenCalled();
+  });
+
+  it('returns only a published Policy detail and masks unavailable content', async () => {
+    const authorization = await token('passenger-1', 'PASSENGER');
+    const found = await fetch(`${baseUrl}/v1/policies/${POLICY_ID}`, {
+      headers: { 'X-Internal-Auth': authorization },
+    });
+    repository.findPublishedById.mockResolvedValueOnce(null);
+    const hidden = await fetch(`${baseUrl}/v1/policies/${POLICY_ID}`, {
+      headers: { 'X-Internal-Auth': authorization },
+    });
+
+    expect(found.status).toBe(200);
+    expect(await found.json()).toMatchObject({ data: { id: POLICY_ID, category: 'REFUND' } });
+    expect(hidden.status).toBe(404);
+    expect(await hidden.json()).toMatchObject({ error: { code: 'POLICY_NOT_FOUND' } });
   });
 
   it('uses only the verified operatorId claim for operator list scope', async () => {

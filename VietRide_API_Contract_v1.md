@@ -9582,10 +9582,20 @@ Routes:
 
 | Route | Role | Tenant |
 |---|---|---|
+| `GET /v1/policies` | any authenticated role | platform, or platform + requested operator |
+| `GET /v1/policies/{policyId}` | any authenticated role | published user-facing Policy |
 | `GET/POST /v1/admin/policies` | `SYSTEM_ADMIN` | platform (`operatorId=null`) |
 | `GET/PATCH/DELETE /v1/admin/policies/{policyId}` | `SYSTEM_ADMIN` | platform |
 | `GET/POST /v1/operator/policies` | `OPERATOR_ADMIN` | caller operator |
 | `GET/PATCH/DELETE /v1/operator/policies/{policyId}` | `OPERATOR_ADMIN` | caller operator |
+
+Consumer reads only expose active, non-deleted `FOR_USER` Policies. `GET /v1/policies` accepts
+optional `operatorId`, `category`, `search`, standard pagination,
+`sortBy=updatedAt|createdAt|title|version` and `sortDir=asc|desc`. Without `operatorId`, the list
+contains platform Policies only; with `operatorId`, pagination applies to the combined platform and
+requested-operator result. The consumer response omits `policyType`, `active`, `createdBy` and all
+audit/concurrency fields. A detail that is missing, inactive, deleted or not `FOR_USER` returns
+`404 POLICY_NOT_FOUND`.
 
 List query supports `policyType=FOR_OPERATOR|FOR_USER`, `category`, `active`, `search`, standard
 pagination, `sortBy=updatedAt|createdAt|title|version` and `sortDir=asc|desc`.

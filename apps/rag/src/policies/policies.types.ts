@@ -42,6 +42,28 @@ export interface PolicyPage {
   hasPreviousPage: boolean;
 }
 
+export interface PublishedPolicyResponse {
+  id: string;
+  operatorId: string | null;
+  title: string;
+  description: string;
+  content: string;
+  category: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublishedPolicyPage {
+  items: PublishedPolicyResponse[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+}
+
 export interface CreatePolicyPersistenceInput {
   operatorId: string | null;
   title: string;
@@ -103,6 +125,20 @@ export function toPolicyResponse(policy: PersistedPolicy): PolicyResponse {
       displayName: policy.createdByDisplayName,
       email: policy.createdByEmail,
     },
+    createdAt: policy.createdAt.toISOString(),
+    updatedAt: policy.updatedAt.toISOString(),
+  };
+}
+
+export function toPublishedPolicyResponse(policy: PersistedPolicy): PublishedPolicyResponse {
+  return {
+    id: policy.id,
+    operatorId: policy.operatorId,
+    title: policy.title,
+    description: policy.description,
+    content: policy.content,
+    category: policy.category,
+    version: policy.version,
     createdAt: policy.createdAt.toISOString(),
     updatedAt: policy.updatedAt.toISOString(),
   };
