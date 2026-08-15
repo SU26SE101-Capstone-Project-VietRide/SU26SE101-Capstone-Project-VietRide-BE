@@ -21,6 +21,7 @@ using VietRide.Shared.Persistence.Outbox;
 using VietRide.Shared.Persistence.UnitOfWork;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Services;
+using VietRide.Trip.Application.Features.Internal.Trips.Tracking;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
 using VietRide.Trip.Infrastructure.Jobs;
@@ -700,6 +701,60 @@ public sealed class ShuttlePersistenceIntegrationTests
 
             await read.Should().ThrowAsync<CodedConflictException>()
                 .Where(error => error.ErrorCode == "SHUTTLE_MANIFEST_INCONSISTENT_STATUS");
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task GetTrackingProjection_ReturnsOnlyOwnedInProgressShuttles()
+    {
+        var databaseName = $"vietride_trip_shuttle_tracking_projection_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond));
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var (seed, service, created) = await SeedAssignedShuttleAsync(db, clock, now);
+            await service.StartAsync(created.ShuttleTripId, seed.ShuttleDriverId, CancellationToken.None);
+            var active = await db.ShuttleTrips.SingleAsync(item => item.Id == created.ShuttleTripId);
+
+            var scheduledOwned = ShuttleTrip.Create(
+                seed.OperatorId,
+                seed.MainTripId,
+                active.StationId,
+                seed.ShuttleDriverId,
+                seed.ShuttleVehicleId,
+                now.AddHours(3),
+                now.AddHours(4),
+                null);
+            var activeOtherTenant = ShuttleTrip.Create(
+                Guid.NewGuid(),
+                seed.MainTripId,
+                active.StationId,
+                seed.ShuttleDriverId,
+                seed.ShuttleVehicleId,
+                now.AddHours(5),
+                now.AddHours(6),
+                null);
+            activeOtherTenant.Start(now);
+            db.ShuttleTrips.AddRange(scheduledOwned, activeOtherTenant);
+            await db.SaveChangesAsync();
+
+            var result = await service.GetTrackingProjectionAsync(
+                seed.OperatorId,
+                CancellationToken.None);
+
+            result.Should().ContainSingle().Which.Should().Be(
+                new OperatorTrackingShuttleTripDto(
+                    created.ShuttleTripId,
+                    seed.MainTripId,
+                    ShuttleTrip.InProgressStatus));
         }
         finally
         {

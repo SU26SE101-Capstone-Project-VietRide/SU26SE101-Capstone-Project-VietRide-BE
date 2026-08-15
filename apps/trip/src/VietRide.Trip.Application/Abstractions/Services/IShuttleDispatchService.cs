@@ -1,4 +1,5 @@
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Trip.Application.Features.Internal.Trips.Tracking;
 using VietRide.Trip.Application.Features.Shuttle;
 
 namespace VietRide.Trip.Application.Abstractions.Services;
@@ -24,6 +25,10 @@ public interface IShuttleDispatchService
         DateOnly? from,
         DateOnly? to,
         IReadOnlyCollection<string>? statuses,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<OperatorTrackingShuttleTripDto>> GetTrackingProjectionAsync(
+        Guid operatorId,
         CancellationToken cancellationToken);
 
     Task<CreateShuttleTripResult> CreateAsync(

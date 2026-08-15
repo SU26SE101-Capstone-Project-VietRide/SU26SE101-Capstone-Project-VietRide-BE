@@ -8,6 +8,7 @@ using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Services;
+using VietRide.Trip.Application.Features.Internal.Trips.Tracking;
 using VietRide.Trip.Application.Features.ResourceAvailability;
 using VietRide.Trip.Application.Features.Stops;
 using VietRide.Trip.Application.Features.Trips.Operations;
@@ -280,6 +281,19 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
 
         return PagedResult<OperatorShuttleTripListItemDto>.Create(items, page, pageSize, totalItems);
     }
+
+    public async Task<IReadOnlyList<OperatorTrackingShuttleTripDto>> GetTrackingProjectionAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken)
+        => await _db.ShuttleTrips.AsNoTracking()
+            .Where(shuttle => shuttle.OperatorId == operatorId
+                && shuttle.Status == ShuttleTrip.InProgressStatus)
+            .OrderBy(shuttle => shuttle.Id)
+            .Select(shuttle => new OperatorTrackingShuttleTripDto(
+                shuttle.Id,
+                shuttle.MainTripId,
+                shuttle.Status))
+            .ToArrayAsync(cancellationToken);
 
     public async Task<CreateShuttleTripResult> CreateAsync(
         CreateShuttleTripInput input,

@@ -36,6 +36,50 @@ namespace VietRide.Trip.IntegrationTests.Internal.Trips;
 public sealed class InternalTripsEndpointTests
 {
     [Fact]
+    public async Task OperatorTrackingShuttle_Happy_ReturnsRawProjectionAndDispatchesTenantQuery()
+    {
+        var operatorId = Guid.NewGuid();
+        var shuttleTripId = Guid.NewGuid();
+        var mainTripId = Guid.NewGuid();
+        var mediator = new StubMediator(_ => new[]
+        {
+            new OperatorTrackingShuttleTripDto(shuttleTripId, mainTripId, "IN_PROGRESS"),
+        });
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+        using var request = CreateAuthorizedRequest(
+            HttpMethod.Get,
+            $"/internal/v1/operators/{operatorId}/tracking-shuttle-trips");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        document.RootElement.GetArrayLength().Should().Be(1);
+        document.RootElement[0].GetProperty("shuttleTripId").GetGuid().Should().Be(shuttleTripId);
+        document.RootElement[0].GetProperty("mainTripId").GetGuid().Should().Be(mainTripId);
+        mediator.LastRequest.Should().BeOfType<ListOperatorTrackingShuttleTripsQuery>()
+            .Which.OperatorId.Should().Be(operatorId);
+    }
+
+    [Fact]
+    public async Task OperatorTrackingShuttle_WithoutInternalJwt_Returns401WithoutDispatch()
+    {
+        var mediator = new StubMediator(_ =>
+            throw new InvalidOperationException("Mediator must not be called."));
+        using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"/internal/v1/operators/{Guid.NewGuid()}/tracking-shuttle-trips");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        await AssertErrorEnvelopeAsync(response, "AUTH_TOKEN_INVALID", hasFields: false);
+        mediator.SendCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task BatchTripSummaries_Happy_ReturnsRawArrayWithoutIdempotencyKey()
     {
         var tripId = Guid.NewGuid();

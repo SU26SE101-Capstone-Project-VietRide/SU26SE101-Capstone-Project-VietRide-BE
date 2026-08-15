@@ -9930,9 +9930,49 @@ This section supersedes older field and endpoint descriptions where they conflic
 
 ### Operations and realtime
 
-- `GET /v1/tracking/operator/fleet-latest?status=` returns latest GPS items for the caller's
-  operator only: `{ tripId, latitude, longitude, speedKmh?, headingDeg?, recordedAt, status }`.
-  Trips without GPS are omitted.
+- `GET /v1/tracking/operator/fleet-latest?status=&include=shuttle` returns latest GPS items for the
+  caller's operator only. `include=shuttle` is optional and is the only accepted `include` value.
+  Every item is discriminated by `kind`:
+
+  ```json
+  {
+    "items": [
+      {
+        "kind": "TRIP",
+        "tripId": "uuid",
+        "latitude": 10.51,
+        "longitude": 106.12,
+        "speedKmh": 47.5,
+        "headingDeg": 215,
+        "recordedAt": "2026-08-15T03:00:00.000Z",
+        "status": "IN_PROGRESS"
+      },
+      {
+        "kind": "SHUTTLE",
+        "shuttleTripId": "uuid",
+        "mainTripId": "uuid",
+        "latitude": 10.76,
+        "longitude": 106.66,
+        "speedKmh": 24,
+        "headingDeg": 120,
+        "recordedAt": "2026-08-15T03:00:00.000Z",
+        "status": "IN_PROGRESS"
+      }
+    ],
+    "generatedAt": "2026-08-15T03:00:01.000Z"
+  }
+  ```
+
+  Main Trip behavior is unchanged except for the additive `kind: "TRIP"`. Shuttle items are
+  included only when `include=shuttle` and `status` is absent or `IN_PROGRESS`; completed,
+  cancelled, scheduled, missing-GPS, malformed, and expired Shuttle values are omitted. Shuttle
+  GPS `heading` is exposed as `headingDeg`. A Shuttle item never places its ID in `tripId`.
+  Invalid `include` returns `400 VALIDATION_FAILED`; projection or Redis failure returns
+  `503 TRACKING_FLEET_UNAVAILABLE`.
+- Tracking obtains active tenant-scoped Shuttle IDs through internal-JWT-only
+  `GET /internal/v1/operators/{operatorId}/tracking-shuttle-trips`, which returns the raw array
+  `{ shuttleTripId, mainTripId, status: "IN_PROGRESS" }[]`. The projection performs no Identity,
+  Vehicle, or passenger-profile enrichment.
 - ETA accepts legacy `stopId` or an explicit stop/station target. If no target is supplied, it
   returns the first cached target from the status-aware origin → stops → destination chain. Cold
   cache returns `{ eta: null }`; GET never invokes the provider synchronously. `stopName` is
