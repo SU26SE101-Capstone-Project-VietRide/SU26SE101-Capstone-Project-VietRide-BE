@@ -251,7 +251,15 @@ async function startFakeBoundaries() {
               latitude: 10.7812,
               longitude: 106.6981,
             },
-            intermediateStops: [],
+            intermediateStops: [
+              {
+                stopId: ids.routeStop,
+                name: 'Trạm dừng Bảo Lộc',
+                sequence: 1,
+                latitude: 11.5475,
+                longitude: 107.8078,
+              },
+            ],
             destinationStation: {
               stationId: ids.destinationStation,
               name: 'Bến xe Đà Lạt',
@@ -391,7 +399,11 @@ function assertPublicContext(result) {
   assert(result.body.data.eta === null, 'Missing ETA did not produce null');
   assertExactKeys(result.body.data.vehicle, ['location'], 'vehicle');
   assert(result.body.data.vehicle.location === null, 'Missing GPS did not produce null');
-  assertExactKeys(result.body.data.route, ['originName', 'destinationName', 'geometry'], 'route');
+  assertExactKeys(
+    result.body.data.route,
+    ['originName', 'destinationName', 'stops', 'geometry'],
+    'route',
+  );
   assert(
     result.body.data.route.originName === 'Bến xe Miền Đông',
     'Guest origin name was incorrect',
@@ -399,6 +411,20 @@ function assertPublicContext(result) {
   assert(
     result.body.data.route.destinationName === 'Bến xe Đà Lạt',
     'Guest destination name was incorrect',
+  );
+  assert(
+    Array.isArray(result.body.data.route.stops) && result.body.data.route.stops.length === 1,
+    'Guest route stops were missing',
+  );
+  assertExactKeys(
+    result.body.data.route.stops[0],
+    ['name', 'latitude', 'longitude', 'sequence'],
+    'route.stops[0]',
+  );
+  assert(
+    result.body.data.route.stops[0].name === 'Trạm dừng Bảo Lộc'
+      && result.body.data.route.stops[0].sequence === 1,
+    'Guest route stop was incorrect',
   );
   assertExactKeys(result.body.data.route.geometry, ['type', 'coordinates'], 'route.geometry');
   assert(

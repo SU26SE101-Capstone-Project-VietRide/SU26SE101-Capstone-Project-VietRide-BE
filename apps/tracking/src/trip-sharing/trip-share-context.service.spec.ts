@@ -76,6 +76,9 @@ describe('TripShareContextService', () => {
       route: {
         originName: 'Origin',
         destinationName: 'Destination',
+        stops: [
+          { name: 'Next stop', latitude: 10.1, longitude: 106.1, sequence: 1 },
+        ],
         geometry: {
           type: 'LineString',
           coordinates: [[106, 10], [106.2, 10.2]],
@@ -103,7 +106,12 @@ describe('TripShareContextService', () => {
     const result = await service.getContext(ACCESS);
 
     expect(result.vehicle.location).toBeNull();
-    expect(result.route).toEqual({ originName: 'Origin', destinationName: 'Destination', geometry: null });
+    expect(result.route).toEqual({
+      originName: 'Origin',
+      destinationName: 'Destination',
+      stops: [{ name: 'Next stop', latitude: 10.1, longitude: 106.1, sequence: 1 }],
+      geometry: null,
+    });
     expect(result.eta).toBeNull();
     expect(result.lastUpdatedAt).toBeNull();
     expect(state.findEta).not.toHaveBeenCalled();
@@ -124,6 +132,49 @@ describe('TripShareContextService', () => {
     const result = await service.getContext(ACCESS);
 
     expect(result.route.geometry).toBeNull();
+  });
+
+  it('orders, sanitizes and bounds anonymous route stops without exposing IDs', async () => {
+    const intermediateStops = Array.from({ length: 102 }, (_, index) => ({
+      stopId: `private-stop-${index + 1}`,
+      name: `Stop ${index + 1}`,
+      sequence: 102 - index,
+      latitude: 10 + index / 1_000,
+      longitude: 106 + index / 1_000,
+    }));
+    intermediateStops.push({
+      stopId: 'invalid-coordinate-stop',
+      name: 'Invalid coordinate',
+      sequence: 0,
+      latitude: 91,
+      longitude: 106,
+    });
+    intermediateStops.push({
+      stopId: 'invalid-sequence-stop',
+      name: 'Invalid sequence',
+      sequence: 0,
+      latitude: 10,
+      longitude: 106,
+    });
+    routeProvider.getDetailedRouteGeometry.mockResolvedValueOnce({
+      kind: 'ok',
+      snapshot: createRoute({ intermediateStops }),
+    });
+
+    const result = await service.getContext(ACCESS);
+
+    expect(result.route.stops).toHaveLength(100);
+    expect(result.route.stops.map((stop) => stop.sequence)).toEqual(
+      Array.from({ length: 100 }, (_, index) => index + 1),
+    );
+    expect(result.route.stops[0]).toEqual({
+      name: 'Stop 102',
+      latitude: 10.101,
+      longitude: 106.101,
+      sequence: 1,
+    });
+    expect(JSON.stringify(result.route.stops)).not.toContain('private-stop');
+    expect(JSON.stringify(result.route.stops)).not.toContain('Invalid sequence');
   });
 
   it('maps absent optional GPS heading and speed to explicit nulls', async () => {
@@ -232,7 +283,15 @@ function createRoute(overrides: Partial<RouteGeometrySnapshot> = {}): RouteGeome
     geometrySource: 'ROUTE_POLYLINE',
     points: [{ latitude: 10, longitude: 106 }, { latitude: 10.2, longitude: 106.2 }],
     originStation: { stationId: ORIGIN_ID, name: 'Origin', latitude: 10, longitude: 106 },
-    intermediateStops: [],
+    intermediateStops: [
+      {
+        stopId: NEXT_STOP_ID,
+        name: 'Next stop',
+        sequence: 1,
+        latitude: 10.1,
+        longitude: 106.1,
+      },
+    ],
     destinationStation: {
       stationId: DESTINATION_ID,
       name: 'Destination',

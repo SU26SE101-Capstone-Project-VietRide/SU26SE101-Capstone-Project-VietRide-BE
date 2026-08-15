@@ -5388,6 +5388,14 @@ Response `200` dùng ADR 0004 envelope; `data` có shape cố định:
   "route": {
     "originName": "Bến xe Miền Đông",
     "destinationName": "Bến xe Đà Lạt",
+    "stops": [
+      {
+        "name": "Trạm dừng Bảo Lộc",
+        "latitude": 11.5475,
+        "longitude": 107.8078,
+        "sequence": 1
+      }
+    ],
     "geometry": {
       "type": "LineString",
       "coordinates": [[106.6981, 10.7812], [106.7124, 10.7935]]
@@ -5403,7 +5411,10 @@ Response `200` dùng ADR 0004 envelope; `data` có shape cố định:
 ```
 
 `lastUpdatedAt`, `vehicle.location`, `route.geometry` và `eta` có thể là `null`; `heading`,
-`speedKph`, `eta.delayMinutes` cũng nullable. Không dựng GPS, geometry hoặc ETA giả. Response luôn có:
+`speedKph`, `eta.delayMinutes` cũng nullable. `route.stops` luôn là mảng, lấy từ ordered
+`TripStop` snapshot, lọc tọa độ không hợp lệ và giới hạn tối đa 100 phần tử; chuyến không có điểm
+dừng trả `stops: []`. Mỗi phần tử chỉ gồm `name`, `latitude`, `longitude`, `sequence`, không chứa
+ID nội bộ. Không dựng GPS, geometry, điểm dừng hoặc ETA giả. Response luôn có:
 
 ```http
 Cache-Control: no-store
