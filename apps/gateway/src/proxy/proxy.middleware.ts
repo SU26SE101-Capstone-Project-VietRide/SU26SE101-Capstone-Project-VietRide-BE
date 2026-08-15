@@ -91,6 +91,7 @@ function isPhoneGateWhitelisted(method: string, path: string): boolean {
   const normalizedMethod = method.toUpperCase();
   return (
     (normalizedMethod === 'GET' && path === '/v1/users/me') ||
+    (normalizedMethod === 'GET' && (path === '/v1/policies' || path.startsWith('/v1/policies/'))) ||
     (normalizedMethod === 'POST' && path === '/v1/users/me/complete-profile') ||
     (normalizedMethod === 'POST' && path === '/v1/auth/logout') ||
     (normalizedMethod === 'POST' && path === '/v1/auth/refresh')

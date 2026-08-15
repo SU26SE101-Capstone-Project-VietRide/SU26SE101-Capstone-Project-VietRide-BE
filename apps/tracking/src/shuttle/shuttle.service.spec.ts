@@ -175,6 +175,75 @@ describe('ShuttleService', () => {
     expect(result).not.toHaveProperty('stops');
   });
 
+  it('maps the complete operator stop context without leaking internal pickup markers', () => {
+    const service = createPassengerContextService(null);
+    const context = createTrackingContext([
+      {
+        ...createStop(1, 'DELIVERED', false, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+        roadDistanceSnapshotMeters: 4_500,
+      },
+      {
+        ...createStop(2, 'PENDING', false, null),
+        isStation: true,
+      },
+    ]);
+    context.scope = 'OPERATOR';
+    context.direction = 'INBOUND_TO_STATION';
+    context.status = 'IN_PROGRESS';
+
+    const result = service.getOperatorContext(context);
+
+    expect(result).toEqual({
+      shuttleTripId: context.shuttleTripId,
+      mainTripId: context.mainTripId,
+      direction: 'INBOUND_TO_STATION',
+      status: 'IN_PROGRESS',
+      stops: [
+        expect.objectContaining({
+          pickupOrder: 1,
+          bookingId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          status: 'DELIVERED',
+          isStation: false,
+          roadDistanceMeters: 4_500,
+        }),
+        expect.objectContaining({ pickupOrder: 2, bookingId: null, isStation: true }),
+      ],
+      station: expect.objectContaining({
+        stationId: '66666666-6666-4666-8666-666666666666',
+        pickupOrder: 6,
+      }),
+    });
+    expect(JSON.stringify(result)).not.toContain('isOwnPickup');
+    expect(JSON.stringify(result)).not.toContain('roadDistanceSnapshotMeters');
+  });
+
+  it('returns null operator station for incomplete coordinates and fails closed on malformed context', () => {
+    const service = createPassengerContextService(null);
+    const context = createTrackingContext([
+      createStop(1, 'PENDING', false, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+    ]);
+    context.scope = 'OPERATOR';
+    context.direction = 'INBOUND_TO_STATION';
+    context.status = 'IN_PROGRESS';
+    context.station = {
+      stationId: '66666666-6666-4666-8666-666666666666',
+      name: 'Station',
+      latitude: null,
+      longitude: null,
+      pickupOrder: 2,
+    };
+
+    expect(service.getOperatorContext(context).station).toBeNull();
+
+    delete context.status;
+    expect(() => service.getOperatorContext(context)).toThrow(
+      expect.objectContaining({
+        status: 503,
+        response: { errorCode: 'TRACKING_CONTEXT_UNAVAILABLE', detail: expect.any(String) },
+      }),
+    );
+  });
+
   it('fails closed when own pickup or station metadata is incomplete', async () => {
     const service = createPassengerContextService(null);
     const invalidPickup = createTrackingContext([

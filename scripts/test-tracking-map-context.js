@@ -1,6 +1,6 @@
 const { randomUUID } = require('node:crypto');
 
-const requiredEnvironment = ['PASSENGER_TOKEN', 'TRIP_ID', 'SHUTTLE_TRIP_ID'];
+const requiredEnvironment = ['PASSENGER_TOKEN', 'OPERATOR_TOKEN', 'TRIP_ID', 'SHUTTLE_TRIP_ID'];
 const baseUrl = process.env.BASE_URL || process.env.TRACKING_URL;
 
 async function main() {
@@ -11,10 +11,12 @@ async function main() {
   }
 
   const token = process.env.PASSENGER_TOKEN;
+  const operatorToken = process.env.OPERATOR_TOKEN;
   const tripId = process.env.TRIP_ID;
   const shuttleTripId = process.env.SHUTTLE_TRIP_ID;
   const routeUrl = trackingUrl(`trips/${tripId}/route-geometry`);
   const shuttleUrl = trackingUrl(`shuttle-trips/${shuttleTripId}/passenger-context`);
+  const operatorShuttleUrl = trackingUrl(`shuttle-trips/${shuttleTripId}/operator-context`);
 
   const route = await request(routeUrl, token);
   assertStatus(route, 200, 'route geometry happy path');
@@ -58,6 +60,22 @@ async function main() {
   const passengerData = assertSuccessEnvelope(passenger, 'Shuttle passenger context');
   assertPassengerContext(passengerData, passenger.text);
   assertHeader(passenger, 'cache-control', 'private, no-store');
+
+  const operator = await request(operatorShuttleUrl, operatorToken);
+  assertStatus(operator, 200, 'Shuttle operator context');
+  const operatorData = assertSuccessEnvelope(operator, 'Shuttle operator context');
+  assertOperatorContext(operatorData, operator.text);
+  assertHeader(operator, 'cache-control', 'private, no-store');
+
+  const passengerDeniedOperatorContext = await request(operatorShuttleUrl, token);
+  assertStatus(passengerDeniedOperatorContext, 403, 'passenger operator-context denial');
+  assertErrorEnvelope(passengerDeniedOperatorContext, 'TRACKING_ACCESS_DENIED');
+
+  if (process.env.OTHER_OPERATOR_TOKEN) {
+    const otherOperator = await request(operatorShuttleUrl, process.env.OTHER_OPERATOR_TOKEN);
+    assertStatus(otherOperator, 403, 'other-tenant operator-context denial');
+    assertErrorEnvelope(otherOperator, 'TRACKING_ACCESS_DENIED');
+  }
 
   const postPickupShuttleTripId = process.env.POST_PICKUP_SHUTTLE_TRIP_ID;
   if (postPickupShuttleTripId) {
@@ -163,6 +181,9 @@ function assertPassengerContext(data, rawText) {
     assertAllowedKeys(pickup, [
       'bookingId',
       'pickupOrder',
+      'serviceAddress',
+      'serviceOrder',
+      'roadDistanceMeters',
       'latitude',
       'longitude',
       'status',
@@ -185,6 +206,50 @@ function assertPassengerContext(data, rawText) {
   ], 'station');
   for (const forbidden of ['passengerUserId', 'address', 'isOwnPickup', 'stops']) {
     if (rawText.includes(`"${forbidden}"`)) throw new Error(`Passenger response leaked ${forbidden}`);
+  }
+}
+
+function assertOperatorContext(data, rawText) {
+  assertAllowedKeys(data, [
+    'shuttleTripId',
+    'mainTripId',
+    'direction',
+    'status',
+    'stops',
+    'station',
+  ], 'operator context');
+  if (!['INBOUND_TO_STATION', 'OUTBOUND_FROM_STATION'].includes(data.direction)) {
+    throw new Error(`Unexpected Shuttle direction: ${data.direction}`);
+  }
+  if (!Array.isArray(data.stops) || data.stops.length === 0) {
+    throw new Error('Operator context must contain Shuttle stops');
+  }
+  for (const stop of data.stops) {
+    assertAllowedKeys(stop, [
+      'pickupOrder',
+      'bookingId',
+      'latitude',
+      'longitude',
+      'status',
+      'isStation',
+      'serviceAddress',
+      'serviceOrder',
+      'roadDistanceMeters',
+    ], 'operator stop');
+    assertCoordinate(stop, 'operator stop');
+    if (!['PENDING', 'PICKED_UP', 'DELIVERED', 'NO_SHOW', 'CANCELLED'].includes(stop.status)) {
+      throw new Error(`Unexpected operator stop status: ${stop.status}`);
+    }
+  }
+  assertNullableMarker(data.station, [
+    'stationId',
+    'name',
+    'latitude',
+    'longitude',
+    'pickupOrder',
+  ], 'operator station');
+  for (const forbidden of ['passengerUserId', 'displayName', 'phone', 'isOwnPickup', 'roadDistanceSnapshotMeters']) {
+    if (rawText.includes(`"${forbidden}"`)) throw new Error(`Operator response leaked ${forbidden}`);
   }
 }
 

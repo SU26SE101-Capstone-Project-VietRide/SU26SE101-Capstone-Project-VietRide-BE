@@ -1714,6 +1714,62 @@ describeExistingAccessGates('createProxyHandler RBAC and phone-required gates', 
     expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
   });
 
+  it.each(['PASSENGER', 'DRIVER', 'ASSISTANT', 'OPERATOR_STAFF', 'OPERATOR_ADMIN', 'SYSTEM_ADMIN'])(
+    'routes authenticated %s consumer Policy reads to RAG without a role gate',
+    async (role) => {
+      const path = '/v1/policies?operatorId=33333333-3333-4333-8333-333333333333&category=REFUND';
+      const upstreamHandler = arrangeProxyPass();
+      const signer = {
+        sign: jest.fn().mockResolvedValue('gateway-internal-token'),
+      } as unknown as InternalJwtSigner;
+      const handler = createProxyHandler(env, signer);
+      const operatorScoped = ['DRIVER', 'ASSISTANT', 'OPERATOR_STAFF', 'OPERATOR_ADMIN'].includes(
+        role,
+      );
+      const authorization = await makeAuthorizationHeader({
+        sub: `${role.toLowerCase()}-1`,
+        role,
+        ...(operatorScoped ? { operatorId: 'operator-1' } : {}),
+      });
+      const req = makeRequest(
+        path,
+        { authorization, 'x-request-id': `req-published-policy-${role.toLowerCase()}` },
+        'GET',
+      );
+      const res = makeResponse();
+      const next = jest.fn() as NextFunction;
+
+      await handler(req, res, next);
+
+      expect(signer.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ sub: `${role.toLowerCase()}-1`, role }),
+      );
+      expect(createProxyMiddlewareMock).toHaveBeenCalledWith(
+        expect.objectContaining({ target: env.RAG_BASE_URL }),
+      );
+      expect(req.url).toBe(path);
+      expect(req.originalUrl).toBe(path);
+      expect(upstreamHandler).toHaveBeenCalledWith(req, res, next);
+      expect(res.status).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects anonymous consumer Policy reads at Gateway', async () => {
+    const handler = createProxyHandler(env, {} as InternalJwtSigner);
+    const req = makeRequest('/v1/policies', { 'x-request-id': 'req-published-policy-anonymous' });
+    const res = makeResponse();
+
+    await handler(req, res, jest.fn() as NextFunction);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.jsonBody).toMatchObject({
+      success: false,
+      statusCode: 401,
+      error: { code: 'AUTH_TOKEN_INVALID' },
+    });
+    expect(createProxyMiddlewareMock).not.toHaveBeenCalled();
+  });
+
   it('gates operator Policy mutations and carries the JWT tenant to RAG', async () => {
     const upstreamHandler = arrangeProxyPass();
     const signer = {

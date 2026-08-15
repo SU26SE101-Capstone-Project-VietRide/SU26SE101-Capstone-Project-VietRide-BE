@@ -5324,6 +5324,52 @@ Response `200` dùng ADR 0004 envelope với `data`:
 - Errors: `400 VALIDATION_FAILED`; `401 UNAUTHORIZED`; `403 TRACKING_ACCESS_DENIED`;
   `404 SHUTTLE_TRIP_NOT_FOUND`; `503 TRACKING_AUTH_UNAVAILABLE`; `503 TRACKING_CONTEXT_UNAVAILABLE`.
 
+### GET `/v1/tracking/shuttle-trips/{shuttleTripId}/operator-context`
+
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. The caller is allowed only when the token `operatorId`
+owns the Shuttle Trip. The endpoint reuses the same tenant authorization context as Shuttle latest,
+ETA, and realtime room joins.
+
+Response `200` uses the ADR 0004 envelope with `data`:
+
+```json
+{
+  "shuttleTripId": "uuid",
+  "mainTripId": "uuid",
+  "direction": "INBOUND_TO_STATION",
+  "status": "IN_PROGRESS",
+  "stops": [
+    {
+      "pickupOrder": 1,
+      "bookingId": "uuid",
+      "latitude": 10.0,
+      "longitude": 106.0,
+      "status": "PENDING",
+      "isStation": false,
+      "serviceAddress": "123 Nguyen Hue, Quan 1",
+      "serviceOrder": 1,
+      "roadDistanceMeters": 4200
+    }
+  ],
+  "station": {
+    "stationId": "uuid",
+    "name": "string",
+    "latitude": 10.0,
+    "longitude": 106.0,
+    "pickupOrder": 3
+  }
+}
+```
+
+- `stops` contains all ordered passenger and Station stops for the owned Shuttle Trip. Passenger
+  stop status uses `PENDING`, `PICKED_UP`, `DELIVERED`, `NO_SHOW`, or `CANCELLED`; `bookingId` is
+  `null` for the Station stop. Passenger names and phone numbers are not returned.
+- Internal authorization markers such as `isOwnPickup` and distance snapshot compatibility fields
+  are never returned. `station` is nullable when valid Station coordinates are unavailable.
+- Response sets `Cache-Control: private, no-store` because passenger service addresses are PII.
+- Errors: `400 VALIDATION_FAILED`; `401 UNAUTHORIZED`; `403 TRACKING_ACCESS_DENIED`;
+  `404 SHUTTLE_TRIP_NOT_FOUND`; `503 TRACKING_AUTH_UNAVAILABLE`; `503 TRACKING_CONTEXT_UNAVAILABLE`.
+
 ### Chia sẻ Main Trip cho người thân
 
 Chỉ `PASSENGER` có Booking ownership của Main Trip được quản lý link. Trip phải chính xác
@@ -9536,10 +9582,20 @@ Routes:
 
 | Route | Role | Tenant |
 |---|---|---|
+| `GET /v1/policies` | any authenticated role | platform, or platform + requested operator |
+| `GET /v1/policies/{policyId}` | any authenticated role | published user-facing Policy |
 | `GET/POST /v1/admin/policies` | `SYSTEM_ADMIN` | platform (`operatorId=null`) |
 | `GET/PATCH/DELETE /v1/admin/policies/{policyId}` | `SYSTEM_ADMIN` | platform |
 | `GET/POST /v1/operator/policies` | `OPERATOR_ADMIN` | caller operator |
 | `GET/PATCH/DELETE /v1/operator/policies/{policyId}` | `OPERATOR_ADMIN` | caller operator |
+
+Consumer reads only expose active, non-deleted `FOR_USER` Policies. `GET /v1/policies` accepts
+optional `operatorId`, `category`, `search`, standard pagination,
+`sortBy=updatedAt|createdAt|title|version` and `sortDir=asc|desc`. Without `operatorId`, the list
+contains platform Policies only; with `operatorId`, pagination applies to the combined platform and
+requested-operator result. The consumer response omits `policyType`, `active`, `createdBy` and all
+audit/concurrency fields. A detail that is missing, inactive, deleted or not `FOR_USER` returns
+`404 POLICY_NOT_FOUND`.
 
 List query supports `policyType=FOR_OPERATOR|FOR_USER`, `category`, `active`, `search`, standard
 pagination, `sortBy=updatedAt|createdAt|title|version` and `sortDir=asc|desc`.
@@ -9884,9 +9940,49 @@ This section supersedes older field and endpoint descriptions where they conflic
 
 ### Operations and realtime
 
-- `GET /v1/tracking/operator/fleet-latest?status=` returns latest GPS items for the caller's
-  operator only: `{ tripId, latitude, longitude, speedKmh?, headingDeg?, recordedAt, status }`.
-  Trips without GPS are omitted.
+- `GET /v1/tracking/operator/fleet-latest?status=&include=shuttle` returns latest GPS items for the
+  caller's operator only. `include=shuttle` is optional and is the only accepted `include` value.
+  Every item is discriminated by `kind`:
+
+  ```json
+  {
+    "items": [
+      {
+        "kind": "TRIP",
+        "tripId": "uuid",
+        "latitude": 10.51,
+        "longitude": 106.12,
+        "speedKmh": 47.5,
+        "headingDeg": 215,
+        "recordedAt": "2026-08-15T03:00:00.000Z",
+        "status": "IN_PROGRESS"
+      },
+      {
+        "kind": "SHUTTLE",
+        "shuttleTripId": "uuid",
+        "mainTripId": "uuid",
+        "latitude": 10.76,
+        "longitude": 106.66,
+        "speedKmh": 24,
+        "headingDeg": 120,
+        "recordedAt": "2026-08-15T03:00:00.000Z",
+        "status": "IN_PROGRESS"
+      }
+    ],
+    "generatedAt": "2026-08-15T03:00:01.000Z"
+  }
+  ```
+
+  Main Trip behavior is unchanged except for the additive `kind: "TRIP"`. Shuttle items are
+  included only when `include=shuttle` and `status` is absent or `IN_PROGRESS`; completed,
+  cancelled, scheduled, missing-GPS, malformed, and expired Shuttle values are omitted. Shuttle
+  GPS `heading` is exposed as `headingDeg`. A Shuttle item never places its ID in `tripId`.
+  Invalid `include` returns `400 VALIDATION_FAILED`; projection or Redis failure returns
+  `503 TRACKING_FLEET_UNAVAILABLE`.
+- Tracking obtains active tenant-scoped Shuttle IDs through internal-JWT-only
+  `GET /internal/v1/operators/{operatorId}/tracking-shuttle-trips`, which returns the raw array
+  `{ shuttleTripId, mainTripId, status: "IN_PROGRESS" }[]`. The projection performs no Identity,
+  Vehicle, or passenger-profile enrichment.
 - ETA accepts legacy `stopId` or an explicit stop/station target. If no target is supplied, it
   returns the first cached target from the status-aware origin → stops → destination chain. Cold
   cache returns `{ eta: null }`; GET never invokes the provider synchronously. `stopName` is

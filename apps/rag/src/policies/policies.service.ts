@@ -11,6 +11,7 @@ import { z } from 'zod';
 import type { RagInternalUser } from '../auth/rag-internal-user.types';
 import type { CreatePolicyDto } from './dto/create-policy.dto';
 import type { ListPoliciesQueryDto } from './dto/list-policies.dto';
+import type { ListPublishedPoliciesQueryDto } from './dto/list-published-policies.dto';
 import type { UpdatePolicyDto } from './dto/update-policy.dto';
 import { IdentityPolicyActorProvider } from './identity-policy-actor.provider';
 import { PoliciesRepository } from './policies.repository';
@@ -20,8 +21,10 @@ import type {
   PolicyPage,
   PolicyResponse,
   PolicyTenantKind,
+  PublishedPolicyPage,
+  PublishedPolicyResponse,
 } from './policies.types';
-import { toPolicyResponse } from './policies.types';
+import { toPolicyResponse, toPublishedPolicyResponse } from './policies.types';
 
 const SYSTEM_ADMIN_ROLE = 'SYSTEM_ADMIN';
 const OPERATOR_ADMIN_ROLE = 'OPERATOR_ADMIN';
@@ -61,6 +64,31 @@ export class PoliciesService {
   ): Promise<PolicyResponse> {
     const operatorId = this.resolveTenant(tenantKind, user);
     return toPolicyResponse(await this.requirePolicy(policyId, operatorId));
+  }
+
+  async listPublished(query: ListPublishedPoliciesQueryDto): Promise<PublishedPolicyPage> {
+    const result = await this.repository.listPublished(query.operatorId ?? null, query);
+    const totalPages = Math.ceil(result.totalItems / query.pageSize);
+    return {
+      items: result.items.map(toPublishedPolicyResponse),
+      page: query.page,
+      pageSize: query.pageSize,
+      totalItems: result.totalItems,
+      totalPages,
+      hasNextPage: query.page < totalPages,
+      hasPreviousPage: query.page > 1,
+    };
+  }
+
+  async getPublished(policyId: string): Promise<PublishedPolicyResponse> {
+    const policy = await this.repository.findPublishedById(policyId);
+    if (!policy) {
+      throw new NotFoundException({
+        errorCode: 'POLICY_NOT_FOUND',
+        detail: 'Policy not found',
+      });
+    }
+    return toPublishedPolicyResponse(policy);
   }
 
   async create(

@@ -1,4 +1,9 @@
-import { ConflictException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { RagInternalUser } from '../auth/rag-internal-user.types';
 import { IdentityPolicyActorProvider } from './identity-policy-actor.provider';
 import type { CreatePolicyDto } from './dto/create-policy.dto';
@@ -21,6 +26,8 @@ describe('PoliciesService', () => {
     repository = {
       list: jest.fn(),
       findById: jest.fn(),
+      listPublished: jest.fn(),
+      findPublishedById: jest.fn(),
       createWithAudit: jest.fn(),
       updateWithAudit: jest.fn(),
       softDeleteWithAudit: jest.fn(),
@@ -165,6 +172,41 @@ describe('PoliciesService', () => {
     expect(actors.resolve).not.toHaveBeenCalled();
   });
 
+  it('lists published platform and requested operator Policies without creator metadata', async () => {
+    repository.listPublished.mockResolvedValue({
+      items: [makePolicy(), makePolicy({ operatorId: OPERATOR_ID })],
+      totalItems: 2,
+    });
+    const query = { ...publishedListQuery(), operatorId: OPERATOR_ID };
+
+    const result = await service.listPublished(query);
+
+    expect(repository.listPublished).toHaveBeenCalledWith(OPERATOR_ID, query);
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]).not.toHaveProperty('createdBy');
+    expect(result.items[1]).toMatchObject({ operatorId: OPERATOR_ID, category: 'REFUND' });
+  });
+
+  it('lists only published platform Policies when operatorId is omitted', async () => {
+    repository.listPublished.mockResolvedValue({ items: [makePolicy()], totalItems: 1 });
+    const query = publishedListQuery();
+
+    await service.listPublished(query);
+
+    expect(repository.listPublished).toHaveBeenCalledWith(null, query);
+  });
+
+  it('masks a non-published Policy detail as POLICY_NOT_FOUND', async () => {
+    repository.findPublishedById.mockResolvedValue(null);
+
+    const action = service.getPublished(POLICY_ID);
+
+    await expect(action).rejects.toBeInstanceOf(NotFoundException);
+    await expect(action).rejects.toMatchObject({
+      response: expect.objectContaining({ errorCode: 'POLICY_NOT_FOUND' }),
+    });
+  });
+
   it('soft-deletes with a DELETE audit snapshot and preserves tenant masking', async () => {
     const current = makePolicy({ operatorId: OPERATOR_ID, createdByUserId: OPERATOR_ADMIN_ID });
     repository.findById.mockResolvedValue(current);
@@ -197,6 +239,15 @@ function createDto(): CreatePolicyDto {
 }
 
 function listQuery() {
+  return {
+    page: 1,
+    pageSize: 20,
+    sortBy: 'updatedAt' as const,
+    sortDir: 'desc' as const,
+  };
+}
+
+function publishedListQuery() {
   return {
     page: 1,
     pageSize: 20,

@@ -63,6 +63,32 @@ export const policySchema: SchemaObject = {
   },
 };
 
+export const publishedPolicySchema: SchemaObject = {
+  type: 'object',
+  required: [
+    'id',
+    'operatorId',
+    'title',
+    'description',
+    'content',
+    'category',
+    'version',
+    'createdAt',
+    'updatedAt',
+  ],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    operatorId: { type: 'string', format: 'uuid', nullable: true },
+    title: { type: 'string' },
+    description: { type: 'string' },
+    content: { type: 'string' },
+    category: { type: 'string' },
+    version: { type: 'integer', minimum: 1 },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
+};
+
 export const policyCreateBodySchema: SchemaObject = {
   type: 'object',
   additionalProperties: false,

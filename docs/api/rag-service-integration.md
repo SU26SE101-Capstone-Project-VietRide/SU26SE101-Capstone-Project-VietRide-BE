@@ -49,6 +49,8 @@ FE/mobile không nhập `X-Internal-Auth` trong Swagger và không hardcode inte
 | `PATCH` | `/v1/admin/rag-config/:key` | Cập nhật một config key. | `SYSTEM_ADMIN`. |
 | `GET` | `/v1/admin/rag-config/:key/history` | Xem lịch sử thay đổi của một config key. | `SYSTEM_ADMIN`. |
 | `POST` | `/v1/admin/rag-config/:key/rollback` | Rollback config key về một history entry. | `SYSTEM_ADMIN`. |
+| `GET` | `/v1/policies` | Đọc Policy đang công bố cho người dùng; có thể gộp Policy nền tảng và nhà xe. | Mọi role đã đăng nhập. |
+| `GET` | `/v1/policies/:policyId` | Xem chi tiết một Policy đang công bố cho người dùng. | Mọi role đã đăng nhập. |
 | `GET` | `/v1/admin/policies` | Liệt kê và lọc Policy cấp nền tảng. | `SYSTEM_ADMIN`. |
 | `POST` | `/v1/admin/policies` | Tạo Policy cấp nền tảng. | `SYSTEM_ADMIN`. |
 | `GET` | `/v1/admin/policies/:policyId` | Xem chi tiết Policy cấp nền tảng. | `SYSTEM_ADMIN`. |
@@ -294,6 +296,29 @@ curl -X PATCH "https://api.example.com/v1/admin/rag-config/chat.no_context_text"
   -H "Content-Type: application/json" \
   -d '{"value":"Không tìm thấy ngữ cảnh phù hợp.","reason":"Cập nhật nội dung hiển thị"}'
 ```
+
+### `/v1/policies/*`
+
+- **Dùng để**: Web/Mobile đọc nội dung Policy dành cho người dùng. Đây là Policy cấp nền tảng hoặc cấp nhà xe, không phải Policy riêng của tài xế.
+- **Quyền**: mọi role có access token hợp lệ đều gọi được; anonymous nhận `401 AUTH_TOKEN_INVALID`. Passenger chưa hoàn tất số điện thoại vẫn được đọc Policy.
+- **Header**:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+`GET /v1/policies` hỗ trợ `operatorId`, `category`, `search`, `page`, `pageSize`, `sortBy=updatedAt|createdAt|title|version` và `sortDir=asc|desc`. Không truyền `operatorId` thì chỉ trả Policy nền tảng. Có `operatorId` thì kết quả phân trang chung gồm Policy nền tảng và Policy của đúng nhà xe đó.
+
+Server luôn giới hạn kết quả ở `policyType=FOR_USER`, `active=true` và chưa soft-delete. Client không thể yêu cầu `FOR_OPERATOR`, Policy inactive hoặc Policy đã xóa. Response consumer chỉ gồm `id`, `operatorId`, `title`, `description`, `content`, `category`, `version`, `createdAt`, `updatedAt`; không trả người tạo, audit log hoặc row version.
+
+Ví dụ:
+
+```bash
+curl "https://api.example.com/v1/policies?operatorId=44444444-4444-4444-8444-444444444444&page=1&pageSize=20" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+`GET /v1/policies/:policyId` áp dụng cùng điều kiện công bố. ID không tồn tại, `FOR_OPERATOR`, inactive hoặc đã xóa đều trả `404 POLICY_NOT_FOUND` để không tiết lộ nội dung quản trị.
 
 ### `/v1/admin/policies/*`
 

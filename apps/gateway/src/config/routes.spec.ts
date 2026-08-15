@@ -131,6 +131,7 @@ describe('buildRouteTable', () => {
   });
 
   it('routes generic Policy APIs to RAG with exact admin roles', () => {
+    const publishedRoute = matchRoute(routes, '/v1/policies/33333333-3333-4333-8333-333333333333');
     const adminRoute = matchRoute(
       routes,
       '/v1/admin/policies/11111111-1111-4111-8111-111111111111',
@@ -156,6 +157,14 @@ describe('buildRouteTable', () => {
     });
     expect(matchRoute(routes, '/v1/operator/policies')).toBe(operatorRoute);
     expect(operatorRoute?.forwardUserAuthorization).not.toBe(true);
+    expect(publishedRoute).toMatchObject({
+      prefix: '/v1/policies',
+      target: env.RAG_BASE_URL,
+      authRequired: 'user',
+    });
+    expect(publishedRoute?.requiredRoles).toBeUndefined();
+    expect(publishedRoute?.forwardUserAuthorization).not.toBe(true);
+    expect(matchRoute(routes, '/v1/policies')).toBe(publishedRoute);
   });
 
   it('routes all six operator XLSX reports to their owning services with operator roles', () => {

@@ -91,6 +91,33 @@ export interface ShuttlePassengerContextDto {
   } | null;
 }
 
+export interface ShuttleOperatorStopDto {
+  pickupOrder: number;
+  bookingId: string | null;
+  latitude: number;
+  longitude: number;
+  status: string;
+  isStation: boolean;
+  serviceAddress?: string;
+  serviceOrder?: number;
+  roadDistanceMeters?: number;
+}
+
+export interface ShuttleOperatorContextDto {
+  shuttleTripId: string;
+  mainTripId: string;
+  direction: ShuttleDirection;
+  status: string;
+  stops: ShuttleOperatorStopDto[];
+  station: {
+    stationId: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+    pickupOrder: number;
+  } | null;
+}
+
 export type ShuttleGpsEvent = ShuttleGpsUpdateDto;
 const RECORD_SHUTTLE_GPS_SCRIPT = `
 local existing = redis.call('GET', KEYS[1])
@@ -271,6 +298,57 @@ export class ShuttleService {
     };
   }
 
+  getOperatorContext(context: ShuttleTrackingContext): ShuttleOperatorContextDto {
+    if (context.scope !== 'OPERATOR'
+      || context.direction === undefined
+      || context.status === undefined
+      || context.station === undefined
+      || context.stops.some((stop) => !this.isValidCoordinate(stop.latitude, stop.longitude))) {
+      throw this.contextUnavailable();
+    }
+
+    const stops = context.stops
+      .map((stop): ShuttleOperatorStopDto => ({
+        pickupOrder: stop.pickupOrder,
+        bookingId: stop.bookingId ?? null,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        status: stop.status,
+        isStation: stop.isStation,
+        ...(stop.serviceAddress !== undefined ? { serviceAddress: stop.serviceAddress } : {}),
+        ...(stop.serviceOrder !== undefined ? { serviceOrder: stop.serviceOrder } : {}),
+        ...(stop.roadDistanceMeters !== undefined
+          ? { roadDistanceMeters: stop.roadDistanceMeters }
+          : typeof stop.roadDistanceSnapshotMeters === 'number'
+            ? { roadDistanceMeters: stop.roadDistanceSnapshotMeters }
+            : {}),
+      }))
+      .sort((left, right) => left.pickupOrder - right.pickupOrder
+        || (left.bookingId ?? '').localeCompare(right.bookingId ?? ''));
+
+    const station = context.station
+      && context.station.latitude !== null
+      && context.station.longitude !== null
+      && this.isValidCoordinate(context.station.latitude, context.station.longitude)
+      ? {
+          stationId: context.station.stationId,
+          name: context.station.name,
+          latitude: context.station.latitude,
+          longitude: context.station.longitude,
+          pickupOrder: context.station.pickupOrder,
+        }
+      : null;
+
+    return {
+      shuttleTripId: context.shuttleTripId,
+      mainTripId: context.mainTripId,
+      direction: context.direction,
+      status: context.status,
+      stops,
+      station,
+    };
+  }
+
   private async readCurrentPickupOrder(context: ShuttleTrackingContext): Promise<number | undefined> {
     const raw = await this.redis.getClient().get(shuttleEtaStateKey(context.shuttleTripId));
     if (raw) {
@@ -313,7 +391,7 @@ export class ShuttleService {
   private contextUnavailable(): ServiceUnavailableException {
     return new ServiceUnavailableException({
       errorCode: 'TRACKING_CONTEXT_UNAVAILABLE',
-      detail: 'Shuttle passenger context is unavailable',
+      detail: 'Shuttle tracking context is unavailable',
     });
   }
 

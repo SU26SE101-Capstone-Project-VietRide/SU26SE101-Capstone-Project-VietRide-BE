@@ -18,7 +18,12 @@ import {
 } from './shuttle-tracking-auth.guard';
 import { ShuttleTripIdParamSchema, type ShuttleTripIdParamDto } from './shuttle.dto';
 import { ShuttlePassengerContextEnvelopeSwaggerDto } from './shuttle-passenger-context-response.dto';
-import { ShuttleService, type ShuttlePassengerContextDto } from './shuttle.service';
+import { ShuttleOperatorContextEnvelopeSwaggerDto } from './shuttle-operator-context-response.dto';
+import {
+  ShuttleService,
+  type ShuttleOperatorContextDto,
+  type ShuttlePassengerContextDto,
+} from './shuttle.service';
 
 @ApiTags('Shuttle Tracking')
 @ApiBearerAuth()
@@ -57,6 +62,32 @@ export class ShuttleTrackingController {
 
     response.setHeader('Cache-Control', 'private, no-store');
     return this.service.getPassengerContext(request.shuttleTrackingContext);
+  }
+
+  @Get(':shuttleTripId/operator-context')
+  @ApiOperation({ summary: 'Get the owning operator complete Shuttle stop context' })
+  @ApiParam({ name: 'shuttleTripId', type: 'string', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Operator-owned Shuttle stop context.', type: ShuttleOperatorContextEnvelopeSwaggerDto })
+  @ApiResponse({ status: 400, description: 'Invalid shuttleTripId.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 401, description: 'Missing or invalid token.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 403, description: 'Operator Shuttle tracking access denied.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 404, description: 'Shuttle trip not found.', type: ApiErrorEnvelopeDto })
+  @ApiResponse({ status: 503, description: 'Authorization or Shuttle context unavailable.', type: ApiErrorEnvelopeDto })
+  operatorContext(
+    @Param(new ZodValidationPipe(ShuttleTripIdParamSchema)) params: ShuttleTripIdParamDto,
+    @Req() request: AuthorizedShuttleTrackingRequest,
+    @Res({ passthrough: true }) response: Response,
+  ): ShuttleOperatorContextDto {
+    if (request.shuttleTrackingContext?.scope !== 'OPERATOR'
+      || request.shuttleTrackingContext.shuttleTripId !== params.shuttleTripId) {
+      throw new ForbiddenException({
+        errorCode: 'TRACKING_ACCESS_DENIED',
+        detail: 'Only the owning operator may access Shuttle operator context',
+      });
+    }
+
+    response.setHeader('Cache-Control', 'private, no-store');
+    return this.service.getOperatorContext(request.shuttleTrackingContext);
   }
 
   @Get(':shuttleTripId/latest')

@@ -16,6 +16,7 @@ import { OperatorFleetAuthGuard } from './operator-fleet-auth.guard';
 import { OperatorFleetController } from './operator-fleet.controller';
 import { OperatorFleetService } from './operator-fleet.service';
 import { OperatorTripProjectionProvider } from './operator-trip-projection.provider';
+import { OperatorShuttleProjectionProvider } from './operator-shuttle-projection.provider';
 import { EtaModule } from '../eta/eta.module';
 
 @Module({
@@ -30,6 +31,7 @@ import { EtaModule } from '../eta/eta.module';
     OperatorFleetAuthGuard,
     OperatorFleetService,
     OperatorTripProjectionProvider,
+    OperatorShuttleProjectionProvider,
     { provide: TRACKING_JWT_VERIFIER, useClass: JoseUserJwtVerifier },
     { provide: TRACKING_AUTHORIZATION_ADAPTER, useClass: HttpTrackingAuthorizationAdapter },
   ],
