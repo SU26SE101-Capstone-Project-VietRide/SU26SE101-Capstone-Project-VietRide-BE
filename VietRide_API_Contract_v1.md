@@ -5324,6 +5324,52 @@ Response `200` dùng ADR 0004 envelope với `data`:
 - Errors: `400 VALIDATION_FAILED`; `401 UNAUTHORIZED`; `403 TRACKING_ACCESS_DENIED`;
   `404 SHUTTLE_TRIP_NOT_FOUND`; `503 TRACKING_AUTH_UNAVAILABLE`; `503 TRACKING_CONTEXT_UNAVAILABLE`.
 
+### GET `/v1/tracking/shuttle-trips/{shuttleTripId}/operator-context`
+
+Auth: `OPERATOR_ADMIN` or `OPERATOR_STAFF`. The caller is allowed only when the token `operatorId`
+owns the Shuttle Trip. The endpoint reuses the same tenant authorization context as Shuttle latest,
+ETA, and realtime room joins.
+
+Response `200` uses the ADR 0004 envelope with `data`:
+
+```json
+{
+  "shuttleTripId": "uuid",
+  "mainTripId": "uuid",
+  "direction": "INBOUND_TO_STATION",
+  "status": "IN_PROGRESS",
+  "stops": [
+    {
+      "pickupOrder": 1,
+      "bookingId": "uuid",
+      "latitude": 10.0,
+      "longitude": 106.0,
+      "status": "PENDING",
+      "isStation": false,
+      "serviceAddress": "123 Nguyen Hue, Quan 1",
+      "serviceOrder": 1,
+      "roadDistanceMeters": 4200
+    }
+  ],
+  "station": {
+    "stationId": "uuid",
+    "name": "string",
+    "latitude": 10.0,
+    "longitude": 106.0,
+    "pickupOrder": 3
+  }
+}
+```
+
+- `stops` contains all ordered passenger and Station stops for the owned Shuttle Trip. Passenger
+  stop status uses `PENDING`, `PICKED_UP`, `DELIVERED`, `NO_SHOW`, or `CANCELLED`; `bookingId` is
+  `null` for the Station stop. Passenger names and phone numbers are not returned.
+- Internal authorization markers such as `isOwnPickup` and distance snapshot compatibility fields
+  are never returned. `station` is nullable when valid Station coordinates are unavailable.
+- Response sets `Cache-Control: private, no-store` because passenger service addresses are PII.
+- Errors: `400 VALIDATION_FAILED`; `401 UNAUTHORIZED`; `403 TRACKING_ACCESS_DENIED`;
+  `404 SHUTTLE_TRIP_NOT_FOUND`; `503 TRACKING_AUTH_UNAVAILABLE`; `503 TRACKING_CONTEXT_UNAVAILABLE`.
+
 ### Chia sẻ Main Trip cho người thân
 
 Chỉ `PASSENGER` có Booking ownership của Main Trip được quản lý link. Trip phải chính xác
