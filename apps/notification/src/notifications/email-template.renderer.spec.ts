@@ -50,18 +50,18 @@ describe('EmailTemplateRenderer', () => {
       const result = renderer.render(EmailTemplateKey.SET_INITIAL_PASSWORD, {
         userId: '11111111-1111-4111-8111-111111111111',
         displayName: 'Staff Member',
-        setInitialPasswordUrl: 'https://app.vietride.app/auth/set-password?token=abc',
+        setInitialPasswordUrl: 'https://app.vietride.online/auth/set-password?token=abc',
         expiresAt: '2026-06-23T10:00:00.000Z',
       });
 
       expect(result.subject).toBe('Thiết lập mật khẩu VietRide');
-      expect(result.text).toContain('https://app.vietride.app/auth/set-password?token=abc');
-      expect(result.html).toContain('href="https://app.vietride.app/auth/set-password?token=abc"');
+      expect(result.text).toContain('https://app.vietride.online/auth/set-password?token=abc');
+      expect(result.html).toContain('href="https://app.vietride.online/auth/set-password?token=abc"');
     });
 
     it('still accepts the legacy `setPasswordUrl` field', () => {
       const result = renderer.render(EmailTemplateKey.SET_INITIAL_PASSWORD, {
-        setPasswordUrl: 'https://app.vietride.app/auth/set-password?token=legacy',
+        setPasswordUrl: 'https://app.vietride.online/auth/set-password?token=legacy',
       });
 
       expect(result.text).toContain('token=legacy');

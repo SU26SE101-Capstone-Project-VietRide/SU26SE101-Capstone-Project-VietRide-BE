@@ -3675,7 +3675,7 @@ Request:
   "toEmail": "recipient@example.com",
   "templateKey": "PARCEL_DELIVERY_LINK",
   "templateData": {
-    "deliveryUrl": "https://app.vietride.app/parcels/delivery/confirm?token=<runtime-token>",
+    "deliveryUrl": "https://app.vietride.online/parcels/delivery/confirm?token=<runtime-token>",
     "parcelCode": "VRP-20260730-ABC123",
     "expiresAt": "2026-08-01T03:00:00Z"
   }

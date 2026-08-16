@@ -39,7 +39,7 @@ public sealed class NotificationEmailServiceTests
 
         await _sut.SendAccountCreatedLinkAsync(
             "staff@vietride.local",
-            new AccountCreatedEmailDto(operationId, userId, "Staff Member", "https://app.vietride.app/auth/set-password?token=abc", expiresAt));
+            new AccountCreatedEmailDto(operationId, userId, "Staff Member", "https://app.vietride.online/auth/set-password?token=abc", expiresAt));
 
         captured.Should().NotBeNull();
         captured!.IdempotencyKey.Should().Be(operationId);
@@ -47,7 +47,7 @@ public sealed class NotificationEmailServiceTests
         captured.ToEmail.Should().Be("staff@vietride.local");
         captured.TemplateData.Should().Contain("userId", userId);
         captured.TemplateData.Should().Contain("displayName", "Staff Member");
-        captured.TemplateData["setInitialPasswordUrl"].Should().Be("https://app.vietride.app/auth/set-password?token=abc");
+        captured.TemplateData["setInitialPasswordUrl"].Should().Be("https://app.vietride.online/auth/set-password?token=abc");
         captured.TemplateData.Should().Contain("expiresAt", expiresAt);
     }
 

@@ -569,7 +569,7 @@ Cập nhật thông tin công ty vận tải và bến xe khai thác.
 
   **Driver/Assistant initial password flow:**
   - OPERATOR_ADMIN tạo User { role=DRIVER hoặc ASSISTANT } qua dashboard, chỉ nhập email + thông tin cá nhân (KHÔNG nhập password).
-  - Identity Service tự generate `EmailVerificationToken { purpose=SET_INITIAL_PASSWORD, code=UUID v4, expiresAt=now+48h }` và gửi email "Tài khoản VietRide đã được tạo" kèm link `https://app.vietride.app/auth/set-password?token=<token>`.
+  - Identity Service tự generate `EmailVerificationToken { purpose=SET_INITIAL_PASSWORD, code=UUID v4, expiresAt=now+48h }` và gửi email "Tài khoản VietRide đã được tạo" kèm link `https://app.vietride.online/auth/set-password?token=<token>`.
   - Driver/Assistant click link → trang đặt password lần đầu → `POST /v1/auth/set-initial-password { token, password }` → Identity Service set passwordHash, mark token used, set `User.status = ACTIVE`.
   - Trước khi set password lần đầu, User.status = `PENDING_INITIAL_PASSWORD` (UserStatus enum) — không login được.
   - Token hết hạn 48h: OPERATOR_ADMIN có thể resend từ dashboard (revoke token cũ, gen mới).
@@ -1897,7 +1897,7 @@ VNPay IPN handler (referenceType=BOOKING_GROUP):
     IF ROW_COUNT < 2:
       -- Edge case: 1 booking đã EXPIRED (rất hiếm — chỉ xảy ra nếu Hangfire chạy ngay trước IPN)
       -- Sẽ có 1 booking CONFIRMED, 1 booking EXPIRED
-      -- Compensation: 
+      -- Compensation:
       compensateAmount = fare của booking EXPIRED  (chiều bị mất seat)
       → Payment Service:
           INSERT Payment { referenceType=BOOKING_REFUND, referenceId=expiredBookingId,
@@ -1906,10 +1906,10 @@ VNPay IPN handler (referenceType=BOOKING_GROUP):
           INSERT PlatformWalletTransaction { type=DEBIT, referenceType=BOOKING_REFUND,
                                              amount=compensateAmount,
                                              note="VNPay paid but 1 booking expired race" }
-          INSERT OperatorLedgerEntry { entryType=BOOKING_REFUND, amount=-compensateAmount, 
+          INSERT OperatorLedgerEntry { entryType=BOOKING_REFUND, amount=-compensateAmount,
                                        note="VNPay paid but 1 booking expired race" }
       → Notification Service push passenger:
-          "Chiều [outbound/return] không thể giữ ghế. Đã hoàn [X] VND về ví. 
+          "Chiều [outbound/return] không thể giữ ghế. Đã hoàn [X] VND về ví.
            Chiều còn lại đã xác nhận thành công."
       → Booking đã CONFIRMED của chiều còn lại — KHÔNG cancel (passenger vẫn dùng được)
 ```
