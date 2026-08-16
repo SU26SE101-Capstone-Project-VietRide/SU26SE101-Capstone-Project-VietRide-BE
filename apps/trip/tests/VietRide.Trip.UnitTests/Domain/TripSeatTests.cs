@@ -38,7 +38,7 @@ public sealed class TripSeatTests
 
         var booked = TripSeat.Create(Guid.NewGuid(), "A2");
         booked.MarkHeld();
-        booked.MarkBooked();
+        booked.MarkBooked(Guid.NewGuid());
         FluentActions.Invoking(() => booked.Disable("broken"))
             .Should().Throw<InvalidOperationException>();
     }
@@ -56,5 +56,39 @@ public sealed class TripSeatTests
     public void Create_NormalizesSeatNumber()
     {
         TripSeat.Create(Guid.NewGuid(), " a1 ").SeatNumber.Should().Be("A1");
+    }
+
+    [Fact]
+    public void MarkBooked_RejectsEmptyBookingId()
+    {
+        var seat = TripSeat.Create(Guid.NewGuid(), "A1");
+        seat.MarkHeld();
+
+        FluentActions.Invoking(() => seat.MarkBooked(Guid.Empty))
+            .Should().Throw<ArgumentException>();
+        seat.Status.Should().Be(TripSeatStatus.HELD);
+        seat.BookingId.Should().BeNull();
+    }
+
+    [Fact]
+    public void ReleaseBooked_RequiresOwnerAndClearsOwnership()
+    {
+        var bookingId = Guid.NewGuid();
+        var seat = TripSeat.Create(Guid.NewGuid(), "A1");
+        seat.MarkHeld();
+        seat.MarkBooked(bookingId);
+
+        FluentActions.Invoking(() => seat.ReleaseBooked(Guid.NewGuid()))
+            .Should().Throw<InvalidOperationException>();
+        seat.Status.Should().Be(TripSeatStatus.BOOKED);
+        seat.BookingId.Should().Be(bookingId);
+
+        seat.ReleaseBooked(bookingId);
+
+        seat.Status.Should().Be(TripSeatStatus.AVAILABLE);
+        seat.BookingId.Should().BeNull();
+
+        seat.Hold();
+        seat.Status.Should().Be(TripSeatStatus.HELD);
     }
 }

@@ -229,10 +229,10 @@ public sealed class TripVehicleSwapServiceIntegrationTests
             VALUES
                 ({tripId}, {operatorId}, {routeId}, {oldVehicleId}, CAST({oldLayout} AS jsonb), {driverUserId}, {departure},
                  {departure.AddHours(4)}, 'MANUAL', 100000);
-            INSERT INTO vietride_trip.trip_seats (id, trip_id, seat_number, seat_type, status)
+            INSERT INTO vietride_trip.trip_seats (id, trip_id, seat_number, seat_type, status, booking_id)
             VALUES
-                ({Guid.NewGuid()}, {tripId}, 'A01', 'VIP', 'BOOKED'),
-                ({Guid.NewGuid()}, {tripId}, 'A02', 'STANDARD', 'AVAILABLE');
+                ({Guid.NewGuid()}, {tripId}, 'A01', 'VIP', 'BOOKED', {bookingId}),
+                ({Guid.NewGuid()}, {tripId}, 'A02', 'STANDARD', 'AVAILABLE', NULL);
             """);
         db.ChangeTracker.Clear();
 

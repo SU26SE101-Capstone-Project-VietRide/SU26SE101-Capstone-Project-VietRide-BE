@@ -688,13 +688,23 @@ CREATE TABLE trip_seats (
     seat_number VARCHAR(20) NOT NULL,
     seat_type trip_seat_type NOT NULL DEFAULT 'STANDARD',
     status trip_seat_status NOT NULL DEFAULT 'AVAILABLE',
+    booking_id UUID NULL,
     disabled_reason TEXT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_trip_seats_booking_owner CHECK (
+        (status = 'BOOKED' AND booking_id IS NOT NULL)
+        OR (status <> 'BOOKED' AND booking_id IS NULL)
+    )
 );
 
 CREATE UNIQUE INDEX uq_trip_seats_trip_seat ON trip_seats (trip_id, seat_number);
 CREATE INDEX idx_trip_seats_trip_status ON trip_seats (trip_id, status);
+CREATE INDEX idx_trip_seats_trip_booking ON trip_seats (trip_id, booking_id)
+    WHERE booking_id IS NOT NULL;
+
+COMMENT ON COLUMN trip_seats.booking_id IS
+    'Logical cross-service reference to vietride_booking.bookings.id; no database FK.';
 
 -- -----------------------------------------------------------------------------
 -- trip_stops (snapshot from RouteStop; intermediate only)

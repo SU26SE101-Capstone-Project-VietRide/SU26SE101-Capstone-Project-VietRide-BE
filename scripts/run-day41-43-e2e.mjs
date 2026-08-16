@@ -558,16 +558,17 @@ function seed() {
            'COMPLETED','MANUAL',100000
     FROM generate_series(1,10000) AS g
     ON CONFLICT (id) DO NOTHING;
-    INSERT INTO trip_seats (id,trip_id,seat_number,seat_type,status)
-    SELECT gen_random_uuid(), t.id, seat.seat_number, 'STANDARD', seat.status::trip_seat_status
+    INSERT INTO trip_seats (id,trip_id,seat_number,seat_type,status,booking_id)
+    SELECT gen_random_uuid(), t.id, seat.seat_number, 'STANDARD', seat.status::trip_seat_status,
+           CASE WHEN seat.status='BOOKED' THEN md5('day4143-seat-owner:'||t.id::text)::uuid END
     FROM trips t
     CROSS JOIN (VALUES ('D01','BOOKED'),('D02','AVAILABLE')) AS seat(seat_number,status)
     WHERE t.operator_id='${operatorA}' AND t.id::text LIKE '41430000-0000-4000-8001-%'
     ON CONFLICT (trip_id,seat_number) DO NOTHING;
-    INSERT INTO trip_seats (id,trip_id,seat_number,seat_type,status)
+    INSERT INTO trip_seats (id,trip_id,seat_number,seat_type,status,booking_id)
     VALUES
-      (gen_random_uuid(),'${tripB}','B01','STANDARD','BOOKED'),
-      (gen_random_uuid(),'${tripB}','B02','STANDARD','AVAILABLE')
+      (gen_random_uuid(),'${tripB}','B01','STANDARD','BOOKED',md5('day4143-seat-owner:${tripB}')::uuid),
+      (gen_random_uuid(),'${tripB}','B02','STANDARD','AVAILABLE',NULL)
     ON CONFLICT (trip_id,seat_number) DO NOTHING;
   `);
 

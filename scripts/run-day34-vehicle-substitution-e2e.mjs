@@ -117,7 +117,10 @@ function resolveNpxCli() {
 
 function seed() {
   const seats = ids.passengers
-    .map((_, index) => `('${uuid()}','${ids.oldTrip}','A0${index + 1}','STANDARD','BOOKED')`)
+    .map(
+      (_, index) =>
+        `('${uuid()}','${ids.oldTrip}','A0${index + 1}','STANDARD','BOOKED','${ids.booking}')`,
+    )
     .join(',');
   psql(
     'vietride_trip',
@@ -158,7 +161,7 @@ function seed() {
       ('${ids.oldTrip}', '${ids.escalatedParcel}', 3.25, 0.0040, 'LOADED', now());
 
     INSERT INTO vietride_trip.trip_seats (
-      id, trip_id, seat_number, seat_type, status)
+      id, trip_id, seat_number, seat_type, status, booking_id)
     VALUES ${seats};
   `,
   );

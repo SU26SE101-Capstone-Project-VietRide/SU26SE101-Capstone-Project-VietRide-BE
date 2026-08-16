@@ -11,6 +11,7 @@ public sealed class TripSeat : BaseEntity<Guid>
     public string SeatNumber { get; private set; } = string.Empty;
     public TripSeatType SeatType { get; private set; } = TripSeatType.STANDARD;
     public TripSeatStatus Status { get; private set; } = TripSeatStatus.AVAILABLE;
+    public Guid? BookingId { get; private set; }
     public string? DisabledReason { get; private set; }
 
     private TripSeat() { }
@@ -20,7 +21,8 @@ public sealed class TripSeat : BaseEntity<Guid>
         string seatNumber,
         TripSeatType seatType = TripSeatType.STANDARD,
         TripSeatStatus status = TripSeatStatus.AVAILABLE,
-        string? disabledReason = null)
+        string? disabledReason = null,
+        Guid? bookingId = null)
     {
         if (tripId == Guid.Empty)
         {
@@ -36,6 +38,14 @@ public sealed class TripSeat : BaseEntity<Guid>
         {
             throw new ArgumentException("Only unavailable seats may have a disabled reason.", nameof(disabledReason));
         }
+        if (status == TripSeatStatus.BOOKED && (!bookingId.HasValue || bookingId.Value == Guid.Empty))
+        {
+            throw new ArgumentException("A booked seat requires a booking id.", nameof(bookingId));
+        }
+        if (status != TripSeatStatus.BOOKED && bookingId.HasValue)
+        {
+            throw new ArgumentException("Only booked seats may have a booking id.", nameof(bookingId));
+        }
 
         return new TripSeat
         {
@@ -44,6 +54,7 @@ public sealed class TripSeat : BaseEntity<Guid>
             SeatNumber = normalizedSeatNumber.ToUpperInvariant(),
             SeatType = seatType,
             Status = status,
+            BookingId = bookingId,
             DisabledReason = disabledReason,
         };
     }
@@ -64,16 +75,33 @@ public sealed class TripSeat : BaseEntity<Guid>
         Status = TripSeatStatus.HELD;
     }
 
-    public void MarkBooked()
+    public void MarkBooked(Guid bookingId)
     {
+        ValidateGuid(bookingId, nameof(bookingId));
         EnsureStatus(TripSeatStatus.HELD, nameof(MarkBooked));
         Status = TripSeatStatus.BOOKED;
+        BookingId = bookingId;
     }
 
     public void Release()
     {
         EnsureStatus(TripSeatStatus.HELD, nameof(Release));
         Status = TripSeatStatus.AVAILABLE;
+        BookingId = null;
+        DisabledReason = null;
+    }
+
+    public void ReleaseBooked(Guid bookingId)
+    {
+        ValidateGuid(bookingId, nameof(bookingId));
+        EnsureStatus(TripSeatStatus.BOOKED, nameof(ReleaseBooked));
+        if (BookingId != bookingId)
+        {
+            throw new InvalidOperationException("Only the owning booking may release a booked seat.");
+        }
+
+        Status = TripSeatStatus.AVAILABLE;
+        BookingId = null;
         DisabledReason = null;
     }
 

@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.73.0
+> **Phiên bản:** 1.74.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-14
+> **Cập nhật lần cuối:** 2026-08-16
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -2237,8 +2237,8 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | `GET /internal/v1/operators/{operatorId}/route-performance?month=YYYY-MM` | Payment | Raw Asia/Ho_Chi_Minh-month trip/completed-trip aggregates grouped by route for the explicit operator tenant |
 | `POST /internal/v1/trips/{tripId}/lock-seats` | Booking | Lock seats trong checkout (TTL 10 phút Redis) |
 | `POST /internal/v1/trips/round-trip/lock-seats` | Booking | Lock outbound + return seats atomically in one Trip-owned Redis Lua script; if either leg fails, no seat is held |
-| `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Release seat khi payment fail/timeout |
-| `POST /internal/v1/trips/{tripId}/book-seats` | Booking | Convert HELD → BOOKED khi payment success (API contract canonical name; was `confirm-seats`) |
+| `POST /internal/v1/trips/{tripId}/release-seats` | Booking | Chỉ release HELD → AVAILABLE khi payment fail/timeout; không release BOOKED |
+| `POST /internal/v1/trips/{tripId}/book-seats` | Booking | Convert HELD → BOOKED và ghi `bookingId` owner khi payment success (API contract canonical name; was `confirm-seats`) |
 | `GET /internal/v1/trips/{tripId}/passengers-pending` | Booking | Cho operator dashboard |
 | `GET /internal/v1/stations/{id}` · `GET /internal/v1/stops/{id}` · `GET /internal/v1/routes/{id}` | All services | Trip internal-auth required; raw DTO lookup. Station active returns canonical resolution; merged soft-delete returns original identity plus terminal `canonicalStationId`; ordinary soft-delete/missing returns `STATION_NOT_FOUND`. Stop not found returns `STOP_NOT_FOUND`. Errors use ADR 0004 envelope. |
 | `GET /internal/v1/routes/search?operatorId=&search=` | Parcel | Internal-JWT-only operator-scoped Route search over Route name and origin/destination Station text; raw response `{routeIds:uuid[]}` and no Gateway exposure. |
@@ -2331,7 +2331,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `identity.firebase_session.revoke_requested` | Identity | Identity | `{ eventId, occurredAt, userId, reason }`; System/Operator user lock emits `USER_LOCKED`, self password change emits `PASSWORD_CHANGED`, and operator suspend emits one request per scoped user; consumer calls Firebase refresh-token revocation, treats missing Firebase users as no-op, and lets transient failures retry/DLQ |
 | `booking.booking.created` | Booking | Tracking, Notification | Exact `{ eventId, occurredAt, bookingId, bookingCode, tripId, status: "CONFIRMED", ticketCodes[], seatNumbers[], departureDateTime, passengerCount, pickup: { stationId, stopId, address }, dropoff: { stationId, stopId, address }, driverUserId, assistantUserId }`; emitted atomically with the CONFIRMED transition; `eventId == OutboxMessage.Id == RabbitMQ MessageId`. |
 | `booking.booking.confirmed` | Booking | Notification, Payment (settle hold), Booking (BookingStats counter), Trip (shuttle fan-out) | `{ bookingId, tripId, totalAmount, userId, voucherUsageId?, bookingCode?, tickets?: [{ ticketId, passengerUserId? }], ticketCodes?, ticketCount?, shuttleRequests?: [{ direction, address, latitude, longitude, roadDistanceMeters }], shuttlePickup?: { address, latitude, longitude } }`; `shuttlePickup` is legacy inbound compatibility. |
-| `booking.booking.cancelled` | Booking | Notification, Trip, Payment, Booking, Tracking | Canonical fields plus operational `{ tripId, previousStatus: PENDING_PAYMENT\|CONFIRMED, seatNumbers[] }`. Legacy payload remains accepted. Crew Notification/Tracking process only `previousStatus=CONFIRMED` and suppress per-booking crew fan-out for terminal Trip cancellation/disruption. Passenger refund and existing consumers remain unchanged. |
+| `booking.booking.cancelled` | Booking | Notification, Trip, Payment, Booking, Tracking | Canonical fields plus operational `{ tripId, previousStatus: PENDING_PAYMENT\|CONFIRMED, seatNumbers[] }`. For `CONFIRMED`, Trip releases only `BOOKED` seats owned by exact `tripId + bookingId`; duplicates are no-op and seat-list mismatch is warned. Legacy payload remains accepted for shuttle compatibility but cannot mutate main-trip seats. Crew Notification/Tracking process only `previousStatus=CONFIRMED` and suppress per-booking crew fan-out for terminal Trip cancellation/disruption. Passenger refund and existing consumers remain unchanged. |
 | `booking.booking.disrupted` | Booking | Notification | Exact `{ eventId, occurredAt, bookingId, bookingCode, tripId, operatorId, userId, traveledRatio, refundAmount, cancellationReason }`; sole passenger-facing notification fact for no-substitution disruption. Payment MUST NOT bind it; canonical `booking.booking.cancelled` remains the sole Booking refund trigger. Booking writes status plus both facts atomically with distinct stable EventIds, each equal to its own Outbox id/MessageId. |
 | `booking.booking.refunded` | Booking | Notification, Booking (BookingStats counter) | `{ bookingId, userId, amount, bookingCode?, ticketCodes?, ticketCount? }` |
 | `booking.payment_refund.requested` | Booking | Payment | One event per Booking allocation: `{ eventId, occurredAt, paymentId, paymentReferenceType: BOOKING\|BOOKING_GROUP, paymentReferenceId, bookingId, userId, amount, reason: PAYMENT_CAPTURE_AFTER_BOOKING_EXPIRY\|SEAT_CONFIRMATION_FAILED }`. Payment ignores event `userId`/`amount` until exact captured VNPay Payment, owner, original reference and trusted-context net allocation are revalidated. |
@@ -2420,8 +2420,10 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 fresh UUID-v4 `eventId` and captures offset-date-time `occurredAt`. One-release consumers accept
 only the complete canonical shape in the registry or the exact legacy shape with both identity
 fields absent, reject partial/malformed/extra fields, and fall back to `bookingId` only for that
-exact legacy payload. Optional `bookingCode`, `ticketCodes`, and `ticketCount` enrich
-notifications but do not alter refund authority.
+exact legacy payload. Trip additionally requires the complete operational seat extension before
+touching main-trip seats. `TripSeat.bookingId` is a logical cross-service reference with invariant
+`BOOKED` iff owner is non-null; AVAILABLE/HELD/UNAVAILABLE have no owner. Optional `bookingCode`,
+`ticketCodes`, and `ticketCount` enrich notifications but do not alter refund authority.
 
 Payment attempts a positive Booking refund once while consuming the cancellation fact. On failure,
 it acknowledges only after persisting one unresolved `RefundFailureLog` with `retryCount=0`; the
@@ -3204,10 +3206,13 @@ PENDING ─→ SUCCEEDED | FAILED | EXPIRED  (15 phút timeout)
 ### 8.8 SeatStatus / TripSeatStatus
 
 ```
-AVAILABLE ↔ HELD ↔ BOOKED
+AVAILABLE ↔ HELD → BOOKED (bookingId owner required)
 AVAILABLE ↔ UNAVAILABLE   (operator disable / seatLayout disabled)
-BOOKED ─→ AVAILABLE       (khi booking cancelled)
+BOOKED ─→ AVAILABLE       (`booking.booking.cancelled`, exact tripId + bookingId owner only)
 ```
+
+No-show giữ nguyên `BOOKED` và owner. HTTP `release-seats` chỉ xử lý `HELD → AVAILABLE`;
+confirmed cancellation được Trip consume bền vững qua Outbox/RabbitMQ và xóa owner cùng transition.
 
 ### 8.9 OperatorTripSettlementStatus
 
@@ -4169,6 +4174,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.74.0** | 2026-08-16 | Codex | **MINOR** — Make confirmed-booking seat release durable and owner-safe. `TripSeat` now stores logical `bookingId` exactly while `BOOKED`; book/round-trip/substitution paths persist ownership, HTTP `release-seats` remains HELD-only, and the existing Trip `booking.booking.cancelled` consumer releases only exact `tripId + bookingId` ownership in its local transaction. Legacy cancellation payloads retain shuttle compatibility without main-seat mutation. Adds one reversible Trip migration and no dependency, endpoint, error code, routing key, or queue. |
 | **1.73.0** | 2026-08-14 | Codex | **MINOR** — Add the approved P0–P2 FE search/filter contract across Booking, Parcel, Trip, Identity and Payment: tenant-safe filters and deterministic sorting, voucher/operator/fare summaries, operator CSV export, internal accent-insensitive user search capped at 1,000 IDs, Parcel sender orchestration, and passenger-level no-show statistics. Register `SEARCH_TOO_BROAD` as HTTP 422 and add reversible Booking/Identity/Parcel migrations; no dependency, Gateway route, integration event or P3/global-list normalization change. |
 | **1.72.1** | 2026-08-13 | Codex | **PATCH** — Close the Identity→Trip crew-assignment gap found by real Docker E2E: DriverSchedule create, activation and crew update now require the logical Identity Driver/Assistant to remain `ACTIVE`; `LOCKED` users are rejected with `422 VALIDATION_ERROR` before schedule/trip persistence. No endpoint, schema, dependency, event or inventory change. |
 | **1.72.0** | 2026-08-13 | Codex | **MINOR** — Add tenant-masked Operator Admin lock/unlock for same-tenant Driver/Assistant with persisted lock-source precedence and legacy-safe backfill; add authenticated all-role local password change with global session revocation; align forgot/reset eligibility and lockout reset semantics. Adds three UUID-v4-required mutations, raising the canonical inventory from 212/191/21 to 215/194/21; adds one reversible Identity migration, no dependency or new routing key. |
@@ -4363,4 +4369,4 @@ BookingStats additionally persists `total_no_show_passengers`. The no-show detec
 only by passengers newly transitioned to `NO_SHOW`, atomically with its existing writes. Replays
 with no new passenger transition add zero. Existing `total_no_show` remains the booking count.
 
-**End of Backend Source of Truth v1.73.0**
+**End of Backend Source of Truth v1.74.0**

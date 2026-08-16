@@ -304,7 +304,7 @@ public sealed class SubstituteVehicleCommandHandler
                 {
                     available.Remove(selected);
                     newSeats[selected.SeatNumber].MarkHeld();
-                    newSeats[selected.SeatNumber].MarkBooked();
+                    newSeats[selected.SeatNumber].MarkBooked(booking.BookingId);
                 }
 
                 mappings.Add(new TripVehicleSubstitutedIntegrationEvent.Mapping(

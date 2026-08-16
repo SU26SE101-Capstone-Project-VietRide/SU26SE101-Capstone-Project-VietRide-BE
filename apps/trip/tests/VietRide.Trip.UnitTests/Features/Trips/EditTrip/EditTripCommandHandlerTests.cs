@@ -197,7 +197,8 @@ public sealed class EditTripCommandHandlerTests
             fixture.Trip.Id,
             " a01 ",
             Enum.Parse<TripSeatType>(oldType),
-            TripSeatStatus.BOOKED));
+            TripSeatStatus.BOOKED,
+            bookingId: Guid.NewGuid()));
         var replacement = CreateVehicle(
             fixture.OperatorId,
             "51B-333.33",
@@ -256,7 +257,8 @@ public sealed class EditTripCommandHandlerTests
             fixture.Trip.Id,
             "A01",
             TripSeatType.VIP,
-            Enum.Parse<TripSeatStatus>(seatStatus)));
+            Enum.Parse<TripSeatStatus>(seatStatus),
+            bookingId: seatStatus == "BOOKED" ? Guid.NewGuid() : null));
         var replacement = CreateVehicle(
             fixture.OperatorId,
             "51B-444.44",
@@ -424,7 +426,7 @@ public sealed class EditTripCommandHandlerTests
                 "A01",
                 TripSeatType.VIP,
                 TripSeatStatus.HELD);
-            racedSeat.MarkBooked();
+            racedSeat.MarkBooked(Guid.NewGuid());
             seats.Add(racedSeat);
         };
 

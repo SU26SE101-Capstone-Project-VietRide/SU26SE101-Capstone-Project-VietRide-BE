@@ -86,11 +86,8 @@ public sealed class CancelBookingCommandHandlerTests
         currentTrip.BaseFare.Should().NotBe(booking.TotalAmount.Amount);
         await _tripClient.DidNotReceiveWithAnyArgs()
             .GetTripSnapshotAsync(default, default, default);
-        await _tripClient.Received(1).ReleaseSeatsAsync(
-            TripId,
-            SeatLockToken,
-                Arg.Is<IReadOnlyList<string>>(seats => seats.SequenceEqual(new[] { "A01" })),
-                Arg.Any<CancellationToken>());
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .ReleaseSeatsAsync(default, default, default!, default);
         await _bookings.Received(1).TryCancelAsync(
             booking.Id,
             BookingCancellationReason.USER_INITIATED,
@@ -139,6 +136,11 @@ public sealed class CancelBookingCommandHandlerTests
 
         result.Status.Should().Be("CANCELLED");
         result.RefundAmount.Should().Be(0);
+        await _tripClient.Received(1).ReleaseSeatsAsync(
+            TripId,
+            SeatLockToken,
+            Arg.Is<IReadOnlyList<string>>(seats => seats.SequenceEqual(new[] { "A01" })),
+            Arg.Any<CancellationToken>());
         await _outbox.Received(1).EnqueueAsync(
             Arg.Is<Guid>(eventId => eventId != Guid.Empty),
             "booking.booking.cancelled",
@@ -291,11 +293,8 @@ public sealed class CancelBookingCommandHandlerTests
             "booking.booking.cancelled",
             Arg.Any<string>(),
             Arg.Any<CancellationToken>());
-        await _tripClient.Received(1).ReleaseSeatsAsync(
-            TripId,
-            SeatLockToken,
-            Arg.Any<IReadOnlyList<string>>(),
-            Arg.Any<CancellationToken>());
+        await _tripClient.DidNotReceiveWithAnyArgs()
+            .ReleaseSeatsAsync(default, default, default!, default);
         await _statusHistory.Received(1).AddAsync(
             Arg.Is<BookingStatusHistory>(history => history.BookingId == booking.Id
                 && history.Status == BookingStatus.CANCELLED

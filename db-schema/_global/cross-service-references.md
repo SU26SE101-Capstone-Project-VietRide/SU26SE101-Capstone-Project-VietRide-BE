@@ -110,6 +110,7 @@
 | Payment & Wallet | `OperatorLedgerEntry.reference_id` (when reference_type=VOUCHER_USAGE) | `booking.voucher_usages.id` | N:1 | polymorphic |
 | Payment & Wallet | `RefundFailureLog.booking_id` | `booking.bookings.id` (nullable) | N:1 | |
 | Trip-Route-Vehicle | `ShuttlePassenger.booking_id` | `booking.bookings.id` (nullable) | N:1 | |
+| Trip-Route-Vehicle | `TripSeat.booking_id` | `booking.bookings.id` (nullable; required only for BOOKED) | N:1 | event/HTTP ownership; no DB FK |
 
 ### → Parcel Service
 

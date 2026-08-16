@@ -2427,7 +2427,8 @@ is locked.
 
 Round-trip confirmation uses `POST /internal/v1/trips/round-trip/book-seats` with outbound
 and return legs (`tripId`, `seatLockToken`, `bookingId`, `passengerSeatAssignments`). Trip
-validates ownership of both locks before changing either leg and persists both legs atomically.
+validates ownership of both locks before changing either leg, persists each leg's `bookingId`
+as the owner of its `BOOKED` rows, and commits both legs atomically.
 
 Request:
 ```json
@@ -2520,7 +2521,8 @@ Errors:
 
 Auth: Internal JWT. Compensation for payment fail / timeout / cancel. **Idempotent** —
 releasing an already-released or expired lock is a no-op `204`. Flips the token's seats
-`HELD → AVAILABLE` and clears their Redis locks.
+`HELD → AVAILABLE` and clears their Redis locks. This endpoint never releases `BOOKED` seats;
+confirmed-booking cancellation uses the ownership-checked `booking.booking.cancelled` consumer.
 
 Request:
 ```json
@@ -2535,7 +2537,8 @@ Response `204`.
 ### POST `/internal/v1/trips/{tripId}/book-seats`
 
 Auth: Internal JWT. Called after payment success. Validates `seatLockToken` is still valid
-(not expired) and owns the seats, then flips them `HELD → BOOKED`.
+(not expired) and owns the seats, then flips them `HELD → BOOKED` and persists the request
+`bookingId` as the seat owner. A retry can no-op only for the same booking owner.
 
 Request:
 ```json
@@ -2552,6 +2555,11 @@ Errors:
 - `404 TRIP_NOT_FOUND`.
 - `409 BOOKING_SEAT_UNAVAILABLE` — lock token expired or no longer owns the seats (seat was
   released on TTL); Booking must compensate (release + cancel). `error.fields` lists the seats.
+
+On `booking.booking.cancelled` with `previousStatus=CONFIRMED`, Trip releases only rows matching
+`tripId + bookingId` and clears their owner in the consumer transaction. Duplicate delivery is a
+no-op; a legacy payload may still cancel shuttle manifests but cannot mutate main-trip seats.
+`previousStatus=PENDING_PAYMENT` keeps the synchronous HELD-seat release above.
 
 ### POST `/internal/v1/trips/{sourceTripId}/cargo/transfer`
 

@@ -31,7 +31,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `Vehicle` | Xe operator. | `licensePlate` UNIQUE, `seatLayoutJson`, `maxCargoWeightKg`, `status` enum |
 | `Trip` | Chuyến cụ thể. | snapshot `baseFare`/`estimatedPassengerLuggageKg`/`maxCargoWeightKg`, nullable trimmed `notes` (max 2000), 2 cargo counter, `source` enum, `disruptedAt`, `hasSubstitution` |
 | `TripAuditLog` | Append-only audit do Trip service sở hữu. | local `tripId` FK; logical `actorUserId`; JSONB metadata |
-| `TripSeat` | Trạng thái từng ghế per trip. | composite UNIQUE `(tripId, seatNumber)`, `status` enum |
+| `TripSeat` | Trạng thái từng ghế per trip. | composite UNIQUE `(tripId, seatNumber)`; `BOOKED` iff logical `bookingId` owner is non-null |
 | `TripStop` | Snapshot RouteStop khi generate. | composite PK, `estimatedArrivalTime` static, nullable `actualArrivalTime`, nullable `actual_departure_time` persisted when assigned crew departs an arrived stop |
 | `Trip.planned_eta_source` | Nguồn nội bộ của planned ETA. | `GOOGLE_ROUTES\|ROUTE_BASELINE`; API chỉ trả quality `TRAFFIC_AWARE\|FALLBACK` |
 | `TripStopFare` | Exception per trip per stop. | `source=TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`; Day 22 chỉ tạo mới `MANUAL_OVERRIDE` |
@@ -102,6 +102,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 | `idx_trip_audit_logs_action_occurred` | `(action, occurred_at DESC)` | B-tree | Audit lookup per action |
 | `uq_trip_seats_trip_seat` | `(trip_id, seat_number)` | unique | Seat map per trip |
 | `idx_trip_seats_trip_status` | `(trip_id, status)` | B-tree | Available seats query |
+| `idx_trip_seats_trip_booking` | `(trip_id, booking_id)` | partial B-tree | Owner-safe confirmed cancellation |
 | `uq_trip_stops_trip_order` | `(trip_id, order_index)` | unique | Ordering integrity |
 | `idx_trip_stops_estimated_arrival` | `estimated_arrival_time` | partial | Approaching alert candidates |
 | `idx_driver_schedules_operator_active` | `(operator_id, is_active)` | B-tree | Generate Trip iteration |
@@ -133,6 +134,7 @@ Service domain logic nặng nhất — quản lý **mạng lưới tuyến đư�
 - **Tool:** EF Core Migrations. Migration history `__EFMigrationsHistory`.
 - **Bootstrap order:** Sau `vietride_identity`. 3 VehicleType seed chạy ngay sau migration (qua `seed.sql` hoặc EF Core HasData với UUID cố định).
 - **Breaking change policy:** Khi đổi `seat_layout_json` schema version, **forward-migrate** existing Vehicles trước khi remove old version support. Trip đã generate giữ TripSeat theo layout cũ.
+- **TripSeat ownership rollout:** `AddTripSeatBookingOwnership` áp dụng cho database local/dev/demo đã reset và reseed. Không chạy migration này trên production có legacy `BOOKED` rows trước khi có backfill được duyệt riêng.
 - **Hangfire bootstrap order:** Hangfire.PostgreSql tạo schema `hangfire.*` ở app startup (lần đầu chạy app sau migration).
 
 ## Open Questions

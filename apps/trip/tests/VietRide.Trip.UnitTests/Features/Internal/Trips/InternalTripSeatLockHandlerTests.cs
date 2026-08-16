@@ -15,6 +15,7 @@ using VietRide.Trip.Api.Controllers;
 using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.SeatLock;
+using VietRide.Trip.Application.Features.Internal.Trips.BookRoundTripSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.BookSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.LockSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.ReleaseExpiredSeatLocks;
@@ -108,17 +109,18 @@ public sealed class InternalTripSeatLockHandlerTests
     }
 
     [Fact]
-    public async Task BookSeats_RetryAfterSuccessWithSameTokenAndLiveMarker_ReturnsNoOp()
+    public async Task BookSeats_RetryAfterSuccessAfterLockConsumed_ReturnsNoOp()
     {
         var fixture = Fixture.Create(held: true);
         var seatLockToken = Guid.NewGuid();
+        var bookingId = Guid.NewGuid();
         fixture.SeatLocks.Lock(fixture.Trip.Id, "A01", seatLockToken.ToString("D"));
 
         await fixture.BookHandler.Handle(
             new BookSeatsCommand(
                 fixture.Trip.Id,
                 seatLockToken,
-                Guid.NewGuid(),
+                bookingId,
                 [new PassengerSeatAssignmentRequest(Guid.NewGuid(), "A01")]),
             CancellationToken.None);
 
@@ -128,13 +130,80 @@ public sealed class InternalTripSeatLockHandlerTests
             new BookSeatsCommand(
                 fixture.Trip.Id,
                 seatLockToken,
-                Guid.NewGuid(),
+                bookingId,
                 [new PassengerSeatAssignmentRequest(Guid.NewGuid(), "A01")]),
             CancellationToken.None);
 
         fixture.Seats.Single().Status.Should().Be(TripSeatStatus.BOOKED);
-        (await fixture.SeatLocks.IsLockedAsync(fixture.Trip.Id, "A01")).Should().BeTrue();
+        (await fixture.SeatLocks.IsLockedAsync(fixture.Trip.Id, "A01")).Should().BeFalse();
         fixture.UnitOfWork.SaveChangesCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task BookSeats_RetryFromDifferentBooking_DoesNotTakeOwnership()
+    {
+        var fixture = Fixture.Create(held: true);
+        var seatLockToken = Guid.NewGuid();
+        var firstBookingId = Guid.NewGuid();
+        fixture.SeatLocks.Lock(fixture.Trip.Id, "A01", seatLockToken.ToString("D"));
+        await fixture.BookHandler.Handle(
+            new BookSeatsCommand(
+                fixture.Trip.Id,
+                seatLockToken,
+                firstBookingId,
+                [new PassengerSeatAssignmentRequest(Guid.NewGuid(), "A01")]),
+            CancellationToken.None);
+
+        var action = () => fixture.BookHandler.Handle(
+            new BookSeatsCommand(
+                fixture.Trip.Id,
+                seatLockToken,
+                Guid.NewGuid(),
+                [new PassengerSeatAssignmentRequest(Guid.NewGuid(), "A01")]),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<CodedConflictException>();
+        fixture.Seats.Single().BookingId.Should().Be(firstBookingId);
+    }
+
+    [Fact]
+    public async Task BookRoundTripSeats_PersistsEachLegBookingOwner()
+    {
+        var outboundFixture = Fixture.Create(held: true);
+        var returnFixture = Fixture.Create(held: true);
+        var outboundToken = Guid.NewGuid();
+        var returnToken = Guid.NewGuid();
+        var outboundBookingId = Guid.NewGuid();
+        var returnBookingId = Guid.NewGuid();
+        var locks = new InMemorySeatLockStore();
+        locks.Lock(outboundFixture.Trip.Id, "A01", outboundToken.ToString("D"));
+        locks.Lock(returnFixture.Trip.Id, "A01", returnToken.ToString("D"));
+        var unitOfWork = new StubUnitOfWork();
+        var handler = new BookRoundTripSeatsHandler(
+            new StubTripRepository([outboundFixture.Trip, returnFixture.Trip]),
+            new StubTripSeatRepository([outboundFixture.Seats.Single(), returnFixture.Seats.Single()]),
+            locks,
+            unitOfWork);
+
+        await handler.Handle(
+            new BookRoundTripSeatsCommand(
+                new BookRoundTripSeatsLeg(
+                    outboundFixture.Trip.Id,
+                    outboundToken,
+                    outboundBookingId,
+                    [new PassengerSeatAssignmentRequest(Guid.NewGuid(), "A01")]),
+                new BookRoundTripSeatsLeg(
+                    returnFixture.Trip.Id,
+                    returnToken,
+                    returnBookingId,
+                    [new PassengerSeatAssignmentRequest(Guid.NewGuid(), "A01")])),
+            CancellationToken.None);
+
+        outboundFixture.Seats.Single().BookingId.Should().Be(outboundBookingId);
+        returnFixture.Seats.Single().BookingId.Should().Be(returnBookingId);
+        (await locks.IsLockedAsync(outboundFixture.Trip.Id, "A01")).Should().BeFalse();
+        (await locks.IsLockedAsync(returnFixture.Trip.Id, "A01")).Should().BeFalse();
+        unitOfWork.SaveChangesCount.Should().Be(1);
     }
 
     [Fact]
@@ -200,7 +269,7 @@ public sealed class InternalTripSeatLockHandlerTests
     }
 
     [Fact]
-    public async Task BookSeats_SaveKeepsRedisMarkerUntilTtl()
+    public async Task BookSeats_SaveConsumesRedisMarker()
     {
         var fixture = Fixture.Create(held: true);
         var token = Guid.NewGuid();
@@ -215,8 +284,8 @@ public sealed class InternalTripSeatLockHandlerTests
             CancellationToken.None);
 
         fixture.Seats.Single().Status.Should().Be(TripSeatStatus.BOOKED);
-        (await fixture.SeatLocks.IsOwnedByAsync(fixture.Trip.Id, "A01", token.ToString("D"))).Should().BeTrue();
-        fixture.SeatLocks.ReleaseCallCount.Should().Be(0);
+        (await fixture.SeatLocks.IsOwnedByAsync(fixture.Trip.Id, "A01", token.ToString("D"))).Should().BeFalse();
+        fixture.SeatLocks.ReleaseCallCount.Should().Be(1);
         fixture.UnitOfWork.SaveChangesCount.Should().Be(1);
     }
 
@@ -264,6 +333,21 @@ public sealed class InternalTripSeatLockHandlerTests
             CancellationToken.None);
 
         fixture.Seats.Single().Status.Should().Be(TripSeatStatus.AVAILABLE);
+        fixture.UnitOfWork.SaveChangesCount.Should().Be(1);
+        fixture.SeatLocks.ReleaseCallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ReleaseSeats_BookedSeatWithExpiredRedisMarker_DoesNotReleaseBookedSeat()
+    {
+        var fixture = Fixture.Create(booked: true);
+
+        await fixture.ReleaseHandler.Handle(
+            new ReleaseSeatsCommand(fixture.Trip.Id, Guid.NewGuid(), ["A01"]),
+            CancellationToken.None);
+
+        fixture.Seats.Single().Status.Should().Be(TripSeatStatus.BOOKED);
+        fixture.Seats.Single().BookingId.Should().NotBeNull();
         fixture.UnitOfWork.SaveChangesCount.Should().Be(1);
         fixture.SeatLocks.ReleaseCallCount.Should().Be(1);
     }
@@ -429,7 +513,7 @@ public sealed class InternalTripSeatLockHandlerTests
             else if (booked)
             {
                 seat.MarkHeld();
-                seat.MarkBooked();
+                seat.MarkBooked(Guid.NewGuid());
             }
 
             return new Fixture(trip, [seat]);

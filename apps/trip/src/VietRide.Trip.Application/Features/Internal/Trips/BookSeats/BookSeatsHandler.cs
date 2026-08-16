@@ -43,7 +43,11 @@ public sealed class BookSeatsHandler : IRequestHandler<BookSeatsCommand>
 
         if (seats.All(seat => seat.Status == TripSeatStatus.BOOKED))
         {
-            await EnsureSeatLocksOwnedByTokenAsync(request.TripId, seats, lockOwner, seatNumbers, cancellationToken);
+            if (seats.Any(seat => seat.BookingId != request.BookingId))
+            {
+                ThrowSeatUnavailable(seatNumbers);
+            }
+
             return Unit.Value;
         }
 
@@ -56,10 +60,15 @@ public sealed class BookSeatsHandler : IRequestHandler<BookSeatsCommand>
 
         foreach (var seat in seats)
         {
-            seat.MarkBooked();
+            seat.MarkBooked(request.BookingId);
         }
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
+        await seatLockStore.ReleaseAsync(
+            request.TripId,
+            seatNumbers,
+            lockOwner,
+            cancellationToken);
         return Unit.Value;
     }
 

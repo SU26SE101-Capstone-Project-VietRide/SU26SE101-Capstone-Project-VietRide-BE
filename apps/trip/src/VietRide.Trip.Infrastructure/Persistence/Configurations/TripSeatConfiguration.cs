@@ -28,6 +28,7 @@ internal sealed class TripSeatConfiguration : IEntityTypeConfiguration<TripSeat>
             .HasColumnName("status")
             .HasColumnType("vietride_trip.trip_seat_status")
             .HasDefaultValue(TripSeatStatus.AVAILABLE);
+        builder.Property(seat => seat.BookingId).HasColumnName("booking_id");
         builder.Property(seat => seat.DisabledReason).HasColumnName("disabled_reason");
         builder.Property(seat => seat.CreatedAt)
             .HasColumnName("created_at")
@@ -40,6 +41,11 @@ internal sealed class TripSeatConfiguration : IEntityTypeConfiguration<TripSeat>
             .IsUnique()
             .HasDatabaseName("uq_trip_seats_trip_seat");
         builder.HasIndex(seat => new { seat.TripId, seat.Status }).HasDatabaseName("idx_trip_seats_trip_status");
-
+        builder.HasIndex(seat => new { seat.TripId, seat.BookingId })
+            .HasDatabaseName("idx_trip_seats_trip_booking")
+            .HasFilter("booking_id IS NOT NULL");
+        builder.ToTable(table => table.HasCheckConstraint(
+            "ck_trip_seats_booking_owner",
+            "(status = 'BOOKED' AND booking_id IS NOT NULL) OR (status <> 'BOOKED' AND booking_id IS NULL)"));
     }
 }

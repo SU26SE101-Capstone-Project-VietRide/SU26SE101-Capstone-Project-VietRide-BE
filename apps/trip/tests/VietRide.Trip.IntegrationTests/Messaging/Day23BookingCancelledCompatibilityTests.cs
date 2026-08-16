@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using Npgsql.NameTranslation;
 using VietRide.Shared.Application.Outbox;
@@ -28,6 +29,21 @@ public sealed class Day23BookingCancelledCompatibilityTests
 
         canonical.EventId.Should().Be(eventId);
         legacy.EventId.Should().Be(bookingId);
+    }
+
+    [Fact]
+    public void Consumer_AcceptsOperationalSeatData()
+    {
+        var bookingId = Guid.NewGuid();
+        var tripId = Guid.NewGuid();
+
+        var integrationEvent = Deserialize(OperationalJson(Guid.NewGuid(), bookingId, tripId, "CONFIRMED", ["A01", "A02"]));
+
+        integrationEvent.Invoking(item => item.Validate()).Should().NotThrow();
+        integrationEvent.HasOperationalSeatData.Should().BeTrue();
+        integrationEvent.TripId.Should().Be(tripId);
+        integrationEvent.PreviousStatus.Should().Be("CONFIRMED");
+        integrationEvent.SeatNumbers.Should().Equal("A01", "A02");
     }
 
     [Theory]
@@ -111,6 +127,87 @@ public sealed class Day23BookingCancelledCompatibilityTests
         }
     }
 
+    [Fact]
+    public async Task ConsumerHandler_ConfirmedCancellation_ReleasesOnlyOwnedSeats_AndDuplicateIsNoOp()
+    {
+        var databaseName = $"vietride_trip_cancel_owner_{Guid.NewGuid():N}";
+        await using var db = CreateDbContext(databaseName);
+        try
+        {
+            await db.Database.MigrateAsync();
+            var tripId = await SeedMainTripAsync(db);
+            var cancelledBookingId = Guid.NewGuid();
+            var replacementBookingId = Guid.NewGuid();
+            var ownedA01 = CreateBookedSeat(tripId, "A01", cancelledBookingId);
+            var ownedA02 = CreateBookedSeat(tripId, "A02", cancelledBookingId);
+            var replacementA03 = CreateBookedSeat(tripId, "A03", replacementBookingId);
+            db.TripSeats.AddRange(ownedA01, ownedA02, replacementA03);
+            await db.SaveChangesAsync();
+
+            var integrationEvent = Deserialize(OperationalJson(
+                Guid.NewGuid(),
+                cancelledBookingId,
+                tripId,
+                "CONFIRMED",
+                ["A01", "A02", "A03"]));
+            var handler = CreateHandler(db);
+
+            await handler.HandleAsync(integrationEvent, CancellationToken.None);
+            await handler.HandleAsync(integrationEvent, CancellationToken.None);
+
+            db.ChangeTracker.Clear();
+            var seats = await db.TripSeats.AsNoTracking()
+                .Where(seat => seat.TripId == tripId)
+                .OrderBy(seat => seat.SeatNumber)
+                .ToArrayAsync();
+            seats.Count(seat => seat.Status == TripSeatStatus.AVAILABLE).Should().Be(2);
+            seats.Count(seat => seat.Status == TripSeatStatus.BOOKED).Should().Be(1);
+            seats[0].Status.Should().Be(TripSeatStatus.AVAILABLE);
+            seats[0].BookingId.Should().BeNull();
+            seats[1].Status.Should().Be(TripSeatStatus.AVAILABLE);
+            seats[1].BookingId.Should().BeNull();
+            seats[2].Status.Should().Be(TripSeatStatus.BOOKED);
+            seats[2].BookingId.Should().Be(replacementBookingId);
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("PENDING_PAYMENT", true)]
+    [InlineData(null, false)]
+    public async Task ConsumerHandler_PendingOrLegacyCancellation_DoesNotReleaseMainTripSeat(
+        string? previousStatus,
+        bool operational)
+    {
+        var databaseName = $"vietride_trip_cancel_nonconfirmed_{Guid.NewGuid():N}";
+        await using var db = CreateDbContext(databaseName);
+        try
+        {
+            await db.Database.MigrateAsync();
+            var tripId = await SeedMainTripAsync(db);
+            var bookingId = Guid.NewGuid();
+            db.TripSeats.Add(CreateBookedSeat(tripId, "A01", bookingId));
+            await db.SaveChangesAsync();
+            var integrationEvent = operational
+                ? Deserialize(OperationalJson(Guid.NewGuid(), bookingId, tripId, previousStatus!, ["A01"]))
+                : Deserialize(LegacyJson(bookingId));
+
+            await CreateHandler(db).HandleAsync(integrationEvent, CancellationToken.None);
+
+            db.ChangeTracker.Clear();
+            var seat = await db.TripSeats.AsNoTracking().SingleAsync(item => item.TripId == tripId);
+            seat.Status.Should().Be(TripSeatStatus.BOOKED);
+            seat.BookingId.Should().Be(bookingId);
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
     private static BookingShuttleCancelledIntegrationEvent Deserialize(string json)
         => JsonSerializer.Deserialize<BookingShuttleCancelledIntegrationEvent>(json, JsonOptions)!;
 
@@ -119,7 +216,10 @@ public sealed class Day23BookingCancelledCompatibilityTests
         var type = typeof(BookingShuttleCancelledIntegrationEvent).Assembly.GetType(
             "VietRide.Trip.Infrastructure.Messaging.BookingShuttleCancelledIntegrationEventHandler",
             throwOnError: true)!;
-        return (IIntegrationEventHandler<BookingShuttleCancelledIntegrationEvent>)Activator.CreateInstance(type, db)!;
+        return (IIntegrationEventHandler<BookingShuttleCancelledIntegrationEvent>)Activator.CreateInstance(
+            type,
+            db,
+            NullLogger<BookingShuttleCancelledIntegrationEvent>.Instance)!;
     }
 
     private static TripDbContext CreateDbContext(string databaseName)
@@ -156,6 +256,14 @@ public sealed class Day23BookingCancelledCompatibilityTests
         return trip.Id;
     }
 
+    private static TripSeat CreateBookedSeat(Guid tripId, string seatNumber, Guid bookingId)
+    {
+        var seat = TripSeat.Create(tripId, seatNumber);
+        seat.MarkHeld();
+        seat.MarkBooked(bookingId);
+        return seat;
+    }
+
     private static string CreateConnectionString(string databaseName)
     {
         const string fallback = "Host=127.0.0.1;Port=5432;Database={databaseName};Username=vietride;Password=vietride_dev";
@@ -173,4 +281,27 @@ public sealed class Day23BookingCancelledCompatibilityTests
     private static string LegacyJson(Guid bookingId) => $$"""
         {"bookingId":"{{bookingId}}","userId":"33333333-3333-3333-3333-333333333333","refundAmount":0,"refundOverride":false,"cancellationReason":"USER"}
         """;
+
+    private static string OperationalJson(
+        Guid eventId,
+        Guid bookingId,
+        Guid tripId,
+        string previousStatus,
+        IReadOnlyCollection<string> seatNumbers)
+        => JsonSerializer.Serialize(new
+        {
+            eventId,
+            occurredAt = "2026-07-17T00:00:00Z",
+            bookingId,
+            userId = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+            refundAmount = 0,
+            refundOverride = false,
+            cancellationReason = "USER",
+            bookingCode = "VR1",
+            ticketCodes = new[] { "T1" },
+            ticketCount = 1,
+            tripId,
+            previousStatus,
+            seatNumbers,
+        }, JsonOptions);
 }

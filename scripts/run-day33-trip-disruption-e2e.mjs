@@ -524,10 +524,10 @@ async function seed() {
        ('${ids.routeTrip}', '${ids.operator}', '${ids.route}', '${ids.vehicle}', '${ids.admin}',
         now() + interval '11 days', now() + interval '11 days 4 hours',
         'SCHEDULED', 'MANUAL', 100000);
-     INSERT INTO vietride_trip.trip_seats (trip_id, seat_number, seat_type, status)
+     INSERT INTO vietride_trip.trip_seats (trip_id, seat_number, seat_type, status, booking_id)
      VALUES
-       ('${ids.cancelTrip}', 'A01', 'STANDARD', 'BOOKED'),
-       ('${ids.routeTrip}', 'A02', 'STANDARD', 'BOOKED');`,
+       ('${ids.cancelTrip}', 'A01', 'STANDARD', 'BOOKED', '${ids.cancelBooking}'),
+       ('${ids.routeTrip}', 'A02', 'STANDARD', 'BOOKED', '${ids.routeBooking}');`,
   );
 
   psql(

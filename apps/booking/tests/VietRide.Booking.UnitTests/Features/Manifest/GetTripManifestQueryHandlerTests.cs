@@ -83,6 +83,20 @@ public sealed class GetTripManifestQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_CancelledBooking_IsExcludedFromManifest()
+    {
+        var cancelled = CreateConfirmedBooking("VR-20260518-ABCD1234", FirstStopId, "A01");
+        cancelled.Cancel(BookingCancellationReason.USER_INITIATED, DateTimeOffset.UtcNow);
+        Arrange([cancelled], CreateTripSnapshot(AssistantUserId));
+
+        var result = await CreateHandler().Handle(
+            new GetTripManifestQuery(TripId, AssistantUserId),
+            CancellationToken.None);
+
+        result.Items.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Handle_ItemSerialization_ContainsExactlyFourOperationalFields()
     {
         var booking = CreateConfirmedBooking("VR-20260518-ABCD1234", FirstStopId, "A01");

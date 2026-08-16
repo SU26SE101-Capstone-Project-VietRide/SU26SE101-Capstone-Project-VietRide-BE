@@ -155,7 +155,7 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
                 reason.ToString()),
             cancellationToken);
 
-        if (booking.SeatLockToken.HasValue)
+        if (previousStatus == BookingStatus.PENDING_PAYMENT && booking.SeatLockToken.HasValue)
         {
             await _tripClient.ReleaseSeatsAsync(
                 booking.TripId,
@@ -163,10 +163,10 @@ public sealed class CancelBookingCommandHandler : IRequestHandler<CancelBookingC
                 booking.Passengers.Select(p => p.SeatNumber).OfType<string>().ToArray(),
                 cancellationToken);
         }
-        else
+        else if (previousStatus == BookingStatus.PENDING_PAYMENT)
         {
             _logger.LogWarning(
-                "Booking {BookingId} has no seat lock token; skipping seat release during cancellation.",
+                "Pending-payment booking {BookingId} has no seat lock token; skipping held-seat release during cancellation.",
                 booking.Id);
         }
 

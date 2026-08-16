@@ -423,7 +423,7 @@ public sealed class TripVehicleSwapServiceTests
 
             if (status == TripSeatStatus.BOOKED)
             {
-                seat.MarkBooked();
+                seat.MarkBooked(Guid.NewGuid());
             }
 
             return new Fixture(

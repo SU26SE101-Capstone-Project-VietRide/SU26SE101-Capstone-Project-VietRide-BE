@@ -2086,7 +2086,9 @@ Khi hành khách bấm vào mua vé một chuyến cụ thể:
    - Ghế đang hold bởi người khác (trong TTL 10 phút): màu vàng, không chọn được
    - Ghế trống: màu xanh, chọn được
 3. Hành khách tap để chọn ghế → hệ thống **lock ghế trong Redis TTL 10 phút** trong khi hành khách điền thông tin và thanh toán
-4. DB cần có: `Vehicle` có `seatLayoutJson` (JSON mô tả layout — số hàng, số cột, vị trí lối đi), `TripSeat` (tripId, seatNumber, status: AVAILABLE/HELD/BOOKED)
+4. DB cần có: `Vehicle` có `seatLayoutJson` (JSON mô tả layout — số hàng, số cột, vị trí lối đi), `TripSeat` (tripId, seatNumber, status: AVAILABLE/HELD/BOOKED/UNAVAILABLE, bookingId nullable logical reference sang Booking)
+
+**Ownership invariant của `TripSeat`:** `AVAILABLE` / `HELD` / `UNAVAILABLE` luôn có `bookingId = null`; `BOOKED` bắt buộc có `bookingId`. Payment success ghi owner khi chuyển `HELD → BOOKED`. `POST /internal/v1/trips/{tripId}/release-seats` chỉ là compensation cho `HELD → AVAILABLE`, không được nhả ghế `BOOKED`.
 
 > **Lý do cần seat map:** Xe khách Việt Nam có ghế đơn/đôi, ghế đầu/cuối xe khác nhau về trải nghiệm → hành khách muốn chọn. Cũng cần để tránh double-booking khi nhiều user đặt cùng lúc.
 
@@ -2140,7 +2142,7 @@ Hành khách bấm "Hủy vé"
   → App hiển thị confirmation: "Bạn sẽ được hoàn X% = Y VND về Ví VietRide"
   → Hành khách confirm
   → Booking Service: cập nhật booking status → CANCELLED
-  → Ghế được giải phóng (TripSeat status → AVAILABLE)
+  → Booking ghi Outbox `booking.booking.cancelled`; Trip consume event và chỉ giải phóng ghế có đúng `tripId + bookingId` (`BOOKED → AVAILABLE`, xóa `bookingId`)
   → Payment & Wallet Service: cộng tiền hoàn vào ví hành khách (consume event qua RabbitMQ)
   → Notification Service: gửi push notification xác nhận hủy + số tiền hoàn
 ```
@@ -5236,7 +5238,7 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **`VehicleType`** — Loại xe: code unique, displayName, `estimatedPassengerLuggageKgPerSeat` override (optional), `isSystemDefined` block delete. Seed STANDARD_BUS / LIMOUSINE / SLEEPER_BUS.
 - **`Vehicle`** — Xe của operator: vehicleType, licensePlate, `seatLayoutJson` (xem 6.1 contract), totalSeats, maxCargoWeightKg, status (xem VehicleStatus enum).
 - **`Trip`** — Chuyến cụ thể. Source: MANUAL | AUTO_FROM_SCHEDULE | VEHICLE_SUBSTITUTION. Trip auto-generated snapshot `baseFare = DriverSchedule.baseFare ?? Route.baseFare` cùng cargo limits từ Vehicle/Route; `notes VARCHAR(2000) NULL` trim/blank-to-null. 2 cargo counter: `reservedParcelWeightKg` + `totalLoadedWeightKg`. `estimatedPassengerLuggageKg` snapshot immutable. `hasSubstitution` flag cho reporting.
-- **`TripSeat`** — Trạng thái từng ghế per trip: AVAILABLE | HELD | BOOKED | UNAVAILABLE.
+- **`TripSeat`** — Trạng thái từng ghế per trip: AVAILABLE | HELD | BOOKED | UNAVAILABLE; `bookingId` là logical cross-service owner, bắt buộc chỉ khi `BOOKED`. Hủy booking `CONFIRMED` nhả owner-matched seat qua `booking.booking.cancelled`; no-show vẫn giữ `BOOKED` và owner.
 - **`TripStop`** — Snapshot từ RouteStop khi generate Trip. Có `estimatedArrivalTime` (static planned baseline; approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING` cascade có thể recompute, GPS/Tracking không update), `actualArrivalTime` (set bởi Assistant), status PENDING | ARRIVED | SKIPPED, copy `distanceFromOriginKm` + 2 allow flags.
 - **`TripStopFare`** — Exception override fare per trip per stop, với `source=TEMPLATE_SNAPSHOT|MANUAL_OVERRIDE`; existing rows backfill `TEMPLATE_SNAPSHOT`, nhưng Day 22 không tạo snapshot mới; chỉ explicit operator per-Trip override tạo `MANUAL_OVERRIDE`.
 - **`DriverSchedule`** — Assignment driver/assistant ↔ vehicle ↔ route theo recurring pattern (dayOfWeek + departureTime). Dùng để Hangfire generate Trip. Mọi create, activate hoặc đổi crew bắt buộc logical Identity user đúng tenant/role và `status = ACTIVE`; user `LOCKED` không được gán để chạy Trip.

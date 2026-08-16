@@ -674,7 +674,7 @@ public sealed class SubstituteVehicleEndpointTests
 
             var vipSeat = TripSeat.Create(trip.Id, "A01", TripSeatType.VIP);
             vipSeat.MarkHeld();
-            vipSeat.MarkBooked();
+            vipSeat.MarkBooked(Guid.NewGuid());
             var standardSeat = TripSeat.Create(trip.Id, "A02", TripSeatType.STANDARD);
             var pendingStopEta = Now.AddHours(1);
             var pending = TripStop.Create(

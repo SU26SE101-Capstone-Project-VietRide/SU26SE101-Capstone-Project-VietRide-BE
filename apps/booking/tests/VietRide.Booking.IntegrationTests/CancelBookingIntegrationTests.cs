@@ -82,11 +82,8 @@ public sealed class CancelBookingIntegrationTests : IClassFixture<CancelBookingW
         data.GetProperty("refundAmount").GetInt64().Should().Be(180_000);
         data.GetProperty("refundMethod").GetString().Should().Be("WALLET");
 
-        await _factory.TripClient.Received(1).ReleaseSeatsAsync(
-            tripId,
-            seatLockToken,
-            Arg.Is<IReadOnlyList<string>>(seats => seats.SequenceEqual(new[] { "A01" })),
-            Arg.Any<CancellationToken>());
+        await _factory.TripClient.DidNotReceiveWithAnyArgs()
+            .ReleaseSeatsAsync(default, default, default!, default);
         await _factory.Outbox.Received(1).EnqueueAsync(
             Arg.Is<Guid>(eventId => eventId != Guid.Empty),
             "booking.booking.cancelled",

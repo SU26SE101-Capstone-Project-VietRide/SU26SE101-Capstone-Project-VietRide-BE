@@ -228,12 +228,12 @@ public sealed class UpdateDriverScheduleHandlerTests
         var trip = fixture.AddTrip(fixture.Now.AddHours(10));
         var oldSeats = new[]
         {
-            TripSeat.Create(trip.Id, "A", TripSeatType.STANDARD, TripSeatStatus.BOOKED),
-            TripSeat.Create(trip.Id, "B", TripSeatType.STANDARD, TripSeatStatus.BOOKED),
-            TripSeat.Create(trip.Id, "C", TripSeatType.STANDARD, TripSeatStatus.BOOKED),
-            TripSeat.Create(trip.Id, "D", TripSeatType.VIP, TripSeatStatus.BOOKED),
-            TripSeat.Create(trip.Id, "E", TripSeatType.SLEEPER_UPPER, TripSeatStatus.BOOKED),
-            TripSeat.Create(trip.Id, "F", TripSeatType.STANDARD, TripSeatStatus.BOOKED),
+            TripSeat.Create(trip.Id, "A", TripSeatType.STANDARD, TripSeatStatus.BOOKED, bookingId: Guid.NewGuid()),
+            TripSeat.Create(trip.Id, "B", TripSeatType.STANDARD, TripSeatStatus.BOOKED, bookingId: Guid.NewGuid()),
+            TripSeat.Create(trip.Id, "C", TripSeatType.STANDARD, TripSeatStatus.BOOKED, bookingId: Guid.NewGuid()),
+            TripSeat.Create(trip.Id, "D", TripSeatType.VIP, TripSeatStatus.BOOKED, bookingId: Guid.NewGuid()),
+            TripSeat.Create(trip.Id, "E", TripSeatType.SLEEPER_UPPER, TripSeatStatus.BOOKED, bookingId: Guid.NewGuid()),
+            TripSeat.Create(trip.Id, "F", TripSeatType.STANDARD, TripSeatStatus.BOOKED, bookingId: Guid.NewGuid()),
         };
         fixture.Seats.Items.AddRange(oldSeats);
         fixture.Booking.Projections[trip.Id] = Projection(
