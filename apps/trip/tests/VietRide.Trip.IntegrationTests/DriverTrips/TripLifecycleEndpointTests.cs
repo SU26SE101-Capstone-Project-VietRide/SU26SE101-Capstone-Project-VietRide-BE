@@ -60,7 +60,9 @@ public sealed class TripLifecycleEndpointTests
                 now,
                 inProgress: false,
                 scheduled: true,
-                departure: now.AddMinutes(180).AddTicks(1));
+                // PostgreSQL timestamptz stores microsecond precision, so a single 100 ns tick
+                // is lost on persistence and becomes the inclusive T-180 boundary.
+                departure: now.AddMinutes(180).AddMilliseconds(1));
             using var factory = new LifecycleWebApplicationFactory(new DatabaseMediator(databaseName, now));
             using var client = factory.CreateClient();
             var boardingPath = $"/v1/driver/trips/{assigned.Id}/boarding";
