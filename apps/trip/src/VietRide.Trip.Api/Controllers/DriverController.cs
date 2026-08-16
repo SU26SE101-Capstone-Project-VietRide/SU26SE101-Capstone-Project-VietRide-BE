@@ -14,6 +14,7 @@ using VietRide.Trip.Application.Features.DriverTrips.StartTrip;
 using VietRide.Trip.Application.Features.Incidents.ReportIncident;
 using VietRide.Trip.Application.Features.RouteChangeProposals;
 using VietRide.Trip.Application.Features.Shuttle;
+using VietRide.Trip.Application.Features.Trips.StartTripBoarding;
 using ArriveTripDestinationCommand = VietRide.Trip.Application.Features.Trips.Operations.ArriveTripDestinationCommand;
 using ArriveTripDestinationResponse = VietRide.Trip.Application.Features.Trips.Operations.ArriveTripDestinationResponse;
 using ArriveTripStopCommand = VietRide.Trip.Application.Features.Trips.Operations.ArriveTripStopCommand;
@@ -175,6 +176,28 @@ public sealed class DriverController : ControllerBase
     {
         var userId = CurrentUserClaims.GetUserId(User);
         return Ok(await mediator.Send(new StartTripCommand(tripId, userId), cancellationToken));
+    }
+
+    [HttpPost("trips/{tripId}/boarding")]
+    [Authorize(Roles = "DRIVER")]
+    [RequireIdempotency(AllowRequestBody = false)]
+    [ProducesResponseType(typeof(ApiResponse<StartTripBoardingResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<StartTripBoardingResponse>> StartBoardingAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new StartTripBoardingCommand(
+                tripId,
+                CurrentUserClaims.GetUserId(User),
+                "DRIVER",
+                null),
+            cancellationToken));
     }
 
     [HttpPost("trips/{tripId}/complete")]

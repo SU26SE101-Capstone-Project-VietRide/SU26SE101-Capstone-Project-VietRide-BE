@@ -68,9 +68,10 @@ public sealed class TripAuditLog
             throw new ArgumentException("Audit action is not approved.", nameof(action));
         }
 
-        if (action == TripAuditAction.TripCompletedManual && actorUserId is null)
+        if (action is TripAuditAction.TripBoardingStartedManual or TripAuditAction.TripCompletedManual
+            && actorUserId is null)
         {
-            throw new ArgumentException("Manual trip completion requires an actor.", nameof(actorUserId));
+            throw new ArgumentException("Manual trip lifecycle actions require an actor.", nameof(actorUserId));
         }
 
         var parsedMetadata = ParseMetadata(metadata);

@@ -40,6 +40,8 @@ public static class InfrastructureServiceCollectionExtensions
         IConfiguration configuration,
         bool backgroundWorkersEnabled)
     {
+        var boardingWindowProvider = TripBoardingWindowProvider.Create(configuration);
+
         services.Configure<BookingImpactClientOptions>(
             configuration.GetSection(BookingImpactClientOptions.SectionName));
         services.AddSingleton<IExcelReportWriter, ClosedXmlExcelReportWriter>();
@@ -75,6 +77,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IIncidentRepository, IncidentRepository>();
         services.AddScoped<IRouteChangeProposalRepository, RouteChangeProposalRepository>();
         services.AddScoped<ITripRouteChangeService, TripRouteChangeService>();
+        services.AddScoped<ITripBoardingTransitionCoordinator, TripBoardingTransitionCoordinator>();
+        services.AddSingleton<ITripBoardingWindowProvider>(boardingWindowProvider);
         services.AddScoped<ITripStopSnapshotSyncService, TripStopSnapshotSyncService>();
         services.AddScoped<IRouteChangeProposalService, RouteChangeProposalService>();
         services.AddScoped<IRouteChangeProposalLifecycleService, RouteChangeProposalLifecycleService>();

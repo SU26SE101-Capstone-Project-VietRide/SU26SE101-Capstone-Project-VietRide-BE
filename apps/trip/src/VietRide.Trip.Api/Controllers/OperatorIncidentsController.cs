@@ -68,7 +68,7 @@ public sealed class OperatorIncidentsController : ControllerBase
             new GetOperatorIncidentQuery(GetRequiredOperatorId(), incidentId),
             cancellationToken));
 
-    [HttpPatch("{incidentId:guid}/resolve")]
+    [HttpPatch("{incidentId}/resolve")]
     [Authorize(Roles = "OPERATOR_ADMIN")]
     [RequireIdempotencyKey]
     [ProducesResponseType(typeof(ApiResponse<OperatorIncidentDto>), StatusCodes.Status200OK)]
@@ -87,15 +87,6 @@ public sealed class OperatorIncidentsController : ControllerBase
                 incidentId,
                 request.ResolutionNote),
             cancellationToken));
-
-    [HttpPatch("{incidentId}/resolve")]
-    [Authorize(Roles = "OPERATOR_ADMIN")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    public ActionResult RejectMalformedResolveIncidentId(string incidentId)
-        => throw new CodedValidationException(
-            "VALIDATION_ERROR",
-            "incidentId must be a valid non-empty UUID.",
-            [new ValidationError("incidentId", "incidentId must be a valid non-empty UUID.")]);
 
     [HttpGet("{incidentId}")]
     [ApiExplorerSettings(IgnoreApi = true)]

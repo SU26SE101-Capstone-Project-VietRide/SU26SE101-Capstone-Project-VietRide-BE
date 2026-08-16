@@ -265,7 +265,7 @@ try {
        departure_date_time, estimated_arrival_time, status, source, base_fare)
     VALUES
       ('${ids.trip}', '${ids.operator}', '${ids.route}', '${ids.vehicle}', '${ids.driver}', '${ids.assistant}',
-       now() + interval '2 hours', now() + interval '6 hours', 'BOARDING', 'MANUAL', 200000);`);
+       now() + interval '2 hours', now() + interval '6 hours', 'SCHEDULED', 'MANUAL', 200000);`);
   psql('vietride_parcel', `
     INSERT INTO vietride_parcel.parcels
       (id, parcel_code, sender_user_id, recipient_name, recipient_phone, operator_id, trip_id,
@@ -282,7 +282,7 @@ try {
       ('${ids.partialNoShow}', 'VR-20260714-P${runTag}', '${ids.passenger}', '${ids.trip}', '${ids.operator}', '${ids.originStation}', 200000, 0, 200000, 'PARTIAL_NO_SHOW', now()),
       ('${ids.noShow}', 'VR-20260714-N${runTag}', '${ids.passenger}', '${ids.trip}', '${ids.operator}', '${ids.originStation}', 200000, 0, 200000, 'NO_SHOW', now()),
       ('${ids.cancelled}', 'VR-20260714-X${runTag}', '${ids.passenger}', '${ids.trip}', '${ids.operator}', '${ids.originStation}', 200000, 0, 200000, 'CANCELLED', now());`);
-  console.log('PASS | isolated Route/Vehicle dependency graph, BOARDING Trip, Booking set, and LOADED Parcel seeded');
+  console.log('PASS | isolated Route/Vehicle dependency graph, SCHEDULED T-120 Trip, Booking set, and LOADED Parcel seeded');
 
   const settings = JSON.parse(
     fs.readFileSync(path.join(root, 'apps/identity/src/VietRide.Identity.Api/appsettings.Development.json'), 'utf8'),
@@ -309,13 +309,39 @@ try {
   ]);
   console.log('PASS | short-lived test JWTs generated at runtime (redacted)');
 
+  const boardingPath = `/v1/driver/trips/${ids.trip}/boarding`;
   const startPath = `/v1/driver/trips/${ids.trip}/start`;
   const completePath = `/v1/driver/trips/${ids.trip}/complete`;
+  expectResponse(await post(boardingPath, assistantToken, newIdempotencyKey()), 403, 'FORBIDDEN', 'assistant boarding denied');
+  expectResponse(await post(boardingPath, unassignedToken, newIdempotencyKey()), 403, 'FORBIDDEN', 'unassigned driver boarding denied');
+  expectResponse(await post(boardingPath, driverToken, 'not-a-uuid-v4'), 422, 'VALIDATION_ERROR', 'boarding malformed key rejected');
   expectResponse(await post(startPath, assistantToken, newIdempotencyKey()), 403, 'FORBIDDEN', 'assistant start denied');
   expectResponse(await post(startPath, unassignedToken, newIdempotencyKey()), 403, 'FORBIDDEN', 'unassigned driver start denied');
   expectResponse(await post(startPath, driverToken, 'not-a-uuid-v4'), 422, 'VALIDATION_ERROR', 'malformed key rejected');
+  expectResponse(await post(startPath, driverToken, newIdempotencyKey()), 409, 'TRIP_INVALID_TRANSITION', 'direct SCHEDULED start rejected');
+
+  const boardingKey = newIdempotencyKey();
+  const boarded = await post(boardingPath, driverToken, boardingKey);
+  expectResponse(boarded, 200, null, 'assigned driver manual boarding at T-120');
+  assert(boarded.body?.data?.tripId === ids.trip && boarded.body?.data?.status === 'BOARDING', 'boarding response data mismatch');
+  const replayedBoarding = await post(boardingPath, driverToken, boardingKey);
+  expectResponse(replayedBoarding, 200, null, 'same-key boarding replay');
+  assert(JSON.stringify(replayedBoarding.body) === JSON.stringify(boarded.body), 'same-key boarding replay body changed');
+
+  await poll(
+    'TripBoardingStarted Outbox published',
+    () => psql('vietride_trip', `SELECT status::text FROM vietride_trip.outbox_events WHERE event_type='trip.trip.boarding_started' AND payload->>'tripId'='${ids.trip}'`),
+    (value) => value === 'PUBLISHED',
+  );
+  const boardingAudit = psql('vietride_trip', `
+    SELECT count(*) || '|' || min(actor_user_id::text)
+    FROM vietride_trip.trip_audit_logs
+    WHERE trip_id='${ids.trip}' AND action='TRIP_BOARDING_STARTED_MANUAL'`);
+  assert(boardingAudit === `1|${ids.driver}`, `manual boarding audit mismatch: ${boardingAudit}`);
+  console.log('PASS | one manual boarding event and audit persisted');
 
   const startKey = newIdempotencyKey();
+  assert(startKey !== boardingKey, 'boarding and start must use different Idempotency-Key values');
   const started = await post(startPath, driverToken, startKey);
   expectResponse(started, 200, null, 'assigned driver manual start');
   assert(started.body?.data?.tripId === ids.trip && started.body?.data?.status === 'IN_PROGRESS', 'start response data mismatch');
@@ -353,10 +379,12 @@ try {
     (value) => value === 'PUBLISHED',
   );
   const audit = psql('vietride_trip', `
-    SELECT count(*) || '|' || min(action) || '|' || min(actor_user_id::text)
+    SELECT count(*)
+      || '|' || count(*) FILTER (WHERE action='TRIP_BOARDING_STARTED_MANUAL' AND actor_user_id='${ids.driver}')
+      || '|' || count(*) FILTER (WHERE action='TRIP_COMPLETED_MANUAL' AND actor_user_id='${ids.assistant}')
     FROM vietride_trip.trip_audit_logs WHERE trip_id='${ids.trip}'`);
-  assert(audit === `1|TRIP_COMPLETED_MANUAL|${ids.assistant}`, `manual completion audit mismatch: ${audit}`);
-  console.log('PASS | one manual Trip audit row persisted');
+  assert(audit === '2|1|1', `manual lifecycle audit mismatch: ${audit}`);
+  console.log('PASS | one boarding and one completion Trip audit row persisted');
 
   await poll(
     'Booking consumer completed eligible statuses only',
@@ -382,7 +410,7 @@ try {
     SELECT count(*) FROM vietride_booking.booking_status_history WHERE booking_id IN (${bookingIds.map((id) => `'${id}'`).join(',')})`);
   const auditAfterDuplicate = psql('vietride_trip', `SELECT count(*) FROM vietride_trip.trip_audit_logs WHERE trip_id='${ids.trip}'`);
   const tripStateAfterDuplicate = psql('vietride_trip', `SELECT status::text FROM vietride_trip.trips WHERE id='${ids.trip}'`);
-  assert(historyAfterDuplicate === '2' && auditAfterDuplicate === '1' && tripStateAfterDuplicate === 'COMPLETED',
+  assert(historyAfterDuplicate === '2' && auditAfterDuplicate === '2' && tripStateAfterDuplicate === 'COMPLETED',
     `duplicate event changed state: history=${historyAfterDuplicate}, audit=${auditAfterDuplicate}, trip=${tripStateAfterDuplicate}`);
   console.log('PASS | duplicate TripCompleted event is a no-op');
   console.log('PASS | deterministic pending behavior remains covered by the controlled Task 21.1 integration test');

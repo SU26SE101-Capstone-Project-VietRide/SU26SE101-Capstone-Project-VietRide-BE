@@ -2,6 +2,7 @@ namespace VietRide.Trip.Domain.Constants;
 
 public static class TripAuditAction
 {
+    public const string TripBoardingStartedManual = "TRIP_BOARDING_STARTED_MANUAL";
     public const string TripCompletedManual = "TRIP_COMPLETED_MANUAL";
     public const string TripEdited = "TRIP_EDITED";
     public const string TripVehicleSwapped = "TRIP_VEHICLE_SWAPPED";
@@ -18,7 +19,8 @@ public static class TripAuditAction
     public const string TripStopSnapshotSynced = "TRIP_STOP_SNAPSHOT_SYNCED";
 
     public static bool IsApproved(string action) => action is
-        TripCompletedManual
+        TripBoardingStartedManual
+        or TripCompletedManual
         or TripEdited
         or TripVehicleSwapped
         or TripRouteChanged

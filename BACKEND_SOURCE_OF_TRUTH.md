@@ -1279,7 +1279,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
 endpoint có behavior-idempotent hay không, trừ đúng 21 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `215 mutation surfaces / 194 required / 21 exempt`;
+bảng sau. Inventory executable phải giữ tổng `217 mutation surfaces / 196 required / 21 exempt`;
 thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
 
 **Canonical 21 exemptions (không yêu cầu `Idempotency-Key`):**
@@ -1343,6 +1343,8 @@ Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable
 | 13 | `POST /v1/operator/voucher-consents/{id}/reject` | Booking |
 | 14 | `POST /v1/admin/vouchers` | Booking |
 | 15 | `POST /v1/operator/vouchers` | Booking |
+| 15a | `POST /v1/driver/trips/{tripId}/boarding` | Trip |
+| 15b | `POST /v1/operator/trips/{tripId}/boarding` | Trip |
 | 16 | `POST /v1/driver/trips/{tripId}/start` | Trip |
 | 17 | `POST /v1/driver/trips/{tripId}/complete` | Trip |
 | 18 | `PATCH /v1/operator/trips/{tripId}` | Trip |
@@ -1671,6 +1673,7 @@ phát integration event.
 | | `FARE_SURCHARGE_PERIOD_NOT_FOUND` | 404 | Holiday surcharge period không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
 | | `FARE_SURCHARGE_PERIOD_OVERLAP` | 422 | Active holiday surcharge period overlap một active non-deleted period của cùng operator |
 | | `TRIP_INVALID_TRANSITION` | 409 | Day-21 start/complete lifecycle precondition fails; do not introduce or use `INVALID_TRIP_STATUS` |
+| | `TRIP_BOARDING_TOO_EARLY` | 409 | Manual boarding is requested before `departureDateTime - TRIP_MANUAL_BOARDING_EARLY_WINDOW_MINUTES`; equality at the boundary is allowed |
 | | `TRIP_NOT_IN_PROGRESS` | 422 | Incident/arrival chỉ hợp lệ khi Trip đang `IN_PROGRESS` |
 | | `TRIP_NOT_SUBSTITUTABLE` | 409 | Vehicle substitution requires an `IN_PROGRESS` old Trip |
 | | `TRIP_STOP_NOT_FOUND` | 404 | TripStop không tồn tại trong Trip được chỉ định |
@@ -2345,7 +2348,7 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `booking.passenger.boarded` | Booking | Tracking | Exact `{ eventId, occurredAt, bookingId, bookingCode, tripId, passengerRecordId, seatNumber, ticketCode, boardedAt }`; written to Outbox atomically with passenger `BOARDED` and ticket `USED`, then broadcast as crew-only `booking:updated` with `reason=PASSENGER_BOARDED`. |
 | `booking.voucher.consent_accepted` | Booking | Notification | `{ voucherId, operatorId }` |
 | `booking.voucher.consent_rejected` | Booking | Notification | `{ voucherId, operatorId, reason? }` |
-| `trip.trip.boarding_started` | Trip | Notification | `{ tripId, boardingStartedAt }` |
+| `trip.trip.boarding_started` | Trip | Notification | Existing exact `{ tripId, boardingStartedAt }`; emitted once by the shared locked automatic/manual boarding transition coordinator |
 | `trip.trip.assigned` | Trip | Notification | `{ tripId, operatorId, driverUserId, assistantUserId?, routeName, vehiclePlateNumber, departureDateTime }` |
 | `trip.trip.crew_changed` | Trip | Notification | `{ tripId, operatorId, oldDriverUserId, oldAssistantUserId?, driverUserId, assistantUserId?, routeName, vehiclePlateNumber?, departureDateTime }` |
 | `trip.trip.started` | Trip | Parcel (block new parcel), Tracking | `{ tripId, actualDepartureTime }` |
@@ -2992,10 +2995,16 @@ SCHEDULED ─┬─→ BOARDING ─→ IN_PROGRESS ─┬─→ COMPLETED
 
 **Triggers:**
 
-- `BOARDING`: Hangfire (Trip) 30 phút trước `departureDateTime`.
+- `BOARDING`: `AutoBoardingJob` mở tự động khi `departureDateTime <= now + 30 phút`, hoặc assigned
+  `DRIVER` / same-tenant `OPERATOR_ADMIN` gọi manual boarding khi
+  `departureDateTime <= now + TRIP_MANUAL_BOARDING_EARLY_WINDOW_MINUTES` (default 180 phút,
+  equality allowed). Cả hai path dùng cùng row lock + status recheck coordinator; chỉ transition
+  thật phát một `trip.trip.boarding_started`. Manual replay khi đã `BOARDING` là `200` no-op.
 - `IN_PROGRESS`: PRIMARY là Driver được gán bấm "Start trip" khi `BOARDING`; SECONDARY là
   Hangfire recurring scan mỗi 5 phút, chỉ auto-start khi `departureDateTime < now - 30 phút`.
-  GPS không phải PRIMARY trigger và chỉ bắt đầu tracking sau `trip.trip.started`.
+  Manual start không có early-time guard sau khi Trip đã `BOARDING`, nhưng không được nhảy thẳng
+  `SCHEDULED -> IN_PROGRESS`; GPS không phải PRIMARY trigger và chỉ bắt đầu tracking sau
+  `trip.trip.started`.
 - `COMPLETED`: PRIMARY là Driver/Assistant được gán bấm "End trip" khi `IN_PROGRESS`; SECONDARY là
   Hangfire recurring scan mỗi 15 phút, chỉ auto-complete khi
   `estimatedArrivalTime < now - 30 phút`.
@@ -3015,7 +3024,7 @@ SCHEDULED ─┬─→ BOARDING ─→ IN_PROGRESS ─┬─→ COMPLETED
 `PENDING`/`SKIPPED` và Trip chưa đến destination trả `null`. Đây là read projection từ trạng thái
 đã persist, không tạo lifecycle transition, event hoặc schema mới.
 
-#### Authoritative Trip manual-completion audit contract (Day 21)
+#### Authoritative Trip manual-lifecycle audit contract (Day 21)
 
 `trip_audit_logs` is append-only and Trip-owned. It has exactly these columns:
 
@@ -3031,8 +3040,13 @@ SCHEDULED ─┬─→ BOARDING ─→ IN_PROGRESS ─┬─→ COMPLETED
 
 Indexes are exactly `(trip_id, occurred_at DESC)`,
 `(actor_user_id, occurred_at DESC) WHERE actor_user_id IS NOT NULL`, and
-`(action, occurred_at DESC)`. The only Day-21 action is
+`(action, occurred_at DESC)`. Approved manual lifecycle actions are
+`TripAuditAction.TripBoardingStartedManual = "TRIP_BOARDING_STARTED_MANUAL"` and
 `TripAuditAction.TripCompletedManual = "TRIP_COMPLETED_MANUAL"`.
+
+Manual boarding atomically persists `BOARDING`, one audit row with exact metadata
+`{tripId,role}`, and the existing `trip.trip.boarding_started` Outbox row. A request that observes
+`BOARDING` after acquiring the lifecycle row lock returns `200` without another audit/event.
 
 Manual completion atomically persists the Trip `COMPLETED` state/timestamps, one audit row with
 the authenticated actor and metadata `{tripId,role}`, and the `trip.trip.completed` Outbox row in
@@ -3636,7 +3650,7 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 | Job | Type | Trigger | Notes |
 |---|---|---|---|
 | `GenerateTripsFromScheduleJob` | Recurring | Weekly Sun 23:00 Asia/Ho_Chi_Minh + immediate on DriverSchedule create/activate | Generate Trip theo cửa sổ lăn từ today đến `today + 30` inclusive. Idempotent (driverId + departureDateTime) |
-| `AutoBoardingJob` | Recurring | Every minute; UTC cron `* * * * *` | Set SCHEDULED Trips to BOARDING only when `departureDateTime <= now + 30 phút`; publish `trip.trip.boarding_started` |
+| `AutoBoardingJob` | Recurring | Every minute; UTC cron `* * * * *` | Shared locked boarding coordinator sets SCHEDULED Trips to BOARDING only when `departureDateTime <= now + 30 phút`; any later status is a no-op and cannot be overwritten; publish one `trip.trip.boarding_started` |
 | `AutoStartFallbackJob` | Recurring | Every 5 phút | Set BOARDING Trips to IN_PROGRESS only when `departureDateTime < now - 30 phút` and no assigned resource belongs to another `ACTIVE` reservation; otherwise leave Trip unchanged and persist one deduped alert/`trip.assignment.start_blocked` Outbox event. On success capture `actualDepartureTime`, activate reservations, and publish `trip.trip.started`. |
 | `AutoCompletedFallbackJob` | Recurring | Every 15 phút | Set IN_PROGRESS Trips to COMPLETED only when `estimatedArrivalTime < now - 30 phút`; publish `trip.trip.completed` |
 
@@ -3836,6 +3850,7 @@ GOOGLE_ROUTES_API_KEY=...
 TRIP_PLANNED_ETA_TIMEOUT_MS=3000
 RESOURCE_TRAVEL_TIME_TIMEOUT_MS=3000
 TRIP_STOP_DWELL_MINUTES=20
+TRIP_MANUAL_BOARDING_EARLY_WINDOW_MINUTES=180 # positive integer; fail fast when configured invalid
 HANGFIRE_DASHBOARD_USER=admin
 HANGFIRE_DASHBOARD_PASSWORD=...
 IDENTITY_BASE_URL=http://identity:5001
@@ -4174,6 +4189,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.75.0** | 2026-08-17 | Codex | **MINOR** — Add assigned-Driver and same-tenant Operator Admin manual `SCHEDULED -> BOARDING` endpoints with configurable inclusive T-180 default, UUID-v4 idempotency, exact no-op replay, manual audit and the existing boarding event. Manual and automatic boarding share one `SELECT ... FOR UPDATE` coordinator, preserving strict `BOARDING -> IN_PROGRESS` start and preventing Hangfire state regression. Adds two required mutations, raising inventory from 215/194/21 to 217/196/21; no status, column, migration, dependency or routing key. |
 | **1.74.0** | 2026-08-16 | Codex | **MINOR** — Make confirmed-booking seat release durable and owner-safe. `TripSeat` now stores logical `bookingId` exactly while `BOOKED`; book/round-trip/substitution paths persist ownership, HTTP `release-seats` remains HELD-only, and the existing Trip `booking.booking.cancelled` consumer releases only exact `tripId + bookingId` ownership in its local transaction. Legacy cancellation payloads retain shuttle compatibility without main-seat mutation. Adds one reversible Trip migration and no dependency, endpoint, error code, routing key, or queue. |
 | **1.73.0** | 2026-08-14 | Codex | **MINOR** — Add the approved P0–P2 FE search/filter contract across Booking, Parcel, Trip, Identity and Payment: tenant-safe filters and deterministic sorting, voucher/operator/fare summaries, operator CSV export, internal accent-insensitive user search capped at 1,000 IDs, Parcel sender orchestration, and passenger-level no-show statistics. Register `SEARCH_TOO_BROAD` as HTTP 422 and add reversible Booking/Identity/Parcel migrations; no dependency, Gateway route, integration event or P3/global-list normalization change. |
 | **1.72.1** | 2026-08-13 | Codex | **PATCH** — Close the Identity→Trip crew-assignment gap found by real Docker E2E: DriverSchedule create, activation and crew update now require the logical Identity Driver/Assistant to remain `ACTIVE`; `LOCKED` users are rejected with `422 VALIDATION_ERROR` before schedule/trip persistence. No endpoint, schema, dependency, event or inventory change. |

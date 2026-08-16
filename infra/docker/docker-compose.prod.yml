@@ -169,6 +169,7 @@ services:
       TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS: ${TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS:-1500}
       TRIP_PLANNED_ETA_TIMEOUT_MS: ${TRIP_PLANNED_ETA_TIMEOUT_MS:-3000}
       TRIP_STOP_DWELL_MINUTES: ${TRIP_STOP_DWELL_MINUTES:-20}
+      TRIP_MANUAL_BOARDING_EARLY_WINDOW_MINUTES: ${TRIP_MANUAL_BOARDING_EARLY_WINDOW_MINUTES:-180}
       # Trip runs the outbox publisher and RabbitMQ consumers. Inside Docker it
       # must use the Compose service hostname, never the localhost fallback.
       RabbitMq__HostName: rabbitmq

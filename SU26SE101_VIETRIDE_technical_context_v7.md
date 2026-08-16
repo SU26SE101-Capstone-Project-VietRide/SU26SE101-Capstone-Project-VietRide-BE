@@ -360,7 +360,7 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 >   `expiresAt`; round-trip dùng leg sớm hơn), schedule-change confirmation auto-accept khi quá
 >   deadline, PENDING_SEAT_ASSIGNMENT escalation (T+2h re-alert) + auto-cancel/refund 100% nếu
 >   unresolved tại `departure - 30 phút` (job interval 15 phút)
-> - **Trip-Route-Vehicle Service:** auto-generate Trip từ DriverSchedule (2 trigger: immediate on-create + weekly CN 23:00), auto-BOARDING 30 phút trước departure, auto-COMPLETED fallback sau estimatedArrivalTime + 30 phút
+> - **Trip-Route-Vehicle Service:** auto-generate Trip từ DriverSchedule (2 trigger: immediate on-create + weekly CN 23:00), auto-BOARDING 30 phút trước departure (cùng locked coordinator với manual boarding T-180 mặc định), auto-COMPLETED fallback sau estimatedArrivalTime + 30 phút
 > - **Parcel Service:** undo-reject window 15 phút (DELIVERY_REJECTED → RETURN_INITIATED), cancel EXTRA_LARGE review timeout sau 24h, reject/forfeit `RESERVED` quá `latestCheckInAt`, reject/forfeit `PENDING_FINAL_PAYMENT` quá `finalPaymentDeadline` (interval 5 phút), PENDING_TRANSFER_CONFIRM escalation 30 phút, PENDING_OPERATOR_ACTION re-alert 2h
 > - **Payment Service:** Payment PENDING_REDIRECT EXPIRED khi `dueAt ?? createdAt + 15 phút <= now`;
 >   TopUpRequest EXPIRED sau 15 phút
@@ -4017,16 +4017,23 @@ thì mất baseline để đo "xe trễ bao nhiêu" — không còn gì để so
 `TripStatus: SCHEDULED → BOARDING` được trigger như sau:
 
 ```
-Cơ chế: Hangfire job (recommended — tự động, không cần manual action):
-  Job chạy mỗi 15 phút:
+Cơ chế tự động: Hangfire job chạy mỗi phút:
     SELECT trip WHERE status = SCHEDULED
       AND departureDateTime <= now + interval '30 minutes'
     → UPDATE status = BOARDING
     → Publish event TripBoardingStarted → Notification Service
         → Gửi push "Chuyến X sẽ khởi hành trong 30 phút — bắt đầu lên xe"
 
-Operator/Driver cũng có thể manual trigger sớm hơn từ dashboard/app nếu cần
-(ví dụ xe vào bến sớm hơn dự kiến)
+Cơ chế manual phục vụ vận hành/demo:
+  POST /v1/driver/trips/{tripId}/boarding — assigned DRIVER
+  POST /v1/operator/trips/{tripId}/boarding — same-tenant OPERATOR_ADMIN
+  Bodyless + UUID-v4 Idempotency-Key; chỉ mở khi departureDateTime <= now + 180 phút mặc định
+  (TRIP_MANUAL_BOARDING_EARLY_WINDOW_MINUTES, equality allowed)
+  → transition thật ghi TRIP_BOARDING_STARTED_MANUAL và dùng cùng TripBoardingStarted event
+  → đã BOARDING trả 200 no-op; quá sớm trả TRIP_BOARDING_TOO_EARLY
+
+Manual API và Hangfire dùng cùng SELECT ... FOR UPDATE + reload/recheck. Vì vậy chỉ một tác nhân
+thắng transition/event; job chạy sau khi Driver đã start thấy IN_PROGRESS và không ghi lùi về BOARDING.
 ```
 
 **Trip IN_PROGRESS — trigger (2 cơ chế PRIMARY + SECONDARY):**
@@ -4034,7 +4041,9 @@ Operator/Driver cũng có thể manual trigger sớm hơn từ dashboard/app n�
 ```
 PRIMARY — Driver bấm "Bắt đầu chuyến" trong Driver App:
   Điều kiện tiên quyết: Trip.status = BOARDING
-    (nút bị disable nếu Trip chưa BOARDING — ngăn Driver start trip quá sớm)
+    (không cho nhảy SCHEDULED → IN_PROGRESS)
+  Sau khi manual/automatic boarding thành công, Driver có thể start ngay; không có early-time guard
+  API boarding và API start là hai mutation riêng, dùng hai Idempotency-Key khác nhau
   → Trip.status = IN_PROGRESS, Trip.actualDepartureTime = now
   → Publish TripStarted event (Outbox pattern)
   → Parcel Service consume TripStarted: LOADED → IN_TRANSIT
@@ -4849,7 +4858,9 @@ TripStatus:        SCHEDULED → BOARDING → IN_PROGRESS → COMPLETED
                    SCHEDULED → CANCELLED   (operator hủy trước BOARDING)
                    BOARDING  → CANCELLED   (operator hủy sau khi mở boarding nhưng trước IN_PROGRESS)
                    IN_PROGRESS → DISRUPTED (terminal — 2 case)
-                   BOARDING trigger: Hangfire job auto-set 30 phút trước departureDateTime
+                   BOARDING trigger: Hangfire auto T-30 hoặc assigned DRIVER / same-tenant
+                   OPERATOR_ADMIN manual trong inclusive T-180 mặc định; cùng row lock/status recheck
+                   START vẫn là transition riêng BOARDING → IN_PROGRESS, không cho SCHEDULED → IN_PROGRESS
                    DISRUPTED có 2 case (phân biệt qua presence của BookingTransfer record):
                      Case 1 — Vehicle Substitution: xe hỏng giữa đường, Operator điều xe khác.
                        Trip_old.status=DISRUPTED, BookingTransfer records created, không refund

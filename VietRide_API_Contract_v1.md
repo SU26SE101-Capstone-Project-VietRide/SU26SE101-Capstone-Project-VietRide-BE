@@ -8484,7 +8484,7 @@ Trip not assigned to the caller returns `403 FORBIDDEN`; malformed `tripId` retu
 
 ## Day 21 — Trip lifecycle automation
 
-Both lifecycle mutations have no request body. They require an `Idempotency-Key` header whose
+All lifecycle mutations below have no request body. They require an `Idempotency-Key` header whose
 value is a UUID v4. The idempotency fingerprint is exactly the HTTP method, normalized request
 route/path parameters including `tripId`, authenticated `sub`, and canonical empty-body marker;
 the authenticated role is not a fingerprint component. Request authentication and
@@ -8499,15 +8499,65 @@ only to retry the same logical mutation and use a new UUID-v4 key for a new atte
 malformed keys, malformed `tripId`, or any request body return `422 VALIDATION_ERROR` without
 changing Trip state.
 
+### POST `/v1/driver/trips/{tripId}/boarding`
+
+Auth: `DRIVER` only. The authenticated JWT `sub` must equal the Trip's `driverUserId`; an existing
+Trip assigned to another Driver returns `403 FORBIDDEN`. `ASSISTANT` is not allowed. The request
+has no body and requires the idempotency semantics above.
+
+### POST `/v1/operator/trips/{tripId}/boarding`
+
+Auth: `OPERATOR_ADMIN` only. The Trip must belong to the caller's JWT `operatorId`; missing or
+cross-tenant Trips are both masked as `404 TRIP_NOT_FOUND`. `OPERATOR_STAFF` is not allowed. The
+request has no body and requires the idempotency semantics above.
+
+Both endpoints implement the same manual `SCHEDULED -> BOARDING` transition. It is allowed when
+`departureDateTime <= now + TRIP_MANUAL_BOARDING_EARLY_WINDOW_MINUTES`; the configurable window
+defaults to 180 minutes and equality is allowed. An otherwise eligible Trip outside the window
+returns `409 TRIP_BOARDING_TOO_EARLY`. A Trip already in `BOARDING` returns the same `200` response
+as a no-op without a second audit or event; every other current status returns
+`409 TRIP_INVALID_TRANSITION`.
+
+A real transition appends `TRIP_BOARDING_STARTED_MANUAL` with the authenticated actor and exact
+metadata `{tripId,role}`, and publishes exactly one existing `trip.trip.boarding_started` event
+with `{tripId,boardingStartedAt}` in the same Trip-local transaction. Manual boarding and
+`AutoBoardingJob` lock the same Trip row and recheck status after the lock, so their race cannot
+duplicate the event or move `IN_PROGRESS` back to `BOARDING`.
+
+Response `200` uses the ADR 0004 success envelope. Data is exactly `{tripId,status}`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "tripId": "2f0cc13f-2207-4b62-9e0f-82f67f5a5bc2",
+    "status": "BOARDING"
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-06-22T06:30:00+07:00" }
+}
+```
+
+Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
+`409 TRIP_BOARDING_TOO_EARLY`; `409 TRIP_INVALID_TRANSITION`;
+`409 IDEMPOTENCY_REQUEST_PENDING`; `422 IDEMPOTENCY_KEY_MISMATCH`;
+`422 VALIDATION_ERROR`.
+
 ### POST `/v1/driver/trips/{tripId}/start`
 
 Auth: `DRIVER` only. The authenticated JWT `sub` must equal the Trip's `driverUserId`; an existing
 Trip assigned to another user returns `403 FORBIDDEN`. The request has no body and requires the
 idempotency semantics above.
 
-Precondition: Trip status is `BOARDING`. A successful transition sets status to `IN_PROGRESS`,
+Precondition: Trip status is `BOARDING`. There is no earliest-time guard once boarding has opened,
+so the assigned Driver may call this endpoint immediately after either manual or automatic
+boarding. Calling it directly from `SCHEDULED` remains `409 TRIP_INVALID_TRANSITION`; clients must
+first call a boarding endpoint and then call start with a different `Idempotency-Key`. A successful
+transition sets status to `IN_PROGRESS`,
 captures `actualDepartureTime`, and publishes `trip.trip.started` through the Trip Outbox in the
-same Trip-local transaction. Any other current status returns `409 TRIP_INVALID_TRANSITION`.
+same Trip-local transaction. The existing assigned-resource activation check remains authoritative;
+an `ACTIVE` conflicting Driver/Vehicle/Shuttle reservation blocks start without changing Trip
+status. Any other current status returns `409 TRIP_INVALID_TRANSITION`.
 
 Response `200` uses the ADR 0004 success envelope. Every data field is required and non-null:
 

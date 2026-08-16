@@ -13,6 +13,7 @@ using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
 using VietRide.Trip.Application.Features.Trips.ListOperatorTrips;
 using VietRide.Trip.Application.Features.Trips.Operations;
 using VietRide.Trip.Application.Features.Trips.SeatOperations;
+using VietRide.Trip.Application.Features.Trips.StartTripBoarding;
 
 namespace VietRide.Trip.Api.Controllers;
 
@@ -93,6 +94,28 @@ public sealed class OperatorTripsController : ControllerBase
                 request.VehicleId,
                 request.RouteIdSpecified,
                 request.RouteId),
+            cancellationToken));
+    }
+
+    [HttpPost("{tripId}/boarding")]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [RequireIdempotency(AllowRequestBody = false)]
+    [ProducesResponseType(typeof(ApiResponse<StartTripBoardingResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<StartTripBoardingResponse>> StartBoardingAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new StartTripBoardingCommand(
+                tripId,
+                CurrentUserClaims.GetUserId(User),
+                "OPERATOR_ADMIN",
+                GetRequiredOperatorId()),
             cancellationToken));
     }
 

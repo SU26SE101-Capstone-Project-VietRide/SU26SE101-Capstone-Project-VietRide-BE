@@ -14,7 +14,10 @@ using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Messaging.Abstractions;
 using VietRide.Shared.Persistence.Outbox;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.DriverTrips.CompleteTrip;
+using VietRide.Trip.Application.Features.DriverTrips.StartTrip;
+using VietRide.Trip.Application.Services;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
 using VietRide.Trip.Infrastructure.Jobs;
@@ -242,6 +245,72 @@ public sealed class TripLifecycleJobIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task ManualAndAutoBoardingRace_EmitsOnce_AllowsImmediateStart_AndNeverRegresses()
+    {
+        var databaseName = $"vietride_trip_boarding_race_{Guid.NewGuid():N}";
+        await using var setup = CreateDbContext(databaseName, new MutableClock(InitialNow));
+        try
+        {
+            await setup.Database.MigrateAsync();
+            var seeded = await SeedTripAsync(
+                setup,
+                InitialNow.AddMinutes(20),
+                InitialNow.AddHours(4));
+            setup.ChangeTracker.Clear();
+
+            await using var manualDb = CreateDbContext(databaseName, new MutableClock(InitialNow));
+            await using var automaticDb = CreateDbContext(databaseName, new MutableClock(InitialNow));
+            var manual = CreateBoardingCoordinator(manualDb, new MutableClock(InitialNow));
+            var automatic = CreateAutoBoardingJob(automaticDb, new MutableClock(InitialNow));
+
+            var manualTask = manual.StartManualAsync(
+                seeded.Id,
+                seeded.DriverUserId,
+                "DRIVER",
+                null,
+                InitialNow,
+                CancellationToken.None);
+            await Task.WhenAll(manualTask, automatic.ScanAsync());
+            (await manualTask).Status.Should().Be("BOARDING");
+
+            await using (var startDb = CreateDbContext(databaseName, new MutableClock(InitialNow)))
+            {
+                var start = new StartTripCommandHandler(
+                    CreateRepository(startDb),
+                    CreateOutbox(startDb, new MutableClock(InitialNow)),
+                    new DbUnitOfWork(startDb),
+                    new MutableClock(InitialNow));
+                var response = await start.Handle(
+                    new StartTripCommand(seeded.Id, seeded.DriverUserId),
+                    CancellationToken.None);
+                response.Status.Should().Be("IN_PROGRESS");
+                response.ActualDepartureTime.Should().Be(InitialNow);
+            }
+
+            await using (var lateJobDb = CreateDbContext(databaseName, new MutableClock(InitialNow)))
+            {
+                await CreateAutoBoardingJob(lateJobDb, new MutableClock(InitialNow)).ScanAsync();
+            }
+
+            await using var assertionDb = CreateDbContext(databaseName, new MutableClock(InitialNow));
+            var persisted = await assertionDb.Trips.SingleAsync(trip => trip.Id == seeded.Id);
+            persisted.Status.Should().Be(TripStatus.IN_PROGRESS);
+            persisted.ActualDepartureTime.Should().Be(InitialNow);
+            (await assertionDb.OutboxEvents.CountAsync(item =>
+                item.EventType == "trip.trip.boarding_started")).Should().Be(1);
+            (await assertionDb.OutboxEvents.CountAsync(item =>
+                item.EventType == "trip.trip.started")).Should().Be(1);
+            (await assertionDb.TripAuditLogs.CountAsync(item =>
+                item.TripId == seeded.Id
+                && item.Action == "TRIP_BOARDING_STARTED_MANUAL")).Should().BeLessThanOrEqualTo(1);
+        }
+        finally
+        {
+            await setup.Database.EnsureDeletedAsync();
+        }
+    }
+
     private static async Task WithDatabaseAsync(Func<TripDbContext, Task> test)
     {
         var databaseName = $"vietride_trip_jobs_{Guid.NewGuid():N}";
@@ -257,8 +326,23 @@ public sealed class TripLifecycleJobIntegrationTests
         }
     }
 
-    private static AutoBoardingJob CreateAutoBoardingJob(TripDbContext db, IClock clock) =>
-        new(db, CreateRepository(db), CreateOutbox(db, clock), clock);
+    private static AutoBoardingJob CreateAutoBoardingJob(TripDbContext db, IClock clock)
+    {
+        var repository = CreateRepository(db);
+        var coordinator = CreateBoardingCoordinator(db, clock, repository);
+        return new AutoBoardingJob(repository, coordinator, clock);
+    }
+
+    private static TripBoardingTransitionCoordinator CreateBoardingCoordinator(
+        TripDbContext db,
+        IClock clock,
+        ITripRepository? repository = null) =>
+        new(
+            repository ?? CreateRepository(db),
+            CreateAuditRepository(db),
+            CreateOutbox(db, clock),
+            new DbUnitOfWork(db),
+            new FixedBoardingWindowProvider(TimeSpan.FromMinutes(180)));
 
     private static AutoStartFallbackJob CreateAutoStartJob(TripDbContext db, IClock clock) =>
         new(db, CreateRepository(db), CreateOutbox(db, clock), clock);
@@ -388,6 +472,12 @@ public sealed class TripLifecycleJobIntegrationTests
         public DateTimeOffset UtcNow { get; private set; }
 
         public void Advance(TimeSpan duration) => UtcNow = UtcNow.Add(duration);
+    }
+
+    private sealed class FixedBoardingWindowProvider(TimeSpan manualEarlyWindow)
+        : ITripBoardingWindowProvider
+    {
+        public TimeSpan ManualEarlyWindow { get; } = manualEarlyWindow;
     }
 
     private sealed class DbUnitOfWork : IUnitOfWork

@@ -2,8 +2,8 @@
   "version": 3,
   "policy": "system-wide-idempotency-contract",
   "expectedSummary": {
-    "mutationSurfaces": 215,
-    "required": 194,
+    "mutationSurfaces": 217,
+    "required": 196,
     "exemptions": 21
   },
   "services": {
@@ -219,7 +219,7 @@
       "stack": "dotnet",
       "servicePrefix": "trip",
       "requireAllMutations": true,
-      "expectedMutationCount": 81,
+      "expectedMutationCount": 85,
       "endpoints": [
         {
           "method": "POST",
@@ -259,6 +259,11 @@
         {
           "method": "DELETE",
           "path": "/v1/admin/stops/{id:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/driver/trips/{tripId}/boarding",
           "policy": "required"
         },
         {
@@ -336,6 +341,12 @@
           "path": "/internal/v1/trips/summaries/batch",
           "policy": "exempt",
           "reason": "Trip summary batching is a read-only query exposed as POST for bounded request payloads."
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/trips/parcel-availability/search",
+          "policy": "exempt",
+          "reason": "Parcel availability search is a read-only query exposed as POST for bounded route filtering."
         },
         {
           "method": "POST",
@@ -585,7 +596,17 @@
         },
         {
           "method": "PATCH",
+          "path": "/v1/operator/incidents/{incidentId}/resolve",
+          "policy": "required"
+        },
+        {
+          "method": "PATCH",
           "path": "/v1/operator/trips/{tripId:guid}",
+          "policy": "required"
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/trips/{tripId}/boarding",
           "policy": "required"
         },
         {
@@ -1177,8 +1198,8 @@
   ],
   "coverage": {
     "dotnetRabbitMqRegistrations": 45,
-    "notificationRabbitMqSubscriptionCallsites": 17,
-    "notificationRabbitMqRuntimeBindings": 82,
+    "notificationRabbitMqSubscriptionCallsites": 19,
+    "notificationRabbitMqRuntimeBindings": 84,
     "notificationRabbitMqBindingCollections": [
       {
         "file": "apps/notification/src/notifications/booking-trip-change-events.consumer.ts",
@@ -1206,7 +1227,7 @@
         "name": "TRIP_TRACKING_ALERT_QUEUE_BINDINGS"
       }
     ],
-    "dotnetOutboundHttpCallsites": 31,
+    "dotnetOutboundHttpCallsites": 33,
     "dotnetOutboundHttpExemptions": [
       {
         "file": "apps/trip/src/VietRide.Trip.Infrastructure/ExternalClients/GoogleRoutesShuttleDistanceClient.cs",
@@ -1245,10 +1266,22 @@
         "reason": "Read-only bounded Trip summary lookup."
       },
       {
+        "file": "apps/booking/src/VietRide.Booking.Infrastructure/Http/TripServiceClient.cs",
+        "method": "POST",
+        "match": "/internal/v1/trips/summaries/batch",
+        "reason": "Read-only bounded Trip summary lookup."
+      },
+      {
         "file": "apps/parcel/src/VietRide.Parcel.Infrastructure/Http/TripServiceClient.cs",
         "method": "POST",
         "match": "/internal/v1/trips/summaries/batch",
         "reason": "Read-only bounded Trip summary lookup."
+      },
+      {
+        "file": "apps/parcel/src/VietRide.Parcel.Infrastructure/Http/TripServiceClient.cs",
+        "method": "POST",
+        "match": "/internal/v1/trips/parcel-availability/search",
+        "reason": "Read-only bounded Parcel Trip availability lookup."
       },
       {
         "file": "apps/payment/src/VietRide.Payment.Infrastructure/Http/IdentityOperatorSummaryClient.cs",

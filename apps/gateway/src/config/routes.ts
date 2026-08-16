@@ -299,6 +299,15 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN'],
     },
     {
+      prefix: '/v1/operator/trips/{tripId}/boarding',
+      pathPattern:
+        /^\/v1\/operator\/trips\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/boarding$/,
+      method: 'POST',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
       prefix: '/v1/operator/trips/{tripId}/change-route',
       pathPattern:
         /^\/v1\/operator\/trips\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/change-route$/,
@@ -425,6 +434,15 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     { prefix: '/v1/vehicles', target: env.TRIP_BASE_URL, authRequired: 'user' },
     {
       prefix: '/v1/driver/shuttle-trips',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER'],
+    },
+    {
+      prefix: '/v1/driver/trips/{tripId}/boarding',
+      pathPattern:
+        /^\/v1\/driver\/trips\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/boarding$/,
+      method: 'POST',
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['DRIVER'],

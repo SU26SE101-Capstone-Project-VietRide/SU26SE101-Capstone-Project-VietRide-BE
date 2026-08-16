@@ -770,6 +770,23 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('restricts exact manual boarding routes to the assigned actor roles', () => {
+    const tripId = '11111111-1111-4111-8111-111111111111';
+
+    expect(matchRoute(routes, `/v1/driver/trips/${tripId}/boarding`)).toMatchObject({
+      prefix: '/v1/driver/trips/{tripId}/boarding',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER'],
+    });
+    expect(matchRoute(routes, `/v1/operator/trips/${tripId}/boarding`)).toMatchObject({
+      prefix: '/v1/operator/trips/{tripId}/boarding',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    });
+  });
+
   it('matches operator vehicles using the dedicated prefix without changing generic vehicles', () => {
     const operatorRoute = matchRoute(
       routes,

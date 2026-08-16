@@ -25,8 +25,11 @@ using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Messaging.Abstractions;
 using VietRide.Shared.Persistence.Outbox;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.DriverTrips.CompleteTrip;
 using VietRide.Trip.Application.Features.DriverTrips.StartTrip;
+using VietRide.Trip.Application.Features.Trips.StartTripBoarding;
+using VietRide.Trip.Application.Services;
 using VietRide.Trip.Domain.Constants;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
@@ -36,6 +39,180 @@ namespace VietRide.Trip.IntegrationTests.DriverTrips;
 public sealed class TripLifecycleEndpointTests
 {
     private const string TestSecret = "test-secret-at-least-32-chars-long-xxxxx";
+
+    [Fact]
+    public async Task ManualBoardingEndpoints_UseInclusiveWindow_NoOpReplay_AndPreserveStrictStartSequence()
+    {
+        var databaseName = $"vietride_trip_boarding_http_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.Parse("2026-08-17T08:00:00Z");
+        await using var setup = CreateDbContext(databaseName);
+        try
+        {
+            await setup.Database.MigrateAsync();
+            var assigned = await SeedTripAsync(
+                setup,
+                now,
+                inProgress: false,
+                scheduled: true,
+                departure: now.AddMinutes(180));
+            var tooEarly = await SeedTripAsync(
+                setup,
+                now,
+                inProgress: false,
+                scheduled: true,
+                departure: now.AddMinutes(180).AddTicks(1));
+            using var factory = new LifecycleWebApplicationFactory(new DatabaseMediator(databaseName, now));
+            using var client = factory.CreateClient();
+            var boardingPath = $"/v1/driver/trips/{assigned.Id}/boarding";
+
+            var directStart = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                $"/v1/driver/trips/{assigned.Id}/start",
+                "DRIVER",
+                assigned.DriverUserId,
+                NewKey()));
+            await AssertErrorAsync(directStart, HttpStatusCode.Conflict, "TRIP_INVALID_TRANSITION");
+
+            var assistant = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                boardingPath,
+                "ASSISTANT",
+                assigned.AssistantUserId!.Value,
+                NewKey()));
+            assistant.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+            var wrongDriver = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                boardingPath,
+                "DRIVER",
+                Guid.NewGuid(),
+                NewKey()));
+            await AssertErrorAsync(wrongDriver, HttpStatusCode.Forbidden, "FORBIDDEN");
+
+            var early = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                $"/v1/driver/trips/{tooEarly.Id}/boarding",
+                "DRIVER",
+                tooEarly.DriverUserId,
+                NewKey()));
+            await AssertErrorAsync(early, HttpStatusCode.Conflict, "TRIP_BOARDING_TOO_EARLY");
+
+            var key = NewKey();
+            var boarded = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                boardingPath,
+                "DRIVER",
+                assigned.DriverUserId,
+                key));
+            var boardedBytes = await boarded.Content.ReadAsByteArrayAsync();
+            boarded.StatusCode.Should().Be(HttpStatusCode.OK);
+            AssertBoardingEnvelope(boardedBytes, assigned.Id);
+
+            var replay = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                boardingPath,
+                "DRIVER",
+                assigned.DriverUserId,
+                key));
+            replay.StatusCode.Should().Be(HttpStatusCode.OK);
+            (await replay.Content.ReadAsByteArrayAsync()).Should().Equal(boardedBytes);
+
+            var newKeyNoOp = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                boardingPath,
+                "DRIVER",
+                assigned.DriverUserId,
+                NewKey()));
+            newKeyNoOp.StatusCode.Should().Be(HttpStatusCode.OK);
+            AssertBoardingEnvelope(await newKeyNoOp.Content.ReadAsByteArrayAsync(), assigned.Id);
+
+            var started = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                $"/v1/driver/trips/{assigned.Id}/start",
+                "DRIVER",
+                assigned.DriverUserId,
+                NewKey()));
+            started.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            await using var assertionDb = CreateDbContext(databaseName);
+            var persisted = await assertionDb.Trips.SingleAsync(item => item.Id == assigned.Id);
+            persisted.Status.Should().Be(TripStatus.IN_PROGRESS);
+            persisted.ActualDepartureTime.Should().Be(now);
+            (await assertionDb.OutboxEvents.CountAsync(item =>
+                item.EventType == "trip.trip.boarding_started"
+                && item.Payload.Contains(assigned.Id.ToString()))).Should().Be(1);
+            (await assertionDb.OutboxEvents.CountAsync(item =>
+                item.EventType == "trip.trip.started"
+                && item.Payload.Contains(assigned.Id.ToString()))).Should().Be(1);
+            var audit = await assertionDb.TripAuditLogs.SingleAsync(item => item.TripId == assigned.Id);
+            audit.Action.Should().Be(TripAuditAction.TripBoardingStartedManual);
+            audit.ActorUserId.Should().Be(assigned.DriverUserId);
+        }
+        finally
+        {
+            await setup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task OperatorBoarding_IsAdminOnlyAndMasksCrossTenantTrip()
+    {
+        var databaseName = $"vietride_trip_operator_boarding_http_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.Parse("2026-08-17T09:00:00Z");
+        await using var setup = CreateDbContext(databaseName);
+        try
+        {
+            await setup.Database.MigrateAsync();
+            var trip = await SeedTripAsync(
+                setup,
+                now,
+                inProgress: false,
+                scheduled: true,
+                departure: now.AddMinutes(120));
+            using var factory = new LifecycleWebApplicationFactory(new DatabaseMediator(databaseName, now));
+            using var client = factory.CreateClient();
+            var path = $"/v1/operator/trips/{trip.Id}/boarding";
+
+            var staff = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                path,
+                "OPERATOR_STAFF",
+                Guid.NewGuid(),
+                NewKey(),
+                operatorId: trip.OperatorId));
+            staff.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+            var crossTenant = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                path,
+                "OPERATOR_ADMIN",
+                Guid.NewGuid(),
+                NewKey(),
+                operatorId: Guid.NewGuid()));
+            await AssertErrorAsync(crossTenant, HttpStatusCode.NotFound, "TRIP_NOT_FOUND");
+
+            var actorId = Guid.NewGuid();
+            var success = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                path,
+                "OPERATOR_ADMIN",
+                actorId,
+                NewKey(),
+                operatorId: trip.OperatorId));
+            success.StatusCode.Should().Be(HttpStatusCode.OK);
+            AssertBoardingEnvelope(await success.Content.ReadAsByteArrayAsync(), trip.Id);
+
+            await using var assertionDb = CreateDbContext(databaseName);
+            var audit = await assertionDb.TripAuditLogs.SingleAsync(item => item.TripId == trip.Id);
+            audit.Action.Should().Be(TripAuditAction.TripBoardingStartedManual);
+            audit.ActorUserId.Should().Be(actorId);
+            audit.Metadata!.Value.GetProperty("role").GetString().Should().Be("OPERATOR_ADMIN");
+        }
+        finally
+        {
+            await setup.Database.EnsureDeletedAsync();
+        }
+    }
 
     [Theory]
     [InlineData("start", false)]
@@ -710,6 +887,16 @@ public sealed class TripLifecycleEndpointTests
         data.GetProperty("actualDepartureTime").GetDateTimeOffset().Should().Be(now);
     }
 
+    private static void AssertBoardingEnvelope(byte[] body, Guid tripId)
+    {
+        using var document = JsonDocument.Parse(body);
+        AssertSuccessEnvelope(document.RootElement);
+        var data = document.RootElement.GetProperty("data");
+        data.EnumerateObject().Select(item => item.Name).Should().BeEquivalentTo(["tripId", "status"]);
+        data.GetProperty("tripId").GetGuid().Should().Be(tripId);
+        data.GetProperty("status").GetString().Should().Be("BOARDING");
+    }
+
     private static void AssertCompleteEnvelope(byte[] body, Guid tripId, Guid actorId, DateTimeOffset now)
     {
         using var document = JsonDocument.Parse(body);
@@ -807,10 +994,13 @@ public sealed class TripLifecycleEndpointTests
         string role,
         Guid subject,
         string? idempotencyKey = null,
-        string? body = null)
+        string? body = null,
+        Guid? operatorId = null)
     {
         var request = new HttpRequestMessage(method, path);
-        request.Headers.TryAddWithoutValidation("X-Internal-Auth", $"Bearer {CreateInternalJwt(role, subject)}");
+        request.Headers.TryAddWithoutValidation(
+            "X-Internal-Auth",
+            $"Bearer {CreateInternalJwt(role, subject, operatorId)}");
         if (idempotencyKey is not null)
         {
             request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
@@ -824,14 +1014,24 @@ public sealed class TripLifecycleEndpointTests
         return request;
     }
 
-    private static string CreateInternalJwt(string role, Guid subject)
+    private static string CreateInternalJwt(string role, Guid subject, Guid? operatorId = null)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TestSecret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var claims = new List<Claim>
+        {
+            new("sub", subject.ToString()),
+            new(ClaimTypes.Role, role),
+        };
+        if (operatorId is not null)
+        {
+            claims.Add(new Claim("operatorId", operatorId.Value.ToString()));
+        }
+
         var token = new JwtSecurityToken(
             issuer: "vietride-gateway",
             audience: "vietride-internal",
-            claims: [new Claim("sub", subject.ToString()), new Claim(ClaimTypes.Role, role)],
+            claims: claims,
             expires: DateTime.UtcNow.AddMinutes(2),
             signingCredentials: credentials);
         return new JwtSecurityTokenHandler().WriteToken(token);
@@ -868,7 +1068,9 @@ public sealed class TripLifecycleEndpointTests
     private static async Task<VietRide.Trip.Domain.Entities.Trip> SeedTripAsync(
         TripDbContext db,
         DateTimeOffset now,
-        bool inProgress)
+        bool inProgress,
+        bool scheduled = false,
+        DateTimeOffset? departure = null)
     {
         var operatorId = Guid.NewGuid();
         var origin = Station.Create(
@@ -907,6 +1109,7 @@ public sealed class TripLifecycleEndpointTests
             20,
             500m,
             10m);
+        var departureDateTime = departure ?? now;
         var trip = VietRide.Trip.Domain.Entities.Trip.Create(
             operatorId,
             route.Id,
@@ -914,15 +1117,19 @@ public sealed class TripLifecycleEndpointTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             null,
-            now,
-            now.AddHours(4),
+            departureDateTime,
+            departureDateTime.AddHours(4),
             TripSource.MANUAL,
             Money.FromRaw(100_000),
             500m,
             maxCargoVolumeM3: null,
             estimatedPassengerLuggageKg: 5m,
             seatLayoutSnapshotJson: vehicle.SeatLayoutJson);
-        trip.MarkBoarding(now.AddMinutes(-10));
+        if (!scheduled)
+        {
+            trip.MarkBoarding(now.AddMinutes(-10));
+        }
+
         if (inProgress)
         {
             trip.Start(now.AddMinutes(-5));
@@ -1009,6 +1216,14 @@ public sealed class TripLifecycleEndpointTests
                     new IntegrationEventOutbox(new OutboxStore(db, clock)),
                     new DbUnitOfWork(db),
                     clock).Handle(command, cancellationToken),
+                StartTripBoardingCommand command => await new StartTripBoardingCommandHandler(
+                    new TripBoardingTransitionCoordinator(
+                        CreateRepository(db),
+                        CreateAuditRepository(db),
+                        new IntegrationEventOutbox(new OutboxStore(db, clock)),
+                        new DbUnitOfWork(db),
+                        new FixedBoardingWindowProvider(TimeSpan.FromMinutes(180))),
+                    clock).Handle(command, cancellationToken),
                 CompleteTripCommand command => await new CompleteTripCommandHandler(
                     CreateRepository(db),
                     CreateAuditRepository(db),
@@ -1077,6 +1292,12 @@ public sealed class TripLifecycleEndpointTests
     {
         public FrozenClock(DateTimeOffset utcNow) => UtcNow = utcNow;
         public DateTimeOffset UtcNow { get; }
+    }
+
+    private sealed class FixedBoardingWindowProvider(TimeSpan manualEarlyWindow)
+        : ITripBoardingWindowProvider
+    {
+        public TimeSpan ManualEarlyWindow { get; } = manualEarlyWindow;
     }
 
     private sealed class DbUnitOfWork : IUnitOfWork
