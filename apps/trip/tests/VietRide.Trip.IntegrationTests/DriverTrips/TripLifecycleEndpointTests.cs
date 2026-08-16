@@ -140,12 +140,12 @@ public sealed class TripLifecycleEndpointTests
             var persisted = await assertionDb.Trips.SingleAsync(item => item.Id == assigned.Id);
             persisted.Status.Should().Be(TripStatus.IN_PROGRESS);
             persisted.ActualDepartureTime.Should().Be(now);
-            (await assertionDb.OutboxEvents.CountAsync(item =>
-                item.EventType == "trip.trip.boarding_started"
-                && item.Payload.Contains(assigned.Id.ToString()))).Should().Be(1);
-            (await assertionDb.OutboxEvents.CountAsync(item =>
-                item.EventType == "trip.trip.started"
-                && item.Payload.Contains(assigned.Id.ToString()))).Should().Be(1);
+            var boardingEvent = await assertionDb.OutboxEvents.SingleAsync(item =>
+                item.EventType == "trip.trip.boarding_started");
+            AssertBoardingStartedPayload(boardingEvent.Payload, assigned.Id, now);
+            var startedEvent = await assertionDb.OutboxEvents.SingleAsync(item =>
+                item.EventType == "trip.trip.started");
+            AssertStartedPayload(startedEvent.Payload, startedEvent.Id, assigned.Id, now);
             var audit = await assertionDb.TripAuditLogs.SingleAsync(item => item.TripId == assigned.Id);
             audit.Action.Should().Be(TripAuditAction.TripBoardingStartedManual);
             audit.ActorUserId.Should().Be(assigned.DriverUserId);
@@ -946,6 +946,17 @@ public sealed class TripLifecycleEndpointTests
         root.GetProperty("eventId").GetGuid().Should().Be(eventId);
         root.GetProperty("tripId").GetGuid().Should().Be(tripId);
         root.GetProperty("actualDepartureTime").GetDateTimeOffset().Should().Be(now);
+    }
+
+    private static void AssertBoardingStartedPayload(
+        string payload,
+        Guid tripId,
+        DateTimeOffset now)
+    {
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        root.GetProperty("tripId").GetGuid().Should().Be(tripId);
+        root.GetProperty("boardingStartedAt").GetDateTimeOffset().Should().Be(now);
     }
 
     private static void AssertCompletedPayload(string payload, Guid tripId, DateTimeOffset now)
