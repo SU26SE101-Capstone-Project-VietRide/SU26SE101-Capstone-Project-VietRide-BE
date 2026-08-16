@@ -106,7 +106,7 @@ public sealed class SearchParcelAvailableTripsQueryHandler
         var routeIds = routes.Keys.ToHashSet();
         var tripCandidates = await _tripRepository.QueryNoTracking()
             .Where(trip => routeIds.Contains(trip.RouteId)
-                && (trip.Status == TripStatus.SCHEDULED || trip.Status == TripStatus.BOARDING)
+                && trip.Status == TripStatus.SCHEDULED
                 && trip.DepartureDateTime >= range.FromUtc
                 && trip.DepartureDateTime < range.ToUtcExclusive)
             .OrderBy(trip => trip.DepartureDateTime)

@@ -1694,7 +1694,7 @@ phát integration event.
 | | `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST` | 409 | Route edit has an active `PENDING_PAYMENT\|CONFIRMED` Booking impact |
 | | `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT` | 409 | Vehicle swap would remove/disable/downgrade an HELD seat |
 | | `TRIP_VEHICLE_SWAP_TOO_LATE` | 409 | Vehicle swap has incompatible BOOKED/BOARDING seats after the strict reassignment window |
-| | `TRIP_NOT_ACCEPTING_PARCEL` | 409 | Trip IN_PROGRESS — không nhận parcel mới |
+| | `TRIP_NOT_ACCEPTING_PARCEL` | 409 | Trip không còn SCHEDULED — không nhận parcel mới, gồm BOARDING và các trạng thái sau đó |
 | | `PARCEL_CARGO_NOT_FOUND` | 404 | Source Trip không có active cargo ledger cho Parcel |
 | | `TRIP_CARGO_TRANSFER_CONFLICT` | 409 | Atomic source→target cargo transfer mất race hoặc source/target invalid |
 | | `TRIP_CARGO_CAPACITY_EXCEEDED` | 422 | Target Trip không đủ cargo capacity cho transfer |

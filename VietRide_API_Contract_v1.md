@@ -3350,6 +3350,9 @@ Auth: `PASSENGER`.
 
 Query: `originStationId`, `destinationStationId`, `departureDate`, `lengthCm`, `widthCm`, `heightCm`, `estimatedWeightKg`; legacy `sizeCategory` is optional and non-authoritative.
 
+Only Trips whose status is `SCHEDULED` are eligible. `BOARDING` Trips are excluded before count
+and pagination because the Parcel check-in deadline has already closed when boarding starts.
+
 Backend calculates `volumeM3`, `dimWeightKg`, and `chargeableWeightKg = max(estimatedWeightKg, dimWeightKg)`.
 It first resolves the derived size to Routes with an active fare, then asks Trip to apply those
 eligible Route IDs before count and pagination. Ordering is stable by `departureDateTime`, then
@@ -3408,6 +3411,10 @@ returns the existing raw `PagedResult<ParcelTripAvailabilityItemDto>`. The legac
 ### POST `/v1/parcels`
 
 Auth: `PASSENGER`. Idempotency: required.
+
+The selected Trip must still be `SCHEDULED` when the command executes. Any other status, including
+`BOARDING`, returns `409 TRIP_NOT_ACCEPTING_PARCEL`; this closes the race between availability
+search and creation when a Trip starts boarding.
 
 Request:
 ```json

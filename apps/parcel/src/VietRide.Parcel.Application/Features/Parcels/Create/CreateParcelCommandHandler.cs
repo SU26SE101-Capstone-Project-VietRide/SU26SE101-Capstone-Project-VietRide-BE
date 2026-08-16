@@ -191,7 +191,7 @@ public sealed class CreateParcelCommandHandler
         }
 
         var trip = tripOutcome.Snapshot!;
-        if (trip.Status != "SCHEDULED" && trip.Status != "BOARDING")
+        if (trip.Status != "SCHEDULED")
             throw new CodedConflictException(
                 "TRIP_NOT_ACCEPTING_PARCEL",
                 $"Trip '{command.TripId}' is in status '{trip.Status}' and is not accepting parcels.");

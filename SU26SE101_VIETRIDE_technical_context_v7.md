@@ -3059,7 +3059,7 @@ Flow search:
        Route.originStationId IN (stations của originCity)
        Route.destinationStationId IN (stations của destCity)
        Trip.departureDateTime::date = :date
-       Trip.status IN (SCHEDULED, BOARDING)
+       Trip.status = SCHEDULED
        Trip.maxCargoWeightKg
          - Trip.estimatedPassengerLuggageKg
          - Trip.reservedParcelWeightKg
@@ -3131,12 +3131,13 @@ không expose UUID nội bộ, và nhất quán với booking QR dùng plain boo
 
 > **`transportCompanyId`** không cần là field riêng trên Parcel — nhà xe đã được xác định **implicit qua `tripId`** (trip thuộc operator nào thì parcel cũng thuộc operator đó). Agent không cần tạo foreign key riêng.
 
-**Guard — block tạo parcel trên trip đang IN_PROGRESS:**
+**Guard — chỉ cho tạo parcel trên trip đang SCHEDULED:**
 `POST /v1/parcels` validate `Trip.status` trước khi tạo:
-- `Trip.status = SCHEDULED | BOARDING` → allow (xe chưa chạy, hàng vẫn có thể load)
-- `Trip.status = IN_PROGRESS` → **block** với error `TRIP_NOT_ACCEPTING_PARCEL`
-  ("Chuyến xe đã khởi hành. Vui lòng chọn chuyến khác.")
-- `Trip.status = COMPLETED | DISRUPTED | CANCELLED` → block với `BOOKING_TRIP_NOT_BOOKABLE`
+- `Trip.status = SCHEDULED` → allow.
+- `Trip.status = BOARDING | IN_PROGRESS | COMPLETED | DISRUPTED | CANCELLED` → **block** với
+  `TRIP_NOT_ACCEPTING_PARCEL` ("Chuyến xe không còn nhận bưu kiện mới. Vui lòng chọn chuyến khác.").
+- `BOARDING` bắt đầu tại T-30, đúng lúc cửa check-in Parcel đã đóng; vì vậy Trip search và create
+  đều phải loại trạng thái này để không tạo Parcel không thể check-in.
 
 **Deadline trước giờ đóng tải:**
 
