@@ -475,13 +475,15 @@ public sealed class CreateParcelTests
         ex.ErrorCode.Should().Be("TRIP_NOT_FOUND");
     }
 
-    [Fact]
-    public async Task Create_Returns_TripNotAcceptingParcel_WhenNotScheduled()
+    [Theory]
+    [InlineData("BOARDING")]
+    [InlineData("IN_PROGRESS")]
+    public async Task Create_Returns_TripNotAcceptingParcel_WhenNotScheduled(string tripStatus)
     {
         var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
             userRole: "PASSENGER",
             userStatus: "ACTIVE",
-            tripStatus: "IN_PROGRESS",
+            tripStatus: tripStatus,
             hasBooking: false,
             hasFare: true);
 
@@ -491,6 +493,7 @@ public sealed class CreateParcelTests
         var ex = await Assert.ThrowsAsync<CodedConflictException>(() =>
             handler.Handle(command, CancellationToken.None));
         ex.ErrorCode.Should().Be("TRIP_NOT_ACCEPTING_PARCEL");
+        await parcelRepo.DidNotReceive().AddAsync(Arg.Any<ParcelEntity>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

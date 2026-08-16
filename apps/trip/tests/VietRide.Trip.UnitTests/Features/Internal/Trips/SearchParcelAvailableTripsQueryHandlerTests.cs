@@ -38,6 +38,21 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
         item.AvailableCargoVolumeM3.Should().Be(10m);
     }
 
+    [Fact]
+    public async Task Handle_ExcludesBoardingTripsBeforeCountAndPagination()
+    {
+        var fixture = Fixture.Create();
+        var scheduled = fixture.CreateTrip(Departure, 100m, 10m);
+        var boarding = fixture.CreateTrip(Departure.AddHours(1), 100m, 10m);
+        boarding.MarkBoarding(Departure.AddMinutes(-30));
+        fixture.Trips.Items.AddRange([scheduled, boarding]);
+
+        var result = await fixture.Handler.Handle(fixture.Query(), CancellationToken.None);
+
+        result.Items.Should().ContainSingle().Which.TripId.Should().Be(scheduled.Id);
+        result.TotalItems.Should().Be(1);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]

@@ -102,7 +102,7 @@ Khi conflict, ưu tiên theo thứ tự sau:
 | `trip` | .NET 8 | 5002 | internal only | |
 | `booking` | .NET 8 | 5003 | internal only | |
 | `payment` | .NET 8 | 5004 | internal + `/v1/payments/vnpay-ipn` (IP whitelist) | VNPay IPN bypass Internal JWT, verify HMAC-SHA512 |
-| `parcel` | .NET 8 | 5005 | internal + delivery link `https://app.vietride.app/parcels/delivery/confirm?token=…` |
+| `parcel` | .NET 8 | 5005 | internal + delivery link `https://app.vietride.online/parcels/delivery/confirm?token=…` |
 | `tracking` | NestJS | 3001 | `/tracking/socket.io` (WSS upgrade) | Direct client connection (User Access Token RS256) |
 | `notification` | NestJS | 3002 | `/notification/socket.io` (WSS upgrade) + internal HTTP | Direct client Socket.IO uses Identity User Access Token RS256; RabbitMQ remains the event ingress |
 | `rag` | NestJS | 3003 | `/v1/rag/*` | SSE streaming |
@@ -1694,7 +1694,7 @@ phát integration event.
 | | `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST` | 409 | Route edit has an active `PENDING_PAYMENT\|CONFIRMED` Booking impact |
 | | `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT` | 409 | Vehicle swap would remove/disable/downgrade an HELD seat |
 | | `TRIP_VEHICLE_SWAP_TOO_LATE` | 409 | Vehicle swap has incompatible BOOKED/BOARDING seats after the strict reassignment window |
-| | `TRIP_NOT_ACCEPTING_PARCEL` | 409 | Trip IN_PROGRESS — không nhận parcel mới |
+| | `TRIP_NOT_ACCEPTING_PARCEL` | 409 | Trip không còn SCHEDULED — không nhận parcel mới, gồm BOARDING và các trạng thái sau đó |
 | | `PARCEL_CARGO_NOT_FOUND` | 404 | Source Trip không có active cargo ledger cho Parcel |
 | | `TRIP_CARGO_TRANSFER_CONFLICT` | 409 | Atomic source→target cargo transfer mất race hoặc source/target invalid |
 | | `TRIP_CARGO_CAPACITY_EXCEEDED` | 422 | Target Trip không đủ cargo capacity cho transfer |
@@ -3802,7 +3802,7 @@ FIREBASE_PRIVATE_KEY=...                  # PEM; literal \n accepted and normali
 FIREBASE_WEB_STORAGE_BUCKET=...           # exact Firebase Storage bucket used by client URLs
 EMAIL_SERVICE_BASE_URL=http://notification:3002
 PASSWORD_HASH_COST=12
-PUBLIC_APP_URL=https://app.vietride.app
+PUBLIC_APP_URL=https://app.vietride.online
 ```
 
 #### Booking
@@ -3868,7 +3868,7 @@ TRIP_BASE_URL=http://trip:5002
 PARCEL_PORT=5005
 DB_CONNECTION=...vietride_parcel...
 DELIVERY_TOKEN_TTL_HOURS=48
-PUBLIC_APP_URL=https://app.vietride.app
+PUBLIC_APP_URL=https://app.vietride.online
 TRIP_BASE_URL=http://trip:5002
 PAYMENT_BASE_URL=http://payment:5004
 IDENTITY_BASE_URL=http://identity:5001

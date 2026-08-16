@@ -321,7 +321,7 @@ public static class InfrastructureServiceCollectionExtensions
         var publicAppUrl = configuration["PUBLIC_APP_URL"]
             ?? configuration[$"{ParcelDeliveryEmailOptions.SectionName}:PublicAppUrl"]
             ?? Environment.GetEnvironmentVariable("PUBLIC_APP_URL")
-            ?? "https://app.vietride.app";
+            ?? "https://app.vietride.online";
 
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out _))
         {

@@ -569,7 +569,7 @@ Cập nhật thông tin công ty vận tải và bến xe khai thác.
 
   **Driver/Assistant initial password flow:**
   - OPERATOR_ADMIN tạo User { role=DRIVER hoặc ASSISTANT } qua dashboard, chỉ nhập email + thông tin cá nhân (KHÔNG nhập password).
-  - Identity Service tự generate `EmailVerificationToken { purpose=SET_INITIAL_PASSWORD, code=UUID v4, expiresAt=now+48h }` và gửi email "Tài khoản VietRide đã được tạo" kèm link `https://app.vietride.app/auth/set-password?token=<token>`.
+  - Identity Service tự generate `EmailVerificationToken { purpose=SET_INITIAL_PASSWORD, code=UUID v4, expiresAt=now+48h }` và gửi email "Tài khoản VietRide đã được tạo" kèm link `https://app.vietride.online/auth/set-password?token=<token>`.
   - Driver/Assistant click link → trang đặt password lần đầu → `POST /v1/auth/set-initial-password { token, password }` → Identity Service set passwordHash, mark token used, set `User.status = ACTIVE`.
   - Trước khi set password lần đầu, User.status = `PENDING_INITIAL_PASSWORD` (UserStatus enum) — không login được.
   - Token hết hạn 48h: OPERATOR_ADMIN có thể resend từ dashboard (revoke token cũ, gen mới).
@@ -1897,7 +1897,7 @@ VNPay IPN handler (referenceType=BOOKING_GROUP):
     IF ROW_COUNT < 2:
       -- Edge case: 1 booking đã EXPIRED (rất hiếm — chỉ xảy ra nếu Hangfire chạy ngay trước IPN)
       -- Sẽ có 1 booking CONFIRMED, 1 booking EXPIRED
-      -- Compensation: 
+      -- Compensation:
       compensateAmount = fare của booking EXPIRED  (chiều bị mất seat)
       → Payment Service:
           INSERT Payment { referenceType=BOOKING_REFUND, referenceId=expiredBookingId,
@@ -1906,10 +1906,10 @@ VNPay IPN handler (referenceType=BOOKING_GROUP):
           INSERT PlatformWalletTransaction { type=DEBIT, referenceType=BOOKING_REFUND,
                                              amount=compensateAmount,
                                              note="VNPay paid but 1 booking expired race" }
-          INSERT OperatorLedgerEntry { entryType=BOOKING_REFUND, amount=-compensateAmount, 
+          INSERT OperatorLedgerEntry { entryType=BOOKING_REFUND, amount=-compensateAmount,
                                        note="VNPay paid but 1 booking expired race" }
       → Notification Service push passenger:
-          "Chiều [outbound/return] không thể giữ ghế. Đã hoàn [X] VND về ví. 
+          "Chiều [outbound/return] không thể giữ ghế. Đã hoàn [X] VND về ví.
            Chiều còn lại đã xác nhận thành công."
       → Booking đã CONFIRMED của chiều còn lại — KHÔNG cancel (passenger vẫn dùng được)
 ```
@@ -3059,7 +3059,7 @@ Flow search:
        Route.originStationId IN (stations của originCity)
        Route.destinationStationId IN (stations của destCity)
        Trip.departureDateTime::date = :date
-       Trip.status IN (SCHEDULED, BOARDING)
+       Trip.status = SCHEDULED
        Trip.maxCargoWeightKg
          - Trip.estimatedPassengerLuggageKg
          - Trip.reservedParcelWeightKg
@@ -3131,12 +3131,13 @@ không expose UUID nội bộ, và nhất quán với booking QR dùng plain boo
 
 > **`transportCompanyId`** không cần là field riêng trên Parcel — nhà xe đã được xác định **implicit qua `tripId`** (trip thuộc operator nào thì parcel cũng thuộc operator đó). Agent không cần tạo foreign key riêng.
 
-**Guard — block tạo parcel trên trip đang IN_PROGRESS:**
+**Guard — chỉ cho tạo parcel trên trip đang SCHEDULED:**
 `POST /v1/parcels` validate `Trip.status` trước khi tạo:
-- `Trip.status = SCHEDULED | BOARDING` → allow (xe chưa chạy, hàng vẫn có thể load)
-- `Trip.status = IN_PROGRESS` → **block** với error `TRIP_NOT_ACCEPTING_PARCEL`
-  ("Chuyến xe đã khởi hành. Vui lòng chọn chuyến khác.")
-- `Trip.status = COMPLETED | DISRUPTED | CANCELLED` → block với `BOOKING_TRIP_NOT_BOOKABLE`
+- `Trip.status = SCHEDULED` → allow.
+- `Trip.status = BOARDING | IN_PROGRESS | COMPLETED | DISRUPTED | CANCELLED` → **block** với
+  `TRIP_NOT_ACCEPTING_PARCEL` ("Chuyến xe không còn nhận bưu kiện mới. Vui lòng chọn chuyến khác.").
+- `BOARDING` bắt đầu tại T-30, đúng lúc cửa check-in Parcel đã đóng; vì vậy Trip search và create
+  đều phải loại trạng thái này để không tạo Parcel không thể check-in.
 
 **Deadline trước giờ đóng tải:**
 
