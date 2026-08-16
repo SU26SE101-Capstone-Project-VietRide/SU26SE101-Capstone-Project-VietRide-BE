@@ -18,7 +18,7 @@ namespace VietRide.Booking.Infrastructure.Migrations
 
             // Enum types — must exist before any table that references them.
             migrationBuilder.Sql("CREATE TYPE outbox_event_status AS ENUM ('PENDING', 'PUBLISHING', 'PUBLISHED', 'FAILED');");
-            migrationBuilder.Sql("CREATE TYPE booking_status AS ENUM ('PENDING_PAYMENT', 'CONFIRMED', 'COMPLETED', 'EXPIRED', 'CANCELLED', 'NO_SHOW', 'PARTIAL_NO_SHOW', 'REFUNDED', 'DISRUPTED');");
+            migrationBuilder.Sql("CREATE TYPE public.booking_status AS ENUM ('PENDING_PAYMENT', 'CONFIRMED', 'COMPLETED', 'EXPIRED', 'CANCELLED', 'NO_SHOW', 'PARTIAL_NO_SHOW', 'REFUNDED', 'DISRUPTED');");
             migrationBuilder.Sql("CREATE TYPE booking_cancellation_reason AS ENUM ('USER_INITIATED', 'OPERATOR_CANCELLED_TRIP', 'OPERATOR_DISRUPTED_IN_PROGRESS', 'SCHEDULE_CHANGED', 'ROUTE_CHANGED_REFUSED', 'VEHICLE_SUBSTITUTION_DOWNGRADE', 'VEHICLE_SUBSTITUTION_NO_SEAT', 'STOP_DISABLED_REFUSED');");
             migrationBuilder.Sql("CREATE TYPE trip_direction AS ENUM ('OUTBOUND', 'RETURN');");
             migrationBuilder.Sql("CREATE TYPE passenger_boarding_status AS ENUM ('PENDING', 'BOARDED', 'NO_SHOW');");
@@ -283,7 +283,7 @@ CREATE TRIGGER trg_passengers_max_5_per_booking
             migrationBuilder.Sql("DROP TYPE IF EXISTS passenger_boarding_status;");
             migrationBuilder.Sql("DROP TYPE IF EXISTS trip_direction;");
             migrationBuilder.Sql("DROP TYPE IF EXISTS booking_cancellation_reason;");
-            migrationBuilder.Sql("DROP TYPE IF EXISTS booking_status;");
+            migrationBuilder.Sql("DROP TYPE IF EXISTS public.booking_status;");
             migrationBuilder.Sql("DROP TYPE IF EXISTS outbox_event_status;");
             migrationBuilder.Sql("DROP EXTENSION IF EXISTS \"pgcrypto\";");
         }

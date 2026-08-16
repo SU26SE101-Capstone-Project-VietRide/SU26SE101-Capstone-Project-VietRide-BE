@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ENUMS
 -- =============================================================================
 
-CREATE TYPE booking_status AS ENUM (
+CREATE TYPE public.booking_status AS ENUM (
     'PENDING_PAYMENT', 'CONFIRMED', 'COMPLETED',
     'EXPIRED', 'CANCELLED', 'NO_SHOW', 'PARTIAL_NO_SHOW',
     'REFUNDED', 'DISRUPTED'
