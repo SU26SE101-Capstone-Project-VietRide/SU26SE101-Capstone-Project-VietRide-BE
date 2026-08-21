@@ -241,7 +241,11 @@ public sealed record ShuttleTrackingStop(
     bool IsOwnPickup = false,
     string? ServiceAddress = null,
     int? ServiceOrder = null,
-    int? RoadDistanceSnapshotMeters = null);
+    int? RoadDistanceSnapshotMeters = null,
+    int? PassengerCount = null,
+    DateTimeOffset? PickedUpAt = null,
+    DateTimeOffset? DeliveredAt = null,
+    string? StatusReason = null);
 
 public sealed record ShuttleDriverAssignmentPage(
     DateOnly From,

@@ -5645,7 +5645,11 @@ Response `200` uses the ADR 0004 envelope with `data`:
       "isStation": false,
       "serviceAddress": "123 Nguyen Hue, Quan 1",
       "serviceOrder": 1,
-      "roadDistanceMeters": 4200
+      "roadDistanceMeters": 4200,
+      "passengerCount": 2,
+      "pickedUpAt": null,
+      "deliveredAt": null,
+      "statusReason": null
     }
   ],
   "station": {
@@ -5660,7 +5664,10 @@ Response `200` uses the ADR 0004 envelope with `data`:
 
 - `stops` contains all ordered passenger and Station stops for the owned Shuttle Trip. Passenger
   stop status uses `PENDING`, `PICKED_UP`, `DELIVERED`, `NO_SHOW`, or `CANCELLED`; `bookingId` is
-  `null` for the Station stop. Passenger names and phone numbers are not returned.
+  `null` for the Station stop. `passengerCount` counts manifest passengers and is `null` for the
+  Station stop. `pickedUpAt` and `deliveredAt` are nullable lifecycle timestamps. `statusReason`
+  contains the reason for both `NO_SHOW` and `CANCELLED`, otherwise it is null. Passenger names and
+  phone numbers are not returned, and `scheduledPickupTime` is not part of this runtime contract.
 - Internal authorization markers such as `isOwnPickup` and distance snapshot compatibility fields
   are never returned. `station` is nullable when valid Station coordinates are unavailable.
 - Response sets `Cache-Control: private, no-store` because passenger service addresses are PII.

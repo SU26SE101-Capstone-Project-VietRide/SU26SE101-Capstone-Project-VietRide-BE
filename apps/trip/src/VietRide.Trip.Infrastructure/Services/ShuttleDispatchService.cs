@@ -870,6 +870,14 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             {
                 Manifest = group.First(),
                 IsOwnPickup = group.Any(manifest => manifest.PassengerUserId == userId),
+                PassengerCount = group.Count(),
+                PickedUpAt = group.Max(manifest => manifest.PickedUpAt),
+                DeliveredAt = group.Max(manifest => manifest.DeliveredAt),
+                StatusReason = group.First().Status is ShuttlePassenger.NoShowStatus
+                    or ShuttlePassenger.CancelledStatus
+                        ? group.Select(manifest => manifest.CancelReason)
+                            .FirstOrDefault(reason => reason is not null)
+                        : null,
             })
             .OrderBy(x => x.Manifest.PickupOrder)
             .Select(x => new ShuttleTrackingStop(
@@ -882,7 +890,11 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 x.IsOwnPickup,
                 x.Manifest.PickupAddress,
                 x.Manifest.PickupOrder,
-                x.Manifest.RoadDistanceMeters))
+                x.Manifest.RoadDistanceMeters,
+                x.PassengerCount,
+                x.PickedUpAt,
+                x.DeliveredAt,
+                x.StatusReason))
             .ToList();
         var station = await _db.Stations.AsNoTracking().SingleAsync(x => x.Id == shuttleTrip.StationId, cancellationToken);
         var stationPickupOrder = shuttleTrip.Direction == ShuttleTrip.OutboundDirection
@@ -905,7 +917,8 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 true,
                 false,
                 station.Name,
-                stationPickupOrder));
+                stationPickupOrder,
+                PassengerCount: null));
         }
         if (shuttleTrip.Direction == ShuttleTrip.OutboundDirection)
         {

@@ -456,6 +456,12 @@ public sealed class ShuttlePersistenceIntegrationTests
                 to: null,
                 statuses: null,
                 CancellationToken.None);
+            var trackingContext = await service.GetTrackingContextAsync(
+                shuttleTrip.Id,
+                Guid.NewGuid(),
+                "OPERATOR_ADMIN",
+                seed.OperatorId,
+                CancellationToken.None);
 
             var item = result.Items.Should().ContainSingle().Subject;
             item.MainTrip.Should().Be(new OperatorShuttleMainTripDto(
@@ -475,6 +481,33 @@ public sealed class ShuttlePersistenceIntegrationTests
                 Delivered: 1,
                 NoShow: 1,
                 Cancelled: 1));
+            trackingContext.Scope.Should().Be("OPERATOR");
+            trackingContext.Stops.Should().Contain(stop =>
+                !stop.IsStation
+                && stop.Status == ShuttlePassenger.PickedUpStatus
+                && stop.PassengerCount == 1
+                && stop.PickedUpAt == now
+                && stop.DeliveredAt == null
+                && stop.StatusReason == null);
+            trackingContext.Stops.Should().Contain(stop =>
+                !stop.IsStation
+                && stop.Status == ShuttlePassenger.DeliveredStatus
+                && stop.PassengerCount == 1
+                && stop.PickedUpAt == now
+                && stop.DeliveredAt == now.AddMinutes(1)
+                && stop.StatusReason == null);
+            trackingContext.Stops.Should().Contain(stop =>
+                !stop.IsStation
+                && stop.Status == ShuttlePassenger.NoShowStatus
+                && stop.PassengerCount == 1
+                && stop.StatusReason == "Passenger unavailable");
+            trackingContext.Stops.Should().Contain(stop =>
+                !stop.IsStation
+                && stop.Status == ShuttlePassenger.CancelledStatus
+                && stop.PassengerCount == 1
+                && stop.StatusReason == "Booking cancelled");
+            trackingContext.Stops.Should().ContainSingle(stop => stop.IsStation)
+                .Which.PassengerCount.Should().BeNull();
         }
         finally
         {

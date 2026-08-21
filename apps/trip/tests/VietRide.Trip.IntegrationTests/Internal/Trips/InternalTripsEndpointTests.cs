@@ -520,7 +520,18 @@ public sealed class InternalTripsEndpointTests
             Guid.NewGuid(),
             true,
             "PASSENGER",
-            [new ShuttleTrackingStop(2, Guid.NewGuid(), 10.75m, 106.67m, "PICKED_UP", false, true)],
+            [new ShuttleTrackingStop(
+                2,
+                Guid.NewGuid(),
+                10.75m,
+                106.67m,
+                "PICKED_UP",
+                false,
+                true,
+                PassengerCount: 2,
+                PickedUpAt: DateTimeOffset.Parse("2026-08-15T03:05:00Z"),
+                DeliveredAt: null,
+                StatusReason: null)],
             new ShuttleTrackingStation(stationId, "Ben den", null, null, 3)));
         using var factory = new InternalTripsEndpointWebApplicationFactory(mediator);
         using var client = factory.CreateClient();
@@ -535,6 +546,11 @@ public sealed class InternalTripsEndpointTests
         var data = document.RootElement;
         data.GetProperty("allowed").GetBoolean().Should().BeTrue();
         data.GetProperty("stops")[0].GetProperty("isOwnPickup").GetBoolean().Should().BeTrue();
+        data.GetProperty("stops")[0].GetProperty("passengerCount").GetInt32().Should().Be(2);
+        data.GetProperty("stops")[0].GetProperty("pickedUpAt").GetDateTimeOffset()
+            .Should().Be(DateTimeOffset.Parse("2026-08-15T03:05:00Z"));
+        data.GetProperty("stops")[0].GetProperty("deliveredAt").ValueKind.Should().Be(JsonValueKind.Null);
+        data.GetProperty("stops")[0].GetProperty("statusReason").ValueKind.Should().Be(JsonValueKind.Null);
         var station = data.GetProperty("station");
         station.GetProperty("stationId").GetGuid().Should().Be(stationId);
         station.GetProperty("latitude").ValueKind.Should().Be(JsonValueKind.Null);
