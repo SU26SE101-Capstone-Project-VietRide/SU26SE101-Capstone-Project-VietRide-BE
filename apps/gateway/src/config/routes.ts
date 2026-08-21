@@ -386,6 +386,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       publicSubpaths: [{ method: 'GET', path: '/v1/trips/search' }],
     },
     { prefix: '/v1/routes', target: env.TRIP_BASE_URL, authRequired: 'user' },
+    {
+      prefix: '/v1/stations/parcels',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
     { prefix: '/v1/stations/search', target: env.TRIP_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/stations', target: env.TRIP_BASE_URL, authRequired: 'none' },
     { prefix: '/v1/stops', target: env.TRIP_BASE_URL, authRequired: 'user' },
@@ -456,6 +462,15 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     {
       prefix: '/v1/assistant/trips/{tripId}/parcels',
       pathPattern: /^\/v1\/assistant\/trips\/[0-9a-fA-F-]{36}\/parcels(?:\/qr-scan)?$/,
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['ASSISTANT'],
+    },
+    {
+      prefix: '/v1/assistant/trips/{tripId}/stops/{stopId}/reconcile',
+      pathPattern:
+        /^\/v1\/assistant\/trips\/[0-9a-fA-F-]{36}\/stops\/[0-9a-fA-F-]{36}\/reconcile$/,
+      method: 'POST',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['ASSISTANT'],
@@ -572,6 +587,47 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
 
     // Parcel
+    {
+      prefix: '/v1/operator/parcel-incidents',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/claims/{claimId}/decision',
+      pathPattern:
+        /^\/v1\/operator\/claims\/[0-9a-fA-F-]{36}\/decision$/,
+      method: 'POST',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/claims',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/unidentified-packages',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/policies/parcel-compensation',
+      method: 'GET',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/policies/parcel-compensation',
+      method: 'PUT',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
     {
       prefix: '/v1/operator/parcel-stats',
       target: env.PARCEL_BASE_URL,

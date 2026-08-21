@@ -37,3 +37,4 @@ export * from './dtos/api-response';
 export * from './dtos/error-envelope';
 export * from './dtos/page-result';
 export * from './dtos/query-options';
+export * from './dtos/parcel-reliability-read-models';
