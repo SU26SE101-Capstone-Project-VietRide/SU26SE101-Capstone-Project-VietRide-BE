@@ -7102,6 +7102,15 @@ History items also expose nullable dispatch audit data: `notes`, `createdAt`, `c
 Rows created before audit capture may return null actor IDs. Cancellation writes dedicated audit
 fields and does not append or parse cancellation text in `notes`.
 
+### GET `/v1/operator/shuttle-trips/{shuttleTripId}/passengers`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`, scoped to the operator tenant from JWT. Response groups
+manifest rows by `(pickupOrder, bookingId)` and returns `bookingCode`, `pickupAddress`,
+`passengerCount`, and `passengers[] { passengerUserId, displayName, phone, ticketIds }`. Missing
+Identity profiles preserve the passenger ID and return null `displayName`/`phone`; Identity
+transport failure returns `503 UPSTREAM_UNAVAILABLE`. Response caching is disabled with
+`Cache-Control: private, no-store`.
+
 ### POST `/v1/operator/shuttle-trips`
 
 Request bắt buộc có thêm `direction`. Inbound dùng origin Station và `scheduledEndTime <= departureDateTime - 30 phút`; outbound dùng destination Station và `scheduledDepartureTime >= estimatedArrivalTime + 30 phút`.

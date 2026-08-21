@@ -391,6 +391,72 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         return PagedResult<OperatorShuttleTripListItemDto>.Create(items, page, pageSize, totalItems);
     }
 
+    public async Task<ShuttlePassengerContactResponse> GetPassengerContactsAsync(
+        Guid operatorId,
+        Guid shuttleTripId,
+        CancellationToken cancellationToken)
+    {
+        var exists = await _db.ShuttleTrips.AsNoTracking().AnyAsync(
+            shuttle => shuttle.Id == shuttleTripId && shuttle.OperatorId == operatorId,
+            cancellationToken);
+        if (!exists)
+        {
+            throw new CodedNotFoundException("SHUTTLE_TRIP_NOT_FOUND", "Shuttle trip was not found.");
+        }
+
+        var rows = await _db.ShuttlePassengers.AsNoTracking()
+            .Where(passenger => passenger.ShuttleTripId == shuttleTripId
+                && passenger.PickupOrder.HasValue)
+            .OrderBy(passenger => passenger.PickupOrder)
+            .ThenBy(passenger => passenger.BookingId)
+            .ThenBy(passenger => passenger.Id)
+            .Select(passenger => new
+            {
+                PickupOrder = passenger.PickupOrder!.Value,
+                passenger.BookingId,
+                passenger.BookingCode,
+                passenger.PickupAddress,
+                passenger.PassengerUserId,
+                passenger.TicketId,
+            })
+            .ToArrayAsync(cancellationToken);
+        var profiles = await GetIdentityProfilesOrThrowAsync(
+            rows.Select(row => row.PassengerUserId),
+            cancellationToken);
+        var groups = rows
+            .GroupBy(row => new { row.PickupOrder, row.BookingId })
+            .Select(group => new ShuttlePassengerContactGroupDto(
+                group.Key.PickupOrder,
+                group.Key.BookingId,
+                group.Select(row => row.BookingCode).FirstOrDefault(code => code is not null),
+                group.Select(row => row.PickupAddress).First(),
+                group.Count(),
+                group.GroupBy(row => row.PassengerUserId)
+                    .Select(passengerGroup =>
+                    {
+                        var passengerUserId = passengerGroup.Key;
+                        var profile = passengerUserId.HasValue
+                            && profiles.TryGetValue(passengerUserId.Value, out var found)
+                                ? found
+                                : null;
+                        return new ShuttlePassengerContactDto(
+                            passengerUserId,
+                            profile?.DisplayName,
+                            profile?.Phone,
+                            passengerGroup
+                                .Where(row => row.TicketId.HasValue)
+                                .Select(row => row.TicketId!.Value)
+                                .Distinct()
+                                .OrderBy(ticketId => ticketId)
+                                .ToArray());
+                    })
+                    .OrderBy(passenger => passenger.PassengerUserId)
+                    .ToArray()))
+            .ToArray();
+
+        return new ShuttlePassengerContactResponse(shuttleTripId, groups);
+    }
+
     public async Task<IReadOnlyList<OperatorTrackingShuttleTripDto>> GetTrackingProjectionAsync(
         Guid operatorId,
         CancellationToken cancellationToken)

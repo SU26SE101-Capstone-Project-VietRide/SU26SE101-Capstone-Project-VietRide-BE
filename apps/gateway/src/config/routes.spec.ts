@@ -497,6 +497,20 @@ describe('buildRouteTable', () => {
     expect(route?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
   });
 
+  it('routes exact operator shuttle passenger contacts GET to Trip for both operator roles', () => {
+    const path =
+      '/v1/operator/shuttle-trips/11111111-1111-4111-8111-111111111111/passengers';
+    const route = matchRoute(routes, path, 'GET');
+
+    expect(route).toMatchObject({
+      prefix: '/v1/operator/shuttle-trips/{shuttleTripId}/passengers',
+      method: 'GET',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    });
+  });
+
   it('routes trip search through the mixed public subpath without a duplicate prefix', () => {
     const route = matchRoute(routes, '/v1/trips/search');
 

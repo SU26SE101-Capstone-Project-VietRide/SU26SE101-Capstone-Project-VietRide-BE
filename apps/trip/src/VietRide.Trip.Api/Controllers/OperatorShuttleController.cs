@@ -54,6 +54,22 @@ public sealed class OperatorShuttleController : ControllerBase
             cancellationToken));
     }
 
+    [HttpGet("shuttle-trips/{shuttleTripId:guid}/passengers")]
+    [Authorize(Roles = "OPERATOR_ADMIN,OPERATOR_STAFF")]
+    [ProducesResponseType(typeof(ApiResponse<ShuttlePassengerContactResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ShuttlePassengerContactResponse>> GetPassengerContacts(
+        Guid shuttleTripId,
+        CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl = "private, no-store";
+        return Ok(await _sender.Send(
+            new GetShuttlePassengerContactsQuery(GetOperatorId(), shuttleTripId),
+            cancellationToken));
+    }
+
     [HttpGet("shuttle-requests")]
     [AllowedQueryParameters("page", "pageSize", "from", "to", "mainTripId", "search")]
     [Authorize(Roles = "OPERATOR_STAFF,OPERATOR_ADMIN")]

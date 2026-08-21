@@ -279,6 +279,15 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
     {
+      prefix: '/v1/operator/shuttle-trips/{shuttleTripId}/passengers',
+      pathPattern:
+        /^\/v1\/operator\/shuttle-trips\/[0-9a-fA-F-]{36}\/passengers$/,
+      method: 'GET',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
       prefix: '/v1/operator/shuttle-trips',
       method: 'POST',
       target: env.TRIP_BASE_URL,

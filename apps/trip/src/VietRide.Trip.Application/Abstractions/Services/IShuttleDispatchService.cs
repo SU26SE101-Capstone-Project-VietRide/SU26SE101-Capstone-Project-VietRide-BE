@@ -27,6 +27,11 @@ public interface IShuttleDispatchService
         IReadOnlyCollection<string>? statuses,
         CancellationToken cancellationToken);
 
+    Task<ShuttlePassengerContactResponse> GetPassengerContactsAsync(
+        Guid operatorId,
+        Guid shuttleTripId,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<OperatorTrackingShuttleTripDto>> GetTrackingProjectionAsync(
         Guid operatorId,
         CancellationToken cancellationToken);
@@ -195,6 +200,24 @@ public sealed record OperatorShuttlePassengerProgressDto(
     int Delivered,
     int NoShow,
     int Cancelled);
+
+public sealed record ShuttlePassengerContactResponse(
+    Guid ShuttleTripId,
+    IReadOnlyList<ShuttlePassengerContactGroupDto> Groups);
+
+public sealed record ShuttlePassengerContactGroupDto(
+    int PickupOrder,
+    Guid? BookingId,
+    string? BookingCode,
+    string PickupAddress,
+    int PassengerCount,
+    IReadOnlyList<ShuttlePassengerContactDto> Passengers);
+
+public sealed record ShuttlePassengerContactDto(
+    Guid? PassengerUserId,
+    string? DisplayName,
+    string? Phone,
+    IReadOnlyList<Guid> TicketIds);
 
 public sealed record ShuttleTrackingContext(
     Guid ShuttleTripId,
