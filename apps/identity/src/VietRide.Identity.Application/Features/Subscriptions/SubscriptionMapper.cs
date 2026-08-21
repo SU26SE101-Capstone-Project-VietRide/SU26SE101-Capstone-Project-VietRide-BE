@@ -19,7 +19,9 @@ internal static class SubscriptionMapper
             plan.MaxRoutes,
             plan.MaxTripsPerMonth),
         new SubscriptionModulesDto(plan.EnableParcel, plan.EnableShuttle, plan.EnableRag),
-        plan.IsActive);
+        plan.IsActive,
+        plan.PlanType.ToString(),
+        plan.OwnerOperatorId);
 
     public static OperatorSubscriptionDto ToSubscriptionDto(
         OperatorSubscription subscription,
@@ -28,7 +30,7 @@ internal static class SubscriptionMapper
         SubscriptionPlan? targetPlan,
         DateTimeOffset now) => new(
         subscription.Id,
-        subscription.Status.ToString(),
+        SubscriptionEffectiveState.GetStatus(subscription, now).ToString(),
         subscription.BillingPeriod?.ToString(),
         subscription.StartedAt,
         subscription.ExpiresAt,
@@ -53,7 +55,8 @@ internal static class SubscriptionMapper
                 pendingUpgrade.LatestPaymentStatus.ToString(),
                 pendingUpgrade.DueAt > now
                     && pendingUpgrade.LatestPaymentStatus is SubscriptionPaymentSessionStatus.FAILED
-                        or SubscriptionPaymentSessionStatus.EXPIRED)));
+                        or SubscriptionPaymentSessionStatus.EXPIRED)),
+        SubscriptionEffectiveState.IsEntitlementActive(subscription, now));
 
     public static SubscriptionBillingPeriod ParseBillingPeriod(string value)
         => Enum.TryParse<SubscriptionBillingPeriod>(value, ignoreCase: false, out var period)

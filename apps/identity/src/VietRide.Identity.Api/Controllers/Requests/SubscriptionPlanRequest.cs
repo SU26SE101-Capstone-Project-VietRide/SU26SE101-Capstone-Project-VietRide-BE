@@ -18,7 +18,7 @@ public sealed record SubscriptionPlanRequest(
     bool EnableRag,
     bool IsActive = true)
 {
-    public SaveSubscriptionPlanCommand ToCommand(Guid? planId)
+    public SaveSubscriptionPlanCommand ToCommand(Guid? planId, Guid? callerUserId = null)
         => new(
             planId,
             Name,
@@ -34,5 +34,6 @@ public sealed record SubscriptionPlanRequest(
             EnableParcel,
             EnableShuttle,
             EnableRag,
-            IsActive);
+            IsActive,
+            callerUserId);
 }

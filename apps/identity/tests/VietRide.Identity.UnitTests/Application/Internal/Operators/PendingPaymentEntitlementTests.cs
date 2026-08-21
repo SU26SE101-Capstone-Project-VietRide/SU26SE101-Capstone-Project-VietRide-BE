@@ -7,6 +7,7 @@ using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Domain.Exceptions;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.UnitTests.Application.Internal.Operators;
 
@@ -31,6 +32,7 @@ public sealed class PendingPaymentEntitlementTests
                 OperatorId,
                 SubscriptionUsageResource.DRIVERS,
                 1,
+                Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
             .Returns((updated, activePlan));
         var handler = CreateHandler(subscriptions);
@@ -46,6 +48,7 @@ public sealed class PendingPaymentEntitlementTests
             OperatorId,
             SubscriptionUsageResource.DRIVERS,
             1,
+            Now.AddDays(1),
             Arg.Any<CancellationToken>());
     }
 
@@ -80,6 +83,7 @@ public sealed class PendingPaymentEntitlementTests
             default,
             default,
             default,
+            default,
             default);
     }
 
@@ -88,10 +92,13 @@ public sealed class PendingPaymentEntitlementTests
     {
         var operators = Substitute.For<IOperatorRepository>();
         operators.ExistsAsync(OperatorId, Arg.Any<CancellationToken>()).Returns(true);
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now.AddDays(1));
         return new IncrementOperatorUsageCommandHandler(
             operators,
             subscriptions,
-            Substitute.For<ISubscriptionUsageWarningPublisher>());
+            Substitute.For<ISubscriptionUsageWarningPublisher>(),
+            clock);
     }
 
     private static OperatorSubscription CreateActiveSubscription()

@@ -40,13 +40,21 @@ public static class SubscriptionPaymentContextCodec
             throw Invalid("Subscription payment context identifiers are invalid.");
         }
 
-        if (context.BillingPeriod is not ("MONTHLY" or "YEARLY")
-            || string.IsNullOrWhiteSpace(context.PlanName)
-            || context.PeriodTo != (context.BillingPeriod == "MONTHLY"
-                ? context.PeriodFrom.AddMonths(1)
-                : context.PeriodFrom.AddYears(1)))
+        var maximumPeriodTo = context.BillingPeriod switch
+        {
+            "MONTHLY" => context.PeriodFrom.AddMonths(1),
+            "YEARLY" => context.PeriodFrom.AddYears(1),
+            _ => (DateTimeOffset?)null,
+        };
+        if (maximumPeriodTo is null || string.IsNullOrWhiteSpace(context.PlanName))
         {
             throw Invalid("Subscription payment context billing period is invalid.");
+        }
+        if (context.PeriodTo <= context.PeriodFrom || context.PeriodTo > maximumPeriodTo.Value)
+        {
+            throw new CodedValidationException(
+                "VALIDATION_ERROR",
+                "Subscription payment period exceeds the trusted billing-period boundary.");
         }
 
         var buyer = context.BuyerSnapshot;

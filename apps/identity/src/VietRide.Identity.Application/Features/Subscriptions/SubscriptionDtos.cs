@@ -8,7 +8,9 @@ public sealed record SubscriptionPlanDto(
     long PricePerYear,
     SubscriptionLimitsDto Limits,
     SubscriptionModulesDto Modules,
-    bool IsActive);
+    bool IsActive,
+    string PlanType = "STANDARD",
+    Guid? OwnerOperatorId = null);
 
 public sealed record SubscriptionLimitsDto(
     int MaxVehicles,
@@ -37,7 +39,8 @@ public sealed record OperatorSubscriptionDto(
     DateTimeOffset? ExpiresAt,
     SubscriptionPlanDto Plan,
     SubscriptionUsageDto Usage,
-    PendingSubscriptionUpgradeDto? PendingUpgrade);
+    PendingSubscriptionUpgradeDto? PendingUpgrade,
+    bool EntitlementActive = false);
 
 public sealed record PendingSubscriptionUpgradeDto(
     Guid UpgradeAttemptId,
@@ -65,3 +68,22 @@ public sealed record SubscriptionUpgradeResponseDto(
     string? InvoiceStatus,
     SubscriptionPlanDto? ActivePlan = null,
     SubscriptionPlanDto? PendingTargetPlan = null);
+
+public sealed record SubscriptionUpgradeQuoteDto(
+    Guid UpgradeAttemptId,
+    Guid SourcePlanId,
+    Guid TargetPlanId,
+    string BillingPeriod,
+    string PaymentMethod,
+    bool ProrationApplied,
+    long CurrentCyclePrice,
+    long TargetCyclePrice,
+    long UnusedCredit,
+    long ProratedTargetAmount,
+    long AmountDue,
+    DateTimeOffset PeriodFrom,
+    DateTimeOffset PeriodTo,
+    DateTimeOffset QuotedAt,
+    DateTimeOffset DueAt,
+    string Currency,
+    string Status);

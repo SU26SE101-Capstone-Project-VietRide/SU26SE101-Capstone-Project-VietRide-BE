@@ -68,6 +68,30 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_TrustedPeriodExceedsBillingUpperBound_CreatesNoFinancialRecords()
+    {
+        var fixture = new Fixture(700_000);
+        var command = fixture.Command("WALLET");
+        var invalid = command with
+        {
+            Context = command.Context with
+            {
+                PeriodTo = command.Context.PeriodFrom.AddMonths(1).AddTicks(1),
+            },
+        };
+
+        var action = () => fixture.Handler.Handle(invalid, CancellationToken.None);
+
+        var error = await action.Should().ThrowAsync<CodedValidationException>();
+        error.Which.ErrorCode.Should().Be("VALIDATION_ERROR");
+        fixture.Payments.Items.Should().BeEmpty();
+        fixture.OperatorWallet.Balance.Amount.Should().Be(700_000);
+        fixture.OperatorTransactions.Items.Should().BeEmpty();
+        fixture.PlatformWallets.Transactions.Should().BeEmpty();
+        fixture.Outbox.Events.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Handle_SameKeyReplay_DoesNotDebitTwice()
     {
         var fixture = new Fixture(700_000);

@@ -3,6 +3,7 @@ using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Events;
+using VietRide.Identity.Api.Filters;
 using VietRide.Identity.Application.Features.Auth.Register;
 using VietRide.Identity.Infrastructure;
 using VietRide.Identity.Infrastructure.DependencyInjection;
@@ -63,6 +64,7 @@ builder.Services.AddVietRideMediatRBehaviors(
 
 // Infrastructure: repositories, security services, email stub, Redis OTP rate-limiter.
 builder.Services.AddInfrastructure(builder.Configuration, registerEventConsumer: !isTesting);
+builder.Services.AddScoped<SubscriptionUniqueConstraintExceptionFilter>();
 builder.Services.AddVietRideIdempotency("identity", requireAllMutations: true);
 
 var registerRecurringJobs = !isTesting;
@@ -91,7 +93,10 @@ if (!IsWebApplicationFactoryHost())
     // Apply pending EF Core migrations before seeding (creates the schema on first boot),
     // then reload the Npgsql type catalog so the native enums (user_role, user_status, …)
     // resolve on a fresh DB — otherwise the first enum read fails with DataTypeName '-'.
-    await scope.ServiceProvider.GetRequiredService<IdentityDbContext>().MigrateAndReloadTypesAsync();
+    var migrationTarget = builder.Configuration["Identity:Migrations:Target"]
+        ?? Environment.GetEnvironmentVariable("IDENTITY_MIGRATION_TARGET");
+    await scope.ServiceProvider.GetRequiredService<IdentityDbContext>()
+        .MigrateAndReloadTypesAsync(migrationTarget);
     var bootstrapAdminSeeder = scope.ServiceProvider.GetRequiredService<BootstrapAdminSeeder>();
     await bootstrapAdminSeeder.SeedAsync();
 }

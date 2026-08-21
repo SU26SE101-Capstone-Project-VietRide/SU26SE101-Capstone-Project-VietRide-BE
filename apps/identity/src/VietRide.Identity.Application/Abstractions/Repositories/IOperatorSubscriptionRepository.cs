@@ -29,6 +29,7 @@ public interface IOperatorSubscriptionRepository : IRepository<OperatorSubscript
         Guid operatorId,
         SubscriptionUsageResource resource,
         int delta,
+        DateTimeOffset decisionAt,
         CancellationToken cancellationToken = default)
         => Task.FromResult<(OperatorSubscription Subscription, SubscriptionPlan Plan)?>(null);
 
@@ -44,5 +45,6 @@ public interface IOperatorSubscriptionRepository : IRepository<OperatorSubscript
         EmailVerificationToken initialPasswordToken,
         ActivityLog activityLog,
         UserRole role,
+        DateTimeOffset decisionAt,
         CancellationToken cancellationToken = default);
 }

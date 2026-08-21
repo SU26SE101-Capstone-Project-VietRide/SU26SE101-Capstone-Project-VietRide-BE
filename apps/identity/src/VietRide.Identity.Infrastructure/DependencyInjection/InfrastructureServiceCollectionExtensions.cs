@@ -127,6 +127,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IOperatorWalletBackfillMarkerRepository, OperatorWalletBackfillMarkerRepository>();
         services.AddScoped<IOperatorSubscriptionRepository, OperatorSubscriptionRepository>();
         services.AddScoped<ISubscriptionPlanRepository, SubscriptionPlanRepository>();
+        services.AddScoped<ISubscriptionCustomRequestRepository, SubscriptionCustomRequestRepository>();
         services.AddScoped<ISubscriptionUpgradeAttemptRepository, SubscriptionUpgradeAttemptRepository>();
         services.AddScoped<ISubscriptionQuotaAllocationRepository, SubscriptionQuotaAllocationRepository>();
         services.AddScoped<ISubscriptionUsageWarningMarkerRepository, SubscriptionUsageWarningMarkerRepository>();

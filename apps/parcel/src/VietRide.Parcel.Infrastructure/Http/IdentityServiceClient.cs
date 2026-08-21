@@ -364,8 +364,10 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
             }
 
             var status = GetStringProperty(json, "status");
-            if (string.Equals(status, "EXPIRED", StringComparison.Ordinal)
-                || string.Equals(status, "CANCELLED", StringComparison.Ordinal))
+            var hasEntitlementFlag = TryGetBooleanProperty(json, "entitlementActive", out var entitlementActive);
+            if (hasEntitlementFlag && !entitlementActive
+                || !hasEntitlementFlag && (string.Equals(status, "EXPIRED", StringComparison.Ordinal)
+                    || string.Equals(status, "CANCELLED", StringComparison.Ordinal)))
             {
                 return SubscriptionWriteEligibilityOutcome.Rejected(
                     402,
@@ -373,7 +375,8 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
                     "Operator subscription is no longer active.");
             }
 
-            if (!string.Equals(status, "ACTIVE", StringComparison.Ordinal)
+            if (!hasEntitlementFlag
+                && !string.Equals(status, "ACTIVE", StringComparison.Ordinal)
                 && !string.Equals(status, "PENDING_PAYMENT", StringComparison.Ordinal))
             {
                 return SubscriptionWriteEligibilityOutcome.Rejected(
@@ -454,6 +457,23 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
         {
             return false;
         }
+    }
+
+    private static bool TryGetBooleanProperty(
+        JsonElement json,
+        string propertyName,
+        out bool value)
+    {
+        value = false;
+        if (json.ValueKind != JsonValueKind.Object
+            || !json.TryGetProperty(propertyName, out var property)
+            || property.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return false;
+        }
+
+        value = property.GetBoolean();
+        return true;
     }
 
     private static bool TryGetBooleanProperty(

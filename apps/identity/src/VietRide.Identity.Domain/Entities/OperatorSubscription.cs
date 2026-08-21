@@ -1,5 +1,6 @@
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Identity.Domain.Entities;
 
@@ -12,6 +13,7 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
     public DateTimeOffset? ExpiresAt { get; private set; }
     public SubscriptionPaymentMethod? PaymentMethod { get; private set; }
     public SubscriptionBillingPeriod? BillingPeriod { get; private set; }
+    public Money CyclePriceAmount { get; private set; } = Money.Zero;
     public int CurrentVehicles { get; private set; }
     public int CurrentDrivers { get; private set; }
     public int CurrentAssistants { get; private set; }
@@ -62,6 +64,8 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
         StartedAt = startedAt;
         ExpiresAt = expiresAt;
         PaymentMethod = null;
+        BillingPeriod = null;
+        CyclePriceAmount = Money.Zero;
     }
 
     public void CancelPendingApproval()
@@ -124,6 +128,16 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
         SubscriptionPaymentMethod paymentMethod,
         DateTimeOffset periodFrom,
         DateTimeOffset periodTo)
+        => ActivatePaid(planId, billingPeriod, paymentMethod, periodFrom, periodTo, Money.Zero, false);
+
+    public void ActivatePaid(
+        Guid planId,
+        SubscriptionBillingPeriod billingPeriod,
+        SubscriptionPaymentMethod paymentMethod,
+        DateTimeOffset periodFrom,
+        DateTimeOffset periodTo,
+        Money cyclePriceAmount,
+        bool preserveCurrentCycle)
     {
         if (Status is not (SubscriptionStatus.PENDING_PAYMENT or SubscriptionStatus.EXPIRED))
         {
@@ -134,8 +148,12 @@ public sealed class OperatorSubscription : BaseEntity<Guid>
         BillingPeriod = billingPeriod;
         PaymentMethod = paymentMethod;
         Status = SubscriptionStatus.ACTIVE;
-        StartedAt = periodFrom;
-        ExpiresAt = periodTo;
+        CyclePriceAmount = cyclePriceAmount;
+        if (!preserveCurrentCycle)
+        {
+            StartedAt = periodFrom;
+            ExpiresAt = periodTo;
+        }
     }
 
     public void MarkExpired(DateTimeOffset expiredAt)

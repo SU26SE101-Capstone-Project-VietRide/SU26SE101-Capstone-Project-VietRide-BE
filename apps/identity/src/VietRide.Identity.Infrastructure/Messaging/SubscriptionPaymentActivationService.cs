@@ -35,10 +35,10 @@ public sealed class SubscriptionPaymentActivationService
         SubscriptionPaymentActivationContext context,
         CancellationToken cancellationToken)
     {
+        var attempt = await _attempts.GetByIdForUpdateAsync(context.UpgradeAttemptId, cancellationToken);
         var subscription = await _subscriptions.GetByIdForUpdateAsync(
             context.OperatorSubscriptionId,
             cancellationToken);
-        var attempt = await _attempts.GetByIdForUpdateAsync(context.UpgradeAttemptId, cancellationToken);
 
         if (attempt is null
             || subscription is null
@@ -48,16 +48,16 @@ public sealed class SubscriptionPaymentActivationService
             || attempt.Amount.Amount != context.Amount
             || !string.Equals(attempt.BillingPeriod.ToString(), context.BillingPeriod, StringComparison.Ordinal)
             || !Enum.TryParse<SubscriptionPaymentMethod>(context.Method, false, out var paymentMethod)
-            || context.PeriodTo != (attempt.BillingPeriod == SubscriptionBillingPeriod.MONTHLY
-                ? context.PeriodFrom.AddMonths(1)
-                : context.PeriodFrom.AddYears(1)))
+            || context.PeriodFrom != attempt.PeriodFrom
+            || context.PeriodTo != attempt.PeriodTo)
         {
             return Quarantine(context, "context mismatch");
         }
 
         if (attempt.Status == SubscriptionUpgradeAttemptStatus.SUCCEEDED)
         {
-            return true;
+            return attempt.PaymentId == context.PaymentId
+                || Quarantine(context, "succeeded attempt is bound to another payment");
         }
 
         if (context.SucceededAt >= attempt.DueAt
@@ -94,7 +94,9 @@ public sealed class SubscriptionPaymentActivationService
             attempt.BillingPeriod,
             paymentMethod,
             context.PeriodFrom,
-            context.PeriodTo);
+            context.PeriodTo,
+            attempt.TargetCyclePrice,
+            attempt.IsProrated);
         attempt.MarkSucceeded(context.PaymentId);
         _subscriptions.Update(subscription);
         _attempts.Update(attempt);

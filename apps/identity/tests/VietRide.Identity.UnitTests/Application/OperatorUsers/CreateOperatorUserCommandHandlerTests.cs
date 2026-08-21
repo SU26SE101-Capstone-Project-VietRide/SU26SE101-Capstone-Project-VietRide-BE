@@ -375,6 +375,7 @@ public sealed class CreateOperatorUserCommandHandlerTests
             EmailVerificationToken initialPasswordToken,
             ActivityLog activityLog,
             UserRole role,
+            DateTimeOffset decisionAt,
             CancellationToken cancellationToken = default)
         {
             Calls++;

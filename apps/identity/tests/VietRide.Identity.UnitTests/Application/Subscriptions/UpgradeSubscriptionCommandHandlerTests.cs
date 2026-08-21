@@ -4,6 +4,7 @@ using NSubstitute;
 using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Features.Subscriptions.RetrySubscriptionPayment;
 using VietRide.Identity.Application.Features.Subscriptions.UpgradeSubscription;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
@@ -98,6 +99,7 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
         plans.GetByIdAsync(targetPlan.Id, Arg.Any<CancellationToken>()).Returns(targetPlan);
+        plans.GetByIdForUpdateAsync(targetPlan.Id, Arg.Any<CancellationToken>()).Returns(targetPlan);
         subscriptions.GetCurrentByOperatorIdForUpdateAsync(operatorId, Arg.Any<CancellationToken>()).Returns(subscription);
         operators.GetByIdNoTrackingAsync(operatorId, Arg.Any<CancellationToken>()).Returns(operatorTenant);
         SubscriptionUpgradeAttempt? createdAttempt = null;
@@ -105,6 +107,10 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
                 Arg.Do<SubscriptionUpgradeAttempt>(attempt => createdAttempt = attempt),
                 Arg.Any<CancellationToken>())
             .Returns(call => call.Arg<SubscriptionUpgradeAttempt>());
+        attempts.GetByIdForUpdateAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(_ => createdAttempt);
+        subscriptions.GetByIdForUpdateAsync(subscription.Id, Arg.Any<CancellationToken>())
+            .Returns(subscription);
         SubscriptionPaymentCreationRequest? captured = null;
         payments.CreateAsync(Arg.Do<SubscriptionPaymentCreationRequest>(request => captured = request), Arg.Any<CancellationToken>())
             .Returns(new SubscriptionPaymentCreationResult(Guid.NewGuid(), "SUCCEEDED", null, "PENDING"));
@@ -140,11 +146,227 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
         captured.Snapshot.PeriodTo.Should().Be(Now.AddMonths(1));
         captured.Snapshot.BuyerSnapshot.TaxCode.Should().Be("0312345678");
         subscription.Status.Should().Be(SubscriptionStatus.ACTIVE);
-        subscription.PaymentMethod.Should().BeNull();
+        subscription.PaymentMethod.Should().Be(SubscriptionPaymentMethod.WALLET);
+        subscription.BillingPeriod.Should().Be(SubscriptionBillingPeriod.MONTHLY);
         createdAttempt.Should().NotBeNull();
-        createdAttempt!.Status.Should().Be(SubscriptionUpgradeAttemptStatus.INITIATED);
+        createdAttempt!.Status.Should().Be(SubscriptionUpgradeAttemptStatus.SUCCEEDED);
         createdAttempt.PaymentMethod.Should().Be(SubscriptionPaymentMethod.WALLET);
-        await unitOfWork.Received(1).CommitAsync(Arg.Any<CancellationToken>());
+        createdAttempt.PaymentId.Should().Be(result.PaymentId);
+        subscription.PlanId.Should().Be(targetPlan.Id);
+        await unitOfWork.Received(2).CommitAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_WalletRetryWithNewKey_ReusesInitiatedAttemptAfterInsufficientBalance()
+    {
+        var operatorId = Guid.NewGuid();
+        var targetPlan = SubscriptionPlan.Create(
+            "Pro",
+            null,
+            Money.FromRaw(500_000),
+            Money.FromRaw(5_000_000),
+            20,
+            20,
+            10,
+            10,
+            20,
+            1_000,
+            true,
+            true,
+            true);
+        var subscription = OperatorSubscription.CreateActiveTrial(
+            operatorId,
+            SubscriptionPlan.StarterPlanId,
+            Now.AddDays(-10),
+            Now.AddDays(20));
+        var attempt = SubscriptionUpgradeAttempt.CreateQuote(
+            subscription.Id,
+            operatorId,
+            subscription.PlanId,
+            targetPlan.Id,
+            SubscriptionBillingPeriod.MONTHLY,
+            targetPlan.PricePerMonth,
+            SubscriptionPaymentMethod.WALLET,
+            "old-insufficient-key",
+            SubscriptionFallbackPolicy.RESTORE_CURRENT,
+            Now,
+            Now.AddMinutes(15),
+            Now,
+            Now.AddMonths(1),
+            Money.Zero,
+            targetPlan.PricePerMonth,
+            Money.Zero,
+            targetPlan.PricePerMonth,
+            false);
+        var operatorTenant = Operator.CreateApproved(
+            "VietRide Bus",
+            "BRN-001",
+            "0312345678",
+            "billing@vietride.test",
+            "+84901234567",
+            Guid.NewGuid(),
+            Now.AddDays(-30));
+        var subscriptions = Substitute.For<IOperatorSubscriptionRepository>();
+        var plans = Substitute.For<ISubscriptionPlanRepository>();
+        var attempts = Substitute.For<ISubscriptionUpgradeAttemptRepository>();
+        var operators = Substitute.For<IOperatorRepository>();
+        var payments = Substitute.For<ISubscriptionPaymentClient>();
+        var unitOfWork = Substitute.For<IUnitOfWork>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now);
+        subscriptions.GetCurrentByOperatorIdForUpdateAsync(operatorId, Arg.Any<CancellationToken>())
+            .Returns(subscription);
+        attempts.GetActiveBySubscriptionIdAsync(subscription.Id, Arg.Any<CancellationToken>())
+            .Returns(attempt);
+        plans.GetByIdForUpdateAsync(targetPlan.Id, Arg.Any<CancellationToken>()).Returns(targetPlan);
+        operators.GetByIdNoTrackingAsync(operatorId, Arg.Any<CancellationToken>()).Returns(operatorTenant);
+        attempts.GetByIdForUpdateAsync(attempt.Id, Arg.Any<CancellationToken>()).Returns(attempt);
+        subscriptions.GetByIdForUpdateAsync(subscription.Id, Arg.Any<CancellationToken>()).Returns(subscription);
+        SubscriptionPaymentCreationRequest? captured = null;
+        payments.CreateAsync(
+                Arg.Do<SubscriptionPaymentCreationRequest>(request => captured = request),
+                Arg.Any<CancellationToken>())
+            .Returns(new SubscriptionPaymentCreationResult(Guid.NewGuid(), "SUCCEEDED", null, "PENDING"));
+        var handler = new UpgradeSubscriptionCommandHandler(
+            subscriptions,
+            plans,
+            attempts,
+            operators,
+            payments,
+            unitOfWork,
+            clock);
+
+        var result = await handler.Handle(
+            new UpgradeSubscriptionCommand(
+                operatorId,
+                targetPlan.Id,
+                "MONTHLY",
+                "WALLET",
+                "new-retry-key",
+                "203.0.113.10"),
+            CancellationToken.None);
+
+        result.UpgradeAttemptId.Should().Be(attempt.Id);
+        result.Status.Should().Be("ACTIVE");
+        captured.Should().NotBeNull();
+        captured!.IdempotencyKey.Should().Be("new-retry-key");
+        attempt.Status.Should().Be(SubscriptionUpgradeAttemptStatus.SUCCEEDED);
+        subscription.PlanId.Should().Be(targetPlan.Id);
+        await attempts.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task RetryVnPay_UsesQuotedPeriodSnapshotInsteadOfCreatedAtCycle()
+    {
+        var operatorId = Guid.NewGuid();
+        var sourcePlan = SubscriptionPlan.Create(
+            "Current",
+            null,
+            Money.FromRaw(300_000),
+            Money.FromRaw(3_000_000),
+            10,
+            10,
+            10,
+            10,
+            10,
+            500,
+            true,
+            true,
+            true);
+        var targetPlan = SubscriptionPlan.Create(
+            "Target",
+            null,
+            Money.FromRaw(500_000),
+            Money.FromRaw(5_000_000),
+            20,
+            20,
+            20,
+            20,
+            20,
+            1_000,
+            true,
+            true,
+            true);
+        var subscription = OperatorSubscription.CreateActiveTrial(
+            operatorId,
+            sourcePlan.Id,
+            Now.AddDays(-15),
+            Now.AddDays(15));
+        subscription.MoveToPendingPayment(SubscriptionPaymentMethod.VNPAY);
+        var attempt = SubscriptionUpgradeAttempt.CreateQuote(
+            subscription.Id,
+            operatorId,
+            sourcePlan.Id,
+            targetPlan.Id,
+            SubscriptionBillingPeriod.MONTHLY,
+            Money.FromRaw(100_000),
+            SubscriptionPaymentMethod.VNPAY,
+            "initial-vnpay",
+            SubscriptionFallbackPolicy.RESTORE_CURRENT,
+            Now.AddMinutes(-5),
+            Now.AddMinutes(10),
+            Now.AddMinutes(-5),
+            Now.AddDays(10),
+            Money.FromRaw(300_000),
+            Money.FromRaw(500_000),
+            Money.FromRaw(150_000),
+            Money.FromRaw(250_000),
+            true);
+        var failedPaymentId = Guid.NewGuid();
+        attempt.BindPendingPayment(failedPaymentId);
+        attempt.MarkPaymentFailed(failedPaymentId);
+        var operatorTenant = Operator.CreateApproved(
+            "VietRide Bus",
+            "BRN-001",
+            "0312345678",
+            "billing@vietride.test",
+            "+84901234567",
+            Guid.NewGuid(),
+            Now.AddDays(-30));
+        var attempts = Substitute.For<ISubscriptionUpgradeAttemptRepository>();
+        var subscriptions = Substitute.For<IOperatorSubscriptionRepository>();
+        var plans = Substitute.For<ISubscriptionPlanRepository>();
+        var operators = Substitute.For<IOperatorRepository>();
+        var payments = Substitute.For<ISubscriptionPaymentClient>();
+        var unitOfWork = Substitute.For<IUnitOfWork>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now);
+        attempts.GetByIdForUpdateAsync(attempt.Id, Arg.Any<CancellationToken>()).Returns(attempt);
+        subscriptions.GetByIdForUpdateAsync(subscription.Id, Arg.Any<CancellationToken>()).Returns(subscription);
+        subscriptions.GetByIdAsync(subscription.Id, Arg.Any<CancellationToken>()).Returns(subscription);
+        plans.GetByIdAsync(targetPlan.Id, Arg.Any<CancellationToken>()).Returns(targetPlan);
+        plans.GetByIdAsync(sourcePlan.Id, Arg.Any<CancellationToken>()).Returns(sourcePlan);
+        operators.GetByIdNoTrackingAsync(operatorId, Arg.Any<CancellationToken>()).Returns(operatorTenant);
+        SubscriptionPaymentCreationRequest? captured = null;
+        payments.CreateAsync(
+                Arg.Do<SubscriptionPaymentCreationRequest>(request => captured = request),
+                Arg.Any<CancellationToken>())
+            .Returns(new SubscriptionPaymentCreationResult(
+                Guid.NewGuid(),
+                "PENDING_REDIRECT",
+                "https://sandbox.vnpay.test/pay",
+                null));
+        var handler = new RetrySubscriptionPaymentCommandHandler(
+            attempts,
+            subscriptions,
+            plans,
+            operators,
+            payments,
+            unitOfWork,
+            clock);
+
+        await handler.Handle(
+            new RetrySubscriptionPaymentCommand(
+                operatorId,
+                attempt.Id,
+                "retry-vnpay",
+                "203.0.113.10"),
+            CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        captured!.Snapshot.PeriodFrom.Should().Be(attempt.PeriodFrom);
+        captured.Snapshot.PeriodTo.Should().Be(attempt.PeriodTo);
+        captured.Snapshot.PeriodFrom.Should().NotBe(attempt.CreatedAt);
     }
 
     [Theory]

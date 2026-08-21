@@ -86,7 +86,11 @@ public sealed class IdentityInternalClient : IIdentityInternalClient, ISubscript
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken)
                 .ConfigureAwait(false);
             var status = GetStringProperty(payload, "status");
-            if (string.Equals(status, "EXPIRED", StringComparison.Ordinal))
+            var entitlementActive = payload.TryGetProperty("entitlementActive", out var entitlement)
+                ? entitlement.ValueKind == JsonValueKind.True
+                : string.Equals(status, "ACTIVE", StringComparison.Ordinal)
+                    || string.Equals(status, "PENDING_PAYMENT", StringComparison.Ordinal);
+            if (!entitlementActive)
             {
                 return new OperatorWriteEligibilityValidation(
                     false, 402, "SUBSCRIPTION_EXPIRED", "Operator subscription has expired.");

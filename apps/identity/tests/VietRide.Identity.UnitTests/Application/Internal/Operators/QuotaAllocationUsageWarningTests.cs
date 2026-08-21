@@ -5,6 +5,7 @@ using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Internal.Operators.QuotaAllocations;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.UnitTests.Application.Internal.Operators;
 
@@ -37,6 +38,7 @@ public sealed class QuotaAllocationUsageWarningTests
                 OperatorId,
                 SubscriptionUsageResource.VEHICLES,
                 1,
+                Arg.Any<DateTimeOffset>(),
                 Arg.Any<CancellationToken>())
             .Returns((updated, plan));
         var allocations = Substitute.For<ISubscriptionQuotaAllocationRepository>();
@@ -51,10 +53,13 @@ public sealed class QuotaAllocationUsageWarningTests
                 Arg.Any<CancellationToken>())
             .Returns(call => call.ArgAt<SubscriptionQuotaAllocation>(0));
         var usageWarnings = Substitute.For<ISubscriptionUsageWarningPublisher>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now.AddDays(1));
         var handler = new ClaimQuotaAllocationCommandHandler(
             subscriptions,
             allocations,
-            usageWarnings);
+            usageWarnings,
+            clock);
 
         var result = await handler.Handle(
             new ClaimQuotaAllocationCommand(

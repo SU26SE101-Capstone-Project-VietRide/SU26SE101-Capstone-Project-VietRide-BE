@@ -350,7 +350,7 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
     }
 
     [Fact]
-    public async Task PendingPaymentEntitlement_CreateOperatorUser_UsesActivePlanInsteadOfLowerTargetPlan()
+    public async Task PendingPaymentEntitlement_CreateOperatorUser_EnforcesLowerTargetPlanCap()
     {
         var dbFactory = new DbBackedOperatorUsersFactory();
 
@@ -374,14 +374,14 @@ public sealed class OperatorUsersEndpointsTests : IClassFixture<AuthWebApplicati
 
             var response = await client.SendAsync(request);
 
-            response.StatusCode.Should().Be(HttpStatusCode.Created);
+            await AssertErrorCode(response, HttpStatusCode.UnprocessableEntity, "SUBSCRIPTION_LIMIT_EXCEEDED");
             await using var scope = dbFactory.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
             var subscription = await db.OperatorSubscriptions.SingleAsync(s => s.OperatorId == OperatorId);
             subscription.Status.Should().Be(SubscriptionStatus.PENDING_PAYMENT);
             subscription.PlanId.Should().Be(SubscriptionPlan.StarterPlanId);
-            subscription.CurrentDrivers.Should().Be(4);
-            (await db.Users.CountAsync(user => user.OperatorId == OperatorId && user.Role == UserRole.DRIVER)).Should().Be(1);
+            subscription.CurrentDrivers.Should().Be(3);
+            (await db.Users.CountAsync(user => user.OperatorId == OperatorId && user.Role == UserRole.DRIVER)).Should().Be(0);
         }
         finally
         {

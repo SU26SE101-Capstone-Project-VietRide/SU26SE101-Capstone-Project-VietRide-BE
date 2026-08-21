@@ -1,3 +1,4 @@
+using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
@@ -12,6 +13,9 @@ public sealed class SubscriptionPlan : BaseEntity<Guid>, IActivatable
     public string? Description { get; private set; }
     public Money PricePerMonth { get; private set; } = Money.Zero;
     public Money PricePerYear { get; private set; } = Money.Zero;
+    public SubscriptionPlanType PlanType { get; private set; } = SubscriptionPlanType.STANDARD;
+    public Guid? OwnerOperatorId { get; private set; }
+    public Guid? SourceCustomRequestId { get; private set; }
     public int MaxVehicles { get; private set; }
     public int MaxDrivers { get; private set; }
     public int MaxAssistants { get; private set; }
@@ -34,6 +38,7 @@ public sealed class SubscriptionPlan : BaseEntity<Guid>, IActivatable
             Description = "Default onboarding plan seeded by Identity migration.",
             PricePerMonth = Money.Zero,
             PricePerYear = Money.Zero,
+            PlanType = SubscriptionPlanType.STANDARD,
             MaxVehicles = 3,
             MaxDrivers = 5,
             MaxAssistants = 5,
@@ -77,6 +82,7 @@ public sealed class SubscriptionPlan : BaseEntity<Guid>, IActivatable
             Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
             PricePerMonth = pricePerMonth,
             PricePerYear = pricePerYear,
+            PlanType = SubscriptionPlanType.STANDARD,
             MaxVehicles = maxVehicles,
             MaxDrivers = maxDrivers,
             MaxAssistants = maxAssistants,
@@ -90,7 +96,54 @@ public sealed class SubscriptionPlan : BaseEntity<Guid>, IActivatable
         };
     }
 
-    public void Activate() => IsActive = true;
+    public static SubscriptionPlan CreateCustom(
+        Guid ownerOperatorId,
+        Guid sourceCustomRequestId,
+        string name,
+        string? description,
+        Money pricePerMonth,
+        Money pricePerYear,
+        int maxVehicles,
+        int maxDrivers,
+        int maxAssistants,
+        int maxOperatorUsers,
+        int maxRoutes,
+        int maxTripsPerMonth,
+        bool enableParcel,
+        bool enableShuttle,
+        bool enableRag)
+    {
+        if (ownerOperatorId == Guid.Empty || sourceCustomRequestId == Guid.Empty)
+            throw new ArgumentException("Custom plan owner and source request are required.");
+        if (pricePerMonth.Amount <= 0 && pricePerYear.Amount <= 0)
+            throw new ArgumentException("At least one custom plan price must be payable.");
+
+        var plan = Create(
+            name,
+            description,
+            pricePerMonth,
+            pricePerYear,
+            maxVehicles,
+            maxDrivers,
+            maxAssistants,
+            maxOperatorUsers,
+            maxRoutes,
+            maxTripsPerMonth,
+            enableParcel,
+            enableShuttle,
+            enableRag);
+        plan.PlanType = SubscriptionPlanType.CUSTOM;
+        plan.OwnerOperatorId = ownerOperatorId;
+        plan.SourceCustomRequestId = sourceCustomRequestId;
+        return plan;
+    }
+
+    public void Activate()
+    {
+        if (PlanType == SubscriptionPlanType.CUSTOM && !IsActive)
+            throw new InvalidOperationException("A deactivated custom plan cannot be reactivated.");
+        IsActive = true;
+    }
 
     public void Deactivate() => IsActive = false;
 
@@ -110,6 +163,30 @@ public sealed class SubscriptionPlan : BaseEntity<Guid>, IActivatable
         bool enableRag,
         bool isActive)
     {
+        if (PlanType == SubscriptionPlanType.CUSTOM)
+        {
+            if (isActive || !MatchesImmutableValues(
+                    name,
+                    description,
+                    pricePerMonth,
+                    pricePerYear,
+                    maxVehicles,
+                    maxDrivers,
+                    maxAssistants,
+                    maxOperatorUsers,
+                    maxRoutes,
+                    maxTripsPerMonth,
+                    enableParcel,
+                    enableShuttle,
+                    enableRag))
+            {
+                throw new InvalidOperationException("Custom plan terms are immutable; only deactivation is allowed.");
+            }
+
+            IsActive = false;
+            return;
+        }
+
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         EnsureNonNegative(maxVehicles, nameof(maxVehicles));
         EnsureNonNegative(maxDrivers, nameof(maxDrivers));
@@ -133,6 +210,37 @@ public sealed class SubscriptionPlan : BaseEntity<Guid>, IActivatable
         EnableRag = enableRag;
         IsActive = isActive;
     }
+
+    public bool IsVisibleTo(Guid operatorId)
+        => PlanType == SubscriptionPlanType.STANDARD || OwnerOperatorId == operatorId;
+
+    private bool MatchesImmutableValues(
+        string name,
+        string? description,
+        Money pricePerMonth,
+        Money pricePerYear,
+        int maxVehicles,
+        int maxDrivers,
+        int maxAssistants,
+        int maxOperatorUsers,
+        int maxRoutes,
+        int maxTripsPerMonth,
+        bool enableParcel,
+        bool enableShuttle,
+        bool enableRag)
+        => string.Equals(Name, name.Trim(), StringComparison.Ordinal)
+            && string.Equals(Description, string.IsNullOrWhiteSpace(description) ? null : description.Trim(), StringComparison.Ordinal)
+            && PricePerMonth == pricePerMonth
+            && PricePerYear == pricePerYear
+            && MaxVehicles == maxVehicles
+            && MaxDrivers == maxDrivers
+            && MaxAssistants == maxAssistants
+            && MaxOperatorUsers == maxOperatorUsers
+            && MaxRoutes == maxRoutes
+            && MaxTripsPerMonth == maxTripsPerMonth
+            && EnableParcel == enableParcel
+            && EnableShuttle == enableShuttle
+            && EnableRag == enableRag;
 
     private static void EnsureNonNegative(int value, string parameterName)
     {

@@ -2,6 +2,7 @@ using MediatR;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperatorSubscription;
 
@@ -10,13 +11,16 @@ public sealed class GetInternalOperatorSubscriptionQueryHandler
 {
     private readonly IOperatorRepository _operators;
     private readonly IOperatorSubscriptionRepository _operatorSubscriptions;
+    private readonly IClock _clock;
 
     public GetInternalOperatorSubscriptionQueryHandler(
         IOperatorRepository operators,
-        IOperatorSubscriptionRepository operatorSubscriptions)
+        IOperatorSubscriptionRepository operatorSubscriptions,
+        IClock? clock = null)
     {
         _operators = operators;
         _operatorSubscriptions = operatorSubscriptions;
+        _clock = clock ?? new SystemClock();
     }
 
     public async Task<InternalOperatorSubscriptionDto> Handle(
@@ -31,6 +35,7 @@ public sealed class GetInternalOperatorSubscriptionQueryHandler
             cancellationToken)
             ?? throw new NotFoundException(nameof(OperatorSubscription), request.OperatorId);
 
-        return InternalOperatorSubscriptionMapper.ToDto(subscription.Subscription, subscription.Plan);
+        var decisionAt = _clock.UtcNow;
+        return InternalOperatorSubscriptionMapper.ToDto(subscription.Subscription, subscription.Plan, decisionAt);
     }
 }
