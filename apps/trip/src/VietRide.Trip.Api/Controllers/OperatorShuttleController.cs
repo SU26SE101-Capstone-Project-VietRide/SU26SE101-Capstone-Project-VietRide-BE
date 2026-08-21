@@ -87,6 +87,7 @@ public sealed class OperatorShuttleController : ControllerBase
     {
         var result = await _sender.Send(new CreateShuttleTripCommand(
             GetOperatorId(),
+            CurrentUserClaims.GetUserId(User),
             request.MainTripId,
             request.DriverUserId,
             request.VehicleId,
@@ -139,7 +140,7 @@ public sealed class OperatorShuttleController : ControllerBase
         [FromBody] CancelShuttleRequest request,
         CancellationToken cancellationToken)
         => Ok(await _sender.Send(new CancelShuttleTripCommand(
-            GetOperatorId(), shuttleTripId, request.Reason), cancellationToken));
+            GetOperatorId(), shuttleTripId, CurrentUserClaims.GetUserId(User), request.Reason), cancellationToken));
 
     private Guid GetOperatorId()
         => CurrentUserClaims.GetOperatorId(User)

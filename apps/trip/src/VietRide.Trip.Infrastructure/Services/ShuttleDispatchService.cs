@@ -297,6 +297,12 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 shuttle.ScheduledEndTime,
                 shuttle.ActualDepartureTime,
                 shuttle.CompletedAt,
+                shuttle.Notes,
+                shuttle.CreatedAt,
+                shuttle.CreatedByUserId,
+                shuttle.CancelledAt,
+                shuttle.CancelReason,
+                shuttle.CancelledByUserId,
                 MainTripDepartureDateTime = mainTrip.DepartureDateTime,
                 MainTripEstimatedArrivalTime = mainTrip.EstimatedArrivalTime,
                 RouteName = route.Name,
@@ -374,7 +380,13 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 row.PickedUpPassengerCount,
                 row.DeliveredPassengerCount,
                 row.NoShowPassengerCount,
-                row.CancelledPassengerCount))).ToArray();
+                row.CancelledPassengerCount),
+            row.Notes,
+            row.CreatedAt,
+            row.CreatedByUserId,
+            row.CancelledAt,
+            row.CancelReason,
+            row.CancelledByUserId)).ToArray();
 
         return PagedResult<OperatorShuttleTripListItemDto>.Create(items, page, pageSize, totalItems);
     }
@@ -535,7 +547,8 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             input.ScheduledDepartureTime,
             input.ScheduledEndTime,
             input.Notes,
-            input.Direction);
+            input.Direction,
+            input.ActorUserId);
         _db.ShuttleTrips.Add(shuttleTrip);
 
         for (var index = 0; index < selectedIds.Length; index++)
@@ -1272,6 +1285,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
     public async Task<ShuttleLifecycleResult> CancelShuttleTripAsync(
         Guid operatorId,
         Guid shuttleTripId,
+        Guid actorUserId,
         string reason,
         CancellationToken cancellationToken)
     {
@@ -1292,7 +1306,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         bool transitioned;
         try
         {
-            transitioned = shuttleTrip.Cancel(reason);
+            transitioned = shuttleTrip.Cancel(now, actorUserId, reason);
         }
         catch (InvalidOperationException exception)
         {

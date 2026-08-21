@@ -7,6 +7,7 @@ public sealed class CreateShuttleTripCommandValidator : AbstractValidator<Create
     public CreateShuttleTripCommandValidator()
     {
         RuleFor(x => x.OperatorId).NotEmpty();
+        RuleFor(x => x.ActorUserId).NotEmpty();
         RuleFor(x => x.MainTripId).NotEmpty();
         RuleFor(x => x.Direction)
             .NotEmpty()

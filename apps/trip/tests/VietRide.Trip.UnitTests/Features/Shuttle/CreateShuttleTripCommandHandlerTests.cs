@@ -36,6 +36,7 @@ public sealed class CreateShuttleTripCommandHandlerTests
             dispatchCalls++;
             var input = Assert.IsType<CreateShuttleTripInput>(args![0]);
             Assert.Equal(command.OperatorId, input.OperatorId);
+            Assert.Equal(command.ActorUserId, input.ActorUserId);
             Assert.Equal(command.MainTripId, input.MainTripId);
             return expected;
         });
@@ -151,6 +152,7 @@ public sealed class CreateShuttleTripCommandHandlerTests
     {
         var departure = DateTimeOffset.UtcNow.AddHours(1);
         return new CreateShuttleTripCommand(
+            Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),

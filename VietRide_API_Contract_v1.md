@@ -7097,11 +7097,18 @@ Usable capacity is derived from the vehicle seat layout and excludes disabled se
 `DRIVER_AREA`; it is not sourced from `totalSeats`. Invalid status returns `422 VALIDATION_ERROR`;
 Identity profile transport failure returns `503 UPSTREAM_UNAVAILABLE`.
 
+History items also expose nullable dispatch audit data: `notes`, `createdAt`, `createdBy`,
+`cancelledAt`, `cancelReason`, and `cancelledBy`. `createdBy` and `cancelledBy` are actor user IDs.
+Rows created before audit capture may return null actor IDs. Cancellation writes dedicated audit
+fields and does not append or parse cancellation text in `notes`.
+
 ### POST `/v1/operator/shuttle-trips`
 
 Request bắt buộc có thêm `direction`. Inbound dùng origin Station và `scheduledEndTime <= departureDateTime - 30 phút`; outbound dùng destination Station và `scheduledDepartureTime >= estimatedArrivalTime + 30 phút`.
 
 Auth: `OPERATOR_ADMIN`. `Idempotency-Key` bắt buộc.
+
+The authenticated actor is persisted as `createdBy`; clients do not submit this field.
 
 ```json
 {

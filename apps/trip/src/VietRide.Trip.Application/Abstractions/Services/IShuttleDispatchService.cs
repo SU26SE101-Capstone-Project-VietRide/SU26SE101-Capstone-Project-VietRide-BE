@@ -93,12 +93,14 @@ public interface IShuttleDispatchService
     Task<ShuttleLifecycleResult> CancelShuttleTripAsync(
         Guid operatorId,
         Guid shuttleTripId,
+        Guid actorUserId,
         string reason,
         CancellationToken cancellationToken);
 }
 
 public sealed record CreateShuttleTripInput(
     Guid OperatorId,
+    Guid ActorUserId,
     Guid MainTripId,
     Guid DriverUserId,
     Guid VehicleId,
@@ -162,7 +164,13 @@ public sealed record OperatorShuttleTripListItemDto(
     OperatorShuttleDriverDto Driver,
     int PassengerCount,
     int StopCount,
-    OperatorShuttlePassengerProgressDto PassengerProgress);
+    OperatorShuttlePassengerProgressDto PassengerProgress,
+    string? Notes,
+    DateTimeOffset CreatedAt,
+    Guid? CreatedBy,
+    DateTimeOffset? CancelledAt,
+    string? CancelReason,
+    Guid? CancelledBy);
 
 public sealed record OperatorShuttleMainTripDto(
     Guid TripId,

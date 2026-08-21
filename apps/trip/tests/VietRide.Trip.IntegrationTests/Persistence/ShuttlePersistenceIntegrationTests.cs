@@ -34,6 +34,7 @@ public sealed class ShuttlePersistenceIntegrationTests
     private static readonly ConcurrentDictionary<string, NpgsqlDataSource> DataSources = new(StringComparer.Ordinal);
 
     private const string PreviousMigration = "20260710000000_AddVehicleImageUrls";
+    private const string PreviousAuditMigration = "20260821180959_AddShuttlePassengerBookingCode";
 
     [Fact]
     public async Task Migration_UpDownAndReapply_CreatesCanonicalShuttleTables()
@@ -481,6 +482,112 @@ public sealed class ShuttlePersistenceIntegrationTests
     }
 
     [Fact]
+    public async Task AuditMigration_UpDownAndReapply_ManagesDedicatedColumns()
+    {
+        var databaseName = $"vietride_trip_shuttle_audit_migration_{Guid.NewGuid():N}";
+        await using var db = CreateDbContext(databaseName, new SystemClock());
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            (await ColumnExistsAsync(db, "shuttle_trips", "created_by_user_id")).Should().BeTrue();
+            (await ColumnExistsAsync(db, "shuttle_trips", "cancelled_at")).Should().BeTrue();
+            (await ColumnExistsAsync(db, "shuttle_trips", "cancel_reason")).Should().BeTrue();
+            (await ColumnExistsAsync(db, "shuttle_trips", "cancelled_by_user_id")).Should().BeTrue();
+
+            var migrator = db.GetService<IMigrator>();
+            await migrator.MigrateAsync(PreviousAuditMigration);
+            (await ColumnExistsAsync(db, "shuttle_trips", "created_by_user_id")).Should().BeFalse();
+            (await ColumnExistsAsync(db, "shuttle_trips", "cancelled_at")).Should().BeFalse();
+            (await ColumnExistsAsync(db, "shuttle_trips", "cancel_reason")).Should().BeFalse();
+            (await ColumnExistsAsync(db, "shuttle_trips", "cancelled_by_user_id")).Should().BeFalse();
+
+            await migrator.MigrateAsync();
+            (await ColumnExistsAsync(db, "shuttle_trips", "created_by_user_id")).Should().BeTrue();
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CreateCancelAndHistory_PersistDedicatedShuttleAuditFieldsWithoutChangingNotes()
+    {
+        var databaseName = $"vietride_trip_shuttle_audit_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond));
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var seed = await SeedBaseAsync(db, now.AddHours(4));
+            var bookingId = Guid.NewGuid();
+            db.ShuttlePassengers.Add(ShuttlePassenger.Request(
+                seed.MainTripId,
+                bookingId,
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                "12 Nguyen Hue, District 1",
+                10.7731m,
+                106.7032m,
+                roadDistanceMeters: 1_000));
+            await db.SaveChangesAsync();
+
+            var createdByUserId = Guid.NewGuid();
+            var cancelledByUserId = Guid.NewGuid();
+            var service = CreateDispatchService(db, clock, seed.OperatorId);
+            var created = await service.CreateAsync(new CreateShuttleTripInput(
+                seed.OperatorId,
+                createdByUserId,
+                seed.MainTripId,
+                seed.ShuttleDriverId,
+                seed.ShuttleVehicleId,
+                now.AddHours(1),
+                now.AddHours(2),
+                [bookingId],
+                "Call before pickup"), CancellationToken.None);
+
+            await service.CancelShuttleTripAsync(
+                seed.OperatorId,
+                created.ShuttleTripId,
+                cancelledByUserId,
+                "Vehicle unavailable",
+                CancellationToken.None);
+
+            var persisted = await db.ShuttleTrips.AsNoTracking()
+                .SingleAsync(shuttle => shuttle.Id == created.ShuttleTripId);
+            persisted.CreatedByUserId.Should().Be(createdByUserId);
+            persisted.CancelledAt.Should().Be(now);
+            persisted.CancelReason.Should().Be("Vehicle unavailable");
+            persisted.CancelledByUserId.Should().Be(cancelledByUserId);
+            persisted.Notes.Should().Be("Call before pickup");
+
+            var history = await service.GetHistoryAsync(
+                seed.OperatorId,
+                page: 1,
+                pageSize: 20,
+                from: null,
+                to: null,
+                statuses: null,
+                CancellationToken.None);
+            var item = history.Items.Should().ContainSingle().Subject;
+            item.Notes.Should().Be("Call before pickup");
+            item.CreatedAt.Should().Be(now);
+            item.CreatedBy.Should().Be(createdByUserId);
+            item.CancelledAt.Should().Be(now);
+            item.CancelReason.Should().Be("Vehicle unavailable");
+            item.CancelledBy.Should().Be(cancelledByUserId);
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task ConfirmedFanOut_RealInbox_FailureBeforeMarker_RollsBackManifestsAndMarker()
     {
         var databaseName = $"vietride_trip_shuttle_inbox_failure_{Guid.NewGuid():N}";
@@ -596,6 +703,7 @@ public sealed class ShuttlePersistenceIntegrationTests
                     {
                         await dispatch.CreateAsync(new CreateShuttleTripInput(
                             seed.OperatorId,
+                            Guid.NewGuid(),
                             trip.Id,
                             seed.ShuttleDriverId,
                             seed.ShuttleVehicleId,
@@ -692,6 +800,7 @@ public sealed class ShuttlePersistenceIntegrationTests
             var service = CreateDispatchService(db, clock, seed.OperatorId);
             var created = await service.CreateAsync(new CreateShuttleTripInput(
                 seed.OperatorId,
+                Guid.NewGuid(),
                 seed.MainTripId,
                 seed.ShuttleDriverId,
                 seed.ShuttleVehicleId,
@@ -811,7 +920,7 @@ public sealed class ShuttlePersistenceIntegrationTests
                 .Where(error => error.ErrorCode == "SHUTTLE_TRIP_NOT_FOUND");
 
             var shuttleTrip = await db.ShuttleTrips.SingleAsync(item => item.Id == created.ShuttleTripId);
-            shuttleTrip.Cancel("test cancellation");
+            shuttleTrip.Cancel(now, Guid.NewGuid(), "test cancellation");
             await db.SaveChangesAsync();
             var afterCancellation = await service.GetDriverAssignmentsAsync(
                 seed.ShuttleDriverId,
@@ -937,6 +1046,7 @@ public sealed class ShuttlePersistenceIntegrationTests
         var service = CreateDispatchService(db, clock, seed.OperatorId);
         var created = await service.CreateAsync(new CreateShuttleTripInput(
             seed.OperatorId,
+            Guid.NewGuid(),
             seed.MainTripId,
             seed.ShuttleDriverId,
             seed.ShuttleVehicleId,
@@ -1169,6 +1279,43 @@ public sealed class ShuttlePersistenceIntegrationTests
         {
             await using var command = db.Database.GetDbConnection().CreateCommand();
             command.CommandText = $"SELECT to_regclass('vietride_trip.{tableName}') IS NOT NULL";
+            return (bool)(await command.ExecuteScalarAsync())!;
+        }
+        finally
+        {
+            if (wasClosed)
+            {
+                await db.Database.CloseConnectionAsync();
+            }
+        }
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        TripDbContext db,
+        string tableName,
+        string columnName)
+    {
+        var wasClosed = db.Database.GetDbConnection().State == System.Data.ConnectionState.Closed;
+        await db.Database.OpenConnectionAsync();
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'vietride_trip'
+                      AND table_name = @table_name
+                      AND column_name = @column_name)
+                """;
+            var tableParameter = command.CreateParameter();
+            tableParameter.ParameterName = "table_name";
+            tableParameter.Value = tableName;
+            command.Parameters.Add(tableParameter);
+            var columnParameter = command.CreateParameter();
+            columnParameter.ParameterName = "column_name";
+            columnParameter.Value = columnName;
+            command.Parameters.Add(columnParameter);
             return (bool)(await command.ExecuteScalarAsync())!;
         }
         finally

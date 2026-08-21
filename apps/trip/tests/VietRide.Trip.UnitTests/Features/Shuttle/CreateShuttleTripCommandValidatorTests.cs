@@ -16,6 +16,7 @@ public sealed class CreateShuttleTripCommandValidatorTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
+            Guid.NewGuid(),
             now,
             now.AddMinutes(30),
             [Guid.NewGuid(), Guid.NewGuid()],
@@ -30,6 +31,7 @@ public sealed class CreateShuttleTripCommandValidatorTests
         var bookingId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         var result = await _validator.ValidateAsync(new CreateShuttleTripCommand(
+            Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
