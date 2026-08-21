@@ -101,7 +101,9 @@ public sealed class WalletTransaction : BaseEntity<Guid>
         Money balanceBefore,
         Money balanceAfter)
     {
-        if (referenceType is not (WalletTransactionRef.BOOKING_REFUND or WalletTransactionRef.PARCEL_REFUND))
+        if (referenceType is not (WalletTransactionRef.BOOKING_REFUND
+            or WalletTransactionRef.PARCEL_REFUND
+            or WalletTransactionRef.PARCEL_COMPENSATION))
             throw new ArgumentException("Refund reference type is required.", nameof(referenceType));
         if (referenceId == Guid.Empty)
             throw new ArgumentException("Reference id is required.", nameof(referenceId));
@@ -114,7 +116,12 @@ public sealed class WalletTransaction : BaseEntity<Guid>
             balanceAfter,
             referenceType,
             referenceId,
-            referenceType == WalletTransactionRef.PARCEL_REFUND ? "Parcel refund" : "Booking refund");
+            referenceType switch
+            {
+                WalletTransactionRef.PARCEL_REFUND => "Parcel refund",
+                WalletTransactionRef.PARCEL_COMPENSATION => "Parcel compensation",
+                _ => "Booking refund",
+            });
     }
 
     public static WalletTransaction CreateBookingRefundCredit(

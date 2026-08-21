@@ -10,6 +10,7 @@ using VietRide.Payment.Application.Abstractions.Refunds;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Events;
+using VietRide.Payment.Application.Features.Compensation;
 using VietRide.Payment.Application.Features.Internal.Revenue.BackfillParcelVoucherReversals;
 using VietRide.Payment.Application.Features.Internal.Wallets.RefundToWallet;
 using VietRide.Payment.Application.Features.Invoices;
@@ -110,6 +111,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IOperatorWalletRepository, OperatorWalletRepository>();
         services.AddScoped<IOperatorWalletTransactionRepository, OperatorWalletTransactionRepository>();
         services.AddScoped<IOperatorLedgerEntryRepository, OperatorLedgerEntryRepository>();
+        services.AddScoped<IParcelCompensationPayoutRepository, ParcelCompensationPayoutRepository>();
         services.AddScoped<IParcelVoucherReversalBackfillService, ParcelVoucherReversalBackfillService>();
         services.AddScoped<IOperatorTripSettlementRepository, OperatorTripSettlementRepository>();
         services.AddScoped<IRevenueAnalyticsRepository, RevenueAnalyticsRepository>();
@@ -123,6 +125,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<TripSettlementService>();
         services.AddScoped<IRefundRetryExecutor, WalletRefundRetryExecutor>();
         services.AddScoped<RefundRetryService>();
+        services.AddScoped<ParcelCompensationPayoutService>();
+        services.AddScoped<ParcelCompensationFundingRetryJob>();
         services.Configure<VnPayOptions>(options =>
         {
             configuration.GetSection(VnPayOptions.SectionName).Bind(options);
@@ -216,6 +220,11 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "payment.parcel-refund-initiated";
                 options.BindingKeys = [ParcelRefundInitiatedIntegrationEvent.EventTypeValue];
+            });
+            services.AddVietRideEventConsumer<ParcelClaimDecidedIntegrationEvent, ParcelClaimDecidedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "payment.parcel-compensation";
+                options.BindingKeys = [ParcelClaimDecidedIntegrationEvent.EventTypeValue];
             });
 
             services.AddVietRideEventConsumer<OperatorApprovedConsumerEvent, BootstrapOperatorWalletEventHandler>(options =>

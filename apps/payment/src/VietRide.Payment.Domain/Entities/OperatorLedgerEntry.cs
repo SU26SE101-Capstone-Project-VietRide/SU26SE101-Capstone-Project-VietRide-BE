@@ -57,7 +57,8 @@ public sealed class OperatorLedgerEntry : BaseEntity<Guid>
         ValidateAdjustment(entryType, amount, referenceType, adjustmentReason);
 
         var isRefund = entryType is OperatorLedgerEntryType.BOOKING_REFUND or
-            OperatorLedgerEntryType.PARCEL_REFUND;
+            OperatorLedgerEntryType.PARCEL_REFUND or
+            OperatorLedgerEntryType.PARCEL_COMPENSATION;
         var isAuditOnly = entryType == OperatorLedgerEntryType.VOUCHER_OPERATOR_FUNDED_AUDIT;
         if (isRefund && amount >= 0)
             throw new ArgumentOutOfRangeException(nameof(amount), "Refund ledger amount must be negative.");

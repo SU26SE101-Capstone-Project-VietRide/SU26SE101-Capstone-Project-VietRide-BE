@@ -36,7 +36,8 @@ CREATE TYPE wallet_transaction_type AS ENUM ('CREDIT', 'DEBIT');
 
 CREATE TYPE wallet_transaction_ref AS ENUM (
     'TOP_UP', 'BOOKING_PAYMENT', 'BOOKING_REFUND',
-    'PARCEL_PAYMENT', 'PARCEL_REFUND', 'PARCEL_ADDITIONAL_PAYMENT', 'MANUAL_ADJUSTMENT'
+    'PARCEL_PAYMENT', 'PARCEL_REFUND', 'PARCEL_ADDITIONAL_PAYMENT',
+    'MANUAL_ADJUSTMENT', 'PARCEL_COMPENSATION'
 );
 
 CREATE TYPE invoice_status AS ENUM ('DRAFT', 'ISSUED', 'CANCELLED');
@@ -53,14 +54,15 @@ CREATE TYPE platform_wallet_transaction_ref AS ENUM (
     'PARCEL_REFUND',
     'TRIP_SETTLEMENT',
     'SUBSCRIPTION_PAYMENT',
-    'MANUAL_ADJUSTMENT'
+    'MANUAL_ADJUSTMENT',
+    'PARCEL_COMPENSATION'
 );
 
 CREATE TYPE operator_ledger_entry_type AS ENUM (
     'BOOKING_REVENUE', 'PARCEL_REVENUE',
     'BOOKING_REFUND', 'PARCEL_REFUND',
     'VOUCHER_VIETRIDE_FUNDED_CREDIT', 'VOUCHER_OPERATOR_FUNDED_AUDIT',
-    'ADJUSTMENT'
+    'ADJUSTMENT', 'PARCEL_COMPENSATION'
 );
 
 CREATE TYPE operator_ledger_reference_type AS ENUM (
@@ -80,7 +82,8 @@ CREATE TYPE operator_wallet_transaction_type AS ENUM ('CREDIT', 'DEBIT');
 CREATE TYPE operator_wallet_transaction_ref AS ENUM (
     'TRIP_SETTLEMENT',
     'ADJUSTMENT',
-    'SUBSCRIPTION_PAYMENT'
+    'SUBSCRIPTION_PAYMENT',
+    'PARCEL_COMPENSATION'
     -- v2 will add 'WITHDRAWAL' for bank transfer out
 );
 
@@ -442,10 +445,10 @@ CREATE TABLE operator_ledger_entries (
     actor_snapshot_resolved BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_operator_ledger_entries_amount_direction CHECK (
-        (entry_type IN ('BOOKING_REFUND', 'PARCEL_REFUND') AND amount < 0)
+        (entry_type IN ('BOOKING_REFUND', 'PARCEL_REFUND', 'PARCEL_COMPENSATION') AND amount < 0)
         OR (entry_type = 'VOUCHER_OPERATOR_FUNDED_AUDIT' AND amount = 0)
         OR entry_type = 'ADJUSTMENT'
-        OR (entry_type NOT IN ('BOOKING_REFUND', 'PARCEL_REFUND', 'VOUCHER_OPERATOR_FUNDED_AUDIT', 'ADJUSTMENT') AND amount > 0)
+        OR (entry_type NOT IN ('BOOKING_REFUND', 'PARCEL_REFUND', 'PARCEL_COMPENSATION', 'VOUCHER_OPERATOR_FUNDED_AUDIT', 'ADJUSTMENT') AND amount > 0)
     ),
     CONSTRAINT chk_operator_ledger_entries_trip_required CHECK (entry_type = 'ADJUSTMENT' OR trip_id IS NOT NULL),
     CONSTRAINT chk_operator_ledger_entries_adjustment_reason_presence CHECK (
@@ -588,6 +591,30 @@ COMMENT ON COLUMN operator_trip_settlements.row_version IS
     'Optimistic lock for status transition. Pattern: UPDATE ... WHERE id=:id AND status=:expected AND row_version=:original.';
 
 -- -----------------------------------------------------------------------------
+-- parcel_compensation_payouts (idempotent claim payout + future funding offset)
+-- -----------------------------------------------------------------------------
+CREATE TABLE parcel_compensation_payouts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    claim_id UUID NOT NULL,             -- logical FK parcel.parcel_claims
+    parcel_id UUID NOT NULL,            -- logical FK parcel.parcels
+    trip_id UUID NOT NULL,              -- logical FK trip.trips
+    operator_id UUID NOT NULL,          -- logical FK identity.operators
+    beneficiary_user_id UUID NOT NULL,  -- logical FK identity.users; sender
+    amount_vnd BIGINT NOT NULL,
+    status VARCHAR(24) NOT NULL,         -- PENDING | FUNDING_PENDING | PAID
+    funding_source VARCHAR(24) NULL,     -- PLATFORM_HOLDING | OPERATOR_WALLET
+    wallet_transaction_id UUID NULL,     -- logical reference wallet_transactions
+    paid_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_parcel_compensation_payout_amount CHECK (amount_vnd > 0)
+);
+CREATE UNIQUE INDEX uq_parcel_compensation_payouts_claim
+    ON parcel_compensation_payouts (claim_id);
+CREATE INDEX idx_parcel_compensation_payouts_operator_status
+    ON parcel_compensation_payouts (operator_id, status, created_at);
+
+-- -----------------------------------------------------------------------------
 -- refund_failure_logs (Hangfire retry tracking; max 5 retries then admin alert)
 -- -----------------------------------------------------------------------------
 CREATE TABLE refund_failure_logs (
@@ -692,6 +719,8 @@ CREATE TRIGGER trg_platform_wallets_updated_at BEFORE UPDATE ON platform_wallets
 CREATE TRIGGER trg_operator_wallets_updated_at BEFORE UPDATE ON operator_wallets
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_operator_trip_settlements_updated_at BEFORE UPDATE ON operator_trip_settlements
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_parcel_compensation_payouts_updated_at BEFORE UPDATE ON parcel_compensation_payouts
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 
 -- =============================================================================
