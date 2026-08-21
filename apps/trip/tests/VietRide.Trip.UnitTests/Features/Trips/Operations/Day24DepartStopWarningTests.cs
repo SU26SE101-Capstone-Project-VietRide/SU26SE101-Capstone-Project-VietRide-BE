@@ -35,8 +35,9 @@ public sealed class Day24DepartStopWarningTests
             2,
             true));
         fixture.TripStops.MarkDepartedCalls.Should().Be(1);
-        fixture.Outbox.Entries.Should().ContainSingle();
-        var entry = fixture.Outbox.Entries.Single();
+        fixture.Outbox.Entries.Should().HaveCount(2);
+        fixture.Outbox.Entries.Should().ContainSingle(row => row.EventType == "trip.stop.departed");
+        var entry = fixture.Outbox.Entries.Single(row => row.EventType == "trip.stop.departed_with_pending");
         entry.EventType.Should().Be("trip.stop.departed_with_pending");
         entry.EventId.Should().NotBeEmpty();
         using var document = JsonDocument.Parse(entry.Payload);
@@ -58,7 +59,7 @@ public sealed class Day24DepartStopWarningTests
     }
 
     [Fact]
-    public async Task Handle_ZeroCount_PersistsDepartureWithoutEvent()
+    public async Task Handle_ZeroCount_PersistsDepartureAndEmitsOperationalDepartureOnly()
     {
         var fixture = CreateFixture();
         fixture.Booking.Projection = new(fixture.Trip.Id, fixture.Stop.Id, 0);
@@ -68,7 +69,13 @@ public sealed class Day24DepartStopWarningTests
         result.PendingPassengerCount.Should().Be(0);
         result.EventEmitted.Should().BeFalse();
         fixture.TripStops.MarkDepartedCalls.Should().Be(1);
-        fixture.Outbox.Entries.Should().BeEmpty();
+        var entry = fixture.Outbox.Entries.Should().ContainSingle().Subject;
+        entry.EventType.Should().Be("trip.stop.departed");
+        using var document = JsonDocument.Parse(entry.Payload);
+        document.RootElement.GetProperty("tripId").GetGuid().Should().Be(fixture.Trip.Id);
+        document.RootElement.GetProperty("stopId").GetGuid().Should().Be(fixture.Stop.Id);
+        document.RootElement.GetProperty("operatorId").GetGuid().Should().Be(fixture.Trip.OperatorId);
+        document.RootElement.GetProperty("departedAt").GetDateTimeOffset().Should().Be(Now);
     }
 
     [Theory]

@@ -110,6 +110,19 @@ public sealed class DepartStopHandler : IRequestHandler<DepartStopCommand, Depar
                 exception);
         }
 
+        var departedEvent = new TripStopDepartedIntegrationEvent(
+            Guid.NewGuid(),
+            departedAt,
+            trip.Id,
+            tripStop.StopId,
+            trip.OperatorId,
+            departedAt);
+        await outbox.EnqueueAsync(
+            departedEvent.EventId,
+            departedEvent.EventType,
+            JsonSerializer.Serialize(departedEvent, JsonOptions),
+            cancellationToken);
+
         var eventEmitted = projection.PendingPassengerCount > 0;
         if (eventEmitted)
         {
