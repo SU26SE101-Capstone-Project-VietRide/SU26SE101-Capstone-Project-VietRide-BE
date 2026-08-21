@@ -39,6 +39,12 @@ import {
   PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
   PARCEL_DELIVERY_REJECTED_ROUTING_KEY,
   PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_INCIDENT_OPENED_ROUTING_KEY,
+  PARCEL_INCIDENT_UPDATED_ROUTING_KEY,
+  PARCEL_CLAIM_SUBMITTED_ROUTING_KEY,
+  PARCEL_CLAIM_DECIDED_ROUTING_KEY,
+  PARCEL_COMPENSATION_PAID_ROUTING_KEY,
+  PARCEL_COMPENSATION_FUNDING_PENDING_ROUTING_KEY,
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_REJECTED_ROUTING_KEY,
   PARCEL_RETURNED_ROUTING_KEY,
@@ -114,6 +120,41 @@ const ParcelTransferInitiatedPayloadSchema = BaseParcelPayloadSchema.and(
     transferReason: z.string().trim().min(1).optional(),
   }),
 );
+
+const ParcelReliabilityIncidentPayloadSchema = z
+  .object({
+    incidentId: z.string().uuid(),
+    parcelId: z.string().uuid(),
+    operatorId: z.string().uuid().optional(),
+    type: z.string().trim().min(1).optional(),
+    status: z.string().trim().min(1).optional(),
+    searchDeadline: z.string().datetime({ offset: true }).optional(),
+    targetTripId: z.string().uuid().optional(),
+  })
+  .passthrough();
+
+const ParcelClaimPayloadSchema = z
+  .object({
+    claimId: z.string().uuid(),
+    parcelId: z.string().uuid(),
+    operatorId: z.string().uuid(),
+    beneficiaryUserId: z.string().uuid(),
+    status: z.string().trim().min(1).optional(),
+    totalAwardVnd: MoneyAmountSchema,
+  })
+  .passthrough();
+
+const ParcelCompensationPayloadSchema = z
+  .object({
+    payoutId: z.string().uuid(),
+    claimId: z.string().uuid(),
+    parcelId: z.string().uuid(),
+    operatorId: z.string().uuid(),
+    beneficiaryUserId: z.string().uuid(),
+    amountVnd: RequiredMoneyAmountSchema,
+    status: z.string().trim().min(1),
+  })
+  .passthrough();
 
 const BaseOperatorPayloadSchema = z
   .object({
@@ -203,6 +244,12 @@ export type ParcelSubscriptionOperatorRoutingKey =
   | typeof PARCEL_RETURN_INITIATED_ROUTING_KEY
   | typeof PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY
   | typeof PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY
+  | typeof PARCEL_INCIDENT_OPENED_ROUTING_KEY
+  | typeof PARCEL_INCIDENT_UPDATED_ROUTING_KEY
+  | typeof PARCEL_CLAIM_SUBMITTED_ROUTING_KEY
+  | typeof PARCEL_CLAIM_DECIDED_ROUTING_KEY
+  | typeof PARCEL_COMPENSATION_PAID_ROUTING_KEY
+  | typeof PARCEL_COMPENSATION_FUNDING_PENDING_ROUTING_KEY
   | typeof TRIP_STOP_ARRIVED_ROUTING_KEY
   | typeof TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY
   | typeof SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY
@@ -357,6 +404,37 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         resolveParcelSnapshot,
         mapParcelPendingOperatorActionRealerted,
       );
+    case PARCEL_INCIDENT_OPENED_ROUTING_KEY:
+      return mapParcelReliabilityIncident(
+        ParcelReliabilityIncidentPayloadSchema.parse(payload),
+        true,
+        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
+      );
+    case PARCEL_INCIDENT_UPDATED_ROUTING_KEY:
+      return mapParcelReliabilityIncident(
+        ParcelReliabilityIncidentPayloadSchema.parse(payload),
+        false,
+        resolveOperatorRecipientUserIds,
+        resolveParcelSnapshot,
+      );
+    case PARCEL_CLAIM_SUBMITTED_ROUTING_KEY:
+      return mapParcelClaimSubmitted(
+        ParcelClaimPayloadSchema.parse(payload),
+        resolveOperatorRecipientUserIds,
+      );
+    case PARCEL_CLAIM_DECIDED_ROUTING_KEY:
+      return [mapParcelClaimDecided(ParcelClaimPayloadSchema.parse(payload))];
+    case PARCEL_COMPENSATION_PAID_ROUTING_KEY:
+      return [
+        mapParcelCompensationPaid(ParcelCompensationPayloadSchema.parse(payload)),
+      ];
+    case PARCEL_COMPENSATION_FUNDING_PENDING_ROUTING_KEY:
+      return [
+        mapParcelCompensationFundingPending(
+          ParcelCompensationPayloadSchema.parse(payload),
+        ),
+      ];
     case TRIP_STOP_ARRIVED_ROUTING_KEY:
       return fanOut(
         BaseOperatorPayloadSchema.parse(payload),
@@ -769,6 +847,105 @@ function mapParcelPendingOperatorActionRealerted(
     type: NotificationType.PARCEL_IN_TRANSIT,
     title: 'Nhắc xử lý đơn gửi hàng',
     body: `${formatParcelLabel(payload.parcelCode)} vẫn đang chờ nhà xe xử lý thủ công.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+async function mapParcelReliabilityIncident(
+  payload: z.infer<typeof ParcelReliabilityIncidentPayloadSchema>,
+  opened: boolean,
+  resolveOperatorRecipientUserIds: (operatorId: string) => Promise<string[]>,
+  resolveParcelSnapshot?: (parcelId: string) => Promise<ParcelRecipientSnapshot>,
+): Promise<CreateNotificationDto[]> {
+  if (!resolveParcelSnapshot) throw new Error('PARCEL_RECIPIENT_PROVIDER_REQUIRED');
+  const snapshot = await resolveParcelSnapshot(payload.parcelId);
+  const operatorId = payload.operatorId ?? snapshot.operatorId;
+  const operatorRecipients = await resolveOperatorRecipientUserIds(operatorId);
+  const parcelRecipients = [snapshot.senderUserId, snapshot.recipientUserId].filter(isString);
+  const status = payload.status?.toUpperCase();
+  const title = opened
+    ? 'Đã mở tìm kiếm hàng hóa'
+    : status === 'FOUND'
+      ? 'Đã tìm thấy hàng hóa'
+      : status === 'FORWARDING'
+        ? 'Hàng đang được chuyển về đúng điểm nhận'
+        : status === 'LOST_CONFIRMED'
+          ? 'Đã xác nhận thất lạc hàng hóa'
+          : 'Cập nhật tìm kiếm hàng hóa';
+  const body = opened
+    ? 'VietRide và nhà xe đang truy tìm kiện hàng từ vị trí xác nhận gần nhất.'
+    : status === 'FOUND'
+      ? 'Kiện hàng đã được tìm thấy và đang chờ phương án giao tiếp theo.'
+      : status === 'FORWARDING'
+        ? 'Kiện hàng đang được chuyển bằng chuyến mới đến đúng điểm nhận.'
+        : status === 'LOST_CONFIRMED'
+          ? 'Quá trình tìm kiếm đã kết thúc và người gửi có thể hoàn tất hồ sơ bồi thường.'
+          : 'Hồ sơ tìm kiếm kiện hàng vừa có cập nhật mới.';
+
+  return [...new Set([...parcelRecipients, ...operatorRecipients])].map((userId) => ({
+    userId,
+    type: NotificationType.INCIDENT_REPORTED,
+    title,
+    body,
+    data: buildNotificationData({ ...payload, operatorId }),
+  }));
+}
+
+async function mapParcelClaimSubmitted(
+  payload: z.infer<typeof ParcelClaimPayloadSchema>,
+  resolveOperatorRecipientUserIds: (operatorId: string) => Promise<string[]>,
+): Promise<CreateNotificationDto[]> {
+  const operatorRecipients = await resolveOperatorRecipientUserIds(payload.operatorId);
+  return [...new Set([payload.beneficiaryUserId, ...operatorRecipients])].map((userId) => ({
+    userId,
+    type: NotificationType.INCIDENT_REPORTED,
+    title:
+      userId === payload.beneficiaryUserId
+        ? 'Đã tiếp nhận yêu cầu bồi thường'
+        : 'Có yêu cầu bồi thường hàng hóa mới',
+    body:
+      userId === payload.beneficiaryUserId
+        ? 'Hồ sơ bồi thường đã được tiếp nhận và đang chờ nhà xe xem xét.'
+        : 'Một hồ sơ bồi thường mới cần được kiểm tra chứng từ và quyết định.',
+    data: buildNotificationData(payload),
+  }));
+}
+
+function mapParcelClaimDecided(
+  payload: z.infer<typeof ParcelClaimPayloadSchema>,
+): CreateNotificationDto {
+  const approved = payload.status?.toUpperCase() === 'APPROVED';
+  return {
+    userId: payload.beneficiaryUserId,
+    type: NotificationType.INCIDENT_REPORTED,
+    title: approved ? 'Yêu cầu bồi thường đã được duyệt' : 'Yêu cầu bồi thường bị từ chối',
+    body: approved
+      ? `Tổng số tiền được duyệt là ${formatMoney(payload.totalAwardVnd)} VND và đang chờ chi trả.`
+      : 'Nhà xe đã từ chối yêu cầu bồi thường. Vui lòng xem lý do trong chi tiết hồ sơ.',
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapParcelCompensationFundingPending(
+  payload: z.infer<typeof ParcelCompensationPayloadSchema>,
+): CreateNotificationDto {
+  return {
+    userId: payload.beneficiaryUserId,
+    type: NotificationType.INCIDENT_REPORTED,
+    title: 'Khoản bồi thường đang chờ nguồn tiền',
+    body: `Khoản bồi thường ${formatMoney(payload.amountVnd)} VND đã được duyệt và sẽ tự động chi trả khi nhà xe bổ sung đủ nguồn.`,
+    data: buildNotificationData(payload),
+  };
+}
+
+function mapParcelCompensationPaid(
+  payload: z.infer<typeof ParcelCompensationPayloadSchema>,
+): CreateNotificationDto {
+  return {
+    userId: payload.beneficiaryUserId,
+    type: NotificationType.WALLET_CREDITED,
+    title: 'Đã chi trả tiền bồi thường',
+    body: `${formatMoney(payload.amountVnd)} VND đã được cộng vào ví VietRide của người gửi.`,
     data: buildNotificationData(payload),
   };
 }
