@@ -46,7 +46,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         _maxShuttleDistanceMeters = checked(Math.Max(1, maxDistanceKm) * 1_000);
     }
 
-    public async Task<PagedResult<ShuttleRequestTripGroup>> GetPendingAsync(
+    public async Task<ShuttleRequestPage> GetPendingAsync(
         Guid operatorId,
         int page,
         int pageSize,
@@ -54,7 +54,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         => await GetPendingFilteredAsync(
             operatorId, page, pageSize, null, null, null, null, [], cancellationToken);
 
-    public async Task<PagedResult<ShuttleRequestTripGroup>> GetPendingFilteredAsync(
+    public async Task<ShuttleRequestPage> GetPendingFilteredAsync(
         Guid operatorId,
         int page,
         int pageSize,
@@ -67,8 +67,6 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
     {
         var passengerQuery = _db.ShuttlePassengers.AsNoTracking()
             .Where(passenger => passenger.Status == ShuttlePassenger.PendingAssignmentStatus);
-        if (fromUtc.HasValue) passengerQuery = passengerQuery.Where(passenger => passenger.CreatedAt >= fromUtc.Value);
-        if (toUtcExclusive.HasValue) passengerQuery = passengerQuery.Where(passenger => passenger.CreatedAt < toUtcExclusive.Value);
         if (mainTripId.HasValue) passengerQuery = passengerQuery.Where(passenger => passenger.MainTripId == mainTripId.Value);
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -77,23 +75,44 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 || (passenger.PassengerUserId.HasValue && passengerUserIds.Contains(passenger.PassengerUserId.Value)));
         }
 
-        var directionQuery = passengerQuery
-            .Join(_db.Trips.AsNoTracking().Where(trip => trip.OperatorId == operatorId),
+        var tripQuery = _db.Trips.AsNoTracking().Where(trip => trip.OperatorId == operatorId);
+        if (fromUtc.HasValue) tripQuery = tripQuery.Where(trip => trip.DepartureDateTime >= fromUtc.Value);
+        if (toUtcExclusive.HasValue) tripQuery = tripQuery.Where(trip => trip.DepartureDateTime < toUtcExclusive.Value);
+
+        var joinedPendingQuery = passengerQuery.Join(
+                tripQuery,
                 passenger => passenger.MainTripId,
                 trip => trip.Id,
-                (passenger, trip) => new { trip.Id, passenger.Direction })
+                (passenger, trip) => new
+                {
+                    Trip = trip,
+                    passenger.Direction,
+                });
+        var directionQuery = joinedPendingQuery
+            .Select(item => new
+            {
+                Id = item.Trip.Id,
+                item.Direction,
+                item.Trip.DepartureDateTime,
+                item.Trip.EstimatedArrivalTime,
+            })
             .Distinct();
 
         var totalItems = await directionQuery.CountAsync(cancellationToken);
+        var totalPendingPassengerCount = await joinedPendingQuery.LongCountAsync(cancellationToken);
         var pagedDirections = await directionQuery
-            .OrderBy(item => item.Id)
+            .OrderBy(item => item.Direction == ShuttleTrip.InboundDirection
+                ? item.DepartureDateTime.AddMinutes(-ArrivalBufferMinutes)
+                : item.EstimatedArrivalTime.AddMinutes(ArrivalBufferMinutes))
+            .ThenBy(item => item.DepartureDateTime)
+            .ThenBy(item => item.Id)
             .ThenBy(item => item.Direction)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToArrayAsync(cancellationToken);
         if (pagedDirections.Length == 0)
         {
-            return PagedResult<ShuttleRequestTripGroup>.Create([], page, pageSize, totalItems);
+            return ShuttleRequestPage.Create([], page, pageSize, totalItems, totalPendingPassengerCount);
         }
 
         var tripIds = pagedDirections.Select(item => item.Id).Distinct().ToArray();
@@ -117,15 +136,35 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         var stations = await _db.Stations.AsNoTracking()
             .Where(station => stationIds.Contains(station.Id))
             .ToDictionaryAsync(station => station.Id, cancellationToken);
-        var manifests = await passengerQuery
+        var manifests = await _db.ShuttlePassengers.AsNoTracking()
+            .Where(passenger => tripIds.Contains(passenger.MainTripId))
+            .ToArrayAsync(cancellationToken);
+        var pendingManifests = await passengerQuery
             .Where(passenger => tripIds.Contains(passenger.MainTripId))
             .ToArrayAsync(cancellationToken);
         var passengerProfiles = await GetIdentityProfilesOrThrowAsync(
-            manifests.Select(manifest => manifest.PassengerUserId),
+            pendingManifests.Select(manifest => manifest.PassengerUserId),
             cancellationToken);
-        var manifestsByDirection = manifests
+        var manifestsByDirection = pendingManifests
             .GroupBy(manifest => (manifest.MainTripId, manifest.Direction))
             .ToDictionary(group => group.Key, group => group.ToArray());
+        var allManifestsByDirection = manifests
+            .GroupBy(manifest => (manifest.MainTripId, manifest.Direction))
+            .ToDictionary(group => group.Key, group => group.ToArray());
+        var dispatchedTripsByDirection = await _db.ShuttleTrips.AsNoTracking()
+            .Where(shuttle => tripIds.Contains(shuttle.MainTripId)
+                && shuttle.Status != ShuttleTrip.CancelledStatus)
+            .GroupBy(shuttle => new { shuttle.MainTripId, shuttle.Direction })
+            .Select(group => new
+            {
+                group.Key.MainTripId,
+                group.Key.Direction,
+                Count = group.Count(),
+            })
+            .ToDictionaryAsync(
+                item => (item.MainTripId, item.Direction),
+                item => item.Count,
+                cancellationToken);
 
         var items = pagedDirections.Select(item =>
         {
@@ -161,6 +200,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                         .ToArray();
                     return new ShuttleBookingGroup(
                         group.Key,
+                        first.BookingCode,
                         group.Count(),
                         first.PickupAddress,
                         first.PickupLat,
@@ -177,6 +217,13 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 .ThenBy(group => group.RequestedAt)
                 .Select(group => group.BookingId)
                 .ToArray();
+            var allDirectionManifests = allManifestsByDirection.GetValueOrDefault((item.Id, item.Direction)) ?? [];
+            var assignedPassengerCount = allDirectionManifests.Count(manifest =>
+                manifest.ShuttleTripId.HasValue
+                && manifest.Status is ShuttlePassenger.PendingStatus
+                    or ShuttlePassenger.PickedUpStatus
+                    or ShuttlePassenger.DeliveredStatus
+                    or ShuttlePassenger.NoShowStatus);
             return new ShuttleRequestTripGroup(
                 trip.Id,
                 route.Name,
@@ -188,11 +235,14 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 station.Id,
                 station.Name,
                 groupedManifests.Length,
+                assignedPassengerCount,
+                groupedManifests.Length + assignedPassengerCount,
+                dispatchedTripsByDirection.GetValueOrDefault((item.Id, item.Direction)),
                 groups,
                 suggested);
         }).ToArray();
 
-        return PagedResult<ShuttleRequestTripGroup>.Create(items, page, pageSize, totalItems);
+        return ShuttleRequestPage.Create(items, page, pageSize, totalItems, totalPendingPassengerCount);
     }
 
     public async Task<PagedResult<OperatorShuttleTripListItemDto>> GetHistoryAsync(

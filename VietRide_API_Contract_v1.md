@@ -7071,7 +7071,9 @@ Shuttle được nhóm theo `mainTripId + direction`, trong đó `direction` là
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant lấy từ JWT. Query phân trang theo main Trip.
 
-Response là `PagedResult<ShuttleRequestTripGroup>`, trả `mainTripId`, `routeName`, Station theo direction, `direction`, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `roadDistanceMeters`, `requestedAt`) và `suggestedBookingOrder`. Pagination gồm `items`, `page`, `pageSize`, `totalItems`, `totalPages`, `hasNextPage`, `hasPreviousPage`. Thứ tự gợi ý dùng road-distance snapshot, xa nhất trước, hòa thì `requestedAt ASC`; không dùng Haversine để quyết định eligibility.
+Response là `ShuttleRequestPage`, giữ `items`, `page`, `pageSize`, `totalItems`, `totalPages`, `hasNextPage`, `hasPreviousPage` và thêm `summary { totalPendingPassengerCount, totalPendingGroupCount }`. Mỗi group trả `mainTripId`, `routeName`, Station theo direction, `direction`, `hardCutoffAt`, `pendingPassengerCount`, `assignedPassengerCount`, `totalShuttlePassengerCount`, `dispatchedShuttleTripCount`, các nhóm Booking (`bookingId`, nullable `bookingCode`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `roadDistanceMeters`, `requestedAt`) và `suggestedBookingOrder`.
+
+`from/to` lọc theo `Trip.departureDateTime` tại ICT. Thứ tự mặc định trước pagination là `hardCutoffAt ASC`, `departureDateTime ASC`, `mainTripId ASC`, `direction ASC`. Thứ tự gợi ý Booking vẫn dùng road-distance snapshot, xa nhất trước, hòa thì `requestedAt ASC`; không dùng Haversine để quyết định eligibility.
 
 Pending shuttle `BookingGroup` responses always include non-null nested `passengers[]`. Each item contains
 `passengerUserId`, nullable `displayName` and `phone`, and aggregated `ticketIds[]`. The result

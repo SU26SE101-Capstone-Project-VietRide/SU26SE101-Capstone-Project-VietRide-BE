@@ -6,13 +6,13 @@ namespace VietRide.Trip.Application.Abstractions.Services;
 
 public interface IShuttleDispatchService
 {
-    Task<PagedResult<ShuttleRequestTripGroup>> GetPendingAsync(
+    Task<ShuttleRequestPage> GetPendingAsync(
         Guid operatorId,
         int page,
         int pageSize,
         CancellationToken cancellationToken);
 
-    Task<PagedResult<ShuttleRequestTripGroup>> GetPendingFilteredAsync(
+    Task<ShuttleRequestPage> GetPendingFilteredAsync(
         Guid operatorId, int page, int pageSize, DateTimeOffset? fromUtc,
         DateTimeOffset? toUtcExclusive, Guid? mainTripId, string? search,
         IReadOnlyCollection<Guid> passengerUserIds, CancellationToken cancellationToken)
@@ -123,11 +123,15 @@ public sealed record ShuttleRequestTripGroup(
     Guid StationId,
     string StationName,
     int PendingPassengerCount,
+    int AssignedPassengerCount,
+    int TotalShuttlePassengerCount,
+    int DispatchedShuttleTripCount,
     IReadOnlyList<ShuttleBookingGroup> BookingGroups,
     IReadOnlyList<Guid> SuggestedBookingOrder);
 
 public sealed record ShuttleBookingGroup(
     Guid BookingId,
+    string? BookingCode,
     int PassengerCount,
     string PickupAddress,
     decimal PickupLat,

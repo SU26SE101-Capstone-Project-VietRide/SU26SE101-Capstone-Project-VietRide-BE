@@ -81,6 +81,7 @@ public sealed class ShuttlePersistenceIntegrationTests
             var integrationEvent = new BookingShuttleConfirmedIntegrationEvent
             {
                 BookingId = bookingId,
+                BookingCode = "VR-20260822-ABCDEFGH",
                 TripId = seed.MainTripId,
                 UserId = passengerId,
                 Tickets = tickets,
@@ -104,6 +105,7 @@ public sealed class ShuttlePersistenceIntegrationTests
                 .Where(x => x.BookingId == bookingId)
                 .ToArrayAsync();
             manifests.Should().HaveCount(3);
+            manifests.Should().OnlyContain(x => x.BookingCode == "VR-20260822-ABCDEFGH");
             manifests.Select(x => x.TicketId).Should().OnlyHaveUniqueItems();
             manifests.Should().OnlyContain(x => x.Status == ShuttlePassenger.PendingAssignmentStatus);
         }
@@ -219,7 +221,8 @@ public sealed class ShuttlePersistenceIntegrationTests
                     10.7731m,
                     106.7032m,
                     ShuttlePassenger.InboundDirection,
-                    1_000),
+                    1_000,
+                    "VR-20260822-ABCDEFGH"),
                 ShuttlePassenger.Request(
                     seed.MainTripId,
                     inboundBookingId,
@@ -229,7 +232,8 @@ public sealed class ShuttlePersistenceIntegrationTests
                     10.7731m,
                     106.7032m,
                     ShuttlePassenger.InboundDirection,
-                    1_000),
+                    1_000,
+                    "VR-20260822-ABCDEFGH"),
                 ShuttlePassenger.Request(
                     seed.MainTripId,
                     outboundBookingId,
@@ -239,7 +243,31 @@ public sealed class ShuttlePersistenceIntegrationTests
                     10.7722m,
                     106.6980m,
                     ShuttlePassenger.OutboundDirection,
-                    900));
+                    900,
+                    "VR-20260822-HGFEDCBA"));
+            var originStationId = (await db.Routes.SingleAsync(route => route.Id == seed.RouteId)).OriginStationId;
+            var assignedTrip = ShuttleTrip.Create(
+                seed.OperatorId,
+                seed.MainTripId,
+                originStationId,
+                seed.ShuttleDriverId,
+                seed.ShuttleVehicleId,
+                now.AddHours(2),
+                now.AddHours(3),
+                null);
+            var assignedPassenger = ShuttlePassenger.Request(
+                seed.MainTripId,
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                profiledPassengerId,
+                "20 Pasteur, District 1",
+                10.7750m,
+                106.7000m,
+                ShuttlePassenger.InboundDirection,
+                1_200,
+                "VR-20260822-ZYXWVUTS");
+            assignedPassenger.Assign(assignedTrip.Id, 1);
+            db.AddRange(assignedTrip, assignedPassenger);
             await db.SaveChangesAsync();
 
             var service = CreateDispatchService(
@@ -264,11 +292,17 @@ public sealed class ShuttlePersistenceIntegrationTests
             firstPage.TotalPages.Should().Be(2);
             firstPage.HasNextPage.Should().BeTrue();
             firstPage.HasPreviousPage.Should().BeFalse();
+            firstPage.Summary.TotalPendingPassengerCount.Should().Be(3);
+            firstPage.Summary.TotalPendingGroupCount.Should().Be(2);
             var inbound = firstPage.Items.Single();
             inbound.RouteName.Should().Be("Shuttle integration route");
             inbound.Direction.Should().Be(ShuttlePassenger.InboundDirection);
             inbound.BookingGroups.Should().ContainSingle();
             var inboundGroup = inbound.BookingGroups.Single();
+            inboundGroup.BookingCode.Should().Be("VR-20260822-ABCDEFGH");
+            inbound.AssignedPassengerCount.Should().Be(1);
+            inbound.TotalShuttlePassengerCount.Should().Be(3);
+            inbound.DispatchedShuttleTripCount.Should().Be(1);
             inboundGroup.Passengers.Should().NotBeNull().And.ContainSingle();
             var profiledPassenger = inboundGroup.Passengers.Single();
             profiledPassenger.PassengerUserId.Should().Be(profiledPassengerId);
@@ -289,6 +323,18 @@ public sealed class ShuttlePersistenceIntegrationTests
             missingProfilePassenger.DisplayName.Should().BeNull();
             missingProfilePassenger.Phone.Should().BeNull();
             missingProfilePassenger.TicketIds.Should().Equal(outboundTicketId);
+
+            var filteredByTripDeparture = await service.GetPendingFilteredAsync(
+                seed.OperatorId,
+                page: 1,
+                pageSize: 20,
+                fromUtc: now.AddHours(3),
+                toUtcExclusive: now.AddHours(5),
+                mainTripId: null,
+                search: null,
+                passengerUserIds: [],
+                CancellationToken.None);
+            filteredByTripDeparture.Items.Should().HaveCount(2);
         }
         finally
         {
@@ -321,6 +367,8 @@ public sealed class ShuttlePersistenceIntegrationTests
             result.TotalPages.Should().Be(0);
             result.HasNextPage.Should().BeFalse();
             result.HasPreviousPage.Should().BeFalse();
+            result.Summary.TotalPendingPassengerCount.Should().Be(0);
+            result.Summary.TotalPendingGroupCount.Should().Be(0);
         }
         finally
         {
@@ -902,6 +950,7 @@ public sealed class ShuttlePersistenceIntegrationTests
         return new BookingShuttleConfirmedIntegrationEvent
         {
             BookingId = Guid.NewGuid(),
+            BookingCode = "VR-20260822-ABCDEFGH",
             TripId = tripId,
             UserId = passengerId,
             Tickets = Enumerable.Range(0, ticketCount)

@@ -8,6 +8,7 @@ public sealed record BookingShuttleConfirmedIntegrationEvent : IIntegrationEvent
     public const string EventType = "booking.booking.confirmed";
 
     public Guid BookingId { get; init; }
+    public string? BookingCode { get; init; }
     public Guid TripId { get; init; }
     public Guid UserId { get; init; }
     public IReadOnlyList<ConfirmedTicket> Tickets { get; init; } = [];

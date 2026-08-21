@@ -809,6 +809,7 @@ CREATE TABLE shuttle_passengers (
     shuttle_trip_id UUID NULL REFERENCES shuttle_trips (id) ON DELETE SET NULL,
     main_trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE RESTRICT,
     booking_id UUID NULL,    -- logical FK → booking.bookings
+    booking_code VARCHAR(30) NULL,
     ticket_id UUID NULL,
     passenger_user_id UUID NULL,
     direction VARCHAR(30) NOT NULL,

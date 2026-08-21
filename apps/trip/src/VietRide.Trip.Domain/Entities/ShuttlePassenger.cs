@@ -15,6 +15,7 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
     public Guid? ShuttleTripId { get; private set; }
     public Guid MainTripId { get; private set; }
     public Guid? BookingId { get; private set; }
+    public string? BookingCode { get; private set; }
     public Guid? TicketId { get; private set; }
     public Guid? PassengerUserId { get; private set; }
     public string Direction { get; private set; } = InboundDirection;
@@ -40,7 +41,8 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
         decimal pickupLat,
         decimal pickupLng,
         string direction = InboundDirection,
-        int? roadDistanceMeters = null)
+        int? roadDistanceMeters = null,
+        string? bookingCode = null)
     {
         ValidateId(mainTripId, nameof(mainTripId));
         ValidateId(bookingId, nameof(bookingId));
@@ -66,11 +68,17 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
             throw new ArgumentOutOfRangeException(nameof(roadDistanceMeters));
         }
 
+        if (bookingCode is not null && string.IsNullOrWhiteSpace(bookingCode))
+        {
+            throw new ArgumentException("Booking code cannot be whitespace.", nameof(bookingCode));
+        }
+
         return new ShuttlePassenger
         {
             Id = Guid.NewGuid(),
             MainTripId = mainTripId,
             BookingId = bookingId,
+            BookingCode = bookingCode?.Trim(),
             TicketId = ticketId,
             PassengerUserId = passengerUserId,
             Direction = direction,
