@@ -1464,13 +1464,6 @@ Response `200`:
         "bookingGroupId": null,
         "tripDirection": null,
         "routeName": "TP.HCM - Hà Nội",
-        "vehicle": {
-          "licensePlate": "51B-123.45",
-          "vehicleType": {
-            "code": "LIMOUSINE",
-            "displayName": "Limousine"
-          }
-        },
         "tickets": [
           {
             "ticketId": "uuid",
@@ -1480,6 +1473,25 @@ Response `200`:
             "paidAmount": 350000
           }
         ],
+        "shuttleRequests": [
+          {
+            "direction": "INBOUND_TO_STATION",
+            "address": "12 Nguyễn Huệ, Quận 1, TP.HCM",
+            "latitude": 10.7731,
+            "longitude": 106.7032,
+            "roadDistanceMeters": 3200,
+            "isActive": true,
+            "requestedAt": "2026-05-01T16:00:00+07:00",
+            "cancelledAt": null
+          }
+        ],
+        "vehicle": {
+          "licensePlate": "51B-123.45",
+          "vehicleType": {
+            "code": "LIMOUSINE",
+            "displayName": "Limousine"
+          }
+        },
         "paymentRedirectUrl": null
       }
     ],
@@ -1509,6 +1521,14 @@ non-success responses, timeouts, and transport failures leave only the affected 
 and do not fail the base history response. No vehicle ID, status, seat layout, capacity, image, or
 other management field is exposed.
 
+`shuttleRequests` is always serialized by this public endpoint and is `[]` when the Booking never
+requested Shuttle service. Each item is Booking-owned request history with `direction` equal to
+`INBOUND_TO_STATION` or `OUTBOUND_FROM_STATION`, the requested service address and coordinates,
+nullable road-distance snapshot, current `isActive`, `requestedAt`, and nullable `cancelledAt`.
+Both active and inactive intents are returned so cancellation does not erase passenger-visible
+history. Items are ordered by `requestedAt ASC, id ASC`. This projection does not enrich Trip-owned
+assignment data such as `shuttleTripId`, Vehicle, Driver, pickup order, or dispatch status.
+
 `paymentRedirectUrl` is the final root property of every item and is always serialized. It is
 non-null only for a `PENDING_PAYMENT` Booking whose latest eligible VNPay Payment lookup matches
 the owner, reference, exact amount, trusted VNPay authority, and a persisted future `dueAt`.
@@ -1522,9 +1542,10 @@ failing the base history response.
 Auth: Internal JWT. Caller: Parcel Service. Never exposed through Gateway.
 
 Query: required `userId`, plus the same `status?`, `from?`, `to?`, `page=1`, and `pageSize=20`
-semantics as the public Booking history endpoint. It returns the same paged data DTO, preserving
-Booking ownership, per-Booking pagination, nested Ticket summaries, nullable current Vehicle
-projection, and deterministic ordering.
+semantics as the public Booking history endpoint. It preserves Booking ownership, per-Booking
+pagination, nested Ticket summaries, nullable current Vehicle projection, and deterministic
+ordering. It does not load or return the public-only `shuttleRequests` field, so Parcel does not
+receive passenger Shuttle addresses or coordinates.
 
 ### GET `/internal/v1/bookings/{bookingId}`
 

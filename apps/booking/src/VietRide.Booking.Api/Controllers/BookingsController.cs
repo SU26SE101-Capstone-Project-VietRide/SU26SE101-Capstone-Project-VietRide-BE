@@ -58,7 +58,8 @@ public sealed class BookingsController : ControllerBase
                 from,
                 to,
                 page,
-                pageSize),
+                pageSize,
+                IncludeShuttleRequests: true),
             cancellationToken);
 
         return Ok(result);

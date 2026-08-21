@@ -173,7 +173,8 @@ internal sealed class BookingRepository : IBookingRepository
         DateTimeOffset? to,
         int page,
         int pageSize,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool includeShuttleRequests = false)
     {
         var query = _db.Bookings
             .AsNoTracking()
@@ -187,8 +188,11 @@ internal sealed class BookingRepository : IBookingRepository
             query = query.Where(booking => booking.CreatedAt < to.Value);
 
         var totalItems = await query.LongCountAsync(ct);
-        var items = await query
-            .Include(booking => booking.Tickets)
+        IQueryable<BookingEntity> pageQuery = query.Include(booking => booking.Tickets);
+        if (includeShuttleRequests)
+            pageQuery = pageQuery.Include(booking => booking.ShuttleIntents);
+
+        var items = await pageQuery
             .AsSplitQuery()
             .OrderByDescending(booking => booking.CreatedAt)
             .ThenByDescending(booking => booking.Id)

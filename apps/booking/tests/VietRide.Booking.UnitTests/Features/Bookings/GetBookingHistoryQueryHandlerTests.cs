@@ -1,13 +1,17 @@
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
 using FluentValidation.TestHelper;
+using MediatR;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
 using VietRide.Booking.Api.Controllers;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Features.Bookings.History;
+using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Cqrs;
@@ -57,7 +61,8 @@ public sealed class GetBookingHistoryQueryHandlerTests
                 createdAt.AddDays(2),
                 1,
                 20,
-                Arg.Any<CancellationToken>())
+                Arg.Any<CancellationToken>(),
+                true)
             .Returns(PagedResult<BookingEntity>.Create([booking], 1, 20, 1));
         var paymentLookup = Substitute.For<IPaymentRedirectLookupClient>();
         var tripClient = Substitute.For<ITripServiceClient>();
@@ -77,7 +82,8 @@ public sealed class GetBookingHistoryQueryHandlerTests
                 "2026-07-01T02:00:00Z",
                 "2026-07-03T02:00:00Z",
                 1,
-                20),
+                20,
+                IncludeShuttleRequests: true),
             CancellationToken.None);
 
         result.Items.Should().ContainSingle();
@@ -93,11 +99,94 @@ public sealed class GetBookingHistoryQueryHandlerTests
             "ISSUED",
             350_000));
         item.PaymentRedirectUrl.Should().BeNull();
+        item.ShuttleRequests.Should().BeEmpty();
         item.Vehicle.Should().BeEquivalentTo(new BookingHistoryVehicleDto(
             "51B-123.45",
             new BookingHistoryVehicleTypeDto("LIMOUSINE", "Limousine")));
         await paymentLookup.DidNotReceiveWithAnyArgs()
             .LookupAsync(default, default!, default);
+    }
+
+    [Fact]
+    public async Task Handle_WhenPublicHistoryIncludesShuttleRequests_MapsActiveAndCancelledIntentsInRequestOrder()
+    {
+        var userId = Guid.NewGuid();
+        var requestedAt = new DateTimeOffset(2026, 8, 21, 1, 0, 0, TimeSpan.Zero);
+        var cancelledAt = requestedAt.AddHours(1);
+        var booking = BookingEntity.CreatePendingPayment(
+            BookingCode.Parse("VR-20260821-ABCDEFGH"),
+            userId,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            null,
+            Guid.NewGuid(),
+            null,
+            Money.FromRaw(350_000),
+            Money.Zero,
+            Money.FromRaw(350_000));
+        booking.RequestShuttle(
+            BookingShuttleIntent.OutboundDirection,
+            "45 Le Loi",
+            10.7750m,
+            106.7010m,
+            4_200);
+        booking.RequestShuttle(
+            BookingShuttleIntent.InboundDirection,
+            "12 Nguyen Hue",
+            10.7731m,
+            106.7032m,
+            3_200);
+        booking.ShuttleDropoffIntent!.CreatedAt = requestedAt.AddMinutes(1);
+        booking.ShuttleDropoffIntent.Cancel(cancelledAt);
+        booking.ShuttleIntent!.CreatedAt = requestedAt;
+
+        var repository = Substitute.For<IBookingRepository>();
+        repository.ListPassengerHistoryAsync(
+                userId,
+                null,
+                null,
+                null,
+                1,
+                20,
+                Arg.Any<CancellationToken>(),
+                true)
+            .Returns(PagedResult<BookingEntity>.Create([booking], 1, 20, 1));
+        var handler = new GetBookingHistoryQueryHandler(
+            repository,
+            Substitute.For<IPaymentRedirectLookupClient>());
+
+        var result = await handler.Handle(
+            new GetBookingHistoryQuery(
+                userId,
+                null,
+                null,
+                null,
+                1,
+                20,
+                IncludeShuttleRequests: true),
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].ShuttleRequests.Should().Equal(
+            new BookingHistoryShuttleRequestDto(
+                BookingShuttleIntent.InboundDirection,
+                "12 Nguyen Hue",
+                10.7731m,
+                106.7032m,
+                3_200,
+                true,
+                requestedAt,
+                null),
+            new BookingHistoryShuttleRequestDto(
+                BookingShuttleIntent.OutboundDirection,
+                "45 Le Loi",
+                10.7750m,
+                106.7010m,
+                4_200,
+                false,
+                requestedAt.AddMinutes(1),
+                cancelledAt));
     }
 
     [Fact]
@@ -272,15 +361,20 @@ public sealed class GetBookingHistoryQueryHandlerTests
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         };
 
-        using var document = JsonDocument.Parse(JsonSerializer.Serialize(dto, options));
+        using var internalDocument = JsonDocument.Parse(JsonSerializer.Serialize(dto, options));
+        using var publicDocument = JsonDocument.Parse(JsonSerializer.Serialize(
+            dto with { ShuttleRequests = [] }, options));
 
-        document.RootElement.TryGetProperty("paymentRedirectUrl", out var property).Should().BeTrue();
+        internalDocument.RootElement.TryGetProperty("paymentRedirectUrl", out var property).Should().BeTrue();
         if (url is null)
             property.ValueKind.Should().Be(JsonValueKind.Null);
         else
             property.GetString().Should().Be(url);
-        document.RootElement.TryGetProperty("vehicle", out var vehicle).Should().BeTrue();
+        internalDocument.RootElement.TryGetProperty("vehicle", out var vehicle).Should().BeTrue();
         vehicle.ValueKind.Should().Be(JsonValueKind.Null);
+        internalDocument.RootElement.TryGetProperty("shuttleRequests", out _).Should().BeFalse();
+        publicDocument.RootElement.GetProperty("shuttleRequests").ValueKind.Should().Be(JsonValueKind.Array);
+        publicDocument.RootElement.GetProperty("shuttleRequests").GetArrayLength().Should().Be(0);
         typeof(BookingsController).GetMethod(nameof(BookingsController.GetHistoryAsync))!.ReturnType
             .Should().Be(typeof(Task<ActionResult<PagedResult<BookingHistoryItemDto>>>));
         typeof(InternalBookingsController).GetMethod(nameof(InternalBookingsController.GetHistoryAsync))!.ReturnType
@@ -307,6 +401,42 @@ public sealed class GetBookingHistoryQueryHandlerTests
         var enrichedType = enriched.RootElement.GetProperty("vehicleType");
         enrichedType.GetProperty("code").GetString().Should().Be("LIMOUSINE");
         enrichedType.GetProperty("displayName").GetString().Should().Be("Limousine");
+    }
+
+    [Fact]
+    public async Task HistoryControllers_IncludeShuttleRequestsOnlyForThePublicPassengerEndpoint()
+    {
+        var userId = Guid.NewGuid();
+        var page = PagedResult<BookingHistoryItemDto>.Create([], 1, 20, 0);
+        var publicSender = Substitute.For<ISender>();
+        publicSender.Send(Arg.Any<GetBookingHistoryQuery>(), Arg.Any<CancellationToken>())
+            .Returns(page);
+        var publicController = new BookingsController(publicSender)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        [new Claim("sub", userId.ToString()), new Claim(ClaimTypes.Role, "PASSENGER")],
+                        "test")),
+                },
+            },
+        };
+        var internalMediator = Substitute.For<IMediator>();
+        internalMediator.Send(Arg.Any<GetBookingHistoryQuery>(), Arg.Any<CancellationToken>())
+            .Returns(page);
+        var internalController = new InternalBookingsController(internalMediator);
+
+        await publicController.GetHistoryAsync(null, null, null, 1, 20, CancellationToken.None);
+        await internalController.GetHistoryAsync(userId, null, null, null, 1, 20, CancellationToken.None);
+
+        await publicSender.Received(1).Send(
+            Arg.Is<GetBookingHistoryQuery>(query => query.IncludeShuttleRequests),
+            Arg.Any<CancellationToken>());
+        await internalMediator.Received(1).Send(
+            Arg.Is<GetBookingHistoryQuery>(query => !query.IncludeShuttleRequests),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

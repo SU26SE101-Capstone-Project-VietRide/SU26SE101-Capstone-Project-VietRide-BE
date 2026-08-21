@@ -18,6 +18,8 @@ public sealed record BookingHistoryItemDto(
     IReadOnlyList<BookingHistoryTicketDto> Tickets,
     Guid? DropoffStationId = null,
     Guid? DropoffStopId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<BookingHistoryShuttleRequestDto>? ShuttleRequests = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     BookingHistoryVehicleDto? Vehicle = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
