@@ -24,7 +24,7 @@ namespace VietRide.Identity.Infrastructure.Migrations
                 .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
-            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "activity_log_action", new[] { "LOGIN", "LOGOUT", "BOOK_TICKET", "CANCEL_TICKET", "UPDATE_PROFILE", "CHANGE_PASSWORD", "COMPLETE_PROFILE", "CREATE_OPERATOR", "APPROVE_OPERATOR", "REJECT_OPERATOR", "SUSPEND_OPERATOR", "REACTIVATE_OPERATOR", "LOCK_USER", "UNLOCK_USER", "VEHICLE_SUBSTITUTION_TRIGGERED", "DRIVER_SCHEDULE_EDIT", "VEHICLE_SWAP", "TRIP_COMPLETED_MANUAL", "PARCEL_UNLOAD_OVERRIDE", "PARCEL_DELIVERY_RESEND", "PARCEL_MANUAL_CONFIRM", "TRIP_SETTLEMENT_MANUAL", "OPERATOR_WALLET_ADJUSTMENT", "SET_INITIAL_PASSWORD", "RESEND_INITIAL_PASSWORD", "STATION_MERGED", "STATION_NORMALIZED" });
+            NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "activity_log_action", new[] { "LOGIN", "LOGOUT", "BOOK_TICKET", "CANCEL_TICKET", "UPDATE_PROFILE", "CHANGE_PASSWORD", "COMPLETE_PROFILE", "CREATE_OPERATOR", "APPROVE_OPERATOR", "REJECT_OPERATOR", "SUSPEND_OPERATOR", "REACTIVATE_OPERATOR", "LOCK_USER", "UNLOCK_USER", "VEHICLE_SUBSTITUTION_TRIGGERED", "DRIVER_SCHEDULE_EDIT", "VEHICLE_SWAP", "TRIP_COMPLETED_MANUAL", "PARCEL_UNLOAD_OVERRIDE", "PARCEL_DELIVERY_RESEND", "PARCEL_MANUAL_CONFIRM", "TRIP_SETTLEMENT_MANUAL", "OPERATOR_WALLET_ADJUSTMENT", "SET_INITIAL_PASSWORD", "RESEND_INITIAL_PASSWORD", "STATION_MERGED", "STATION_NORMALIZED", "CREATE_SUBSCRIPTION_CUSTOM_REQUEST", "APPROVE_SUBSCRIPTION_CUSTOM_REQUEST", "REJECT_SUBSCRIPTION_CUSTOM_REQUEST", "DEACTIVATE_CUSTOM_SUBSCRIPTION_PLAN" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "device_platform", new[] { "IOS", "ANDROID", "WEB" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "email_verification_purpose", new[] { "REGISTRATION", "PASSWORD_RESET", "SET_INITIAL_PASSWORD" });
             NpgsqlModelBuilderExtensions.HasPostgresEnum(modelBuilder, "oauth_provider", new[] { "GOOGLE" });
@@ -455,6 +455,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("current_vehicles");
 
+                    b.Property<long>("CyclePriceAmount")
+                        .HasColumnType("bigint")
+                        .HasColumnName("cycle_price_amount");
+
                     b.Property<DateTimeOffset?>("ExpiresAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at");
@@ -514,7 +518,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     b.HasIndex("Status")
                         .HasDatabaseName("idx_operator_subscriptions_status");
 
-                    b.ToTable("operator_subscriptions", "vietride_identity");
+                    b.ToTable("operator_subscriptions", "vietride_identity", t =>
+                        {
+                            t.HasCheckConstraint("chk_operator_subscriptions_cycle_price_non_negative", "cycle_price_amount >= 0");
+                        });
                 });
 
             modelBuilder.Entity("VietRide.Identity.Domain.Entities.OperatorWalletBackfillMarker", b =>
@@ -639,6 +646,125 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     b.ToTable("refresh_tokens", "vietride_identity");
                 });
 
+            modelBuilder.Entity("VietRide.Identity.Domain.Entities.SubscriptionCustomRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid?>("ApprovedPlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("approved_plan_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<bool>("EnableParcel")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enable_parcel");
+
+                    b.Property<bool>("EnableRag")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enable_rag");
+
+                    b.Property<bool>("EnableShuttle")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enable_shuttle");
+
+                    b.Property<int>("MaxAssistants")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_assistants");
+
+                    b.Property<int>("MaxDrivers")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_drivers");
+
+                    b.Property<int>("MaxOperatorUsers")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_operator_users");
+
+                    b.Property<int>("MaxRoutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_routes");
+
+                    b.Property<int>("MaxTripsPerMonth")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_trips_per_month");
+
+                    b.Property<int>("MaxVehicles")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_vehicles");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("note");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operator_id");
+
+                    b.Property<SubscriptionBillingPeriod>("PreferredBillingPeriod")
+                        .HasColumnType("subscription_billing_period")
+                        .HasColumnName("preferred_billing_period");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("rejection_reason");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reviewed_at");
+
+                    b.Property<Guid?>("ReviewedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reviewed_by");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_subscription_custom_requests");
+
+                    b.HasIndex("ApprovedPlanId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_subscription_custom_requests_approved_plan_id")
+                        .HasFilter("approved_plan_id IS NOT NULL");
+
+                    b.HasIndex("OperatorId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_subscription_custom_requests_pending_operator")
+                        .HasFilter("status = 'PENDING_REVIEW'");
+
+                    b.HasIndex("ReviewedBy")
+                        .HasDatabaseName("ix_subscription_custom_requests_reviewed_by");
+
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("idx_subscription_custom_requests_status_created_at");
+
+                    b.ToTable("subscription_custom_requests", "vietride_identity", t =>
+                        {
+                            t.HasCheckConstraint("chk_subscription_custom_requests_limits_non_negative", "max_vehicles >= 0 AND max_drivers >= 0 AND max_assistants >= 0 AND max_operator_users >= 0 AND max_routes >= 0 AND max_trips_per_month >= 0");
+
+                            t.HasCheckConstraint("chk_subscription_custom_requests_review_state", "(status = 'PENDING_REVIEW' AND reviewed_by IS NULL AND reviewed_at IS NULL AND rejection_reason IS NULL AND approved_plan_id IS NULL) OR (status = 'APPROVED' AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL AND rejection_reason IS NULL AND approved_plan_id IS NOT NULL) OR (status = 'REJECTED' AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL AND rejection_reason IS NOT NULL AND approved_plan_id IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("VietRide.Identity.Domain.Entities.SubscriptionPlan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -723,6 +849,18 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("name");
 
+                    b.Property<Guid?>("OwnerOperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_operator_id");
+
+                    b.Property<string>("PlanType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("STANDARD")
+                        .HasColumnName("plan_type");
+
                     b.Property<long>("PricePerMonth")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")
@@ -734,6 +872,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnType("bigint")
                         .HasColumnName("price_per_year")
                         .HasDefaultValueSql("0");
+
+                    b.Property<Guid?>("SourceCustomRequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_custom_request_id");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .ValueGeneratedOnAdd()
@@ -747,8 +889,19 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     b.HasIndex("IsActive")
                         .HasDatabaseName("idx_subscription_plans_is_active");
 
+                    b.HasIndex("OwnerOperatorId")
+                        .HasDatabaseName("idx_subscription_plans_owner_operator_id")
+                        .HasFilter("owner_operator_id IS NOT NULL");
+
+                    b.HasIndex("SourceCustomRequestId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_subscription_plans_source_custom_request_id")
+                        .HasFilter("source_custom_request_id IS NOT NULL");
+
                     b.ToTable("subscription_plans", "vietride_identity", t =>
                         {
+                            t.HasCheckConstraint("chk_subscription_plans_owner_by_type", "(plan_type = 'STANDARD' AND owner_operator_id IS NULL AND source_custom_request_id IS NULL) OR (plan_type = 'CUSTOM' AND owner_operator_id IS NOT NULL AND source_custom_request_id IS NOT NULL)");
+
                             t.HasCheckConstraint("chk_subscription_plans_price_per_month_non_negative", "price_per_month >= 0");
 
                             t.HasCheckConstraint("chk_subscription_plans_price_per_year_non_negative", "price_per_year >= 0");
@@ -837,6 +990,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnName("created_at")
                         .HasDefaultValueSql("now()");
 
+                    b.Property<long>("CurrentCyclePrice")
+                        .HasColumnType("bigint")
+                        .HasColumnName("current_cycle_price_amount");
+
                     b.Property<DateTimeOffset>("DueAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("due_at");
@@ -852,6 +1009,10 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")
                         .HasColumnName("idempotency_key");
+
+                    b.Property<bool>("IsProrated")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_prorated");
 
                     b.Property<string>("LatestPaymentStatus")
                         .IsRequired()
@@ -877,6 +1038,26 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("payment_session_version");
 
+                    b.Property<DateTimeOffset>("PeriodFrom")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("period_from");
+
+                    b.Property<DateTimeOffset>("PeriodTo")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("period_to");
+
+                    b.Property<long>("ProratedTargetAmount")
+                        .HasColumnType("bigint")
+                        .HasColumnName("prorated_target_amount");
+
+                    b.Property<DateTimeOffset>("QuotedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("quoted_at");
+
+                    b.Property<Guid>("SourcePlanId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_plan_id");
+
                     b.Property<SubscriptionUpgradeAttemptStatus>("Status")
                         .HasColumnType("subscription_upgrade_attempt_status")
                         .HasColumnName("status");
@@ -885,9 +1066,17 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("subscription_id");
 
+                    b.Property<long>("TargetCyclePrice")
+                        .HasColumnType("bigint")
+                        .HasColumnName("target_cycle_price_amount");
+
                     b.Property<Guid>("TargetPlanId")
                         .HasColumnType("uuid")
                         .HasColumnName("target_plan_id");
+
+                    b.Property<long>("UnusedCredit")
+                        .HasColumnType("bigint")
+                        .HasColumnName("unused_credit_amount");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .ValueGeneratedOnAdd()
@@ -909,6 +1098,9 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasDatabaseName("idx_subscription_upgrade_attempts_latest_payment_id")
                         .HasFilter("latest_payment_id IS NOT NULL");
 
+                    b.HasIndex("SourcePlanId")
+                        .HasDatabaseName("ix_subscription_upgrade_attempts_source_plan_id");
+
                     b.HasIndex("SubscriptionId")
                         .IsUnique()
                         .HasDatabaseName("uq_subscription_upgrade_attempts_active_subscription")
@@ -920,7 +1112,12 @@ namespace VietRide.Identity.Infrastructure.Migrations
                     b.HasIndex("Status", "DueAt")
                         .HasDatabaseName("idx_subscription_upgrade_attempts_status_due_at");
 
-                    b.ToTable("subscription_upgrade_attempts", "vietride_identity");
+                    b.ToTable("subscription_upgrade_attempts", "vietride_identity", t =>
+                        {
+                            t.HasCheckConstraint("chk_subscription_upgrade_attempts_quote_amounts", "amount > 0 AND current_cycle_price_amount >= 0 AND target_cycle_price_amount >= 0 AND unused_credit_amount >= 0 AND prorated_target_amount >= 0 AND prorated_target_amount = unused_credit_amount + amount");
+
+                            t.HasCheckConstraint("chk_subscription_upgrade_attempts_quote_period", "quoted_at < due_at AND period_from < period_to");
+                        });
                 });
 
             modelBuilder.Entity("VietRide.Identity.Domain.Entities.SubscriptionUsageWarningMarker", b =>
@@ -1375,6 +1572,37 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .HasConstraintName("fk_refresh_tokens_user_id");
                 });
 
+            modelBuilder.Entity("VietRide.Identity.Domain.Entities.SubscriptionCustomRequest", b =>
+                {
+                    b.HasOne("VietRide.Identity.Domain.Entities.SubscriptionPlan", null)
+                        .WithMany()
+                        .HasForeignKey("ApprovedPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_subscription_custom_requests_approved_plan_id");
+
+                    b.HasOne("VietRide.Identity.Domain.Entities.Operator", null)
+                        .WithMany()
+                        .HasForeignKey("OperatorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_subscription_custom_requests_operator_id");
+
+                    b.HasOne("VietRide.Identity.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("ReviewedBy")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_subscription_custom_requests_reviewed_by");
+                });
+
+            modelBuilder.Entity("VietRide.Identity.Domain.Entities.SubscriptionPlan", b =>
+                {
+                    b.HasOne("VietRide.Identity.Domain.Entities.Operator", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerOperatorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_subscription_plans_owner_operator_id");
+                });
+
             modelBuilder.Entity("VietRide.Identity.Domain.Entities.SubscriptionQuotaAllocation", b =>
                 {
                     b.HasOne("VietRide.Identity.Domain.Entities.OperatorSubscription", null)
@@ -1393,6 +1621,13 @@ namespace VietRide.Identity.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_subscription_upgrade_attempts_operator_id");
+
+                    b.HasOne("VietRide.Identity.Domain.Entities.SubscriptionPlan", null)
+                        .WithMany()
+                        .HasForeignKey("SourcePlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_subscription_upgrade_attempts_source_plan_id");
 
                     b.HasOne("VietRide.Identity.Domain.Entities.OperatorSubscription", null)
                         .WithMany()

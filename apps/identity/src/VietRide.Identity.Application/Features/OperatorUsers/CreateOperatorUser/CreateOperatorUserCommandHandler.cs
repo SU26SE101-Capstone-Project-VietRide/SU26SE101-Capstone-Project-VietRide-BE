@@ -101,6 +101,7 @@ public sealed class CreateOperatorUserCommandHandler
             token,
             activityLog,
             role,
+            now,
             cancellationToken);
 
         if (!created)

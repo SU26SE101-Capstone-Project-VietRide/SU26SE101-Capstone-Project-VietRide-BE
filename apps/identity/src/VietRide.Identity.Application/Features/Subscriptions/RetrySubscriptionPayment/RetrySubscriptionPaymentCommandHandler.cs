@@ -99,7 +99,7 @@ public sealed class RetrySubscriptionPaymentCommandHandler
                 ?? throw new NotFoundException(nameof(OperatorSubscription), attempt.SubscriptionId);
 
             if (attempt.OperatorId != request.OperatorId || subscription.OperatorId != request.OperatorId)
-                throw new ForbiddenException("SUBSCRIPTION_UPGRADE_FORBIDDEN", "Upgrade attempt does not belong to this operator.");
+                throw new NotFoundException(nameof(SubscriptionUpgradeAttempt), request.UpgradeAttemptId);
             if (attempt.Status != SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING
                 || subscription.Status != SubscriptionStatus.PENDING_PAYMENT)
                 throw new CodedConflictException("SUBSCRIPTION_UPGRADE_NOT_PENDING", "Upgrade attempt is no longer pending payment.");
@@ -144,18 +144,14 @@ public sealed class RetrySubscriptionPaymentCommandHandler
         SubscriptionPlan plan,
         Operator operatorTenant)
     {
-        var periodFrom = attempt.CreatedAt;
-        var periodTo = attempt.BillingPeriod == SubscriptionBillingPeriod.MONTHLY
-            ? periodFrom.AddMonths(1)
-            : periodFrom.AddYears(1);
         return new SubscriptionPaymentSnapshot(
             1,
             attempt.SubscriptionId,
             plan.Id,
             plan.Name,
             attempt.BillingPeriod.ToString(),
-            periodFrom,
-            periodTo,
+            attempt.PeriodFrom,
+            attempt.PeriodTo,
             new SubscriptionBuyerSnapshot(
                 operatorTenant.Name,
                 operatorTenant.BusinessRegistrationNumber,

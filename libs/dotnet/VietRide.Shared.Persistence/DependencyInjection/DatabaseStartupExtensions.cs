@@ -1,5 +1,7 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 
 namespace VietRide.Shared.Persistence.DependencyInjection;
@@ -19,9 +21,18 @@ public static class DatabaseStartupExtensions
     /// until the process is restarted. Reloading the catalog here makes the mapped enums resolve on
     /// first boot against an empty DB.
     /// </summary>
-    public static async Task MigrateAndReloadTypesAsync(this DbContext dbContext)
+    public static async Task MigrateAndReloadTypesAsync(
+        this DbContext dbContext,
+        string? targetMigration = null)
     {
-        await dbContext.Database.MigrateAsync();
+        if (string.IsNullOrWhiteSpace(targetMigration))
+        {
+            await dbContext.Database.MigrateAsync();
+        }
+        else
+        {
+            await dbContext.GetService<IMigrator>().MigrateAsync(targetMigration.Trim());
+        }
 
         var connection = (NpgsqlConnection)dbContext.Database.GetDbConnection();
         var wasClosed = connection.State != ConnectionState.Open;

@@ -1766,6 +1766,16 @@ phát integration event.
 | | `SUBSCRIPTION_PAYMENT_PENDING` | 409 | Có upgrade attempt active; dùng GET subscription và retry session nếu được phép |
 | | `SUBSCRIPTION_UPGRADE_EXPIRED` | 409 | Upgrade attempt đã quá hạn 15 phút |
 | | `SUBSCRIPTION_PAYMENT_NOT_RETRYABLE` | 409 | Latest payment chưa FAILED/EXPIRED hoặc session khác còn pending |
+| | `SUBSCRIPTION_UPGRADE_ALREADY_ACTIVE` | 409 | Unique active quote/attempt đã tồn tại cho subscription |
+| | `SUBSCRIPTION_UPGRADE_TARGET_PLAN_INACTIVE` | 409 | Target plan bị ngừng bán trước thời điểm confirm |
+| | `SUBSCRIPTION_UPGRADE_QUOTE_STALE` | 409 | Source cycle hoặc current usage đã đổi sau quote |
+| | `SUBSCRIPTION_UPGRADE_AMOUNT_NOT_PAYABLE` | 422 | Target không tạo ra amount due dương |
+| | `SUBSCRIPTION_UPGRADE_BILLING_PERIOD_MISMATCH` | 422 | Active paid upgrade đổi billing period giữa chu kỳ |
+| | `SUBSCRIPTION_UPGRADE_TARGET_LIMIT_BELOW_USAGE` | 422 | Target quota thấp hơn current usage tại quote |
+| | `CUSTOM_REQUEST_ALREADY_PENDING` | 409 | Operator đã có một Custom Request đang chờ duyệt |
+| | `CUSTOM_REQUEST_ALREADY_REVIEWED` | 409 | Custom Request đã APPROVED/REJECTED |
+| | `CUSTOM_PLAN_LIMIT_BELOW_CURRENT_USAGE` | 422 | Admin cấp Custom quota thấp hơn usage đang lock |
+| | `CUSTOM_PLAN_IMMUTABLE` | 409 | Cố sửa hoặc reactivate Custom Plan |
 | **Settlement** | `TRIP_SETTLEMENT_NOT_FOUND` | 404 | |
 | | `TRIP_SETTLEMENT_ALREADY_SETTLED` | 409 | Status = SETTLED/CANCELLED |
 | | `PLATFORM_WALLET_INSUFFICIENT_BALANCE` | 500 | Refund/settle thất bại, alert Admin |
@@ -2051,6 +2061,22 @@ failure. No Gateway-to-Identity synchronous status hop or Redis access-token bla
 `OperatorSubscription.status=PENDING_PAYMENT`, `activePlanId` remains the sole entitlement source
 for quota allocation/increment and module flags (`enableParcel`, `enableShuttle`, `enableRag`). The
 target plan in `SubscriptionUpgradeAttempt` grants no entitlement before Payment succeeds.
+Public/internal subscription DTO additionally exposes `entitlementActive`; Identity computes it from
+one request-scoped instant, with `expiresAt <= decisionAt` treated as expired. Trip and Parcel consume
+this flag, falling back to legacy status only during rolling deployment. While VNPAY is pending, target
+quota is an additional upper bound only; it never grants capacity before success.
+
+**Subscription proration and Custom Plan rule:** an active paid upgrade stays in the same billing
+period and preserves the current cycle boundaries. Identity snapshots full-cycle prices and charges
+the double-rounded remaining delta. Trial/effectively expired subscriptions pay full price and open a
+new cycle. `pricePerMonth` and `pricePerYear` are independent stored prices; there is no
+`annualBillableMonths`, per-ticket commission, overage fee, or individually sold route/trip quota.
+Operators that outgrow Standard plans submit an in-system Custom Request. SYSTEM_ADMIN approval
+locks current usage, enforces all six quota floors, and atomically creates an immutable owner-scoped
+private plan. Foreign request/plan IDs return 404.
+Payment validates subscription period snapshots independently: monthly periods are bounded by
+`periodFrom.AddMonths(1)`, yearly periods by `periodFrom.AddYears(1)`, and both require
+`periodTo > periodFrom`. A violation returns `422 VALIDATION_ERROR` before any financial persistence.
 
 ### 6.7 Account status enums
 

@@ -16,6 +16,7 @@ internal sealed class SubscriptionUpgradeAttemptConfiguration : IEntityTypeConfi
         builder.Property(attempt => attempt.SubscriptionId).HasColumnName("subscription_id").HasColumnType("uuid").IsRequired();
         builder.Property(attempt => attempt.OperatorId).HasColumnName("operator_id").HasColumnType("uuid").IsRequired();
         builder.Property(attempt => attempt.TargetPlanId).HasColumnName("target_plan_id").HasColumnType("uuid").IsRequired();
+        builder.Property(attempt => attempt.SourcePlanId).HasColumnName("source_plan_id").HasColumnType("uuid").IsRequired();
         builder.Property(attempt => attempt.BillingPeriod).HasColumnName("billing_period").HasColumnType("subscription_billing_period").IsRequired();
         builder.Property(attempt => attempt.Amount).HasColumnName("amount").HasColumnType("bigint").HasConversion(money => money.Amount, amount => Money.FromRaw(amount)).IsRequired();
         builder.Property(attempt => attempt.PaymentMethod).HasColumnName("payment_method").HasColumnType("subscription_payment_method").IsRequired();
@@ -26,6 +27,14 @@ internal sealed class SubscriptionUpgradeAttemptConfiguration : IEntityTypeConfi
         builder.Property(attempt => attempt.FallbackPolicy).HasColumnName("fallback_policy").HasConversion<string>().HasMaxLength(24).IsRequired();
         builder.Property(attempt => attempt.IdempotencyKey).HasColumnName("idempotency_key").HasMaxLength(100).IsRequired();
         builder.Property(attempt => attempt.DueAt).HasColumnName("due_at").IsRequired();
+        builder.Property(attempt => attempt.QuotedAt).HasColumnName("quoted_at").IsRequired();
+        builder.Property(attempt => attempt.PeriodFrom).HasColumnName("period_from").IsRequired();
+        builder.Property(attempt => attempt.PeriodTo).HasColumnName("period_to").IsRequired();
+        builder.Property(attempt => attempt.CurrentCyclePrice).HasColumnName("current_cycle_price_amount").HasColumnType("bigint").HasConversion(money => money.Amount, amount => Money.FromRaw(amount)).IsRequired();
+        builder.Property(attempt => attempt.TargetCyclePrice).HasColumnName("target_cycle_price_amount").HasColumnType("bigint").HasConversion(money => money.Amount, amount => Money.FromRaw(amount)).IsRequired();
+        builder.Property(attempt => attempt.UnusedCredit).HasColumnName("unused_credit_amount").HasColumnType("bigint").HasConversion(money => money.Amount, amount => Money.FromRaw(amount)).IsRequired();
+        builder.Property(attempt => attempt.ProratedTargetAmount).HasColumnName("prorated_target_amount").HasColumnType("bigint").HasConversion(money => money.Amount, amount => Money.FromRaw(amount)).IsRequired();
+        builder.Property(attempt => attempt.IsProrated).HasColumnName("is_prorated").IsRequired();
         builder.Property(attempt => attempt.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()").IsRequired();
         builder.Property(attempt => attempt.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()").IsRequired();
         builder.Ignore(attempt => attempt.RowVersion);
@@ -39,5 +48,11 @@ internal sealed class SubscriptionUpgradeAttemptConfiguration : IEntityTypeConfi
         builder.HasOne<OperatorSubscription>().WithMany().HasForeignKey(attempt => attempt.SubscriptionId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_subscription_upgrade_attempts_subscription_id");
         builder.HasOne<Operator>().WithMany().HasForeignKey(attempt => attempt.OperatorId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_subscription_upgrade_attempts_operator_id");
         builder.HasOne<SubscriptionPlan>().WithMany().HasForeignKey(attempt => attempt.TargetPlanId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_subscription_upgrade_attempts_target_plan_id");
+        builder.HasOne<SubscriptionPlan>().WithMany().HasForeignKey(attempt => attempt.SourcePlanId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_subscription_upgrade_attempts_source_plan_id");
+        builder.ToTable(table =>
+        {
+            table.HasCheckConstraint("chk_subscription_upgrade_attempts_quote_amounts", "amount > 0 AND current_cycle_price_amount >= 0 AND target_cycle_price_amount >= 0 AND unused_credit_amount >= 0 AND prorated_target_amount >= 0 AND prorated_target_amount = unused_credit_amount + amount");
+            table.HasCheckConstraint("chk_subscription_upgrade_attempts_quote_period", "quoted_at < due_at AND period_from < period_to");
+        });
     }
 }

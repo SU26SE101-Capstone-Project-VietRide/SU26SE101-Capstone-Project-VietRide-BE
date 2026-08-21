@@ -8,4 +8,5 @@ public sealed record InternalOperatorSubscriptionDto(
     DateTimeOffset? ExpiresAt,
     InternalSubscriptionPlanDto Plan,
     InternalSubscriptionUsageDto Usage,
-    DateTimeOffset LastResetAt);
+    DateTimeOffset LastResetAt,
+    bool EntitlementActive = false);

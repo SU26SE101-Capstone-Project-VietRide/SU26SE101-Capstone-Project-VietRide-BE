@@ -9,6 +9,7 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
     public Guid SubscriptionId { get; private set; }
     public Guid OperatorId { get; private set; }
     public Guid TargetPlanId { get; private set; }
+    public Guid SourcePlanId { get; private set; }
     public SubscriptionBillingPeriod BillingPeriod { get; private set; }
     public Money Amount { get; private set; } = Money.Zero;
     public SubscriptionPaymentMethod PaymentMethod { get; private set; }
@@ -19,6 +20,14 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
     public SubscriptionFallbackPolicy FallbackPolicy { get; private set; }
     public string IdempotencyKey { get; private set; } = string.Empty;
     public DateTimeOffset DueAt { get; private set; }
+    public DateTimeOffset QuotedAt { get; private set; }
+    public DateTimeOffset PeriodFrom { get; private set; }
+    public DateTimeOffset PeriodTo { get; private set; }
+    public Money CurrentCyclePrice { get; private set; } = Money.Zero;
+    public Money TargetCyclePrice { get; private set; } = Money.Zero;
+    public Money UnusedCredit { get; private set; } = Money.Zero;
+    public Money ProratedTargetAmount { get; private set; } = Money.Zero;
+    public bool IsProrated { get; private set; }
 
     private SubscriptionUpgradeAttempt() { }
 
@@ -33,9 +42,48 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
         SubscriptionFallbackPolicy fallbackPolicy,
         DateTimeOffset createdAt,
         DateTimeOffset dueAt)
+        => CreateQuote(
+            subscriptionId,
+            operatorId,
+            targetPlanId,
+            targetPlanId,
+            billingPeriod,
+            amount,
+            paymentMethod,
+            idempotencyKey,
+            fallbackPolicy,
+            createdAt,
+            dueAt,
+            createdAt,
+            billingPeriod == SubscriptionBillingPeriod.MONTHLY ? createdAt.AddMonths(1) : createdAt.AddYears(1),
+            Money.Zero,
+            amount,
+            Money.Zero,
+            amount,
+            false);
+
+    public static SubscriptionUpgradeAttempt CreateQuote(
+        Guid subscriptionId,
+        Guid operatorId,
+        Guid sourcePlanId,
+        Guid targetPlanId,
+        SubscriptionBillingPeriod billingPeriod,
+        Money amount,
+        SubscriptionPaymentMethod paymentMethod,
+        string idempotencyKey,
+        SubscriptionFallbackPolicy fallbackPolicy,
+        DateTimeOffset quotedAt,
+        DateTimeOffset dueAt,
+        DateTimeOffset periodFrom,
+        DateTimeOffset periodTo,
+        Money currentCyclePrice,
+        Money targetCyclePrice,
+        Money unusedCredit,
+        Money proratedTargetAmount,
+        bool isProrated)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(idempotencyKey);
-        if (dueAt <= createdAt)
+        if (dueAt <= quotedAt)
             throw new ArgumentOutOfRangeException(nameof(dueAt), "Due time must be after creation time.");
 
         return new SubscriptionUpgradeAttempt
@@ -43,6 +91,7 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
             Id = Guid.NewGuid(),
             SubscriptionId = subscriptionId,
             OperatorId = operatorId,
+            SourcePlanId = sourcePlanId,
             TargetPlanId = targetPlanId,
             BillingPeriod = billingPeriod,
             Amount = amount,
@@ -52,6 +101,14 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
             FallbackPolicy = fallbackPolicy,
             IdempotencyKey = idempotencyKey.Trim(),
             DueAt = dueAt,
+            QuotedAt = quotedAt,
+            PeriodFrom = periodFrom,
+            PeriodTo = periodTo,
+            CurrentCyclePrice = currentCyclePrice,
+            TargetCyclePrice = targetCyclePrice,
+            UnusedCredit = unusedCredit,
+            ProratedTargetAmount = proratedTargetAmount,
+            IsProrated = isProrated,
         };
     }
 

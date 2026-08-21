@@ -5702,6 +5702,7 @@ Response `200`:
   "data": {
     "subscriptionId": "uuid",
     "status": "ACTIVE",
+    "entitlementActive": true,
     "billingPeriod": "MONTHLY",
     "startedAt": "2026-07-14T17:00:00+07:00",
     "expiresAt": "2026-08-14T17:00:00+07:00",
@@ -5729,6 +5730,40 @@ Errors: `403 FORBIDDEN`, `404 RESOURCE_NOT_FOUND`.
 ### GET `/v1/operator/subscription-plans`
 
 Auth: `OPERATOR_ADMIN`. Returns active plans only. Response uses the ADR 0004 envelope with `items`; each item has `planId`, `name`, `description`, `pricePerMonth`, `pricePerYear`, `limits`, and `modules`.
+The list contains active Standard plans plus active Custom plans whose `ownerOperatorId` matches the authenticated operator. Foreign private plans are never returned.
+
+### POST `/v1/operator/subscription/upgrade/quote`
+
+Auth: `OPERATOR_ADMIN`. `Idempotency-Key`: required UUID v4. Request uses the existing upgrade body `{ planId, billingPeriod, paymentMethod }`. Response `201` returns `{ upgradeAttemptId, sourcePlanId, targetPlanId, billingPeriod, paymentMethod, prorationApplied, currentCyclePrice, targetCyclePrice, unusedCredit, proratedTargetAmount, amountDue, periodFrom, periodTo, quotedAt, dueAt, currency: "VND", status: "INITIATED" }`.
+
+For an active paid subscription, billing period must stay unchanged and the target cycle price must be higher. Identity keeps the current cycle boundaries and charges only the double-rounded remaining delta. Trial and effectively expired subscriptions pay full price and open a new cycle. `expiresAt <= quotedAt` is expired. Target quota must not be below current usage. Private Custom plans are visible only to their owner; foreign IDs return `404 RESOURCE_NOT_FOUND`.
+
+Payment independently validates the trusted snapshot period: `MONTHLY` requires `periodFrom < periodTo <= periodFrom.AddMonths(1)` and `YEARLY` requires `periodFrom < periodTo <= periodFrom.AddYears(1)`. A period outside that boundary returns `422 VALIDATION_ERROR` before Payment, Invoice, wallet, ledger, or Outbox persistence.
+
+Errors: `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_UPGRADE_ALREADY_ACTIVE`; `409 SUBSCRIPTION_UPGRADE_TARGET_PLAN_INACTIVE`; `422 SUBSCRIPTION_UPGRADE_AMOUNT_NOT_PAYABLE`; `422 SUBSCRIPTION_UPGRADE_BILLING_PERIOD_MISMATCH`; `422 SUBSCRIPTION_UPGRADE_TARGET_LIMIT_BELOW_USAGE`; `422 IDEMPOTENCY_KEY_MISMATCH`.
+
+### POST `/v1/operator/subscription/upgrade/{upgradeAttemptId}/payment`
+
+Auth: `OPERATOR_ADMIN`. `Idempotency-Key`: required UUID v4 and must be new for each confirm attempt. No request body. Identity locks attempt, subscription, and target plan; then revalidates deadline, source snapshot, current usage, target ownership, and target `isActive` before calling Payment.
+
+- WALLET success: `200` using `SubscriptionUpgradeResponseDto`.
+- VNPAY pending redirect: `202` using `SubscriptionUpgradeResponseDto`.
+- `402 WALLET_INSUFFICIENT_BALANCE`: no Payment or wallet mutation; attempt remains `INITIATED`, `paymentId=null`, `latestPaymentStatus=NONE`. The same key replays cached 402 for 24 hours; retry after top-up uses a new key before `dueAt`.
+- Target deactivated before confirm: `409 SUBSCRIPTION_UPGRADE_TARGET_PLAN_INACTIVE`.
+- Source or usage changed after quote: `409 SUBSCRIPTION_UPGRADE_QUOTE_STALE`.
+- Expired quote: `409 SUBSCRIPTION_UPGRADE_EXPIRED`.
+
+A VNPAY session accepted before plan deactivation may still complete. During `PENDING_PAYMENT`, current-plan entitlement remains authoritative, while usage increments are additionally capped by the quoted target limits.
+
+### Custom subscription requests
+
+Operator endpoints, auth `OPERATOR_ADMIN`:
+
+- `POST /v1/operator/subscription/custom-requests` — idempotent create; one `PENDING_REVIEW` request per operator.
+- `GET /v1/operator/subscription/custom-requests` — own requests only.
+- `GET /v1/operator/subscription/custom-requests/{requestId}` — foreign valid UUID returns 404.
+
+Request contains all six requested limits, module flags, `preferredBillingPeriod`, and optional `note`. Response contains status, review metadata, rejection reason, and approved private plan ID. Duplicate pending request returns `409 CUSTOM_REQUEST_ALREADY_PENDING`.
 
 ### POST `/v1/operator/subscription/upgrade`
 
@@ -6092,6 +6127,19 @@ Auth: `SYSTEM_ADMIN`. Idempotency-Key: required. Request defines `name`, `descri
 ### PATCH `/v1/admin/subscription-plans/{planId}`
 
 Auth: `SYSTEM_ADMIN`. Idempotency-Key: required. Supports mutable plan presentation, prices, limits, module flags, and `isActive`. It never deletes a plan. Response `200` returns the updated plan.
+
+For a Custom plan, price/quota/module/owner/source terms are immutable. PATCH may only change `isActive` from true to false while every other field is unchanged. A deactivated Custom plan cannot be reactivated; existing subscriptions keep entitlement, but new quote/confirm is blocked.
+
+### Admin Custom Request review
+
+Auth: `SYSTEM_ADMIN`:
+
+- `GET /v1/admin/subscription-plans/custom-requests?status=`.
+- `GET /v1/admin/subscription-plans/custom-requests/{requestId}`.
+- `POST /v1/admin/subscription-plans/custom-requests/{requestId}/approve` — `Idempotency-Key` required.
+- `POST /v1/admin/subscription-plans/custom-requests/{requestId}/reject` — `Idempotency-Key` required and body `{ "reason": "..." }`.
+
+Approve accepts final independent `pricePerMonth`/`pricePerYear`, six granted limits, and module flags. It atomically creates one owner-scoped immutable Custom plan and marks the request approved. Every granted limit must be at least the operator's locked current usage; otherwise `422 CUSTOM_PLAN_LIMIT_BELOW_CURRENT_USAGE` returns field errors whose message includes requested, granted, and current-usage values. Terminal requests return `409 CUSTOM_REQUEST_ALREADY_REVIEWED`.
 
 ### POST `/v1/operators/register`
 
@@ -6643,6 +6691,7 @@ Response `200`:
   "operatorId": "uuid",
   "subscriptionId": "uuid",
   "status": "ACTIVE",
+  "entitlementActive": true,
   "startedAt": "2026-06-01T10:00:00Z",
   "expiresAt": "2026-07-01T10:00:00Z",
   "plan": {

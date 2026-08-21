@@ -72,7 +72,11 @@ CREATE TYPE activity_log_action AS ENUM (
     -- Initial password flow (Day 5)
     'SET_INITIAL_PASSWORD', 'RESEND_INITIAL_PASSWORD',
     -- Station cleanup audit (Day 40)
-    'STATION_MERGED', 'STATION_NORMALIZED'
+    'STATION_MERGED', 'STATION_NORMALIZED',
+    'CREATE_SUBSCRIPTION_CUSTOM_REQUEST',
+    'APPROVE_SUBSCRIPTION_CUSTOM_REQUEST',
+    'REJECT_SUBSCRIPTION_CUSTOM_REQUEST',
+    'DEACTIVATE_CUSTOM_SUBSCRIPTION_PLAN'
     -- v2: 'BANK_ACCOUNT_UPDATED' (removed from v1 — bank withdrawal deferred)
     -- v2: 'OPERATOR_WITHDRAWAL_REQUESTED' / 'OPERATOR_WITHDRAWAL_PROCESSED'
 );
@@ -360,6 +364,9 @@ CREATE TABLE subscription_plans (
     description TEXT NULL,
     price_per_month BIGINT NOT NULL DEFAULT 0,
     price_per_year BIGINT NOT NULL DEFAULT 0,
+    plan_type VARCHAR(16) NOT NULL DEFAULT 'STANDARD',
+    owner_operator_id UUID NULL REFERENCES operators (id) ON DELETE RESTRICT,
+    source_custom_request_id UUID NULL,
     -- Resource limits
     max_vehicles INT NOT NULL DEFAULT 0,
     max_drivers INT NOT NULL DEFAULT 0,
@@ -375,10 +382,60 @@ CREATE TABLE subscription_plans (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_subscription_plans_price_per_month_non_negative CHECK (price_per_month >= 0),
-    CONSTRAINT chk_subscription_plans_price_per_year_non_negative CHECK (price_per_year >= 0)
+    CONSTRAINT chk_subscription_plans_price_per_year_non_negative CHECK (price_per_year >= 0),
+    CONSTRAINT chk_subscription_plans_owner_by_type CHECK (
+        (plan_type = 'STANDARD' AND owner_operator_id IS NULL AND source_custom_request_id IS NULL)
+        OR (plan_type = 'CUSTOM' AND owner_operator_id IS NOT NULL AND source_custom_request_id IS NOT NULL))
 );
 
 CREATE INDEX idx_subscription_plans_is_active ON subscription_plans (is_active);
+CREATE INDEX idx_subscription_plans_owner_operator_id ON subscription_plans (owner_operator_id)
+    WHERE owner_operator_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_subscription_plans_source_custom_request_id
+    ON subscription_plans (source_custom_request_id) WHERE source_custom_request_id IS NOT NULL;
+
+-- -----------------------------------------------------------------------------
+-- subscription_custom_requests (operator-authored private plan requests)
+-- -----------------------------------------------------------------------------
+CREATE TABLE subscription_custom_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    operator_id UUID NOT NULL REFERENCES operators (id) ON DELETE RESTRICT,
+    max_vehicles INT NOT NULL,
+    max_drivers INT NOT NULL,
+    max_assistants INT NOT NULL,
+    max_operator_users INT NOT NULL,
+    max_routes INT NOT NULL,
+    max_trips_per_month INT NOT NULL,
+    enable_parcel BOOLEAN NOT NULL,
+    enable_shuttle BOOLEAN NOT NULL,
+    enable_rag BOOLEAN NOT NULL,
+    preferred_billing_period subscription_billing_period NOT NULL,
+    note VARCHAR(2000) NULL,
+    status VARCHAR(24) NOT NULL,
+    reviewed_by UUID NULL REFERENCES users (id) ON DELETE RESTRICT,
+    reviewed_at TIMESTAMPTZ NULL,
+    rejection_reason VARCHAR(1000) NULL,
+    approved_plan_id UUID NULL REFERENCES subscription_plans (id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_subscription_custom_requests_limits_non_negative CHECK (
+        max_vehicles >= 0 AND max_drivers >= 0 AND max_assistants >= 0
+        AND max_operator_users >= 0 AND max_routes >= 0 AND max_trips_per_month >= 0),
+    CONSTRAINT chk_subscription_custom_requests_review_state CHECK (
+        (status = 'PENDING_REVIEW' AND reviewed_by IS NULL AND reviewed_at IS NULL
+            AND rejection_reason IS NULL AND approved_plan_id IS NULL)
+        OR (status = 'APPROVED' AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL
+            AND rejection_reason IS NULL AND approved_plan_id IS NOT NULL)
+        OR (status = 'REJECTED' AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL
+            AND rejection_reason IS NOT NULL AND approved_plan_id IS NULL))
+);
+
+CREATE UNIQUE INDEX uq_subscription_custom_requests_pending_operator
+    ON subscription_custom_requests (operator_id) WHERE status = 'PENDING_REVIEW';
+CREATE INDEX idx_subscription_custom_requests_status_created_at
+    ON subscription_custom_requests (status, created_at);
+CREATE UNIQUE INDEX uq_subscription_custom_requests_approved_plan_id
+    ON subscription_custom_requests (approved_plan_id) WHERE approved_plan_id IS NOT NULL;
 
 -- -----------------------------------------------------------------------------
 -- operator_subscriptions (1-1 with operators, current plan + usage counters)
@@ -392,6 +449,7 @@ CREATE TABLE operator_subscriptions (
     expires_at TIMESTAMPTZ NULL,
     payment_method subscription_payment_method NULL,
     billing_period subscription_billing_period NULL,
+    cycle_price_amount BIGINT NOT NULL,
     -- Usage counters (current period)
     current_vehicles INT NOT NULL DEFAULT 0,
     current_drivers INT NOT NULL DEFAULT 0,
@@ -403,7 +461,8 @@ CREATE TABLE operator_subscriptions (
     -- Notification flags
     trial_expiring_warn_sent_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_operator_subscriptions_cycle_price_non_negative CHECK (cycle_price_amount >= 0)
 );
 
 CREATE INDEX idx_operator_subscriptions_status ON operator_subscriptions (status);
@@ -420,6 +479,7 @@ CREATE TABLE subscription_upgrade_attempts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     subscription_id UUID NOT NULL REFERENCES operator_subscriptions (id) ON DELETE RESTRICT,
     operator_id UUID NOT NULL REFERENCES operators (id) ON DELETE RESTRICT,
+    source_plan_id UUID NOT NULL REFERENCES subscription_plans (id) ON DELETE RESTRICT,
     target_plan_id UUID NOT NULL REFERENCES subscription_plans (id) ON DELETE RESTRICT,
     billing_period subscription_billing_period NOT NULL,
     amount BIGINT NOT NULL CHECK (amount >= 0),
@@ -431,9 +491,23 @@ CREATE TABLE subscription_upgrade_attempts (
     fallback_policy VARCHAR(24) NOT NULL DEFAULT 'RESTORE_CURRENT',
     idempotency_key VARCHAR(100) NOT NULL,
     due_at TIMESTAMPTZ NOT NULL,
+    quoted_at TIMESTAMPTZ NOT NULL,
+    period_from TIMESTAMPTZ NOT NULL,
+    period_to TIMESTAMPTZ NOT NULL,
+    current_cycle_price_amount BIGINT NOT NULL,
+    target_cycle_price_amount BIGINT NOT NULL,
+    unused_credit_amount BIGINT NOT NULL,
+    prorated_target_amount BIGINT NOT NULL,
+    is_prorated BOOLEAN NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT uq_subscription_upgrade_attempts_idempotency_key UNIQUE (idempotency_key)
+    CONSTRAINT uq_subscription_upgrade_attempts_idempotency_key UNIQUE (idempotency_key),
+    CONSTRAINT chk_subscription_upgrade_attempts_quote_amounts CHECK (
+        amount > 0 AND current_cycle_price_amount >= 0 AND target_cycle_price_amount >= 0
+        AND unused_credit_amount >= 0 AND prorated_target_amount >= 0
+        AND prorated_target_amount = unused_credit_amount + amount),
+    CONSTRAINT chk_subscription_upgrade_attempts_quote_period CHECK (
+        quoted_at < due_at AND period_from < period_to)
 );
 
 CREATE INDEX idx_subscription_upgrade_attempts_latest_payment_id

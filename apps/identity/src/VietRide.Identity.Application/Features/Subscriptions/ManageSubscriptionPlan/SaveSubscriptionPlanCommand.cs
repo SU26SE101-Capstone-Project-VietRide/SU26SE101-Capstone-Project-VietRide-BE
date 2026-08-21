@@ -17,4 +17,5 @@ public sealed record SaveSubscriptionPlanCommand(
     bool EnableParcel,
     bool EnableShuttle,
     bool EnableRag,
-    bool IsActive) : IRequest<SubscriptionPlanDto>;
+    bool IsActive,
+    Guid? CallerUserId = null) : IRequest<SubscriptionPlanDto>;
