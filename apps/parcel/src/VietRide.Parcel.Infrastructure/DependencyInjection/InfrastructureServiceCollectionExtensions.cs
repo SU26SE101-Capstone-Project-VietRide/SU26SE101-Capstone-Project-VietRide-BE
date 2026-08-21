@@ -9,7 +9,9 @@ using VietRide.Parcel.Application.Abstractions.Caching;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.Security;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Features.History;
+using VietRide.Parcel.Application.Services;
 using VietRide.Parcel.Infrastructure.Caching;
 using VietRide.Parcel.Infrastructure.Http;
 using VietRide.Parcel.Infrastructure.Jobs;
@@ -55,6 +57,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ParcelSettlementTimeoutJob>();
         services.AddScoped<ParcelPendingAutoRejectJob>();
         services.AddScoped<ParcelLifecycleSweepJob>();
+        services.AddScoped<ParcelIncidentSearchExpiryJob>();
         services.AddScoped<PendingTransferClaimRecoveryJob>();
         services.AddScoped<PendingCargoRecoveryOperationJob>();
         services.AddScoped<ParcelDeliveryPendingConfirmReminderJob>();
@@ -109,6 +112,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddTransient<CorrelationIdDelegatingHandler>();
 
         services.AddScoped<IParcelRepository, ParcelRepository>();
+        services.AddScoped<IParcelReliabilityRepository, ParcelReliabilityRepository>();
+        services.AddScoped<IParcelCustodyService, ParcelCustodyService>();
+        services.AddScoped<IParcelReliabilityReadModelService, ParcelReliabilityReadModelService>();
         services.AddScoped<IOperatorParcelStatsRepository, OperatorParcelStatsRepository>();
         services.AddScoped<IParcelDeliveryTokenRepository, ParcelDeliveryTokenRepository>();
         services.AddScoped<SentParcelHistoryReader>();
@@ -140,6 +146,16 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "parcel.wallet-credited";
                 options.BindingKeys = [WalletCreditedIntegrationEvent.EventTypeValue];
             });
+            services.AddVietRideEventConsumer<ParcelCompensationPaidIntegrationEvent, ParcelCompensationPaidIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.compensation-paid";
+                options.BindingKeys = [ParcelCompensationPaidIntegrationEvent.EventTypeValue];
+            });
+            services.AddVietRideEventConsumer<ParcelCompensationFundingPendingIntegrationEvent, ParcelCompensationFundingPendingIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.compensation-funding-pending";
+                options.BindingKeys = [ParcelCompensationFundingPendingIntegrationEvent.EventTypeValue];
+            });
             services.AddVietRideEventConsumer<TripStartedIntegrationEvent, TripStartedIntegrationEventHandler>(options =>
             {
                 options.QueueName = "parcel.trip-started";
@@ -149,6 +165,16 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.QueueName = "parcel.trip-completed";
                 options.BindingKeys = [TripCompletedIntegrationEvent.EventType];
+            });
+            services.AddVietRideEventConsumer<TripStopDepartedIntegrationEvent, TripStopDepartedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.trip-stop-departed";
+                options.BindingKeys = [TripStopDepartedIntegrationEvent.EventTypeValue];
+            });
+            services.AddVietRideEventConsumer<TripDestinationArrivedIntegrationEvent, TripDestinationArrivedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.trip-destination-arrived";
+                options.BindingKeys = [TripDestinationArrivedIntegrationEvent.EventTypeValue];
             });
             services.AddVietRideEventConsumer<TripCancelledIntegrationEvent, TripCancelledIntegrationEventHandler>(options =>
             {

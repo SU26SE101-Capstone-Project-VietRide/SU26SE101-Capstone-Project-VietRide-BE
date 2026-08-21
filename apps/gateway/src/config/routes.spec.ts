@@ -949,6 +949,46 @@ describe('buildRouteTable', () => {
     expect(routeDetail?.requiredRoles).toBeUndefined();
   });
 
+  it('routes Parcel Reliability passenger and operator APIs with their exact access gates', () => {
+    const parcelId = '11111111-1111-4111-8111-111111111111';
+    const claimId = '22222222-2222-4222-8222-222222222222';
+    const appeal = matchRoute(
+      routes,
+      `/v1/parcels/${parcelId}/claims/${claimId}/appeal`,
+      'POST',
+    );
+    const incidents = matchRoute(routes, '/v1/operator/parcel-incidents', 'GET');
+    const claimQueue = matchRoute(routes, '/v1/operator/claims', 'GET');
+    const claimDecision = matchRoute(
+      routes,
+      `/v1/operator/claims/${claimId}/decision`,
+      'POST',
+    );
+    const unidentified = matchRoute(routes, '/v1/operator/unidentified-packages', 'GET');
+    const policyRead = matchRoute(
+      routes,
+      '/v1/operator/policies/parcel-compensation',
+      'GET',
+    );
+    const policyWrite = matchRoute(
+      routes,
+      '/v1/operator/policies/parcel-compensation',
+      'PUT',
+    );
+
+    expect(appeal).toMatchObject({
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+    });
+    expect(appeal?.requiredRoles).toBeUndefined();
+    expect(incidents?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    expect(claimQueue?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    expect(claimDecision?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
+    expect(unidentified?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    expect(policyRead?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    expect(policyWrite?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
+  });
+
   it('allows the signed VNPay return status lookup without a user token', () => {
     const route = matchRoute(routes, '/v1/payments/vnpay-return-status');
 

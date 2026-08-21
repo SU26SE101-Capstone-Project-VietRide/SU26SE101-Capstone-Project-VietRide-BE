@@ -25,6 +25,11 @@ public interface IIdentityServiceClient
         Guid operatorId,
         CancellationToken cancellationToken = default);
 
+    Task<IdentityOperatorBatchOutcome> GetOperatorsAsync(
+        IReadOnlyCollection<Guid> operatorIds,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Identity operator batch lookup is not implemented by this client.");
+
     Task<SubscriptionWriteEligibilityOutcome> GetSubscriptionWriteEligibilityAsync(
         Guid operatorId,
         bool requireParcelModule,

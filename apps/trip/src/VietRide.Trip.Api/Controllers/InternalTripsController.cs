@@ -13,6 +13,8 @@ using VietRide.Trip.Application.Features.Internal.Trips.BatchTripSummaries;
 using VietRide.Trip.Application.Features.Internal.Trips.BookRoundTripSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.BookSeats;
 using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
+using VietRide.Trip.Application.Features.Internal.Trips.ForwardingOptions;
+using VietRide.Trip.Application.Features.Internal.Trips.GetOperationalLocation;
 using VietRide.Trip.Application.Features.Internal.Trips.GetShuttleRoadDistance;
 using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 using VietRide.Trip.Application.Features.Internal.Trips.LockRoundTripSeats;
@@ -59,6 +61,28 @@ public sealed class InternalTripsController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("forwarding-options")]
+    [SkipIdempotency("Forwarding option search is a read-only query exposed as POST for structured criteria.")]
+    [ProducesResponseType(typeof(IReadOnlyList<InternalForwardingOptionDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<IReadOnlyList<InternalForwardingOptionDto>>> GetForwardingOptionsAsync(
+        [FromBody] ForwardingOptionsRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await mediator.Send(
+            new GetForwardingOptionsQuery(
+                request.OperatorId,
+                request.ExcludedTripId,
+                request.PickupLocationType,
+                request.PickupLocationId,
+                request.TargetLocationType,
+                request.TargetLocationId,
+                request.WeightKg,
+                request.VolumeM3,
+                request.EarliestDeparture,
+                request.Limit),
+            cancellationToken));
+
     [HttpGet("{tripId:guid}")]
     [ProducesResponseType(typeof(InternalTripSnapshotDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
@@ -89,6 +113,20 @@ public sealed class InternalTripsController : ControllerBase
         }
 
         var result = await mediator.Send(new GetTripSnapshotQuery(tripId, parsedPricingAt), cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("{tripId:guid}/operational-location")]
+    [ProducesResponseType(typeof(TripOperationalLocationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<TripOperationalLocationDto>> GetOperationalLocationAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        var result = await mediator.Send(
+            new GetTripOperationalLocationQuery(tripId),
+            cancellationToken);
         return Ok(result);
     }
 

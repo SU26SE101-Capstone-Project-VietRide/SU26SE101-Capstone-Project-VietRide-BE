@@ -8,4 +8,7 @@ public sealed record InternalTripSummaryDto(
     InternalTripRouteSummaryDto Route,
     InternalTripVehicleSummaryDto Vehicle,
     Guid DriverUserId,
-    Guid? AssistantUserId);
+    Guid? AssistantUserId)
+{
+    public IReadOnlyList<InternalTripStopSummaryDto> Stops { get; init; } = [];
+}

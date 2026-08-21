@@ -11,6 +11,7 @@ using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
+using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -218,6 +219,70 @@ public sealed class Day35ParcelTransferConfirmationTests
     }
 
     [Fact]
+    public async Task ReliabilityForwardingPlannedLeg_RechecksCapacityWithoutOverflow()
+    {
+        var persistedClaim = Guid.NewGuid();
+        var claimed = Snapshot(
+            claimId: persistedClaim,
+            claimedAt: Now.AddMinutes(-1),
+            claimedByUserId: CrewUserId);
+        var repository = Substitute.For<IParcelRepository>();
+        repository.GetTransferConfirmationSnapshotAsync(ParcelId, Arg.Any<CancellationToken>())
+            .Returns(claimed);
+        repository.TryClearTransferConfirmationClaimAsync(
+                ParcelId,
+                persistedClaim,
+                Now,
+                Arg.Any<CancellationToken>())
+            .Returns(true);
+        var plannedLeg = ParcelTransitLeg.Create(
+            ParcelId,
+            TargetTripId,
+            OperatorId,
+            2,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "Wrong station",
+            "Expected stop",
+            Guid.NewGuid(),
+            null);
+        var reliability = Substitute.For<IParcelReliabilityRepository>();
+        reliability.GetTransitLegAsync(ParcelId, TargetTripId, Arg.Any<CancellationToken>())
+            .Returns(plannedLeg);
+        var tripClient = AuthorizedTripClient();
+        tripClient.TransferCargoAsync(
+                SourceTripId,
+                ParcelId,
+                TargetTripId,
+                "LOADED",
+                false,
+                persistedClaim,
+                Arg.Any<CancellationToken>())
+            .Returns(new TripCargoTransferOutcome(
+                TripCargoTransferOutcomeKind.CapacityExceeded,
+                "full"));
+
+        var act = () => Handler(
+                repository,
+                tripClient,
+                Substitute.For<IIntegrationEventOutbox>(),
+                Substitute.For<IUnitOfWork>(),
+                reliability)
+            .Handle(Command(Guid.NewGuid()), CancellationToken.None);
+
+        await act.Should().ThrowAsync<CodedValidationException>()
+            .Where(exception => exception.ErrorCode == "TRIP_CARGO_CAPACITY_EXCEEDED");
+        await tripClient.Received(1).TransferCargoAsync(
+            SourceTripId,
+            ParcelId,
+            TargetTripId,
+            "LOADED",
+            false,
+            persistedClaim,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task UnclaimedAtExactThirtyMinuteDeadline_TimeoutWins()
     {
         var pending = Snapshot(requestedAt: Now.AddMinutes(-30));
@@ -345,7 +410,8 @@ public sealed class Day35ParcelTransferConfirmationTests
         IParcelRepository repository,
         ITripServiceClient tripClient,
         IIntegrationEventOutbox outbox,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IParcelReliabilityRepository? reliability = null)
     {
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
@@ -354,7 +420,8 @@ public sealed class Day35ParcelTransferConfirmationTests
             tripClient,
             outbox,
             unitOfWork,
-            clock);
+            clock,
+            reliability);
     }
 
     private static ConfirmTransferCommand Command(Guid idempotencyKey)

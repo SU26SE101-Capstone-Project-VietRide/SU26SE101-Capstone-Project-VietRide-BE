@@ -2,6 +2,7 @@ using System.Text.Json;
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
@@ -19,17 +20,20 @@ public sealed class MarkParcelLoadedCommandHandler
     private readonly ITripServiceClient _tripClient;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
+    private readonly IParcelCustodyService? _custody;
 
     public MarkParcelLoadedCommandHandler(
         IParcelRepository parcelRepository,
         ITripServiceClient tripClient,
         IIntegrationEventOutbox outbox,
-        IParcelStatsRepository statsRepository)
+        IParcelStatsRepository statsRepository,
+        IParcelCustodyService? custody = null)
     {
         _parcelRepository = parcelRepository;
         _tripClient = tripClient;
         _outbox = outbox;
         _statsRepository = statsRepository;
+        _custody = custody;
     }
 
     public async Task<MarkParcelLoadedResponse> Handle(
@@ -93,6 +97,23 @@ public sealed class MarkParcelLoadedCommandHandler
                 parcel.ActualVolumeM3 ?? parcel.EstimatedVolumeM3,
                 command.IdempotencyKey ?? snapshot.ParcelId,
                 cancellationToken));
+
+        if (_custody is not null)
+        {
+            await _custody.AppendAsync(
+                parcel,
+                ParcelCustodyEventType.LOADED,
+                ParcelCustodyLocationType.ORIGIN_STATION,
+                null,
+                parcel.TripSnapshotOriginStationName,
+                command.LoadedByUserId,
+                "ASSISTANT",
+                "LOAD",
+                command.IdempotencyKey?.ToString(),
+                null,
+                null,
+                cancellationToken);
+        }
 
         var eventId = Guid.NewGuid();
         var userIds = new[] { parcel.SenderUserId }

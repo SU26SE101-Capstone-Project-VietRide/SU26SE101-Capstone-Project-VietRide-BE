@@ -3432,6 +3432,8 @@ Request:
   "bookingId": "uuid",
   "itemName": "Thùng quà",
   "description": "Hàng dễ vỡ",
+  "quantity": 2,
+  "declaredValueVnd": 12000000,
   "lengthCm": 60,
   "widthCm": 40,
   "heightCm": 35,
@@ -3443,6 +3445,7 @@ Request:
     "email": "recipient@example.com"
   },
   "deliveryMethod": "TERMINAL_PICKUP",
+  "paymentMethod": "WALLET",
   "voucherCode": null,
   "quoteToken": "base64url-payload.base64url-signature"
 }
@@ -3473,7 +3476,17 @@ Response `201`:
     "depositRequiredVnd": 30000,
     "depositPaidVnd": 0,
     "voucherCode": null,
-    "settlementPolicyVersion": 2
+    "settlementPolicyVersion": 2,
+    "compensationPolicy": {
+      "version": 1,
+      "compensationRatePercent": 50,
+      "maxCompensationVnd": 30000000,
+      "noProofFallbackMultiplier": 4,
+      "claimWindowDays": 30,
+      "searchSlaHours": 72,
+      "decisionSlaBusinessDays": 7,
+      "payoutSlaBusinessDays": 3
+    }
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
@@ -3494,6 +3507,11 @@ category, amount, dimensions or weight cannot reinterpret the signed quote. Sign
 policy/fare drift and request mismatch return `409 PARCEL_QUOTE_INVALID`,
 `PARCEL_QUOTE_EXPIRED`, `PARCEL_QUOTE_STALE`, and `PARCEL_QUOTE_MISMATCH`, respectively. Legacy
 requests without a token remain supported.
+
+`quantity` is an immutable positive integer (default `1` for backward compatibility).
+`declaredValueVnd` is optional, non-negative integer VND. The response discloses the exact
+compensation policy snapshot accepted for this Parcel; future operator policy updates do not
+change it.
 
 When `recipient.email` is present, Parcel trims/lowercases it and calls Identity's exact,
 non-deleted user lookup. A match is saved as the logical `recipientUserId` in the create
@@ -4054,13 +4072,26 @@ Errors:
 
 ### POST `/v1/assistant/parcels/{parcelId}/unload`
 
-Auth: assigned `ASSISTANT` under the Parcel operator. Idempotency: required. Body is empty.
+Auth: assigned `ASSISTANT` under the Parcel operator. Idempotency: required. Body:
 
-Parcel synchronously reads the raw `GET /internal/v1/trips/{tripId}` snapshot before mutation.
-For `dropoffStopId != null`, the matching TripStop must exist, have `allowDropoff=true`, and have
-`status=ARRIVED`. For terminal-bound `dropoffStopId=null`, `destinationArrivedAt` must be non-null;
-the last intermediate stop is never treated as destination arrival. No Parcel arrival
-event-consumer or local arrival projection is used.
+```json
+{
+  "parcelCode": "VR-PCL-20260722-ABCDEFGH",
+  "actualLocation": { "kind": "ROUTE_STOP", "id": "uuid" },
+  "photoUrls": ["https://storage.googleapis.com/{bucket}/parcel-ops/.../unload.webp"]
+}
+```
+
+`actualLocation.kind` is `ROUTE_STOP|DESTINATION_STATION`; it is required. `parcelCode` is the QR
+identity and must equal the addressed Parcel. `photoUrls` is optional and follows the existing
+Parcel evidence URL ownership rules.
+
+Parcel synchronously reads raw `GET /internal/v1/trips/{tripId}/operational-location` before
+mutation. For `dropoffStopId != null`, the requested id must equal both `dropoffStopId` and the
+Trip's current stop; that stop must be `ARRIVED`, allow drop-off, and have
+`actualDepartureAt=null`. For terminal-bound `dropoffStopId=null`, kind must be
+`DESTINATION_STATION` and `destinationArrivedAt` must be non-null. A stop that was formerly
+`ARRIVED` but has departed is invalid.
 
 Only `IN_TRANSIT` may transition to `UNLOADED`. The winning CAS persists `unloadedAt`, releases the
 Trip-owned cargo exactly once using the same idempotency identity, and enqueues one
@@ -4068,7 +4099,7 @@ Trip-owned cargo exactly once using the same idempotency identity, and enqueues 
 `{ "parcelId": "uuid", "parcelCode": "VR-PCL-20260722-ABCDEFGH", "status": "UNLOADED" }`.
 
 Errors: `401 UNAUTHORIZED`; `403 FORBIDDEN` (including a missing/hidden Trip snapshot);
-`404 PARCEL_NOT_FOUND`; `409 INVALID_STATUS|IDEMPOTENCY_REQUEST_PENDING`;
+`404 PARCEL_NOT_FOUND`; `409 INVALID_STATUS|SCAN_IDENTITY_MISMATCH|PARCEL_CUSTODY_LOCATION_MISMATCH|IDEMPOTENCY_REQUEST_PENDING`;
 `422 DROP_OFF_STOP_NOT_FOUND|DROP_OFF_STOP_NOT_ALLOWED|DROP_OFF_STOP_NOT_ARRIVED|DESTINATION_TERMINAL_NOT_ARRIVED|IDEMPOTENCY_KEY_REQUIRED|IDEMPOTENCY_KEY_MISMATCH`;
 `503 TRIP_SERVICE_UNAVAILABLE`.
 
@@ -4536,6 +4567,236 @@ Response `200`:
   "meta": { "traceId": "req-abc123", "timestamp": "2026-06-01T17:00:00+07:00" }
 }
 ```
+
+## Parcel Reliability v2
+
+All mutation endpoints in this section require UUID-v4 `Idempotency-Key`, return ADR 0004
+`ApiResponse<T>`, and are tenant-fenced. Public trace never exposes crew PII, internal notes, raw
+evidence tokens, or continuous GPS.
+
+### GET `/internal/v1/trips/{tripId}/operational-location`
+
+Auth: Internal JWT. Caller: Parcel. Success is a raw internal DTO:
+
+```json
+{
+  "tripId": "uuid",
+  "tripStatus": "IN_PROGRESS",
+  "vehicleId": "uuid",
+  "currentStopId": "uuid|null",
+  "currentStopStatus": "ARRIVED|null",
+  "actualArrivalAt": "2026-08-20T10:00:00Z|null",
+  "actualDepartureAt": null,
+  "destinationArrivedAt": null
+}
+```
+
+`currentStopId` is present only for the current `ARRIVED` and not-yet-departed stop. Missing Trip is
+`404 TRIP_NOT_FOUND` in an ADR 0004 error envelope.
+
+### GET `/v1/parcels/{parcelId}/trace`
+
+Auth: sender, linked recipient, or same-tenant operator. This is the single screen-ready Passenger
+tracking read. Response data contains `parcelSummary,operator,trip,dropoffLocation,currentCustody?,
+activeIncident?,forwardingTrip?,claimSummary?,availableActions[],timeline,incidents[],nextUpdateAt?`.
+`claimSummary` is omitted/null for a recipient and visible to the sender. `timeline` is
+`{items,nextCursor}`; default/max page is 50/100 and `cursor` loads older sequence values. Timeline
+entries do not disclose actor identity, internal investigation notes, raw evidence, or a public
+reason. GPS never becomes custody proof.
+
+`GET /v1/parcels/sent` and `/received` items add `operator,dropoffLocation,reliability`; only sent
+items include claim status. `GET /v1/parcels/{parcelId}` adds `operator,trip,dropoffLocation,
+compensationPolicySnapshot,reliabilitySummary,availableActions`. These are additive batch
+projections: a page performs one Parcel projection query and at most one Trip batch plus one
+Identity batch; nullable display enrichment degrades without hiding the Parcel fact.
+
+### Passenger incident and claim APIs
+
+| Endpoint | Auth/body | Response |
+|---|---|---|
+| `POST /v1/parcels/{parcelId}/incidents` | Sender or linked recipient; `{ incidentType, description?, evidenceUrls? }` | `201` incident summary; one active incident per Parcel/type |
+| `GET /v1/parcels/{parcelId}/incidents` | Sender, linked recipient, same-tenant operator | `200` incident summaries |
+| `POST /v1/parcels/{parcelId}/claims` | Sender `PASSENGER`; bodyless | `201` snapshotted claim; requires `LOST_CONFIRMED` within claim window |
+| `POST /v1/parcels/{parcelId}/claims/{claimId}/evidence` | Sender; `{ evidenceType, reference, note? }` | `201` updated claim with all evidence metadata, deadlines, frozen policy and `availableActions`; no raw upload token |
+| `POST /v1/parcels/{parcelId}/claims/{claimId}/appeal` | Sender; `{ reason }`; claim must be `PAID` or `REJECTED` | `200` claim in `APPEALED`; original decision fields remain immutable |
+| `GET /v1/parcels/{parcelId}/claims` | Sender or same-tenant operator; recipient is not authorized | `200` claims and evidence metadata |
+
+The sender is always `beneficiaryUserId`. Claim response freezes `declaredValueVnd,
+provenDirectLossVnd,compensationRatePercent,policyCapVnd,cargoAwardVnd,freightRefundVnd,
+totalAwardVnd,policyVersion,status,decisionReason,decidedBy,decidedAt,payoutReferenceId,paidAt,
+appealReason,appealedByUserId,appealedAt`. An appeal never overwrites the original decision audit.
+
+### Assistant/station custody APIs
+
+`GET /v1/assistant/trips/{tripId}/parcels` accepts `stopId,status,hasException,search,page,pageSize`
+and returns one manifest screen model: `tripContext {trip,status,route,vehicle,
+currentOperationalLocation,orderedStops},summary,items,pagination`. Each item includes named
+`dropoffLocation,currentCustody,activeIncident,paymentState,identityCheckHints,availableActions`.
+
+QR scan, check-in, load, unload, custody scan, custody exception and deliver return the common
+`{parcelState,currentCustody,activeIncident,createdCustodyEvent,availableActions,warning}` model so
+the Mobile app updates its card without refetching the manifest.
+
+#### POST `/v1/assistant/parcels/{parcelId}/custody-scan`
+
+Body `{ parcelCode, eventType, actualLocationType, actualLocationId?, locationSnapshot?,
+evidenceReferences?, reason? }`. Direct scan event type is limited to
+`ACCEPTED|ARRIVED_AT_STOP|HANDOFF|RETURNED_TO_STATION`. QR mismatch returns
+`409 SCAN_IDENTITY_MISMATCH`; invalid/missing location returns
+`422 PARCEL_CUSTODY_LOCATION_REQUIRED`.
+
+`POST /v1/stations/parcels/{parcelId}/handoff` is a station-facing alias with the same body and
+custody semantics.
+
+#### POST `/v1/assistant/parcels/{parcelId}/custody-exception`
+
+Body:
+
+```json
+{
+  "incidentType": "WRONG_STOP",
+  "actualLocationType": "ROUTE_STOP",
+  "actualLocationId": "uuid|null",
+  "locationSnapshot": "Bến B",
+  "temporaryExceptionTag": "TMP-20260820-001|null",
+  "description": "Kiện dỡ ngoài luồng scan",
+  "observedWeightKg": 12.5,
+  "evidenceUrls": ["https://..."],
+  "reason": "Physical unload already occurred",
+  "supervisorApprovalUserId": "uuid"
+}
+```
+
+Creates append-only `MANUAL_CUSTODY_EXCEPTION`, opens an incident, and moves the Parcel to
+`PENDING_OPERATOR_ACTION/CUSTODY_EXCEPTION` with its resume status. It does not falsify a normal
+unload event.
+
+#### POST `/v1/assistant/trips/{tripId}/stops/{stopId}/reconcile`
+
+Body `{ scannedParcelIds?, manualExceptionParcelIds?, departureOverrideReason?,
+supervisorApprovalUserId? }`. Response data:
+
+```json
+{
+  "expectedCount": 4,
+  "scannedCount": 2,
+  "manualExceptionCount": 1,
+  "unresolvedParcels": [{
+    "parcelId": "uuid",
+    "parcelCode": "VRP-...",
+    "photoUrl": "https://...",
+    "expectedDropoff": { "type": "ROUTE_STOP", "id": "uuid", "name": "Bến C" },
+    "lastCustody": null,
+    "incidentId": "uuid",
+    "incidentType": "UNSCANNED_HANDOFF",
+    "reason": "No verified unload or manual custody event exists for this stop.",
+    "recommendedAction": "SEARCH_VEHICLE_OR_STATION"
+  }],
+  "canDepart": false,
+  "requiresSupervisorApproval": true
+}
+```
+
+An override with unresolved Parcels requires both reason and supervisor. Each unresolved Parcel
+opens `UNSCANNED_HANDOFF`; the Trip departure event may additionally open
+`MISSING_AFTER_DEPARTURE`. No scan gap directly confirms loss.
+`scannedParcelIds` and `manualExceptionParcelIds` are assertions only: Parcel derives the counts
+from matching append-only `UNLOADED` or `MANUAL_CUSTODY_EXCEPTION` facts for the same Trip and stop.
+An asserted id without that custody fact returns `409 PARCEL_CUSTODY_EVENT_NOT_FOUND`.
+
+#### Unidentified package APIs
+
+`POST /v1/stations/parcels/unidentified` accepts `{ temporaryExceptionTag, tripId?, locationType,
+locationId, locationSnapshot?, description, observedWeightKg?, evidenceReferences? }` and creates
+an `UNIDENTIFIED_PACKAGE`. `POST /v1/stations/parcels/unidentified/{packageId}/match` accepts
+`{ parcelId }`, marks the temporary record matched, and appends `IDENTIFIED_MANUALLY` for the real
+Parcel. Both require same-tenant station/operator authorization.
+
+Operator reads are `GET /v1/operator/unidentified-packages`, `GET .../{packageId}`, and
+`GET .../{packageId}/match-candidates`. Candidate items include Parcel code, Trip/route/vehicle,
+photo, description, weight, expected stop, and explicit match reasons. Search never auto-matches;
+the existing station `POST .../match` remains the supervisor confirmation.
+
+### Operator incident/search/forwarding APIs
+
+The Parcel route deliberately uses `/v1/operator/parcel-incidents` to avoid the Trip operational
+incident resource at `/v1/operator/incidents`.
+
+| Endpoint | Body/semantics |
+|---|---|
+| `GET /v1/operator/parcel-incidents?status=&type=&search=&tripId=&assigneeId=&slaState=&from=&to=&page=&pageSize=` | Paged same-tenant screen rows with Parcel, Trip/route/vehicle, expected dropoff, last custody, reporter, task/assignee summary, claim summary, SLA and actions |
+| `GET /v1/operator/parcel-incidents/{incidentId}?beforeSequence=&limit=` | Incident, Parcel parties, Trip, current custody, cursor timeline (50 default), enriched assignees, forwarding summary, linked claim and actions |
+| `GET .../{incidentId}/forwarding-options?limit=` | Trip-owned route/cargo-compatible choices; returns `503 UPSTREAM_UNAVAILABLE` when Trip cannot calculate |
+| `POST .../{incidentId}/assign` | `{ assigneeUserId }`; creates the standard search task set |
+| `POST .../{incidentId}/search-scan` | `{ taskId, found, result, evidenceReferences? }` |
+| `POST .../{incidentId}/mark-found` | `{ actualLocationType, actualLocationId?, locationSnapshot?, evidenceReferences?, note? }`; appends `FOUND` |
+| `POST .../{incidentId}/forward` | `{ targetTripId }`; creates a `PLANNED` leg and returns target Trip, leg, cargo-transfer status and next handoff action |
+| `POST .../{incidentId}/resolve` | `{ resolutionCode, note? }`; only recovered/forwarding cases; restores pending Parcel state |
+| `POST .../{incidentId}/declare-lost` | `{ note? }`; only at/after search deadline unless already system-expired |
+
+All incident mutations return the updated incident detail read model; FE does not refetch. The
+forward response additionally carries `forwardingOperation: { targetTrip, newLeg,
+cargoTransferStatus, nextHandoffAction }`. Initially the status is
+`AWAITING_CREW_CONFIRMATION` and the action is `CREW_CONFIRM_TRANSFER`; after the assigned crew
+confirms custody, the planned leg becomes `ACTIVE`, cargo is transferred with a fresh capacity
+check, and the status/action become `TRANSFERRED`/`DELIVER_AT_EXPECTED_DROPOFF`.
+Forwarding never edits the old leg and never creates a sender charge. If the Parcel remains on the
+original vehicle before its expected stop, no new leg is created.
+
+### Operator claim and policy APIs
+
+`GET /v1/operator/claims?status=&search=&slaState=&from=&to=&page=&pageSize=` is the paged claim
+queue. Rows contain Parcel, sender, incident, evidence count, policy snapshot, award, deadline,
+funding state, Trip, and actions. `GET /v1/operator/claims/{claimId}` is the single claim-detail
+read with evidence, custody, incident, Trip and beneficiary. Staff may read; only
+`OPERATOR_ADMIN` may decide.
+
+`POST /v1/operator/claims/{claimId}/decision` requires `OPERATOR_ADMIN` and body
+`{ decision: "APPROVE|REJECT", provenDirectLossVnd?, reason }`. Approval calculates the award from
+the Parcel's frozen policy; the client cannot provide rate, cap, or award. Approval emits
+`parcel.claim.decided`; rejection does not call Payment.
+
+`GET /v1/operator/policies/parcel-compensation` returns the active policy. PUT on the same path
+accepts:
+
+```json
+{
+  "compensationRatePercent": 50,
+  "maxCompensationVnd": 30000000,
+  "noProofFallbackMultiplier": 4,
+  "claimWindowDays": 30,
+  "searchSlaHours": 72,
+  "decisionSlaBusinessDays": 7,
+  "payoutSlaBusinessDays": 3,
+  "belowDefaultAcknowledged": false
+}
+```
+
+Rate must be `1..100`; monetary/SLA/window fields must be positive. A rate below 50 or cap below
+30,000,000 requires `belowDefaultAcknowledged=true`. Updates create a new version; accepted Parcel
+snapshots never change.
+
+Policy GET/PUT responses additionally return `platformDefaultPolicy,isBelowPlatformDefault,
+effectiveForNewParcelsOnly=true,updatedAt,updatedBy`, so Operator Web never hard-codes 50%/30m.
+
+Internal-JWT-only `POST /internal/v1/trips/forwarding-options` accepts operator, excluded Trip,
+pickup/target typed locations, cargo dimensions, earliest departure and limit. Trip alone evaluates
+route order, operator ownership, lifecycle and cargo capacity and returns enriched choices; it is
+never exposed through Gateway.
+
+### Reliability errors
+
+`PARCEL_SCAN_REQUIRED`, `PARCEL_CUSTODY_LOCATION_REQUIRED`, `PARCEL_CUSTODY_LOCATION_MISMATCH`,
+`PARCEL_CUSTODY_EVENT_DUPLICATE`, `PARCEL_CUSTODY_EVENT_NOT_FOUND`,
+`SCAN_IDENTITY_MISMATCH`, `PACKAGE_IDENTITY_MISMATCH`,
+`UNIDENTIFIED_PACKAGE_NOT_FOUND`, `PARCEL_INCIDENT_NOT_FOUND`, `PARCEL_INCIDENT_ALREADY_OPEN`,
+`PARCEL_INCIDENT_INVALID_STATUS`, `PARCEL_SEARCH_TASK_NOT_FOUND`, `PARCEL_SEARCH_TASK_MISMATCH`,
+`PARCEL_SEARCH_SLA_NOT_EXPIRED`, `PARCEL_CLAIM_NOT_FOUND`, `PARCEL_CLAIM_WINDOW_NOT_OPEN`,
+`PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED`, `PARCEL_CLAIM_ALREADY_EXISTS`,
+`PARCEL_CLAIM_EVIDENCE_REQUIRED`, `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY`,
+`PARCEL_CLAIM_ALREADY_DECIDED`, `PARCEL_CLAIM_APPEAL_NOT_ALLOWED`,
+`PARCEL_CLAIM_FUNDING_PENDING`,
+`POLICY_BELOW_DEFAULT_ACK_REQUIRED`.
 
 ## Payment & Wallet Service
 
@@ -8672,8 +8933,9 @@ Auth: assigned `DRIVER` or nullable assigned `ASSISTANT` for the same tenant. Th
 bodyless and requires a UUID-v4 `Idempotency-Key` using the lifecycle fingerprint above. The
 first execution is valid only when `Trip.status=IN_PROGRESS`, `TripStop.status=ARRIVED`, and
 `TripStop.actualDepartureTime IS NULL`. Trip and TripStop are locked (or an equivalent CAS is
-used), the timestamp is persisted, then Trip calls the exact Booking pending-count seam. A
-positive count emits one `trip.stop.departed_with_pending` Outbox event; zero emits no event.
+used), the timestamp is persisted, then Trip calls the exact Booking pending-count seam. Every
+success emits one `trip.stop.departed` operational fact; a positive passenger count additionally
+emits one `trip.stop.departed_with_pending` warning event.
 
 Response `200` uses the public ADR 0004 envelope and data is exactly `{ tripId, stopId, departedAt, pendingPassengerCount, eventEmitted }`:
 
@@ -9210,9 +9472,9 @@ fact; unload eligibility is read synchronously from the Trip snapshot.
 
 ### `trip.destination.arrived`
 
-Producer: Trip. No v1 consumer. Exchange: `vietride.events`. Parcel does not consume this fact or
-maintain an arrival projection; terminal unload reads `destinationArrivedAt` synchronously from
-the Trip snapshot.
+Producer: Trip. Consumer: Parcel. Exchange: `vietride.events`. Terminal unload reads the dedicated
+Trip operational-location endpoint synchronously; independently, Parcel consumes this fact to open
+a search incident for terminal-bound parcels still `LOADED|IN_TRANSIT`.
 
 ```json
 {
@@ -9338,6 +9600,28 @@ Producer: Booking. Consumer: Notification. One event is emitted for each Booking
 `bookingStatus` is `NO_SHOW|PARTIAL_NO_SHOW`, `triggerType` is `ALONG_ROUTE|TERMINAL`, and
 `pickupStopId` is omitted for terminal pickup. Identity is
 `eventId == OutboxEvent.Id == RabbitMQ MessageId` and duplicate EventIds are ignored.
+
+### `trip.stop.departed`
+
+Producer: Trip. Consumer: Parcel. Exchange: `vietride.events`. This operational fact is emitted
+for every committed stop departure so missing-parcel detection does not depend on whether Booking
+also has pending passengers.
+
+```json
+{
+  "eventId": "uuid",
+  "occurredAt": "2026-06-30T03:00:00Z",
+  "eventType": "trip.stop.departed",
+  "tripId": "uuid",
+  "stopId": "uuid",
+  "operatorId": "uuid",
+  "departedAt": "2026-06-30T03:00:00Z"
+}
+```
+
+Parcel uses this fact only as a reconciliation trigger. Custody location remains sourced from
+confirmed scans/events; a matching expected drop-off without unload opens
+`MISSING_AFTER_DEPARTURE` idempotently.
 
 ### `trip.stop.departed_with_pending`
 

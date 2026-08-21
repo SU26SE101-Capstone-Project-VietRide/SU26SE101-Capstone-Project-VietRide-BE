@@ -10,4 +10,5 @@ public enum PlatformWalletTransactionRef
     TRIP_SETTLEMENT,
     SUBSCRIPTION_PAYMENT,
     MANUAL_ADJUSTMENT,
+    PARCEL_COMPENSATION,
 }

@@ -40,6 +40,13 @@ export const PARCEL_TRANSFER_CONFIRMED_ROUTING_KEY = 'parcel.parcel.transfer_con
 export const PARCEL_TRANSFER_ESCALATED_ROUTING_KEY = 'parcel.parcel.transfer_escalated';
 export const PARCEL_RETURN_INITIATED_ROUTING_KEY = 'parcel.parcel.return_initiated';
 export const PARCEL_PENDING_OPERATOR_ACTION_ROUTING_KEY = 'parcel.parcel.pending_operator_action';
+export const PARCEL_INCIDENT_OPENED_ROUTING_KEY = 'parcel.incident.opened';
+export const PARCEL_INCIDENT_UPDATED_ROUTING_KEY = 'parcel.incident.updated';
+export const PARCEL_CLAIM_SUBMITTED_ROUTING_KEY = 'parcel.claim.submitted';
+export const PARCEL_CLAIM_DECIDED_ROUTING_KEY = 'parcel.claim.decided';
+export const PARCEL_COMPENSATION_PAID_ROUTING_KEY = 'payment.parcel_compensation.paid';
+export const PARCEL_COMPENSATION_FUNDING_PENDING_ROUTING_KEY =
+  'payment.parcel_compensation.funding_pending';
 export const TRIP_STOP_ARRIVED_ROUTING_KEY = 'trip.stop.arrived';
 
 export const SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY = 'subscription.limit.trip_skipped';
@@ -130,6 +137,30 @@ export const PARCEL_SUBSCRIPTION_OPERATOR_QUEUE_BINDINGS = [
   {
     queue: 'notification:parcel-pending-operator-action-realerted',
     routingKey: PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-incident-opened',
+    routingKey: PARCEL_INCIDENT_OPENED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-incident-updated',
+    routingKey: PARCEL_INCIDENT_UPDATED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-claim-submitted',
+    routingKey: PARCEL_CLAIM_SUBMITTED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-claim-decided',
+    routingKey: PARCEL_CLAIM_DECIDED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-compensation-paid',
+    routingKey: PARCEL_COMPENSATION_PAID_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:parcel-compensation-funding-pending',
+    routingKey: PARCEL_COMPENSATION_FUNDING_PENDING_ROUTING_KEY,
   },
   { queue: 'notification:trip-stop-arrived', routingKey: TRIP_STOP_ARRIVED_ROUTING_KEY },
   {

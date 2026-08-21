@@ -9,4 +9,5 @@ public enum WalletTransactionRef
     PARCEL_REFUND = 5,
     PARCEL_ADDITIONAL_PAYMENT = 7,
     MANUAL_ADJUSTMENT = 6,
+    PARCEL_COMPENSATION = 8,
 }

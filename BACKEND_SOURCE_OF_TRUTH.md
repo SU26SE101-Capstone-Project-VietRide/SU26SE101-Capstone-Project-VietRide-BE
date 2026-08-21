@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.74.0
+> **Phiên bản:** 1.76.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-16
+> **Cập nhật lần cuối:** 2026-08-21
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1086,11 +1086,11 @@ Idempotent: chạy migration 2 lần không lỗi (EF Core / Prisma migrations h
 
 #### Payment & Wallet (`vietride_payment`)
 
-`Payment` · `TopUpRequest` · `Wallet` · `WalletTransaction` · `Invoice` · `PlatformWallet` · `PlatformWalletTransaction` · `OperatorLedgerEntry` · `OperatorWallet` · `OperatorWalletTransaction` · `OperatorTripSettlement` · `RefundFailureLog` · `OutboxEvent`
+`Payment` · `TopUpRequest` · `Wallet` · `WalletTransaction` · `Invoice` · `PlatformWallet` · `PlatformWalletTransaction` · `OperatorLedgerEntry` · `OperatorWallet` · `OperatorWalletTransaction` · `OperatorTripSettlement` · `ParcelCompensationPayout` · `RefundFailureLog` · `OutboxEvent`
 
 #### Parcel (`vietride_parcel`)
 
-`Parcel` · `ParcelRouteFare` · `ParcelStats` · `OutboxEvent`
+`Parcel` · `ParcelRouteFare` · `ParcelStats` · `ParcelTransitLeg` · `ParcelCustodyEvent` · `ParcelCurrentCustody` · `ParcelIncident` · `ParcelSearchTask` · `ParcelClaim` · `ParcelClaimEvidence` · `ParcelCompensationPolicy` · `UnidentifiedParcelPackage` · `OutboxEvent`
 
 #### Tracking (`vietride_tracking`)
 
@@ -1725,6 +1725,30 @@ phát integration event.
 | | `PARCEL_CARGO_RECOVERY_IN_PROGRESS` | 409 | Parcel already has a durable `TRANSFER|RETURN|RELEASE` cargo-recovery operation pending |
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
 | | `PARCEL_REVIEW_TIMEOUT` | 409 | Timeout review 24h cho record legacy `PENDING_OPERATOR_REVIEW` |
+| | `PARCEL_CUSTODY_LOCATION_REQUIRED` | 422 | Custody/unload request thiếu hoặc sai actual location type/id bắt buộc |
+| | `PARCEL_SCAN_REQUIRED` | 422 | Normal unload thiếu QR/parcel code; phải dùng manual custody exception nếu không quét được |
+| | `PARCEL_CUSTODY_LOCATION_MISMATCH` | 409 | Requested actual location không phải Trip operational location, stop đã departed, hoặc không khớp Parcel destination |
+| | `PARCEL_CUSTODY_EVENT_DUPLICATE` | 409 | Custody idempotency identity đã được dùng cho một fact khác |
+| | `PARCEL_CUSTODY_EVENT_NOT_FOUND` | 409 | Stop reconciliation khai báo scan/manual nhưng không có custody event khớp Trip + stop |
+| | `SCAN_IDENTITY_MISMATCH` | 409 | QR/ParcelCode không khớp Parcel, manifest, Trip hoặc destination stop được yêu cầu |
+| | `PACKAGE_IDENTITY_MISMATCH` | 409 | QR hợp lệ nhưng ảnh/mô tả/cân nặng/kích thước/serial của kiện vật lý không khớp snapshot |
+| | `UNIDENTIFIED_PACKAGE_NOT_FOUND` | 404 | Temporary-tag package không tồn tại hoặc bị tenant-mask |
+| | `PARCEL_INCIDENT_NOT_FOUND` | 404 | Parcel incident không tồn tại hoặc bị tenant-mask |
+| | `PARCEL_INCIDENT_ALREADY_OPEN` | 409 | Parcel đã có incident active cùng phạm vi điều tra |
+| | `PARCEL_INCIDENT_INVALID_STATUS` | 409 | Incident state không cho phép found/forward/resolve/close transition được yêu cầu |
+| | `PARCEL_SEARCH_TASK_NOT_FOUND` | 404 | Search task không tồn tại hoặc bị tenant-mask |
+| | `PARCEL_SEARCH_TASK_MISMATCH` | 409 | Search task không thuộc incident được chỉ định |
+| | `PARCEL_SEARCH_SLA_NOT_EXPIRED` | 409 | Operator declare-lost trước search deadline |
+| | `PARCEL_CLAIM_NOT_FOUND` | 404 | Parcel claim không tồn tại hoặc bị tenant-mask |
+| | `PARCEL_CLAIM_WINDOW_NOT_OPEN` | 409 | Incident chưa `LOST_CONFIRMED`, sender chưa đủ điều kiện mở claim |
+| | `PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED` | 409 | Claim nộp sau frozen `claimWindowDays` kể từ lost confirmation |
+| | `PARCEL_CLAIM_ALREADY_EXISTS` | 409 | Incident đã có claim |
+| | `PARCEL_CLAIM_EVIDENCE_REQUIRED` | 422 | Claim decision thiếu reason/evidence bắt buộc |
+| | `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY` | 422 | Requested/assessed claim value vi phạm frozen declaration/policy cap |
+| | `PARCEL_CLAIM_ALREADY_DECIDED` | 409 | Claim đã rời `SUBMITTED`, không nhận decision/evidence mutation mới |
+| | `PARCEL_CLAIM_APPEAL_NOT_ALLOWED` | 409 | Claim không ở `PAID` hoặc `REJECTED`, nên sender chưa thể appeal |
+| | `PARCEL_CLAIM_FUNDING_PENDING` | 409 | Claim đã approve nhưng operator chưa đủ nguồn payout |
+| | `POLICY_BELOW_DEFAULT_ACK_REQUIRED` | 422 | Operator cấu hình rate dưới 50% hoặc cap dưới 30 triệu mà chưa xác nhận điều khoản |
 | **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path; cross-tenant DELETE is masked here |
 | | `STOP_REPLACEMENT_INVALID` | 422 | Replacement Stop missing, inactive, cross-operator, or self-reference |
 | | `STOP_REPLACEMENT_CYCLE` | 422 | Replacement chain would create a cycle |
@@ -2259,6 +2283,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 | Method + Path | Caller | Mục đích |
 |---|---|---|
 | `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves ordinary Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`, then applies the matching active operator holiday surcharge by the Trip departure Asia/Ho_Chi_Minh date. Omitted preserves persisted legacy snapshot semantics and applies no new surcharge. No event/projection is added. |
+| `GET /internal/v1/trips/{tripId}/operational-location` | Parcel | Raw `{ tripId,vehicleId,tripStatus,currentStopId?,currentStopStatus?,actualArrivalAt?,actualDepartureAt?,destinationArrivedAt? }`. `currentStopId` is only an `ARRIVED` TripStop with null departure; Parcel unload uses this proof to reject a former stop after departure. |
 | `GET /internal/v1/trips/{tripId}/shuttle-road-distance?direction=&latitude=&longitude=` | Booking | Internal-JWT-only road distance to origin Station (`INBOUND_TO_STATION`) or destination Station (`OUTBOUND_FROM_STATION`). Trip validates Station active/supportsShuttle/coordinates and calls Google Routes `travelMode=DRIVE`; raw success is `{ distanceMeters }`. Google/configuration/timeout/invalid response maps to `503 SHUTTLE_DISTANCE_UNAVAILABLE`; direction/coordinates/station eligibility maps to `422`. |
 | `POST /internal/v1/trips/summaries/batch` | Booking, Parcel | Read-only `{ tripIds }`, 1..100 distinct UUIDs; one Trip query joins Vehicle Type and returns route/station/vehicle/crew/timing summaries; missing IDs are omitted. Vehicle includes `vehicleType { code, displayName }` for both system-defined and custom types. Booking uses one distinct-ID batch per non-empty passenger-history page to project the current `vehicle { licensePlate, vehicleType }`; enrichment is fail-open per item. |
 | `POST /internal/v1/trips/parcel-availability/search` | Parcel | `[SkipIdempotency]` read-only replacement for fare-aware paging. Body keeps current station/date/capacity/category/page filters and adds `eligibleRouteIds`; Trip filters before count/page and orders `departureDateTime,tripId`. Empty eligible list returns a valid empty page. Legacy GET remains during rollout. |
@@ -2340,8 +2365,9 @@ TripStop lock/CAS recheck before persisting one timestamp. Success is public `20
 exact data `{tripId,stopId,departedAt,pendingPassengerCount,eventEmitted}`. New-key repeat after
 departure is `409 TRIP_STOP_ALREADY_DEPARTED`; `PENDING|SKIPPED` is
 `422 TRIP_STOP_NOT_ARRIVED`; upstream Booking failure is `502 UPSTREAM_UNAVAILABLE`. Same-key
-replay and mismatch follow §5.6. A positive exact Booking pending-count result emits only
-`trip.stop.departed_with_pending`.
+replay and mismatch follow §5.6. Every successful departure emits `trip.stop.departed` for
+Parcel custody reconciliation; a positive exact Booking pending-count result additionally emits
+`trip.stop.departed_with_pending` for the Driver App warning.
 
 ### 7.3 RabbitMQ event registry
 
@@ -2398,9 +2424,10 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `booking.booking.stop_disabled_auto_fallback_applied` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, bookingId, tripId, userId, pendingActionId, disabledStopId, affectedField, fallbackStationId, resolvedAction }`; `affectedField=PICKUP|DROPOFF`, `resolvedAction=AUTO_FALLBACK_DESTINATION`; one fact per action. |
 | `booking.booking.route_change_auto_fallback_applied` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, bookingId, tripId, userId, pendingActionId, originalStopId, fallbackDestinationStationId, shuttleRequired, resolvedAction }`; `shuttleRequired=true`, `resolvedAction=AUTO_FALLBACK_DESTINATION`; one fact per timed-out ROUTE_CHANGE action. |
 | `booking.booking.passenger_no_show_marked` | Booking | Notification | Exact `{ eventId, occurredAt, eventType, bookingId, tripId, userId, bookingStatus, newlyNoShowPassengerIds[], triggerType, pickupStopId? }`; status `NO_SHOW|PARTIAL_NO_SHOW`, trigger `ALONG_ROUTE|TERMINAL`; one fact per Booking transition. |
-| `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }` |
+| `trip.stop.departed` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, departedAt }`; emitted for every committed stop departure. Parcel never infers a new location from it; it opens `MISSING_AFTER_DEPARTURE` only for manifest parcels whose expected stop lacks a confirmed unload. |
+| `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }`. |
 | `trip.stop.arrived` | Trip | Notification | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, actorUserId, actualArrivalTime }`; Trip và TripStop lock theo thứ tự, `PENDING -> ARRIVED`, static ETA không đổi, business row + Outbox commit atomic; Parcel reads the Trip snapshot synchronously and has no arrival projection |
-| `trip.destination.arrived` | Trip | — (no v1 consumer) | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ; event does not drive Parcel state |
+| `trip.destination.arrived` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ; Parcel opens a search incident only for terminal-bound parcels still `LOADED|IN_TRANSIT`. |
 | `trip.trip.delayed` | Tracking | Notification | `{ eventId, occurredAt, tripId, stopId, delayMinutes, etaNew, staticEstimatedArrivalTime, dynamicEstimatedArrivalTime, userIds? }`; one durable Outbox fact per `tripId/stopId/5-minute-window`, deduped by unique `dedupeKey`; Notification resolves active passengers and operator admins |
 | `trip.incident.reported` | Trip | Notification | `{ eventId, occurredAt, incidentId, tripId, operatorId, reporterUserId, category, description?, photoUrls?, latitude?, longitude?, reportedAt }`; optional fields được omit khi null; Notification resolve active `OPERATOR_ADMIN` theo `operatorId` |
 | `trip.cargo.threshold_crossed` | Trip | Notification | Exact `{ eventId, occurredAt, tripId, operatorId, loadedWeightKg, maxCargoWeightKg, percentFull }`; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
@@ -2416,6 +2443,8 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `payment.payment.expired` | Payment | Booking, Parcel | `{ paymentId, referenceType, referenceId }` |
 | `payment.wallet.credited` | Payment | Payment (self-consume to mark the funding Payment REFUNDED), Booking (mark REFUNDED), Parcel (mark REFUNDED), Notification | `{ eventId, occurredAt, userId, amount, referenceType, referenceId, paymentId? }`; `paymentId` is optional for wire compatibility. The current `BOOKING_REFUND` producer populates it for both generic and exact refunds after resolving the correlated funding Payment; it is omitted only for legacy payloads and non-Booking refunds. |
 | `payment.wallet.debited` | Payment | Notification | `{ eventId, occurredAt, userId, walletTransactionId?, amount, balanceAfter?, referenceType, referenceId }`; one fact per committed wallet ledger item |
+| `payment.parcel_compensation.paid` | Payment | Parcel, Notification | `{ eventId,occurredAt,sourceEventId,payoutId,claimId,parcelId,operatorId,beneficiaryUserId,amountVnd,status:"PAID",fundingSource,walletTransactionId }`; Parcel marks claim `PAID`, replay is no-op. |
+| `payment.parcel_compensation.funding_pending` | Payment | Parcel, Notification | `{ eventId,occurredAt,sourceEventId,payoutId,claimId,parcelId,operatorId,beneficiaryUserId,amountVnd,status:"FUNDING_PENDING",fundingSource:null,walletTransactionId:null }`; no VietRide advance, retry job waits for operator funds. |
 | `payment.subscription.payment_succeeded` | Payment | Identity, Payment Invoice pipeline | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId, planId, amount, method, planName, billingPeriod, periodFrom, periodTo, succeededAt, buyerSnapshot }`; WALLET and VNPay use one schema |
 | `payment.subscription.payment_failed` | Payment | Identity | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId, responseCode }`; đóng session, attempt còn retry được trước dueAt |
 | `payment.subscription.payment_expired` | Payment | Identity | `{ eventId, occurredAt, paymentId, upgradeAttemptId, operatorId, operatorSubscriptionId }`; đóng session, không kéo dài attempt dueAt |
@@ -2444,6 +2473,12 @@ replay and mismatch follow §5.6. A positive exact Booking pending-count result 
 | `parcel.parcel.settlement_recovered` | Parcel | Notification (sender) | Exact `{ eventId, occurredAt, parcelId, parcelCode, userId, tripId, recoveredStatus: READY_TO_LOAD\|CANCELLED, refundAmountVnd }`; corrective fact khi callback có `paidAt` đúng hạn thắng timeout đã phát trước đó |
 | `parcel.parcel.transfer_initiated` | Parcel | Notification | `{ parcelId, originalTripId, newTripId }` |
 | `parcel.refund.initiated` | Parcel | Payment | Exact `{ eventId, occurredAt, parcelId, senderUserId, amount, referenceType:"PARCEL_REFUND", referenceId, reason, idempotencyKey }`; sole authoritative Day-32 refund trigger. `referenceId=parcelId`. Allowed `reason` is `TRIP_CANCELLED_PRE_LOAD`, `MANUAL_CANCEL_FULL`, `MANUAL_CANCEL_POLICY`, `OPERATOR_RETURN`, or `TRIP_DISRUPTED_PRE_LOAD`. `idempotencyKey` is the stable UUID-v4 derived once per Parcel + source event/request + refund phase and is reused on retry. Payment dedupes the one-release legacy terminal refund and this canonical fact by `(referenceType,referenceId,idempotencyKey)`, so a partial and later final refund remain distinct while the same phase can create at most one wallet credit/ledger entry. |
+| `parcel.custody.event_recorded` | Parcel | None in v1 (registered audit/extension fact) | `{ eventId,occurredAt,custodyEventId,parcelId,tripId,operatorId,eventType,actualLocationType?,actualLocationId? }`; emitted for every accepted lifecycle/manual scan from the same transaction; no evidence URL, token, reason or actor PII. |
+| `parcel.incident.opened` | Parcel | Notification | Required common `{ incidentId,parcelId,operatorId,type,searchDeadline }` plus source-specific Trip/stop/reporter/last-location fields; opens sender/recipient/operator search communication without exposing internal notes. |
+| `parcel.incident.updated` | Parcel | Notification | Required common `{ incidentId,parcelId,status }` plus transition-specific operator/location/forwarding/resolution fields; statuses include `FOUND|FORWARDING|RESOLVED|LOST_CONFIRMED`. |
+| `parcel.claim.submitted` | Parcel | Notification | `{ claimId,parcelId,incidentId,operatorId,beneficiaryUserId,policyVersion }`; sender is always beneficiary. |
+| `parcel.claim.decided` | Parcel | Payment (only `APPROVED`), Notification | `{ claimId,parcelId,tripId?,operatorId,status:APPROVED\|REJECTED,totalAwardVnd,beneficiaryUserId }`; Payment requires non-null Trip and positive award only for `APPROVED`, and unique payout is keyed by claimId. |
+| `parcel.claim.appealed` | Parcel | None in v1 (registered audit/extension fact) | `{ eventId,occurredAt,claimId,parcelId,incidentId,operatorId,beneficiaryUserId,status:"APPEALED" }`; sender-only mutation, no appeal reason or evidence URL is published. |
 
 **Cancellation event compatibility:** A canonical `booking.booking.cancelled` producer creates a
 fresh UUID-v4 `eventId` and captures offset-date-time `occurredAt`. One-release consumers accept
@@ -3171,13 +3206,16 @@ converge on one logical release; recovery claim/finalize uses compare-and-swap.
 
 **Canonical two-step delivery (Day 39):**
 
-- `POST /v1/assistant/parcels/{parcelId}/unload` performs a synchronous Internal-JWT read of
-  `GET /internal/v1/trips/{tripId}`. Parcel owns no consumer/projection for
-  `trip.stop.arrived` or `trip.destination.arrived`; those facts never drive Parcel state.
+- `POST /v1/assistant/parcels/{parcelId}/unload` requires QR plus actual location and performs a
+  synchronous Internal-JWT read of `GET /internal/v1/trips/{tripId}/operational-location`.
+  Parcel owns no arrival projection; Trip's current not-departed stop/destination anchor is the
+  operational proof.
 - Unload chỉ cho phép `IN_TRANSIT -> UNLOADED`. Parcel có `dropoffStopId` phải dùng đúng TripStop
-  khớp ID, `allowDropoff=true` và `status=ARRIVED`. Parcel có `dropoffStopId=null` chỉ dùng
+  khớp ID, `allowDropoff=true`, `status=ARRIVED`, `actualDepartureAt=null`, đồng thời khớp Trip
+  `currentStopId`. Parcel có `dropoffStopId=null` chỉ dùng `DESTINATION_STATION` và
   `destinationArrivedAt`; không suy diễn từ stop trung gian cuối. Express Trip không có TripStop vẫn
-  unload được sau destination arrival.
+  unload được sau destination arrival. Mismatch trả `409 PARCEL_CUSTODY_LOCATION_MISMATCH` trước
+  mọi Parcel/cargo mutation.
 - CAS unload thắng set duy nhất `status`, `unloadedAt`, clear pending-confirm metadata, revoke any
   active token-history row if present, and enqueue exactly one `parcel.parcel.unloaded` in the same
   Parcel-local transaction. Cargo
@@ -3206,6 +3244,46 @@ converge on one logical release; recovery claim/finalize uses compare-and-swap.
 Section 6.6e. Riêng canonical two-step delivery, cargo counter là Trip-owned qua internal API;
 Parcel không tạo cross-database transaction, release chỉ được gọi một lần sau CAS unload thắng và
 deliver không gọi lại.
+
+### 8.3.1 Parcel reliability states
+
+`ParcelStatus` không có `LOST`. Custody exception dùng `PENDING_OPERATOR_ACTION` với
+`PendingActionType=CUSTODY_EXCEPTION` và frozen resume status.
+
+```text
+ParcelIncident recovery: OPEN -> SEARCHING -> FOUND -> FORWARDING -> RESOLVED -> CLOSED
+ParcelIncident loss:     SEARCHING -> ESCALATED -> SEARCH_EXPIRED -> LOST_CONFIRMED
+
+ParcelClaim: SUBMITTED -> UNDER_REVIEW -> APPROVED -> FUNDING_PENDING -> PAID
+                                  \-> REJECTED
+                         APPROVED -> CANCELLED
+                         PAID|REJECTED -> APPEALED (hardening state)
+```
+
+The incident, append-only custody timeline, tasks, claim evidence, frozen policy calculation, and
+Payment payout references are the audit trail. Custody events may never be updated/deleted. A
+wrong station creates a new transit leg and paired forwarding events; it never rewrites the old
+leg. Default search/decision/payout SLA is 72 hours / 7 business days / 3 business days.
+`LOADED` activates the current transit leg; a validated destination `UNLOADED` completes it; and
+`LOST_CONFIRMED` marks the remaining active/planned leg `LOST`. A verified `FOUND` cancels remaining
+`OPEN|IN_PROGRESS` search tasks, while `LOST_CONFIRMED` fails them; completed task evidence is never
+overwritten.
+
+### 8.3.2 Parcel Reliability FE read-model rule
+
+Parcel FE reads are screen-ready REST projections, not generic `include` expansion. Passenger
+tracking, Assistant manifest/action, Operator incident queue/detail, claim queue/detail,
+unidentified-package matching, and forwarding selection each have one primary public request.
+Same-DB enrichment is batched over the page. Cross-service display enrichment performs at most one
+Trip batch and one Identity batch per page; no per-row HTTP call and no cross-database join is
+allowed. Missing display enrichment remains nullable, while forwarding-option calculation fails
+closed with `503 UPSTREAM_UNAVAILABLE` because Trip owns route order and cargo compatibility.
+
+Mutation responses return their updated screen state and `availableActions`; FE MUST NOT recreate
+Parcel/Incident/Claim state machines. Public Passenger projections never expose actor IDs, internal
+notes or investigation evidence. Assistant data is fenced to the assigned Trip. Operator reads are
+always scoped from the trusted `operatorId` claim. Cursor custody timelines default to 50 events
+and page backward by immutable sequence.
 
 ### 8.4 PaymentStatus
 
@@ -3730,6 +3808,7 @@ permitted.
 | `PendingCargoRecoveryOperationJob` | Recurring every 5 minutes | `parcel_cargo_recovery_operations.status=PENDING`, unclaimed/stale claim | Replay `TRANSFER|RETURN|RELEASE` with the persisted UUID-v4 operation id and frozen payload. RELEASE calls Trip no-op-safe release with the same ID; success atomically finalizes the operation, definitive 4xx marks `FAILED`, unknown/503 stays `PENDING`. |
 | `PendingOperatorActionReAlertJob` | Scheduled (per Parcel) | PENDING_OPERATOR_ACTION + 2h | Emit replay-safe `parcel.parcel.pending_operator_action_realerted`; status unchanged |
 | `DeliveryConfirmationReminderJob` | Recurring | Active confirmation token expired at least 7 days | Emit `parcel.parcel.delivery_confirmation_realerted` for the operator; never rotate the token or change Parcel status |
+| `ParcelIncidentSearchExpiryJob` | Recurring every 15 minutes | Active incident with `search_deadline <= now` | Idempotently records escalation/search expiry, confirms `LOST_CONFIRMED`, emits `parcel.incident.updated`, and makes the sender claim-eligible; never changes `ParcelStatus` to LOST |
 
 #### Payment & Wallet
 
@@ -3741,6 +3820,7 @@ permitted.
 | `TripSettlementWeeklyAutoSettleJob` | Recurring | Weekly Mon 09:00 Asia/Ho_Chi_Minh | Debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE |
 | `InvoicePdfRetryJob` | Triggered (retry) | Post-payment-success event | Generate PDF, retry max 5 nếu fail |
 | `RefundFailureRetryJob` | Recurring | Every 10 phút | Retry refund từ RefundFailureLog, max 5 lần |
+| `ParcelCompensationFundingRetryJob` | Recurring every 10 minutes | `parcel_compensation_payouts.status=FUNDING_PENDING` | Retry at most 100 oldest payouts against the same operator's current funding source; unique claim/wallet references prevent double credit and operator wallet cannot become negative |
 
 ### 10.2 BullMQ jobs (NestJS services)
 
@@ -4215,6 +4295,8 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.77.0** | 2026-08-21 | Codex | **MINOR** — Add screen-ready Parcel Reliability read contracts for Passenger, Assistant and Operator FE: batched operator/Trip/stop/custody/incident/claim enrichment, one-call tracking and Driver manifest/action state, detailed reconciliation, paged incident/claim/unidentified queues, cursor detail timelines, supervisor match candidates, operator policy defaults, and Trip-owned forwarding compatibility/capacity search. Gateway gates staff read vs admin decision explicitly; no state machine, schema, dependency or cross-database join is added. |
+| **1.76.0** | 2026-08-21 | Codex | **MINOR** — Implement Parcel Reliability v2 across Parcel, Trip, Payment, Gateway and Notification. Add immutable declaration/operator compensation-policy snapshots (default 50%, cap 30m, fallback 4x freight), append-only multi-leg chain of custody with current-location projection, explicit QR/manual/unidentified-package handling, operational-location-fenced unload/reconciliation, incident/search/forwarding/lost-confirmation workflows, sender-owned claims/evidence/appeal audit, and idempotent operator-funded payout with `FUNDING_PENDING` future-settlement retry. Register one Internal Trip endpoint, nine reliability/payment routing keys including the every-stop `trip.stop.departed` reconciliation fact, the Parcel consumer for `trip.destination.arrived`, two recurring jobs, reliability error codes, ADR 0006, and reversible Parcel/Payment migrations. `ParcelStatus` deliberately gains no `LOST`; personal luggage and insurance remain out of scope; no dependency is added. |
 | **1.75.0** | 2026-08-17 | Codex | **MINOR** — Add assigned-Driver and same-tenant Operator Admin manual `SCHEDULED -> BOARDING` endpoints with configurable inclusive T-180 default, UUID-v4 idempotency, exact no-op replay, manual audit and the existing boarding event. Manual and automatic boarding share one `SELECT ... FOR UPDATE` coordinator, preserving strict `BOARDING -> IN_PROGRESS` start and preventing Hangfire state regression. Adds two required mutations, raising inventory from 215/194/21 to 217/196/21; no status, column, migration, dependency or routing key. |
 | **1.74.0** | 2026-08-16 | Codex | **MINOR** — Make confirmed-booking seat release durable and owner-safe. `TripSeat` now stores logical `bookingId` exactly while `BOOKED`; book/round-trip/substitution paths persist ownership, HTTP `release-seats` remains HELD-only, and the existing Trip `booking.booking.cancelled` consumer releases only exact `tripId + bookingId` ownership in its local transaction. Legacy cancellation payloads retain shuttle compatibility without main-seat mutation. Adds one reversible Trip migration and no dependency, endpoint, error code, routing key, or queue. |
 | **1.73.0** | 2026-08-14 | Codex | **MINOR** — Add the approved P0–P2 FE search/filter contract across Booking, Parcel, Trip, Identity and Payment: tenant-safe filters and deterministic sorting, voucher/operator/fare summaries, operator CSV export, internal accent-insensitive user search capped at 1,000 IDs, Parcel sender orchestration, and passenger-level no-show statistics. Register `SEARCH_TOO_BROAD` as HTTP 422 and add reversible Booking/Identity/Parcel migrations; no dependency, Gateway route, integration event or P3/global-list normalization change. |

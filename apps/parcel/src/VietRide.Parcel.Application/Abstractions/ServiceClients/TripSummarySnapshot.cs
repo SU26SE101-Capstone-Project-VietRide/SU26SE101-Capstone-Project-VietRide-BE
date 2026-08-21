@@ -6,4 +6,7 @@ public sealed record TripSummarySnapshot(
     DateTimeOffset DepartureAt,
     DateTimeOffset ArrivalEstimate,
     TripRouteSummarySnapshot Route,
-    TripVehicleSummarySnapshot Vehicle);
+    TripVehicleSummarySnapshot Vehicle)
+{
+    public IReadOnlyList<TripStopSummarySnapshot> Stops { get; init; } = [];
+}

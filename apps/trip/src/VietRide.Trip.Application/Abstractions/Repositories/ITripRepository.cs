@@ -16,6 +16,20 @@ public interface ITripRepository : IRepository<Domain.Entities.Trip, Guid>
         CancellationToken cancellationToken)
         => throw new NotSupportedException("Internal Trip summary batching is not implemented by this repository.");
 
+    Task<IReadOnlyList<ForwardingTripCandidate>> ListForwardingCandidatesAsync(
+        Guid operatorId,
+        Guid? excludedTripId,
+        string pickupLocationType,
+        Guid pickupLocationId,
+        string targetLocationType,
+        Guid targetLocationId,
+        decimal weightKg,
+        decimal volumeM3,
+        DateTimeOffset earliestDeparture,
+        int limit,
+        CancellationToken cancellationToken)
+        => throw new NotSupportedException("Forwarding candidate search is not implemented by this repository.");
+
     Task<PagedResult<OperatorTripListRow>> ListOperatorTripsAsync(
         Guid operatorId,
         int page,

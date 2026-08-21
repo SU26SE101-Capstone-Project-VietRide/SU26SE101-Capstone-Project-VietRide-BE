@@ -13,6 +13,12 @@ import {
   PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
   PARCEL_DELIVERY_REJECTED_ROUTING_KEY,
   PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_INCIDENT_OPENED_ROUTING_KEY,
+  PARCEL_INCIDENT_UPDATED_ROUTING_KEY,
+  PARCEL_CLAIM_SUBMITTED_ROUTING_KEY,
+  PARCEL_CLAIM_DECIDED_ROUTING_KEY,
+  PARCEL_COMPENSATION_PAID_ROUTING_KEY,
+  PARCEL_COMPENSATION_FUNDING_PENDING_ROUTING_KEY,
   PARCEL_REVIEW_APPROVED_ROUTING_KEY,
   PARCEL_REVIEW_REQUESTED_ROUTING_KEY,
   PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
@@ -87,6 +93,102 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
     expect(loaded).toHaveLength(2);
     expect(unloaded[0]?.type).toBe(NotificationType.PARCEL_IN_TRANSIT);
     expect(rejected[0]?.type).toBe(NotificationType.PARCEL_REJECTED);
+  });
+
+  it('maps Parcel Reliability incident, claim, and compensation facts to scoped recipients', async () => {
+    const snapshot = async (): Promise<ParcelRecipientSnapshot> => ({
+      parcelId: PARCEL_ID,
+      tripId: TRIP_ID,
+      status: 'PENDING_OPERATOR_ACTION',
+      senderUserId: USER_ID,
+      recipientUserId: SECOND_USER_ID,
+      operatorId: OPERATOR_ID,
+      dropoffStopId: null,
+    });
+    const operatorRecipients = async () => [SECOND_USER_ID];
+    const incidentId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const claimId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+    const opened = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_INCIDENT_OPENED_ROUTING_KEY,
+      {
+        incidentId,
+        parcelId: PARCEL_ID,
+        type: 'WRONG_STOP',
+        searchDeadline: '2026-08-23T03:00:00Z',
+      },
+      operatorRecipients,
+      snapshot,
+    );
+    const forwarding = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_INCIDENT_UPDATED_ROUTING_KEY,
+      {
+        incidentId,
+        parcelId: PARCEL_ID,
+        operatorId: OPERATOR_ID,
+        status: 'FORWARDING',
+        targetTripId: TRIP_ID,
+      },
+      operatorRecipients,
+      snapshot,
+    );
+    const submitted = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_CLAIM_SUBMITTED_ROUTING_KEY,
+      {
+        claimId,
+        parcelId: PARCEL_ID,
+        operatorId: OPERATOR_ID,
+        beneficiaryUserId: USER_ID,
+      },
+      operatorRecipients,
+    );
+    const approved = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_CLAIM_DECIDED_ROUTING_KEY,
+      {
+        claimId,
+        parcelId: PARCEL_ID,
+        operatorId: OPERATOR_ID,
+        beneficiaryUserId: USER_ID,
+        status: 'APPROVED',
+        totalAwardVnd: 6_000_000,
+      },
+      operatorRecipients,
+    );
+    const fundingPending = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_COMPENSATION_FUNDING_PENDING_ROUTING_KEY,
+      {
+        payoutId: PAYOUT_ID,
+        claimId,
+        parcelId: PARCEL_ID,
+        operatorId: OPERATOR_ID,
+        beneficiaryUserId: USER_ID,
+        amountVnd: 6_000_000,
+        status: 'FUNDING_PENDING',
+      },
+      operatorRecipients,
+    );
+    const paid = await mapParcelSubscriptionOperatorEventToNotifications(
+      PARCEL_COMPENSATION_PAID_ROUTING_KEY,
+      {
+        payoutId: PAYOUT_ID,
+        claimId,
+        parcelId: PARCEL_ID,
+        operatorId: OPERATOR_ID,
+        beneficiaryUserId: USER_ID,
+        amountVnd: 6_000_000,
+        status: 'PAID',
+      },
+      operatorRecipients,
+    );
+
+    expect(opened.map(({ userId }) => userId)).toEqual([USER_ID, SECOND_USER_ID]);
+    expect(forwarding[0]?.title).toBe('Hàng đang được chuyển về đúng điểm nhận');
+    expect(submitted.map(({ userId }) => userId)).toEqual([USER_ID, SECOND_USER_ID]);
+    expect(approved).toEqual([
+      expect.objectContaining({ userId: USER_ID, body: expect.stringContaining('6000000 VND') }),
+    ]);
+    expect(fundingPending[0]?.title).toBe('Khoản bồi thường đang chờ nguồn tiền');
+    expect(paid[0]).toMatchObject({ userId: USER_ID, type: NotificationType.WALLET_CREDITED });
   });
 
   it('maps canonical delivered-pending-confirm only to explicit recipient accounts', async () => {

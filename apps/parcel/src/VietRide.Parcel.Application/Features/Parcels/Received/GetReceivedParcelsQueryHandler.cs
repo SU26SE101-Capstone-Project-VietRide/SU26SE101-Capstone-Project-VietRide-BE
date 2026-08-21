@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Parcel.Application.Features.Parcels.Received;
@@ -10,13 +11,16 @@ public sealed class GetReceivedParcelsQueryHandler
 {
     private readonly IParcelRepository _parcelRepository;
     private readonly ITripServiceClient _tripClient;
+    private readonly IParcelReliabilityReadModelService? _screenModels;
 
     public GetReceivedParcelsQueryHandler(
         IParcelRepository parcelRepository,
-        ITripServiceClient tripClient)
+        ITripServiceClient tripClient,
+        IParcelReliabilityReadModelService? screenModels = null)
     {
         _parcelRepository = parcelRepository;
         _tripClient = tripClient;
+        _screenModels = screenModels;
     }
 
     public async Task<PagedResult<ReceivedParcelResponse>> Handle(
@@ -25,6 +29,44 @@ public sealed class GetReceivedParcelsQueryHandler
     {
         var pagedResult = await _parcelRepository.ListReceivedByUserIdAsync(
             query.UserId, query.Page, query.PageSize, cancellationToken);
+
+        if (_screenModels is not null)
+        {
+            var screens = await _screenModels.BuildAsync(
+                pagedResult.Items,
+                query.UserId,
+                includeClaim: false,
+                cancellationToken);
+            var enrichedItems = pagedResult.Items.Select(parcel =>
+            {
+                screens.TryGetValue(parcel.Id, out var screen);
+                return new ReceivedParcelResponse(
+                    parcel.Id,
+                    parcel.ParcelCode,
+                    parcel.Status.ToString(),
+                    screen?.Trip.Route?.Origin is { } origin
+                        ? new ReceivedParcelStationResponse(origin.Id ?? Guid.Empty, origin.Name ?? string.Empty)
+                        : null,
+                    screen?.Trip.Route?.Destination is { } destination
+                        ? new ReceivedParcelStationResponse(destination.Id ?? Guid.Empty, destination.Name ?? string.Empty)
+                        : null,
+                    screen?.Trip.Eta,
+                    parcel.SenderUserId,
+                    parcel.RecipientName,
+                    parcel.SizeCategory.ToString(),
+                    parcel.CreatedAt,
+                    parcel.OperatorId,
+                    parcel.TripId,
+                    screen?.Operator,
+                    screen?.DropoffLocation,
+                    screen?.Reliability);
+            }).ToArray();
+            return PagedResult<ReceivedParcelResponse>.Create(
+                enrichedItems,
+                pagedResult.Page,
+                pagedResult.PageSize,
+                pagedResult.TotalItems);
+        }
 
         var distinctTripIds = pagedResult.Items
             .Select(p => p.TripId)

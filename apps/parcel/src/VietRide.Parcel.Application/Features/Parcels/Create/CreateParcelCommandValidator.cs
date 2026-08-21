@@ -37,6 +37,13 @@ public sealed class CreateParcelCommandValidator : AbstractValidator<CreateParce
         RuleFor(x => x.EstimatedWeightKg)
             .GreaterThan(0);
 
+        RuleFor(x => x.DeclaredValueVnd)
+            .GreaterThanOrEqualTo(0)
+            .When(x => x.DeclaredValueVnd.HasValue);
+
+        RuleFor(x => x.Quantity)
+            .InclusiveBetween(1, 10_000);
+
         RuleFor(x => x.LengthCm)
             .GreaterThan(0);
         RuleFor(x => x.WidthCm)

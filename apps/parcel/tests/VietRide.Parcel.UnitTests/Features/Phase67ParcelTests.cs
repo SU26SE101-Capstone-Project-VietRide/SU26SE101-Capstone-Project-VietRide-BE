@@ -45,6 +45,7 @@ public sealed class Phase67ParcelTests
     private static readonly Guid OperatorId = Guid.NewGuid();
     private static readonly Guid TripId = Guid.NewGuid();
     private static readonly Guid DropoffStopId = Guid.NewGuid();
+    private static readonly Guid DestinationStationId = Guid.NewGuid();
     private static readonly Guid AssistantUserId = Guid.NewGuid();
 
     [Fact]
@@ -105,6 +106,8 @@ public sealed class Phase67ParcelTests
             .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
         tripClient.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
             .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, TripSnapshot(allowDropoff: true), null));
+        tripClient.GetTripOperationalLocationAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(OperationalLocation(DropoffStopId, destinationArrivedAt: null));
         tripClient.ReleaseCargoAsync(TripId, ParcelId, Arg.Any<decimal>(), Arg.Any<CancellationToken>())
             .Returns(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
         repo.TryMarkUnloadedAsync(ParcelId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
@@ -112,7 +115,7 @@ public sealed class Phase67ParcelTests
 
         var handler = new UnloadParcelCommandHandler(repo, tripClient, Outbox(), UnitOfWork());
         var result = await handler.Handle(
-            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            ValidRouteUnloadCommand(),
             default);
 
         result.Status.Should().Be("UNLOADED");
@@ -144,10 +147,12 @@ public sealed class Phase67ParcelTests
                     allowDropoff: true,
                     destinationArrivedAt: null),
                 null));
+        tripClient.GetTripOperationalLocationAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(OperationalLocation(currentStopId: null, destinationArrivedAt: null));
 
         var handler = new UnloadParcelCommandHandler(repo, tripClient, Outbox(), UnitOfWork());
         var act = () => handler.Handle(
-            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            ValidDestinationUnloadCommand(),
             default);
 
         await act.Should().ThrowAsync<CodedValidationException>()
@@ -172,6 +177,8 @@ public sealed class Phase67ParcelTests
                     stops: [],
                     destinationArrivedAt: DateTimeOffset.UtcNow),
                 null));
+        tripClient.GetTripOperationalLocationAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(OperationalLocation(currentStopId: null, destinationArrivedAt: DateTimeOffset.UtcNow));
         tripClient.ReleaseCargoAsync(TripId, ParcelId, Arg.Any<decimal>(), Arg.Any<CancellationToken>())
             .Returns(new TripCargoOutcome(TripCargoOutcomeKind.Success, null));
         repo.TryMarkUnloadedAsync(ParcelId, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
@@ -179,7 +186,7 @@ public sealed class Phase67ParcelTests
 
         var handler = new UnloadParcelCommandHandler(repo, tripClient, Outbox(), UnitOfWork());
         var result = await handler.Handle(
-            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            ValidDestinationUnloadCommand(),
             default);
 
         result.Status.Should().Be("UNLOADED");
@@ -783,7 +790,7 @@ public sealed class Phase67ParcelTests
             DateTimeOffset.UtcNow.AddHours(1),
             100_000,
             new TripStationDto(Guid.NewGuid(), "Origin"),
-            new TripStationDto(Guid.NewGuid(), "Destination"),
+            new TripStationDto(DestinationStationId, "Destination"),
             stops ?? [new TripStopDto(DropoffStopId, 1, false, allowDropoff, DateTimeOffset.UtcNow, 10, null, "ARRIVED", DateTimeOffset.UtcNow)],
             new TripSeatSummaryDto(40, 10),
             null,
@@ -796,6 +803,40 @@ public sealed class Phase67ParcelTests
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         property!.SetValue(target, value);
     }
+
+    private static UnloadParcelCommand ValidRouteUnloadCommand()
+        => new(
+            ParcelId,
+            AssistantUserId,
+            OperatorId,
+            ActualLocationKind: "ROUTE_STOP",
+            ActualLocationId: DropoffStopId,
+            ScannedParcelCode: "VRP-001");
+
+    private static UnloadParcelCommand ValidDestinationUnloadCommand()
+        => new(
+            ParcelId,
+            AssistantUserId,
+            OperatorId,
+            ActualLocationKind: "DESTINATION_STATION",
+            ActualLocationId: DestinationStationId,
+            ScannedParcelCode: "VRP-001");
+
+    private static TripOperationalLocationOutcome OperationalLocation(
+        Guid? currentStopId,
+        DateTimeOffset? destinationArrivedAt)
+        => new(
+            TripOperationalLocationOutcomeKind.Success,
+            new TripOperationalLocationSnapshot(
+                TripId,
+                Guid.NewGuid(),
+                "IN_PROGRESS",
+                currentStopId,
+                currentStopId.HasValue ? "ARRIVED" : null,
+                currentStopId.HasValue ? DateTimeOffset.UtcNow : null,
+                null,
+                destinationArrivedAt),
+            null);
 
     private static ParcelEventSnapshot EventSnapshot(ParcelStatus status)
         => new(Guid.NewGuid(), "VRP-001", OperatorId, TripId, status);

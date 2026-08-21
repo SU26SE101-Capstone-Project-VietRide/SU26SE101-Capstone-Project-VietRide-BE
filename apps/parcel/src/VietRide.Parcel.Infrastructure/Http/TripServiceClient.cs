@@ -135,6 +135,54 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
         }
     }
 
+    public async Task<TripOperationalLocationOutcome> GetTripOperationalLocationAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient
+                .GetAsync($"/internal/v1/trips/{tripId:D}/operational-location", cancellationToken)
+                .ConfigureAwait(false);
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return new TripOperationalLocationOutcome(
+                    TripOperationalLocationOutcomeKind.TripNotFound,
+                    null,
+                    null);
+            if (response.StatusCode != HttpStatusCode.OK)
+                return new TripOperationalLocationOutcome(
+                    TripOperationalLocationOutcomeKind.TransportError,
+                    null,
+                    $"Trip service returned status {(int)response.StatusCode}.");
+
+            var snapshot = await response.Content
+                .ReadFromJsonAsync<TripOperationalLocationSnapshot>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            return snapshot is null
+                ? new TripOperationalLocationOutcome(
+                    TripOperationalLocationOutcomeKind.TransportError,
+                    null,
+                    "Trip service returned null operational location on 200.")
+                : new TripOperationalLocationOutcome(
+                    TripOperationalLocationOutcomeKind.Success,
+                    snapshot,
+                    null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TripServiceClient.GetTripOperationalLocationAsync({TripId}) failed.", tripId);
+            return new TripOperationalLocationOutcome(
+                TripOperationalLocationOutcomeKind.TransportError,
+                null,
+                $"Trip service transport failure: {ex.Message}");
+        }
+    }
+
     public async Task<TripSummaryBatchOutcome> GetTripSummariesAsync(
         IReadOnlyCollection<Guid> tripIds,
         CancellationToken cancellationToken = default)
@@ -204,6 +252,59 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
             _logger.LogError(ex, "TripServiceClient.GetTripSummariesAsync failed.");
             return TripSummaryBatchOutcome.TransportFailure(
                 $"Trip summary batch transport failure: {ex.Message}");
+        }
+    }
+
+    public async Task<TripForwardingOptionsOutcome> GetForwardingOptionsAsync(
+        Guid operatorId,
+        Guid? excludedTripId,
+        string pickupLocationType,
+        Guid pickupLocationId,
+        string targetLocationType,
+        Guid targetLocationId,
+        decimal weightKg,
+        decimal volumeM3,
+        DateTimeOffset earliestDeparture,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _httpClient.PostAsJsonAsync(
+                "/internal/v1/trips/forwarding-options",
+                new
+                {
+                    operatorId,
+                    excludedTripId,
+                    pickupLocationType,
+                    pickupLocationId,
+                    targetLocationType,
+                    targetLocationId,
+                    weightKg,
+                    volumeM3,
+                    earliestDeparture,
+                    limit,
+                },
+                JsonOptions,
+                cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.OK)
+                return TripForwardingOptionsOutcome.Failure(
+                    $"Trip forwarding option search returned status {(int)response.StatusCode}.");
+            var options = await response.Content
+                .ReadFromJsonAsync<IReadOnlyList<TripForwardingOptionSnapshot>>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            return options is null
+                ? TripForwardingOptionsOutcome.Failure("Trip forwarding option search returned a null body.")
+                : TripForwardingOptionsOutcome.Success(options);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TripServiceClient.GetForwardingOptionsAsync failed.");
+            return TripForwardingOptionsOutcome.Failure($"Trip service transport failure: {ex.Message}");
         }
     }
 

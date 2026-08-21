@@ -9,4 +9,5 @@ public sealed record TripStopDto(
     double DistanceFromOriginKm,
     long? FareFromThisStop,
     string Status = "PENDING",
-    DateTimeOffset? ActualArrivalTime = null);
+    DateTimeOffset? ActualArrivalTime = null,
+    DateTimeOffset? ActualDepartureTime = null);

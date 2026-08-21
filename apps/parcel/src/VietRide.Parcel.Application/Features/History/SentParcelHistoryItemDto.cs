@@ -1,3 +1,5 @@
+using VietRide.Parcel.Application.Features.Reliability.ReadModels;
+
 namespace VietRide.Parcel.Application.Features.History;
 
 public sealed record SentParcelHistoryItemDto(
@@ -15,4 +17,7 @@ public sealed record SentParcelHistoryItemDto(
     string RecipientName,
     string SizeCategory,
     string? PhotoUrl,
-    string DeliveryMethod);
+    string DeliveryMethod,
+    ReliabilityOperatorResponse? Operator = null,
+    ReliabilityLocationResponse? DropoffLocation = null,
+    ParcelReliabilitySummaryResponse? Reliability = null);

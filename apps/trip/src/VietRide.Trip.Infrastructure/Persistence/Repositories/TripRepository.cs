@@ -66,7 +66,9 @@ internal sealed class TripRepository : ITripRepository
                    vt.code,
                    vt.display_name,
                    t.driver_user_id,
-                   t.assistant_user_id
+                   t.assistant_user_id,
+                   origin.id,
+                   destination.id
             FROM vietride_trip.trips AS t
             INNER JOIN vietride_trip.routes AS r ON r.id = t.route_id
             INNER JOIN vietride_trip.stations AS origin ON origin.id = r.origin_station_id
@@ -79,31 +81,180 @@ internal sealed class TripRepository : ITripRepository
         AddParameter(command, "trip_ids", tripIds.ToArray());
 
         var summaries = new List<InternalTripSummaryDto>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                summaries.Add(new InternalTripSummaryDto(
+                    reader.GetGuid(0),
+                    reader.GetString(1),
+                    reader.GetFieldValue<DateTimeOffset>(2),
+                    reader.GetFieldValue<DateTimeOffset>(3),
+                    new InternalTripRouteSummaryDto(
+                        reader.GetGuid(4),
+                        reader.GetString(5),
+                        reader.GetString(6),
+                        reader.GetString(7))
+                    {
+                        OriginStationId = reader.GetGuid(15),
+                        DestinationStationId = reader.GetGuid(16),
+                    },
+                    new InternalTripVehicleSummaryDto(
+                        reader.GetGuid(8),
+                        reader.GetString(9),
+                        reader.GetString(10),
+                        new InternalTripVehicleTypeSummaryDto(
+                            reader.GetString(11),
+                            reader.GetString(12))),
+                    reader.GetGuid(13),
+                    reader.IsDBNull(14) ? null : reader.GetGuid(14)));
+            }
+        }
+
+        if (summaries.Count == 0)
+            return summaries;
+
+        await using var stopCommand = connection.CreateCommand();
+        stopCommand.Transaction = _dbContext.Database.CurrentTransaction?.GetDbTransaction();
+        stopCommand.CommandText =
+            """
+            SELECT ts.trip_id,
+                   ts.stop_id,
+                   s.name,
+                   ts.order_index,
+                   ts.estimated_arrival_time,
+                   ts.status::text,
+                   ts.actual_arrival_time,
+                   ts.actual_departure_time
+            FROM vietride_trip.trip_stops AS ts
+            INNER JOIN vietride_trip.stops AS s ON s.id = ts.stop_id
+            WHERE ts.trip_id = ANY(@trip_ids)
+            ORDER BY ts.trip_id, ts.order_index, ts.stop_id;
+            """;
+        AddParameter(stopCommand, "trip_ids", summaries.Select(summary => summary.TripId).ToArray());
+
+        var stopsByTrip = new Dictionary<Guid, List<InternalTripStopSummaryDto>>();
+        await using (var stopReader = await stopCommand.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await stopReader.ReadAsync(cancellationToken))
+            {
+                var tripId = stopReader.GetGuid(0);
+                if (!stopsByTrip.TryGetValue(tripId, out var stops))
+                {
+                    stops = [];
+                    stopsByTrip.Add(tripId, stops);
+                }
+
+                stops.Add(new InternalTripStopSummaryDto(
+                    stopReader.GetGuid(1),
+                    stopReader.GetString(2),
+                    stopReader.GetInt32(3),
+                    stopReader.GetFieldValue<DateTimeOffset>(4),
+                    stopReader.GetString(5),
+                    stopReader.IsDBNull(6) ? null : stopReader.GetFieldValue<DateTimeOffset>(6),
+                    stopReader.IsDBNull(7) ? null : stopReader.GetFieldValue<DateTimeOffset>(7)));
+            }
+        }
+
+        return summaries
+            .Select(summary => summary with
+            {
+                Stops = stopsByTrip.TryGetValue(summary.TripId, out var stops)
+                    ? stops
+                    : [],
+            })
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<ForwardingTripCandidate>> ListForwardingCandidatesAsync(
+        Guid operatorId,
+        Guid? excludedTripId,
+        string pickupLocationType,
+        Guid pickupLocationId,
+        string targetLocationType,
+        Guid targetLocationId,
+        decimal weightKg,
+        decimal volumeM3,
+        DateTimeOffset earliestDeparture,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var connection = _dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = _dbContext.Database.CurrentTransaction?.GetDbTransaction();
+        command.CommandText =
+            """
+            SELECT t.id,
+                   CASE
+                       WHEN @pickup_type = 'ROUTE_STOP' THEN pickup_stop.name
+                       ELSE origin.name
+                   END AS pickup_name,
+                   CASE
+                       WHEN @target_type = 'ROUTE_STOP' THEN target_stop.name
+                       ELSE destination.name
+                   END AS target_name,
+                   COALESCE(pickup_trip_stop.estimated_arrival_time, t.departure_date_time) AS pickup_at,
+                   COALESCE(target_trip_stop.estimated_arrival_time, t.estimated_arrival_time) AS target_eta,
+                   ((COALESCE(t.max_cargo_weight_kg, 0) - t.estimated_passenger_luggage_kg - t.reserved_parcel_weight_kg - t.total_loaded_weight_kg) >= @weight_kg
+                     AND (COALESCE(t.max_cargo_volume_m3, 0) - t.reserved_parcel_volume_m3 - t.total_loaded_volume_m3) >= @volume_m3) AS has_capacity
+            FROM vietride_trip.trips AS t
+            INNER JOIN vietride_trip.routes AS r ON r.id = t.route_id
+            INNER JOIN vietride_trip.stations AS origin ON origin.id = r.origin_station_id
+            INNER JOIN vietride_trip.stations AS destination ON destination.id = r.destination_station_id
+            LEFT JOIN vietride_trip.trip_stops AS pickup_trip_stop
+             ON pickup_trip_stop.trip_id = t.id
+             AND pickup_trip_stop.stop_id = @pickup_id
+            LEFT JOIN vietride_trip.stops AS pickup_stop ON pickup_stop.id = pickup_trip_stop.stop_id
+            LEFT JOIN vietride_trip.trip_stops AS target_trip_stop
+             ON target_trip_stop.trip_id = t.id
+             AND target_trip_stop.stop_id = @target_id
+            LEFT JOIN vietride_trip.stops AS target_stop ON target_stop.id = target_trip_stop.stop_id
+            WHERE t.operator_id = @operator_id
+              AND (@excluded_trip_id = '00000000-0000-0000-0000-000000000000'::uuid OR t.id <> @excluded_trip_id)
+              AND t.status IN ('SCHEDULED', 'BOARDING')
+              AND t.departure_date_time >= @earliest_departure
+              AND (
+                    (@pickup_type = 'ROUTE_STOP' AND pickup_trip_stop.stop_id IS NOT NULL AND pickup_trip_stop.allow_pickup = TRUE)
+                 OR (@pickup_type <> 'ROUTE_STOP' AND r.origin_station_id = @pickup_id)
+              )
+              AND (
+                    (@target_type = 'ROUTE_STOP' AND target_trip_stop.stop_id IS NOT NULL AND target_trip_stop.allow_dropoff = TRUE)
+                 OR (@target_type <> 'ROUTE_STOP' AND r.destination_station_id = @target_id)
+              )
+              AND (
+                    @pickup_type <> 'ROUTE_STOP'
+                 OR @target_type <> 'ROUTE_STOP'
+                 OR pickup_trip_stop.order_index < target_trip_stop.order_index
+              )
+            ORDER BY has_capacity DESC, pickup_at, t.id
+            LIMIT @limit;
+            """;
+        AddParameter(command, "operator_id", operatorId);
+        AddParameter(command, "excluded_trip_id", excludedTripId ?? Guid.Empty);
+        AddParameter(command, "pickup_type", pickupLocationType.ToUpperInvariant());
+        AddParameter(command, "pickup_id", pickupLocationId);
+        AddParameter(command, "target_type", targetLocationType.ToUpperInvariant());
+        AddParameter(command, "target_id", targetLocationId);
+        AddParameter(command, "weight_kg", weightKg);
+        AddParameter(command, "volume_m3", volumeM3);
+        AddParameter(command, "earliest_departure", earliestDeparture);
+        AddParameter(command, "limit", Math.Clamp(limit, 1, 50));
+
+        var results = new List<ForwardingTripCandidate>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            summaries.Add(new InternalTripSummaryDto(
+            results.Add(new ForwardingTripCandidate(
                 reader.GetGuid(0),
                 reader.GetString(1),
-                reader.GetFieldValue<DateTimeOffset>(2),
+                reader.GetString(2),
                 reader.GetFieldValue<DateTimeOffset>(3),
-                new InternalTripRouteSummaryDto(
-                    reader.GetGuid(4),
-                    reader.GetString(5),
-                    reader.GetString(6),
-                    reader.GetString(7)),
-                new InternalTripVehicleSummaryDto(
-                    reader.GetGuid(8),
-                    reader.GetString(9),
-                    reader.GetString(10),
-                    new InternalTripVehicleTypeSummaryDto(
-                        reader.GetString(11),
-                        reader.GetString(12))),
-                reader.GetGuid(13),
-                reader.IsDBNull(14) ? null : reader.GetGuid(14)));
+                reader.GetFieldValue<DateTimeOffset>(4),
+                reader.GetBoolean(5)));
         }
-
-        return summaries;
+        return results;
     }
 
     public async Task<PagedResult<OperatorTripListRow>> ListOperatorTripsAsync(

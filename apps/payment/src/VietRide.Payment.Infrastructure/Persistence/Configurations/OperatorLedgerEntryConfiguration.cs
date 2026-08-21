@@ -12,10 +12,10 @@ internal sealed class OperatorLedgerEntryConfiguration : IEntityTypeConfiguratio
         {
             table.HasCheckConstraint(
                 "chk_operator_ledger_entries_amount_direction",
-                "(entry_type IN ('BOOKING_REFUND','PARCEL_REFUND') AND amount < 0) OR " +
+                "(entry_type IN ('BOOKING_REFUND','PARCEL_REFUND','PARCEL_COMPENSATION') AND amount < 0) OR " +
                 "(entry_type = 'VOUCHER_OPERATOR_FUNDED_AUDIT' AND amount = 0) OR " +
                 "(entry_type = 'ADJUSTMENT') OR " +
-                "(entry_type NOT IN ('BOOKING_REFUND','PARCEL_REFUND','VOUCHER_OPERATOR_FUNDED_AUDIT','ADJUSTMENT') AND amount > 0)");
+                "(entry_type NOT IN ('BOOKING_REFUND','PARCEL_REFUND','PARCEL_COMPENSATION','VOUCHER_OPERATOR_FUNDED_AUDIT','ADJUSTMENT') AND amount > 0)");
             table.HasCheckConstraint(
                 "chk_operator_ledger_entries_trip_required",
                 "entry_type = 'ADJUSTMENT' OR trip_id IS NOT NULL");

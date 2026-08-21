@@ -24,6 +24,15 @@ public sealed class ParcelDbContext : VietRideDbContextBase
     public DbSet<ParcelDeliveryToken> ParcelDeliveryTokens => Set<ParcelDeliveryToken>();
     public DbSet<ParcelCargoRecoveryOperation> ParcelCargoRecoveryOperations
         => Set<ParcelCargoRecoveryOperation>();
+    public DbSet<ParcelTransitLeg> ParcelTransitLegs => Set<ParcelTransitLeg>();
+    public DbSet<ParcelCustodyEvent> ParcelCustodyEvents => Set<ParcelCustodyEvent>();
+    public DbSet<ParcelCurrentCustody> ParcelCurrentCustodies => Set<ParcelCurrentCustody>();
+    public DbSet<ParcelIncident> ParcelIncidents => Set<ParcelIncident>();
+    public DbSet<ParcelSearchTask> ParcelSearchTasks => Set<ParcelSearchTask>();
+    public DbSet<ParcelClaim> ParcelClaims => Set<ParcelClaim>();
+    public DbSet<ParcelClaimEvidence> ParcelClaimEvidence => Set<ParcelClaimEvidence>();
+    public DbSet<ParcelCompensationPolicy> ParcelCompensationPolicies => Set<ParcelCompensationPolicy>();
+    public DbSet<UnidentifiedParcelPackage> UnidentifiedParcelPackages => Set<UnidentifiedParcelPackage>();
     public DbSet<ParcelRouteFare> ParcelRouteFares => Set<ParcelRouteFare>();
     public DbSet<ParcelStats> ParcelStats => Set<ParcelStats>();
     public DbSet<SystemConfig> SystemConfigs => Set<SystemConfig>();

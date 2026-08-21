@@ -16,6 +16,7 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
   - Subscription PENDING_PAYMENT warn 24h + revert 7d
   - Invoice PDF reconciliation (`*/5 * * * *` UTC), five total attempts, stale PROCESSING recovery after 15 minutes
   - RefundFailureLog retry (5m, max 5 retries)
+  - Parcel compensation funding retry (10m) cho payout đang `FUNDING_PENDING`
 
 > **v1 model:** Booking/parcel revenue vào **PlatformWallet holding pool**, sau Trip terminal + 7-day hold mới settle sang **ví nội bộ operator** (`OperatorWallet`). KHÔNG có bank withdrawal trong v1 — defer sang v2.
 
@@ -34,6 +35,7 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
 | `OperatorWalletTransaction` | Ledger immutable của OperatorWallet. | `type` CREDIT/DEBIT, `referenceType` TRIP_SETTLEMENT/ADJUSTMENT/SUBSCRIPTION_PAYMENT, balance snapshot |
 | `OperatorTripSettlement` | Per-Trip settlement marker và settlement cùng một row. | UNIQUE `(operator_id, trip_id)`, `status` enum 4-state, `eligibleAt`, failure metadata, `row_version` |
 | `OperatorLedgerEntry` | **Audit log** per booking/parcel revenue/refund. | `trip_id` nullable, `entryType` enum, `amount` signed, `adjustmentReason` có kiểu rõ ràng cho mọi `ADJUSTMENT`. **KHÔNG có balance_before/after** (drop từ v1 wallet model). |
+| `ParcelCompensationPayout` | Payout bồi thường unique theo Parcel claim. | Frozen parcel/trip/operator/beneficiary/amount, funding source, PassengerWallet transaction, `PENDING|FUNDING_PENDING|PAID` |
 | `RefundFailureLog` | Retry tracking khi refund event consume fail. | `retryCount` ≤ 5 → admin manual |
 | `OutboxEvent` | Outbox pattern. | |
 | `OutboxDlq` | Terminal Outbox failures for admin review. | unique `eventId`, payload, retry metadata, `terminalAt` |
@@ -78,6 +80,7 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
   - PassengerWallet payment → DEBIT PassengerWallet + CREDIT PlatformWallet cùng amount (chuyển liability sang holding pool, không có dòng tiền vật lý mới).
 - Refund trước settlement → CREDIT PassengerWallet + DEBIT PlatformWallet; KHÔNG debit OperatorWallet.
 - Settlement → DEBIT PlatformWallet + CREDIT OperatorWallet trong cùng transaction.
+- Parcel compensation trước settlement chỉ debit phần holding của đúng operator/Trip; sau settlement debit đúng OperatorWallet. Thiếu tiền không cho ví âm mà giữ `FUNDING_PENDING` để retry từ settlement tương lai; VietRide không ứng trước.
 
 - **`operator_wallets`** thay thế hoàn toàn `operator_balances` cũ. Schema gần giống (1-1 với operator, balance non-negative, optimistic lock theo row_version) nhưng semantic khác:
   - **Cũ:** `operator_balances` ghi nhận "số VietRide đang nợ operator" — credit ngay khi booking SUCCEEDED, debit khi bank-transfer payout.
@@ -179,6 +182,8 @@ Trước đây flow check `OperatorBalance >= refundTotal` + `OPERATOR_INSUFFICI
 | `idx_operator_wallet_transactions_reference` | `(reference_type, reference_id)` partial | B-tree | Trace credit/adjustment |
 | `uq_operator_wallet_transactions_subscription` | `(operator_id, type, reference_type, reference_id)` partial where SUBSCRIPTION_PAYMENT | unique | Idempotent subscription debit |
 | `uq_operator_trip_settlements_operator_trip` | `(operator_id, trip_id)` | unique | 1 settlement per trip per operator |
+| `uq_parcel_compensation_payouts_claim` | `claim_id` | unique | Một payout idempotent cho mỗi claim |
+| `idx_parcel_compensation_payouts_operator_status` | `(operator_id, status, created_at)` | B-tree | Tenant-safe funding retry/đối soát |
 | `idx_operator_trip_settlements_status_eligible` | `(status, eligible_at)` partial | B-tree | **Hangfire daily 02:00 + Monday 09:00 jobs** |
 | `idx_operator_trip_settlements_operator_status` | `(operator_id, status)` | B-tree | Operator dashboard "pending revenue" tab |
 | `idx_operator_ledger_entries_operator_id_created_at` | `(operator_id, created_at DESC)` | B-tree | Ledger query per operator |
@@ -202,7 +207,7 @@ amount dương. Đây là contract logic trên schema hiện có, không thêm m
 | Column | References | Enforcement |
 |---|---|---|
 | `Payment.userId`, `TopUpRequest.userId`, `Wallet.userId` (PK), `WalletTransaction.userId`, `RefundFailureLog.resolvedByUserId`, `OperatorTripSettlement.settledByUserId` | `identity.User.id` | app-layer |
-| `Payment.operatorId`, `Invoice.operatorId`, `OperatorWallet.operatorId`, `OperatorWalletTransaction.operatorId`, `OperatorLedgerEntry.operatorId`, `OperatorTripSettlement.operatorId` | `identity.Operator.id` | app-layer |
+| `Payment.operatorId`, `Invoice.operatorId`, `OperatorWallet.operatorId`, `OperatorWalletTransaction.operatorId`, `OperatorLedgerEntry.operatorId`, `OperatorTripSettlement.operatorId`, `ParcelCompensationPayout.operatorId` | `identity.Operator.id` | app-layer |
 | `Invoice.operatorSubscriptionId` | `identity.OperatorSubscription.id` | app-layer |
 | `OperatorLedgerEntry.tripId`, `OperatorTripSettlement.tripId` | `trip.Trip.id` | app-layer |
 | `Payment.referenceId` (polymorphic) | `booking.Booking.id` / `booking.bookingGroupId` / `parcel.Parcel.id` / `top_up_requests.id` / `identity.operator_subscriptions.id` | by `referenceType` |

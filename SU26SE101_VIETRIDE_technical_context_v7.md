@@ -507,8 +507,9 @@ suspend phát Outbox revoke request để Identity gọi Firebase `RevokeRefresh
   - Khi xe đang tại stop (GPS trong vòng 200m từ stop) → app tự động highlight danh sách passenger chưa tick tại stop này
   - Khi Driver/Assistant bấm "Rời điểm dừng" → bodyless `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart`
     persists `TripStop.actualDepartureTime` and asks Booking for the exact pending-passenger count.
-    A positive count emits `trip.stop.departed_with_pending`; GPS is a future adapter to this
-    same command and is not a second write path.
+    Every committed departure emits `trip.stop.departed` for Parcel reconciliation; a positive
+    passenger count additionally emits `trip.stop.departed_with_pending`. GPS is a future adapter
+    to this same command and is not a second write path.
 - Nhận push notification thay đổi lộ trình, lịch trình từ operator
 - **Tab "Hỗ trợ" — RAG AI (Driver/Assistant App):**
   - Truy cập chatbot RAG AI với context DRIVER role (query được: FAQ, quy trình vận hành, chính sách hàng ký gửi, thông tin tuyến)
@@ -3217,9 +3218,10 @@ Operator override (exception handling only):
       metadata: { parcelId, tripId, reason } }
   → Không dùng override cho bulk action — phải per-parcel
 
-Arrival Outbox facts không điều khiển Parcel state: `trip.stop.arrived` chỉ có Notification
-consumer; `trip.destination.arrived` không có Parcel consumer. Parcel không tạo arrival projection,
-không update từ event và không suy diễn destination từ stop trung gian cuối.
+Arrival Outbox facts không trực tiếp đổi `ParcelStatus`: `trip.stop.arrived` chỉ có Notification
+consumer; `trip.destination.arrived` kích hoạt Parcel search cho terminal-bound parcel vẫn
+`LOADED|IN_TRANSIT`. Custody projection chỉ update từ custody event và không suy diễn vị trí từ
+arrival/departure fact.
 ```
 
 **Parcel behavior khi Trip CANCELLED (SCHEDULED hoặc BOARDING):**
@@ -3577,6 +3579,85 @@ Parcel có tính phí. Operator define bảng giá theo route + size category. C
 **Operator setup:** Khi tạo Route, Operator configure ParcelRouteFare cho từng size. Nếu chưa config → parcel request trên route đó sẽ hiển thị error "Nhà xe chưa cấu hình giá hàng ký gửi cho tuyến này".
 
 > **Lý do chọn email link thay SMS:** Email miễn phí hoàn toàn (SendGrid free 100/ngày), không cần cài app, chỉ cần browser. SMS Gateway (Twilio, ESMS.vn) tốn phí và phức tạp cấu hình. Zalo OA ZNS không có free tier production. Pattern email link phổ biến (tương tự xác nhận đơn hàng Shopee/Lazada).
+
+#### 6.6.1 Parcel Reliability v2 — custody, incident, search và bồi thường
+
+Áp dụng cho mọi Parcel (parcel-only và gắn Booking); không áp dụng cho hành lý cá nhân chưa có mã
+Parcel. `ParcelStatusHistory` tiếp tục là state machine thương mại. Vị trí và người đang giữ hàng
+được chứng minh riêng bởi `ParcelTransitLeg`, append-only `ParcelCustodyEvent` và projection
+`ParcelCurrentCustody`. Không thêm `LOST` vào `ParcelStatus`; mất hàng là
+`ParcelIncident.status=LOST_CONFIRMED`.
+
+Custody event bắt buộc ghi Parcel/leg/Trip, expected và actual location, location type/id/snapshot,
+vehicle, actor/role, `occurredAt`, `recordedAt`, source, UUID-v4 idempotency key, evidence reference,
+reason và sequence. Event không được update/delete. Tracking public chỉ hiển thị vị trí nghiệp vụ
+đã xác nhận gần nhất và confidence `CONFIRMED_SCAN|MANUAL_EXCEPTION|INFERRED_FROM_MANIFEST|UNKNOWN`;
+GPS chỉ hỗ trợ điều tra, không phải custody proof.
+
+Unload tại route stop chỉ hợp lệ khi đồng thời:
+
+```text
+Trip.currentStopId == requestedStopId
+Trip.currentStopStatus == ARRIVED
+Trip.actualDepartureAt == null
+Parcel.dropoffStopId == requestedStopId
+Parcel.status == IN_TRANSIT
+```
+
+Terminal-bound Parcel yêu cầu `destinationArrivedAt`. Trip cung cấp raw Internal-JWT endpoint
+`GET /internal/v1/trips/{tripId}/operational-location`. Sai location/QR bị từ chối trước mọi state
+hoặc cargo mutation. Dỡ vật lý ngoài hệ thống phải tạo exception có reason/ảnh/supervisor; không
+được sửa history. QR dán nhầm kiện tạo `PACKAGE_IDENTITY_MISMATCH` sau khi đối chiếu ảnh, mô tả,
+cân nặng, kích thước và serial/IMEI.
+
+Không scan không đồng nghĩa mất. QR hỏng phải dùng `MANUAL_CUSTODY_EXCEPTION`; kiện chưa định danh
+nhận temporary tag và `UNIDENTIFIED_PACKAGE`. Stop close đối soát expected/scanned/manual/unresolved.
+Unresolved khi departure tạo `UNSCANNED_HANDOFF` hoặc `MISSING_AFTER_DEPARTURE` và search case dựa
+trên manifest, Trip/vehicle, crew, station/stop, thời gian, ảnh và mô tả. Trip luôn phát
+`trip.stop.departed`, vì vậy detection không phụ thuộc vào việc Booking có pending passenger.
+
+Incident types gồm `MISSING|WRONG_STOP|DELIVERY_NOT_RECEIVED|PARTIAL_LOSS|DAMAGED|
+SCAN_IDENTITY_MISMATCH|PACKAGE_IDENTITY_MISMATCH|UNSCANNED_HANDOFF|MISSING_AFTER_DEPARTURE`.
+Recovery đi qua `OPEN -> SEARCHING -> FOUND -> FORWARDING -> RESOLVED -> CLOSED`; nhánh mất là
+`SEARCHING -> ESCALATED -> SEARCH_EXPIRED -> LOST_CONFIRMED`. SLA mặc định: kiểm tra xe/bến gần
+nhất 30 phút, supervisor tiếp nhận 2 giờ, quyết định forwarding/lưu kho 24 giờ, hết search 72 giờ.
+Khi hàng được xác nhận `FOUND`, các search task `OPEN|IN_PROGRESS` còn lại chuyển `CANCELLED`; khi
+incident thành `LOST_CONFIRMED`, các task chưa kết thúc chuyển `FAILED`. Leg vật lý chuyển `ACTIVE`
+khi scan `LOADED`, kết thúc `COMPLETED` khi unload hợp lệ tại đích, và chuyển `LOST` khi hết quy
+trình tìm kiếm mà không có custody fact xác nhận hàng đã được tìm thấy.
+
+Nếu hàng còn trên xe thì giữ nguyên leg và giao đúng stop. Nếu đã ở wrong station, station scan
+`FOUND/HANDOFF`, giữ tại kho an toàn, reserve cargo trên Trip phù hợp, kết thúc leg cũ bằng
+`FORWARDED_OUT`, tạo leg mới và crew scan `FORWARDED_IN`. Không thu thêm phí, không sửa lịch sử và
+không tạo payment trùng. Không có Trip phù hợp thì lưu kho, tìm chuyến khác, return sender hoặc sau
+SLA xác nhận mất.
+
+Sender là claim owner/beneficiary; recipient chỉ tracking và report incident. Policy mặc định của
+operator là rate 50%, cap 30.000.000 VND, fallback không chứng từ 4 lần cước, claim window 30 ngày,
+search 72 giờ, decision 7 ngày làm việc và payout 3 ngày làm việc. Operator được cấu hình rate
+`1..100` và cap dương; điều khoản thấp hơn 50%/30 triệu cần xác nhận rõ. Policy/version được công
+khai và snapshot khi Parcel được chấp nhận, không hồi tố.
+
+```text
+assessedLoss = min(provenDirectLoss, declaredValueVnd) nếu có declaredValueVnd
+cargoAward = min(round(assessedLoss * compensationRatePercent / 100), maxCompensationVnd)
+freightRefund = max(parcelFreight - priorRefunds, 0)
+totalAward = cargoAward + freightRefund
+noProofCargoAward = min(noProofFallbackMultiplier * parcelFreight, maxCompensationVnd)
+```
+
+Chỉ bồi thường thiệt hại trực tiếp; không bồi thường lợi nhuận kỳ vọng/thiệt hại gián tiếp. Điều
+tra xem xét hàng cấm/khai sai, đóng gói/đặc tính tự nhiên, lỗi sender/recipient, cơ quan nhà nước,
+bất khả kháng và chứng từ không hợp lệ. Wrong stop, lỗi crew/operator hoặc thiếu custody fact hợp lệ
+được mặc định là operational breach đến khi có bằng chứng ngược lại.
+
+Operator chịu nghĩa vụ tài chính; VietRide không ứng trước. Payment dùng một payout unique theo
+`claimId`: trước settlement debit đúng operator/Trip PlatformWallet holding, sau settlement debit
+đúng OperatorWallet, rồi credit PassengerWallet và ghi `PARCEL_COMPENSATION` ledger. Thiếu tiền
+  chuyển `FUNDING_PENDING` và job retry khấu trừ settlement tương lai; không cho ví âm, cross-tenant
+  funding hoặc double payout. Sender có thể appeal claim `PAID` hoặc `REJECTED`; appeal lưu reason,
+  actor và timestamp riêng, không ghi đè decision audit gốc. Chi tiết kỹ thuật được ratify trong
+  ADR 0006.
 
 ### 6.7 Thông báo (Notifications)
 
@@ -3947,7 +4028,8 @@ Fields cần có: tripId + stopId composite key, `orderIndex` (1-indexed, thứ 
 > `Trip.status=IN_PROGRESS`, `TripStop.status=ARRIVED`, and nullable
 > `TripStop.actualDepartureTime IS NULL`. Trip and TripStop are lock/CAS rechecked before
 > persisting one departure timestamp. Trip then calls Booking's exact pending-count predicate;
-> only a positive count publishes `trip.stop.departed_with_pending`. GPS is a future adapter to
+> every departure publishes `trip.stop.departed`; only a positive passenger count additionally
+> publishes `trip.stop.departed_with_pending`. GPS is a future adapter to
 > this command.
 > Booking counts exactly `Booking.status=CONFIRMED AND Passenger.boardingStatus=PENDING AND
 > Booking.tripId=:tripId AND Booking.pickupStopId=:stopId AND Booking.operatorId=:operatorId`.
@@ -5141,7 +5223,7 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
   - **Payment:** `PAYMENT_INSUFFICIENT_WALLET`, `PAYMENT_VNPAY_ERROR`, `PAYMENT_TIMEOUT`, `PAYMENT_ALREADY_PROCESSED`, `PAYMENT_SIGNATURE_INVALID` (VNPay HMAC verify fail)
   - **Wallet:** `WALLET_INSUFFICIENT_BALANCE`, `WALLET_TOP_UP_FAILED`, `WALLET_TOP_UP_AMOUNT_TOO_LOW`
   - **Trip:** `TRIP_NOT_FOUND`, `TRIP_NOT_EDITABLE`, `TRIP_VEHICLE_CONFLICT`, `TRIP_DRIVER_CONFLICT`, `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST`, `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`, `TRIP_VEHICLE_SWAP_TOO_LATE`, `TRIP_NOT_ACCEPTING_PARCEL` (Trip IN_PROGRESS — không nhận parcel mới), `TRIP_NOT_IN_PROGRESS`, `TRIP_STOP_NOT_ARRIVED`, `TRIP_STOP_ALREADY_DEPARTED`, `DRIVER_SCHEDULE_EDIT_TOO_LATE`, `INCIDENT_NOT_FOUND`, `INCIDENT_ALREADY_RESOLVED`
-  - **Parcel:** `PARCEL_NOT_FOUND`, `PARCEL_CAPACITY_EXCEEDED`, `PARCEL_PRICING_NOT_CONFIGURED`, `PARCEL_QUOTE_INVALID`, `PARCEL_QUOTE_EXPIRED`, `PARCEL_QUOTE_STALE`, `PARCEL_QUOTE_MISMATCH`, `PARCEL_CARGO_RECOVERY_IN_PROGRESS`, `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, `PARCEL_NOT_TRANSFERABLE` (parcel ở status sai khi confirm transfer), `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` (cân lại > ước lượng, cần thanh toán thêm), `PARCEL_REVIEW_TIMEOUT` (chỉ record legacy PENDING_OPERATOR_REVIEW)
+  - **Parcel:** `PARCEL_NOT_FOUND`, `PARCEL_CAPACITY_EXCEEDED`, `PARCEL_PRICING_NOT_CONFIGURED`, `PARCEL_QUOTE_INVALID`, `PARCEL_QUOTE_EXPIRED`, `PARCEL_QUOTE_STALE`, `PARCEL_QUOTE_MISMATCH`, `PARCEL_CARGO_RECOVERY_IN_PROGRESS`, `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, `PARCEL_NOT_TRANSFERABLE`, `PARCEL_ADDITIONAL_PAYMENT_REQUIRED`, `PARCEL_REVIEW_TIMEOUT`, `PARCEL_CUSTODY_LOCATION_REQUIRED`, `PARCEL_CUSTODY_LOCATION_MISMATCH`, `PARCEL_CUSTODY_EVENT_DUPLICATE`, `SCAN_IDENTITY_MISMATCH`, `PACKAGE_IDENTITY_MISMATCH`, `UNIDENTIFIED_PACKAGE_NOT_FOUND`, `PARCEL_INCIDENT_NOT_FOUND`, `PARCEL_INCIDENT_ALREADY_OPEN`, `PARCEL_INCIDENT_INVALID_STATUS`, `PARCEL_SEARCH_TASK_NOT_FOUND`, `PARCEL_SEARCH_TASK_MISMATCH`, `PARCEL_SEARCH_SLA_NOT_EXPIRED`, `PARCEL_CLAIM_NOT_FOUND`, `PARCEL_CLAIM_WINDOW_NOT_OPEN`, `PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED`, `PARCEL_CLAIM_ALREADY_EXISTS`, `PARCEL_CLAIM_EVIDENCE_REQUIRED`, `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY`, `PARCEL_CLAIM_ALREADY_DECIDED`, `PARCEL_CLAIM_FUNDING_PENDING`, `POLICY_BELOW_DEFAULT_ACK_REQUIRED`
   - **Stop/Route:** `STOP_NOT_FOUND`, `STOP_REPLACEMENT_INVALID`, `STOP_REPLACEMENT_CYCLE` (replacedByStopId tạo cycle), `STOP_REPLACEMENT_DIFFERENT_OPERATOR`, `STOP_ALREADY_DISABLED`, `STOP_DISABLED_BOOKING_AFFECTED` (legacy/deprecated synchronous warning/count for DELETE; unrelated usages remain unchanged), `STOP_NOT_PICKUP_ALLOWED`, `STOP_NOT_DROPOFF_ALLOWED`, `ROUTE_NOT_FOUND`, `ROUTE_RETURN_NOT_CONFIGURED` (Route.returnRouteId null khi đặt round-trip)
   - **Station:** `STATION_NOT_FOUND`, `STATION_DUPLICATE_NEARBY` (warning khi operator tạo Station mới quá gần Station hiện có — gợi ý link thay vì tạo), `STATION_MERGE_CONFLICT` (merge vi phạm Route/domain invariant; không partial write)
   - **Invoice:** `INVOICE_NOT_FOUND`, `INVOICE_PDF_GENERATION_FAILED`
@@ -5267,11 +5349,12 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **`Wallet`** + **`WalletTransaction`** — Ví hành khách. **`Wallet.userId` là PK natural** (1-1 với User, logical FK identity.users — cùng pattern `OperatorWallet.operatorId` PK). Balance BIGINT không âm, `rowVersion` optimistic lock. `WalletTransaction.userId` là logical FK (không hard FK tới Wallet — mirror `OperatorWalletTransaction` pattern). Transaction immutable với balanceBefore/balanceAfter snapshot (audit + optimistic lock). Bootstrap qua event `identity.user.created` consume (UPSERT idempotent).
 - **`Invoice`** — Subscription invoice (VietRide → Operator): invoiceNumber UNIQUE format `VR-INV-yyyyMM-XXXXXX`, period, amount, status DRAFT | ISSUED | CANCELLED, pdfUrl. v2: e-invoice provider integration.
 - **`PlatformWallet`** — Singleton clearing/holding pool của VietRide (xem 4.6). Balance BIGINT không âm, `rowVersion` optimistic lock. Ghi nhận tiền booking/parcel đang hold, refund về PassengerWallet, subscription payment thuộc VietRide, và settlement transfer sang OperatorWallet. Không phải ví người dùng thao tác trực tiếp.
-- **`PlatformWalletTransaction`** — Immutable ledger của PlatformWallet. Fields: `type` CREDIT | DEBIT, `amount` positive, `balanceBefore`/`balanceAfter`, `referenceType` BOOKING_PAYMENT_HOLD | PARCEL_PAYMENT_HOLD | BOOKING_REFUND | PARCEL_REFUND | TRIP_SETTLEMENT | SUBSCRIPTION_PAYMENT | MANUAL_ADJUSTMENT, `referenceId`, `note`, `createdAt`. Atomic INSERT với UPDATE PlatformWallet.
-- **`OperatorLedgerEntry`** — **Audit log** per-event của doanh thu/refund/voucher per operator per trip (xem 4.6). Fields: `operatorId`, `tripId` nullable (NULL cho ADJUSTMENT/MANUAL không gắn trip), `entryType` enum BOOKING_REVENUE | PARCEL_REVENUE | BOOKING_REFUND | PARCEL_REFUND | VOUCHER_VIETRIDE_FUNDED_CREDIT | VOUCHER_OPERATOR_FUNDED_AUDIT | ADJUSTMENT, `amount` signed, `referenceType` BOOKING | PARCEL | VOUCHER_USAGE | MANUAL, `referenceId`, `note`. **KHÔNG có `balanceBefore`/`balanceAfter`** — balance concept thuộc về OperatorWallet, ledger entries audit-only.
+- **`PlatformWalletTransaction`** — Immutable ledger của PlatformWallet. Fields: `type` CREDIT | DEBIT, `amount` positive, `balanceBefore`/`balanceAfter`, `referenceType` BOOKING_PAYMENT_HOLD | PARCEL_PAYMENT_HOLD | BOOKING_REFUND | PARCEL_REFUND | PARCEL_COMPENSATION | TRIP_SETTLEMENT | SUBSCRIPTION_PAYMENT | MANUAL_ADJUSTMENT, `referenceId`, `note`, `createdAt`. Atomic INSERT với UPDATE PlatformWallet.
+- **`OperatorLedgerEntry`** — **Audit log** per-event của doanh thu/refund/voucher/compensation per operator per trip (xem 4.6). Fields: `operatorId`, `tripId` nullable (NULL cho ADJUSTMENT/MANUAL không gắn trip), `entryType` enum BOOKING_REVENUE | PARCEL_REVENUE | BOOKING_REFUND | PARCEL_REFUND | PARCEL_COMPENSATION | VOUCHER_VIETRIDE_FUNDED_CREDIT | VOUCHER_OPERATOR_FUNDED_AUDIT | ADJUSTMENT, `amount` signed, `referenceType` BOOKING | PARCEL | VOUCHER_USAGE | MANUAL, `referenceId`, `note`. **KHÔNG có `balanceBefore`/`balanceAfter`** — balance concept thuộc về OperatorWallet, ledger entries audit-only.
 - **`OperatorWallet`** — Ví nội bộ operator trên platform (1-1 với Operator). `balance BIGINT` CHECK >= 0, `rowVersion` cho optimistic lock. Credit chỉ qua TripSettlement settle từ PlatformWallet; debit qua ADJUSTMENT (admin manual cho late refund/correction). v2 sẽ thêm WITHDRAWAL DEBIT (bank transfer ra ngoài).
-- **`OperatorWalletTransaction`** — Immutable ledger của OperatorWallet (giống pattern WalletTransaction passenger). Fields: `operatorId`, `type` CREDIT | DEBIT, `amount` positive, `balanceBefore`/`balanceAfter`, `referenceType` TRIP_SETTLEMENT | ADJUSTMENT, `referenceId`, `note`, `createdAt`. Atomic INSERT với UPDATE OperatorWallet.
+- **`OperatorWalletTransaction`** — Immutable ledger của OperatorWallet (giống pattern WalletTransaction passenger). Fields: `operatorId`, `type` CREDIT | DEBIT, `amount` positive, `balanceBefore`/`balanceAfter`, `referenceType` TRIP_SETTLEMENT | PARCEL_COMPENSATION | ADJUSTMENT, `referenceId`, `note`, `createdAt`. Atomic INSERT với UPDATE OperatorWallet.
 - **`OperatorTripSettlement`** — Per-Trip per-Operator settlement marker. Fields: `operatorId`, `tripId`, UNIQUE `(operatorId, tripId)`. `netAmount BIGINT` (computed at settle), `tripTerminalAt`, `eligibleAt` (= tripTerminalAt + 7 days), `status` enum PENDING_HOLD | ELIGIBLE | SETTLED | CANCELLED, `settlementMethod` AUTO_WEEKLY | ADMIN_MANUAL nullable, `settledAt`, `settledByUserId` nullable (SYSTEM_ADMIN nếu manual), `walletTransactionId` FK nullable, `rowVersion` cho status transition lock. Hangfire daily eligibility flag + Monday weekly auto-settle. Admin manual `POST /v1/admin/trip-settlements/{id}/settle`.
+- **`ParcelCompensationPayout`** — Một payout unique per claim, frozen Parcel/Trip/operator/sender/amount; trạng thái `PENDING|FUNDING_PENDING|PAID`, funding source và PassengerWallet transaction reference. Job retry 10 phút dùng settlement tương lai của đúng operator, không cho double payout/cross-tenant funding.
 - **`RefundFailureLog`** — Track refund retry khi event consume fail (vd Wallet credit fail). Hangfire retry job, max 5 lần, alert Admin sau khi exhausted. Xem section 6.2 compensation flow.
 - **`OutboxEvent`**.
 
@@ -5282,6 +5365,10 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **`Parcel`** — Hàng ký gửi. `parcelCode` UNIQUE. `senderUserId` NOT NULL; `recipientUserId` nullable; `dropoffStopId` nullable. Lưu estimated/actual cargo + size derived, canonical settlement fields, payment/deadline/check-in snapshots, `pendingActionResumeStatus`, delivery/transfer/return/review fields.
 - **`ParcelRouteFare`** — Operator config `pricePerKgVnd` + `minimumPriceVnd` per route/derived size category và effective window.
 - **`ParcelStats`** — Counter table per (operatorId, date) cho reporting.
+- **`ParcelTransitLeg` + `ParcelCustodyEvent` + `ParcelCurrentCustody`** — multi-leg physical chain of custody append-only và latest-location projection; status history không thay thế custody proof.
+- **`ParcelIncident` + `ParcelSearchTask`** — wrong-stop/missing/unscanned/not-received/damage investigation, actor/evidence/deadline/result và `LOST_CONFIRMED` riêng khỏi `ParcelStatus`.
+- **`ParcelClaim` + `ParcelClaimEvidence` + `ParcelCompensationPolicy`** — sender claim, evidence, frozen declaration/rate/cap/fallback/version/award; default operator policy 50%/30 triệu.
+- **`UnidentifiedParcelPackage`** — temporary-tag lost-and-found record cho kiện không đọc được QR, được supervisor match lại với Parcel thật.
 - **`OutboxEvent`**.
 
 #### Tracking Service

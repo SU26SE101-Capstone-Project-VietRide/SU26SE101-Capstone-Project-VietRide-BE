@@ -23,6 +23,7 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             table.HasCheckConstraint("chk_parcels_settlement_amounts_non_negative", "estimated_gross_price_vnd >= 0 AND final_gross_price_vnd >= 0 AND discount_amount_vnd >= 0 AND estimated_total_price_vnd >= 0 AND final_total_price_vnd >= 0 AND deposit_required_vnd >= 0 AND deposit_paid_vnd >= 0 AND balance_required_vnd >= 0 AND balance_paid_vnd >= 0 AND refund_due_vnd >= 0 AND refunded_amount_vnd >= 0 AND forfeited_deposit_vnd >= 0");
             table.HasCheckConstraint("chk_parcels_settlement_policy_version_positive", "settlement_policy_version > 0");
             table.HasCheckConstraint("chk_parcels_weight_positive", "estimated_weight_kg > 0");
+            table.HasCheckConstraint("chk_parcels_quantity_positive", "quantity > 0");
             table.HasCheckConstraint("chk_parcels_dimensions_positive", "estimated_length_cm > 0 AND estimated_width_cm > 0 AND estimated_height_cm > 0");
             table.HasCheckConstraint("chk_parcels_volume_positive", "estimated_volume_m3 > 0");
             table.HasCheckConstraint("chk_parcels_actual_weight_positive", "actual_weight_kg IS NULL OR actual_weight_kg > 0");
@@ -128,10 +129,60 @@ internal sealed class ParcelConfiguration : IEntityTypeConfiguration<ParcelEntit
             .HasColumnType("text")
             .IsRequired(false);
 
+        builder.Property(x => x.Quantity)
+            .HasColumnName("quantity")
+            .HasDefaultValue(1)
+            .IsRequired();
+
         builder.Property(x => x.PhotoUrl)
             .HasColumnName("photo_url")
             .HasColumnType("text")
             .IsRequired(false);
+
+        builder.Property(x => x.DeclaredValueVnd)
+            .HasColumnName("declared_value_vnd")
+            .HasColumnType("bigint")
+            .IsRequired(false);
+        builder.Property(x => x.DeclarationAcceptedAt)
+            .HasColumnName("declaration_accepted_at")
+            .IsRequired(false);
+        builder.Property(x => x.DeclarationPolicyVersion)
+            .HasColumnName("declaration_policy_version")
+            .HasDefaultValue(1)
+            .IsRequired();
+        builder.Property(x => x.CompensationRatePercentSnapshot)
+            .HasColumnName("compensation_rate_percent_snapshot")
+            .HasDefaultValue(ParcelCompensationPolicy.DefaultRatePercent)
+            .IsRequired();
+        builder.Property(x => x.CompensationPolicyCapVndSnapshot)
+            .HasColumnName("compensation_policy_cap_vnd_snapshot")
+            .HasColumnType("bigint")
+            .HasDefaultValue(ParcelCompensationPolicy.DefaultMaximumCompensationVnd)
+            .IsRequired();
+        builder.Property(x => x.NoProofFallbackMultiplierSnapshot)
+            .HasColumnName("no_proof_fallback_multiplier_snapshot")
+            .HasDefaultValue(ParcelCompensationPolicy.DefaultNoProofFallbackMultiplier)
+            .IsRequired();
+        builder.Property(x => x.CompensationPolicyVersionSnapshot)
+            .HasColumnName("compensation_policy_version_snapshot")
+            .HasDefaultValue(1)
+            .IsRequired();
+        builder.Property(x => x.ClaimWindowDaysSnapshot)
+            .HasColumnName("claim_window_days_snapshot")
+            .HasDefaultValue(ParcelCompensationPolicy.DefaultClaimWindowDays)
+            .IsRequired();
+        builder.Property(x => x.SearchSlaHoursSnapshot)
+            .HasColumnName("search_sla_hours_snapshot")
+            .HasDefaultValue(ParcelCompensationPolicy.DefaultSearchSlaHours)
+            .IsRequired();
+        builder.Property(x => x.DecisionSlaBusinessDaysSnapshot)
+            .HasColumnName("decision_sla_business_days_snapshot")
+            .HasDefaultValue(ParcelCompensationPolicy.DefaultDecisionSlaBusinessDays)
+            .IsRequired();
+        builder.Property(x => x.PayoutSlaBusinessDaysSnapshot)
+            .HasColumnName("payout_sla_business_days_snapshot")
+            .HasDefaultValue(ParcelCompensationPolicy.DefaultPayoutSlaBusinessDays)
+            .IsRequired();
 
         ConfigurePhotoUrls(builder, x => x.CheckInPhotoUrls, "check_in_photo_urls");
         ConfigurePhotoUrls(builder, x => x.DeliveryPhotoUrls, "delivery_photo_urls");

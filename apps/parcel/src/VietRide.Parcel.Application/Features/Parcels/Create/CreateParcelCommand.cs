@@ -25,7 +25,9 @@ public sealed record CreateParcelCommand(
     string PaymentMethod,
     string? VoucherCode = null,
     string? QuoteToken = null,
-    string? IdempotencyKey = null) : IRequest<CreateParcelResponse>
+    string? IdempotencyKey = null,
+    long? DeclaredValueVnd = null,
+    int Quantity = 1) : IRequest<CreateParcelResponse>
 {
     public CreateParcelCommand(
         Guid senderUserId,

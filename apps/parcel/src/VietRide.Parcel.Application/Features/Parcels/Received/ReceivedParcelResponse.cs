@@ -1,3 +1,5 @@
+using VietRide.Parcel.Application.Features.Reliability.ReadModels;
+
 namespace VietRide.Parcel.Application.Features.Parcels.Received;
 
 public sealed record ReceivedParcelResponse(
@@ -12,6 +14,9 @@ public sealed record ReceivedParcelResponse(
     string SizeCategory,
     DateTimeOffset CreatedAt,
     Guid OperatorId,
-    Guid TripId);
+    Guid TripId,
+    ReliabilityOperatorResponse? Operator = null,
+    ReliabilityLocationResponse? DropoffLocation = null,
+    ParcelReliabilitySummaryResponse? Reliability = null);
 
 public sealed record ReceivedParcelStationResponse(Guid Id, string Name);

@@ -1,6 +1,9 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Abstractions.Services;
+using VietRide.Parcel.Application.Features.Parcels.Create;
+using VietRide.Parcel.Application.Features.Reliability.ReadModels;
 using VietRide.Shared.Application.Exceptions;
 
 namespace VietRide.Parcel.Application.Features.Parcels.Detail;
@@ -10,13 +13,16 @@ public sealed class GetParcelDetailQueryHandler
 {
     private readonly IParcelRepository _parcelRepository;
     private readonly ITripServiceClient _tripClient;
+    private readonly IParcelReliabilityReadModelService? _screenModels;
 
     public GetParcelDetailQueryHandler(
         IParcelRepository parcelRepository,
-        ITripServiceClient tripClient)
+        ITripServiceClient tripClient,
+        IParcelReliabilityReadModelService? screenModels = null)
     {
         _parcelRepository = parcelRepository;
         _tripClient = tripClient;
+        _screenModels = screenModels;
     }
 
     public async Task<ParcelDetailResponse> Handle(
@@ -42,13 +48,29 @@ public sealed class GetParcelDetailQueryHandler
         string? destinationStationName = null;
         DateTimeOffset? eta = null;
 
-        var tripOutcome = await _tripClient.GetTripParcelSnapshotAsync(parcel.TripId, cancellationToken);
-        if (tripOutcome.Kind == TripSnapshotOutcomeKind.Success)
+        ParcelScreenReadModel? screen = null;
+        if (_screenModels is not null)
         {
-            var trip = tripOutcome.Snapshot!;
-            originStationName = trip.OriginStation.Name;
-            destinationStationName = trip.DestinationStation.Name;
-            eta = trip.EstimatedArrivalTime;
+            var screens = await _screenModels.BuildAsync(
+                [parcel],
+                query.UserId,
+                includeClaim: true,
+                cancellationToken);
+            screens.TryGetValue(parcel.Id, out screen);
+            originStationName = screen?.Trip.Route?.Origin.Name;
+            destinationStationName = screen?.Trip.Route?.Destination.Name;
+            eta = screen?.Trip.Eta;
+        }
+        else
+        {
+            var tripOutcome = await _tripClient.GetTripParcelSnapshotAsync(parcel.TripId, cancellationToken);
+            if (tripOutcome.Kind == TripSnapshotOutcomeKind.Success)
+            {
+                var trip = tripOutcome.Snapshot!;
+                originStationName = trip.OriginStation.Name;
+                destinationStationName = trip.DestinationStation.Name;
+                eta = trip.EstimatedArrivalTime;
+            }
         }
 
         return new ParcelDetailResponse(
@@ -63,6 +85,7 @@ public sealed class GetParcelDetailQueryHandler
             parcel.TripId,
             parcel.DropoffStopId,
             parcel.Description,
+            parcel.Quantity,
             parcel.PhotoUrl,
             parcel.CheckInPhotoUrls,
             parcel.DeliveryPhotoUrls,
@@ -124,6 +147,20 @@ public sealed class GetParcelDetailQueryHandler
             parcel.RejectedAt,
             originStationName,
             destinationStationName,
-            eta);
+            eta,
+            screen?.Operator,
+            screen?.Trip,
+            screen?.DropoffLocation,
+            new ParcelCompensationPolicySnapshotResponse(
+                parcel.CompensationPolicyVersionSnapshot,
+                parcel.CompensationRatePercentSnapshot,
+                parcel.CompensationPolicyCapVndSnapshot,
+                parcel.NoProofFallbackMultiplierSnapshot,
+                parcel.ClaimWindowDaysSnapshot,
+                parcel.SearchSlaHoursSnapshot,
+                parcel.DecisionSlaBusinessDaysSnapshot,
+                parcel.PayoutSlaBusinessDaysSnapshot),
+            screen?.Reliability,
+            screen?.Reliability.AvailableActions);
     }
 }

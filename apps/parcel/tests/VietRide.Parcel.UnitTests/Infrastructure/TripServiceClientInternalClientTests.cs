@@ -190,6 +190,44 @@ public class TripServiceClientInternalClientTests
     }
 
     [Fact]
+    public async Task GetTripOperationalLocationAsync_UsesDedicatedInternalEndpoint()
+    {
+        var stopId = Guid.NewGuid();
+        var arrivedAt = DateTimeOffset.UtcNow;
+        var body = JsonSerializer.Serialize(new
+        {
+            tripId = TripId,
+            vehicleId = Guid.NewGuid(),
+            tripStatus = "IN_PROGRESS",
+            currentStopId = stopId,
+            currentStopStatus = "ARRIVED",
+            actualArrivalAt = arrivedAt,
+            actualDepartureAt = (DateTimeOffset?)null,
+            destinationArrivedAt = (DateTimeOffset?)null,
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var outcome = await client.GetTripOperationalLocationAsync(TripId);
+
+        outcome.Kind.Should().Be(TripOperationalLocationOutcomeKind.Success);
+        outcome.Snapshot!.CurrentStopId.Should().Be(stopId);
+        outcome.Snapshot.ActualArrivalAt.Should().Be(arrivedAt);
+        _handler.LastRequest!.RequestUri!.AbsolutePath.Should()
+            .Be($"/internal/v1/trips/{TripId:D}/operational-location");
+    }
+
+    [Fact]
+    public async Task GetTripOperationalLocationAsync_MapsNotFoundWithoutSnapshotFallback()
+    {
+        var client = BuildClient(HttpStatusCode.NotFound, "{}");
+
+        var outcome = await client.GetTripOperationalLocationAsync(TripId);
+
+        outcome.Kind.Should().Be(TripOperationalLocationOutcomeKind.TripNotFound);
+        outcome.Snapshot.Should().BeNull();
+    }
+
+    [Fact]
     public async Task GetTripParcelSnapshotAsync_Returns_Success_On_200()
     {
         var destinationArrivedAt = new DateTimeOffset(2026, 7, 15, 9, 30, 0, TimeSpan.Zero);

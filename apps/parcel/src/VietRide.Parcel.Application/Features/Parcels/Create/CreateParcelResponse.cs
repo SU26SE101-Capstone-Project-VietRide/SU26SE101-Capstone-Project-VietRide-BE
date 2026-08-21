@@ -14,7 +14,8 @@ public sealed record CreateParcelResponse(
     long DepositRequiredVnd,
     long DepositPaidVnd,
     string? VoucherCode,
-    int SettlementPolicyVersion)
+    int SettlementPolicyVersion,
+    ParcelCompensationPolicySnapshotResponse? CompensationPolicy = null)
 {
     [JsonIgnore]
     public long TotalAmount => DepositRequiredVnd;
@@ -28,3 +29,13 @@ public sealed record CreateParcelResponse(
     [JsonIgnore]
     public string? PaymentRedirectUrl => null;
 }
+
+public sealed record ParcelCompensationPolicySnapshotResponse(
+    int Version,
+    int CompensationRatePercent,
+    long MaxCompensationVnd,
+    int NoProofFallbackMultiplier,
+    int ClaimWindowDays,
+    int SearchSlaHours,
+    int DecisionSlaBusinessDays,
+    int PayoutSlaBusinessDays);

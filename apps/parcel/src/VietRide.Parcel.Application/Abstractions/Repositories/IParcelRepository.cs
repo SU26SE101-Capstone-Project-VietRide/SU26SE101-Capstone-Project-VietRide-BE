@@ -42,6 +42,10 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
 
     Task<ParcelEntity?> FindByParcelCodeAsync(string parcelCode, CancellationToken ct = default);
 
+    Task<IReadOnlyList<ParcelEntity>> ListByIdsAsync(
+        IReadOnlyCollection<Guid> parcelIds,
+        CancellationToken ct = default);
+
     // Payment deposit transitions (PENDING_PAYMENT)
     Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositSucceededAsync(
         Guid parcelId, Guid paymentId, long depositAmount, DateTimeOffset now, CancellationToken ct);
@@ -71,7 +75,8 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
         string reason,
         Money? refundAmount,
         DateTimeOffset now,
-        CancellationToken ct);
+        CancellationToken ct,
+        ParcelStatus? resumeStatus = null);
 
     Task<ParcelPaymentTransitionSnapshot?> TryResolvePendingOperatorActionAsync(
         Guid parcelId,
@@ -318,6 +323,13 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<ParcelPaymentTransitionSnapshot?> TryRequestTransferAsync(
         Guid parcelId, Guid operatorId, Guid targetTripId, DateTimeOffset now, CancellationToken ct);
 
+    Task<ParcelPaymentTransitionSnapshot?> TryRequestReliabilityForwardingAsync(
+        Guid parcelId,
+        Guid operatorId,
+        Guid targetTripId,
+        DateTimeOffset now,
+        CancellationToken ct);
+
     Task<ParcelTransferConfirmationSnapshot?> GetTransferConfirmationSnapshotAsync(
         Guid parcelId,
         CancellationToken ct);
@@ -480,6 +492,37 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     /// </summary>
     Task<PagedResult<ParcelEntity>> ListByTripAndOperatorAsync(
         Guid tripId, Guid operatorId, int page, int pageSize, CancellationToken ct);
+
+    Task<PagedResult<ParcelEntity>> ListByTripAndOperatorFilteredAsync(
+        Guid tripId,
+        Guid operatorId,
+        Guid? stopId,
+        ParcelStatus? status,
+        bool? hasException,
+        string? search,
+        int page,
+        int pageSize,
+        CancellationToken ct);
+
+    Task<AssistantParcelManifestCounts> GetAssistantManifestCountsAsync(
+        Guid tripId,
+        Guid operatorId,
+        Guid? currentStopId,
+        CancellationToken ct);
+
+    Task<IReadOnlyList<ParcelEntity>> ListPendingDropoffByTripAndStopAsync(
+        Guid tripId,
+        Guid stopId,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<ParcelEntity>> ListPendingTerminalDropoffByTripAsync(
+        Guid tripId,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<ParcelEntity>> ListDropoffManifestByTripAndStopAsync(
+        Guid tripId,
+        Guid stopId,
+        CancellationToken ct = default);
 
     Task<PagedResult<ParcelEntity>> ListByOperatorAsync(
         Guid operatorId,

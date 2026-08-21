@@ -15,6 +15,12 @@ import {
   PARCEL_LOADED_ROUTING_KEY,
   PARCEL_DELIVERY_CONFIRMED_ROUTING_KEY,
   PARCEL_FINAL_PAYMENT_REQUESTED_ROUTING_KEY,
+  PARCEL_INCIDENT_OPENED_ROUTING_KEY,
+  PARCEL_INCIDENT_UPDATED_ROUTING_KEY,
+  PARCEL_CLAIM_SUBMITTED_ROUTING_KEY,
+  PARCEL_CLAIM_DECIDED_ROUTING_KEY,
+  PARCEL_COMPENSATION_PAID_ROUTING_KEY,
+  PARCEL_COMPENSATION_FUNDING_PENDING_ROUTING_KEY,
   PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
   PARCEL_REVIEW_APPROVED_ROUTING_KEY,
   PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
@@ -109,6 +115,14 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
         }),
         expect.objectContaining({
           routingKey: PARCEL_PENDING_OPERATOR_ACTION_REALERTED_ROUTING_KEY,
+        }),
+        expect.objectContaining({ routingKey: PARCEL_INCIDENT_OPENED_ROUTING_KEY }),
+        expect.objectContaining({ routingKey: PARCEL_INCIDENT_UPDATED_ROUTING_KEY }),
+        expect.objectContaining({ routingKey: PARCEL_CLAIM_SUBMITTED_ROUTING_KEY }),
+        expect.objectContaining({ routingKey: PARCEL_CLAIM_DECIDED_ROUTING_KEY }),
+        expect.objectContaining({ routingKey: PARCEL_COMPENSATION_PAID_ROUTING_KEY }),
+        expect.objectContaining({
+          routingKey: PARCEL_COMPENSATION_FUNDING_PENDING_ROUTING_KEY,
         }),
       ]),
     );
@@ -537,7 +551,6 @@ describe('ParcelSubscriptionOperatorEventsConsumer', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.INVOICE_ISSUED,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         data: expect.objectContaining({ invoiceWebUrl }),
       }),
     );

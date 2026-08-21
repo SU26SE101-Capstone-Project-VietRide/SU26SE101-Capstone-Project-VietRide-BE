@@ -30,6 +30,7 @@ public sealed class CreateParcelCommandHandler
     private readonly IParcelStatsRepository _statsRepository;
     private readonly ILogger<CreateParcelCommandHandler> _logger;
     private readonly IClock _clock;
+    private readonly IParcelReliabilityRepository? _reliability;
 
     public CreateParcelCommandHandler(
         IIdentityServiceClient identityClient,
@@ -44,7 +45,8 @@ public sealed class CreateParcelCommandHandler
         IParcelStatsRepository statsRepository,
         ILogger<CreateParcelCommandHandler> logger,
         IClock clock,
-        IParcelQuoteTokenService? quoteTokenService = null)
+        IParcelQuoteTokenService? quoteTokenService = null,
+        IParcelReliabilityRepository? reliability = null)
     {
         _identityClient = identityClient;
         _bookingClient = bookingClient;
@@ -57,6 +59,7 @@ public sealed class CreateParcelCommandHandler
         _statsRepository = statsRepository;
         _logger = logger;
         _clock = clock;
+        _reliability = reliability;
     }
 
     public CreateParcelCommandHandler(
@@ -403,6 +406,30 @@ public sealed class CreateParcelCommandHandler
             deadlines.LoadCutoffAt,
             deadlines.LatestCheckInAt);
 
+        var compensationPolicy = _reliability is null
+            ? null
+            : await _reliability.GetCompensationPolicyAsync(parcel.OperatorId, cancellationToken);
+        parcel.AcceptDeclaration(
+            command.DeclaredValueVnd,
+            declarationPolicyVersion: 1,
+            now,
+            compensationPolicy?.CompensationRatePercent
+                ?? VietRide.Parcel.Domain.Entities.ParcelCompensationPolicy.DefaultRatePercent,
+            compensationPolicy?.MaxCompensationVnd
+                ?? VietRide.Parcel.Domain.Entities.ParcelCompensationPolicy.DefaultMaximumCompensationVnd,
+            compensationPolicy?.NoProofFallbackMultiplier
+                ?? VietRide.Parcel.Domain.Entities.ParcelCompensationPolicy.DefaultNoProofFallbackMultiplier,
+            compensationPolicy?.Version ?? 1,
+            compensationPolicy?.ClaimWindowDays
+                ?? VietRide.Parcel.Domain.Entities.ParcelCompensationPolicy.DefaultClaimWindowDays,
+            compensationPolicy?.SearchSlaHours
+                ?? VietRide.Parcel.Domain.Entities.ParcelCompensationPolicy.DefaultSearchSlaHours,
+            compensationPolicy?.DecisionSlaBusinessDays
+                ?? VietRide.Parcel.Domain.Entities.ParcelCompensationPolicy.DefaultDecisionSlaBusinessDays,
+            compensationPolicy?.PayoutSlaBusinessDays
+                ?? VietRide.Parcel.Domain.Entities.ParcelCompensationPolicy.DefaultPayoutSlaBusinessDays,
+            command.Quantity);
+
         await _unitOfWork.BeginTransactionAsync(cancellationToken);
         try
         {
@@ -447,7 +474,16 @@ public sealed class CreateParcelCommandHandler
             depositRequired.Amount,
             0,
             parcel.VoucherCode,
-            ParcelCargoCalculator.SettlementPolicyVersion);
+            ParcelCargoCalculator.SettlementPolicyVersion,
+            new ParcelCompensationPolicySnapshotResponse(
+                parcel.CompensationPolicyVersionSnapshot,
+                parcel.CompensationRatePercentSnapshot,
+                parcel.CompensationPolicyCapVndSnapshot,
+                parcel.NoProofFallbackMultiplierSnapshot,
+                parcel.ClaimWindowDaysSnapshot,
+                parcel.SearchSlaHoursSnapshot,
+                parcel.DecisionSlaBusinessDaysSnapshot,
+                parcel.PayoutSlaBusinessDaysSnapshot));
     }
 
     private static PaymentContextSnapshot CreatePaymentContext(

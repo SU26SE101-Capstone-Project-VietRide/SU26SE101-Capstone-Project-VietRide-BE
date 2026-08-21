@@ -8,4 +8,8 @@ public sealed record UnloadParcelCommand(
     Guid ParcelId,
     Guid ActorUserId,
     Guid OperatorId,
-    Guid? IdempotencyKey = null) : IRequest<UnloadParcelResponse>;
+    Guid? IdempotencyKey = null,
+    string? ActualLocationKind = null,
+    Guid? ActualLocationId = null,
+    IReadOnlyCollection<string>? PhotoUrls = null,
+    string? ScannedParcelCode = null) : IRequest<UnloadParcelResponse>;

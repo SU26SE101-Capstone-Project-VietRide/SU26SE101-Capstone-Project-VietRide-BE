@@ -1,3 +1,5 @@
+using VietRide.Parcel.Application.Features.Reliability.ReadModels;
+
 namespace VietRide.Parcel.Application.Features.Parcels.AssistantTripParcels;
 
 public sealed record AssistantTripParcelResponse(
@@ -16,4 +18,10 @@ public sealed record AssistantTripParcelResponse(
     long BalancePaidVnd,
     DateTimeOffset? FinalPaymentDeadline,
     string? Description,
-    string? PhotoUrl);
+    string? PhotoUrl,
+    ReliabilityLocationResponse? DropoffLocation = null,
+    ReliabilityCustodySummaryResponse? CurrentCustody = null,
+    ReliabilityIncidentSummaryResponse? ActiveIncident = null,
+    AssistantParcelPaymentStateResponse? PaymentState = null,
+    AssistantParcelIdentityHintsResponse? IdentityCheckHints = null,
+    IReadOnlyList<string>? AvailableActions = null);

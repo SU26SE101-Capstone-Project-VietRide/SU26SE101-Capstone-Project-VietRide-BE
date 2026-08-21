@@ -22,6 +22,7 @@ public sealed class InternalJwtTokenFactory : IInternalJwtTokenProvider
     public InternalJwtTokenFactory(IConfiguration configuration)
     {
         var secret = configuration["InternalJwt:Secret"]
+            ?? configuration["INTERNAL_JWT_SECRET"]
             ?? Environment.GetEnvironmentVariable("INTERNAL_JWT_SECRET")
             ?? throw new InvalidOperationException(
                 "INTERNAL_JWT_SECRET must be configured for Parcel internal calls.");
