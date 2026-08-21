@@ -17,6 +17,7 @@ using Npgsql;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Persistence;
 using VietRide.Shared.Web.Authentication;
@@ -270,7 +271,7 @@ public sealed class InternalOperatorsEndpointsTests
     }
 
     [Fact]
-    public async Task PendingPaymentEntitlement_IncrementUsage_UsesActivePlanInsteadOfLowerTargetPlan()
+    public async Task PendingPaymentEntitlement_IncrementUsage_EnforcesLowerTargetPlanCap()
     {
         var factory = new DbBackedInternalOperatorsFactory();
         try
@@ -288,11 +289,11 @@ public sealed class InternalOperatorsEndpointsTests
                 $"/internal/v1/operators/{OperatorId}/usage/increment",
                 new { resource = "DRIVERS", delta = 1 });
 
-            response.StatusCode.Should().Be(HttpStatusCode.OK);
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            doc.RootElement.GetProperty("status").GetString().Should().Be(SubscriptionStatus.PENDING_PAYMENT.ToString());
-            doc.RootElement.GetProperty("plan").GetProperty("planId").GetGuid().Should().Be(SubscriptionPlan.StarterPlanId);
-            doc.RootElement.GetProperty("usage").GetProperty("currentDrivers").GetInt32().Should().Be(4);
+            await AssertErrorCode(response, HttpStatusCode.UnprocessableEntity, "SUBSCRIPTION_LIMIT_EXCEEDED");
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var subscription = await db.OperatorSubscriptions.SingleAsync(s => s.OperatorId == OperatorId);
+            subscription.CurrentDrivers.Should().Be(3);
         }
         finally
         {
@@ -464,6 +465,7 @@ public sealed class InternalOperatorsEndpointsTests
                 services.RemoveAll<DbContextOptions<IdentityDbContext>>();
                 services.RemoveAll<IdentityDbContext>();
                 services.RemoveAll<VietRideDbContextBase>();
+                services.RemoveAll<IClock>();
 
                 services.AddSingleton(_ =>
                 {
@@ -479,6 +481,7 @@ public sealed class InternalOperatorsEndpointsTests
                         .ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
                 });
                 services.AddScoped<VietRideDbContextBase>(sp => sp.GetRequiredService<IdentityDbContext>());
+                services.AddSingleton<IClock>(new FrozenClock(Now));
             });
         }
 
@@ -646,5 +649,10 @@ public sealed class InternalOperatorsEndpointsTests
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
             property.SetValue(entity, value);
         }
+    }
+
+    private sealed class FrozenClock(DateTimeOffset now) : IClock
+    {
+        public DateTimeOffset UtcNow { get; } = now;
     }
 }

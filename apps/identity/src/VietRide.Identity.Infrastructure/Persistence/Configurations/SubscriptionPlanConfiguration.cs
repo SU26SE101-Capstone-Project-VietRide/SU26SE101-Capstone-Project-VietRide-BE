@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Identity.Infrastructure.Persistence.Configurations;
@@ -40,6 +41,21 @@ internal sealed class SubscriptionPlanConfiguration : IEntityTypeConfiguration<S
             .HasConversion(m => m.Amount, amount => Money.FromRaw(amount))
             .HasDefaultValueSql("0")
             .IsRequired();
+
+        builder.Property(p => p.PlanType)
+            .HasColumnName("plan_type")
+            .HasConversion<string>()
+            .HasMaxLength(16)
+            .HasDefaultValue(SubscriptionPlanType.STANDARD)
+            .IsRequired();
+
+        builder.Property(p => p.OwnerOperatorId)
+            .HasColumnName("owner_operator_id")
+            .HasColumnType("uuid");
+
+        builder.Property(p => p.SourceCustomRequestId)
+            .HasColumnName("source_custom_request_id")
+            .HasColumnType("uuid");
 
         builder.Property(p => p.MaxVehicles)
             .HasColumnName("max_vehicles")
@@ -107,6 +123,21 @@ internal sealed class SubscriptionPlanConfiguration : IEntityTypeConfiguration<S
         builder.HasIndex(p => p.IsActive)
             .HasDatabaseName("idx_subscription_plans_is_active");
 
+        builder.HasIndex(p => p.OwnerOperatorId)
+            .HasDatabaseName("idx_subscription_plans_owner_operator_id")
+            .HasFilter("owner_operator_id IS NOT NULL");
+
+        builder.HasIndex(p => p.SourceCustomRequestId)
+            .HasDatabaseName("uq_subscription_plans_source_custom_request_id")
+            .IsUnique()
+            .HasFilter("source_custom_request_id IS NOT NULL");
+
+        builder.HasOne<Operator>()
+            .WithMany()
+            .HasForeignKey(p => p.OwnerOperatorId)
+            .OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_subscription_plans_owner_operator_id");
+
         builder.ToTable(t =>
         {
             t.HasCheckConstraint(
@@ -116,6 +147,10 @@ internal sealed class SubscriptionPlanConfiguration : IEntityTypeConfiguration<S
             t.HasCheckConstraint(
                 "chk_subscription_plans_price_per_year_non_negative",
                 "price_per_year >= 0");
+
+            t.HasCheckConstraint(
+                "chk_subscription_plans_owner_by_type",
+                "(plan_type = 'STANDARD' AND owner_operator_id IS NULL AND source_custom_request_id IS NULL) OR (plan_type = 'CUSTOM' AND owner_operator_id IS NOT NULL AND source_custom_request_id IS NOT NULL)");
         });
     }
 }

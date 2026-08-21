@@ -6,4 +6,8 @@ namespace VietRide.Identity.Application.Abstractions.Repositories;
 public interface ISubscriptionPlanRepository : IRepository<SubscriptionPlan, Guid>
 {
     Task<SubscriptionPlan?> GetStarterPlanAsync(CancellationToken cancellationToken = default);
+
+    Task<SubscriptionPlan?> GetByIdForUpdateAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
 }

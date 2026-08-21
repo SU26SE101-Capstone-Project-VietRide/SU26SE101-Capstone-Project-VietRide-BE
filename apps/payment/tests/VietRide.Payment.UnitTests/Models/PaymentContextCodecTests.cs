@@ -6,6 +6,86 @@ namespace VietRide.Payment.UnitTests.Models;
 
 public sealed class PaymentContextCodecTests
 {
+    [Theory]
+    [InlineData("MONTHLY", 2026, 1, 31, 2026, 2, 28)]
+    [InlineData("MONTHLY", 2024, 1, 31, 2024, 2, 29)]
+    [InlineData("MONTHLY", 2026, 4, 30, 2026, 5, 30)]
+    [InlineData("MONTHLY", 2026, 5, 31, 2026, 6, 30)]
+    [InlineData("YEARLY", 2024, 2, 29, 2025, 2, 28)]
+    public void ValidateAndSerialize_WhenSubscriptionPeriodIsWithinBillingUpperBound_AcceptsContext(
+        string billingPeriod,
+        int fromYear,
+        int fromMonth,
+        int fromDay,
+        int toYear,
+        int toMonth,
+        int toDay)
+    {
+        var subscriptionId = Guid.NewGuid();
+        var context = CreateSubscriptionContext(
+            subscriptionId,
+            billingPeriod,
+            new DateTimeOffset(fromYear, fromMonth, fromDay, 0, 0, 0, TimeSpan.Zero),
+            new DateTimeOffset(toYear, toMonth, toDay, 0, 0, 0, TimeSpan.Zero));
+
+        var json = SubscriptionPaymentContextCodec.ValidateAndSerialize(context, subscriptionId);
+
+        SubscriptionPaymentContextCodec.DeserializeTrusted(json).Should().BeEquivalentTo(context);
+    }
+
+    [Fact]
+    public void ValidateAndSerialize_WhenSubscriptionPeriodIsProrated_AcceptsContext()
+    {
+        var subscriptionId = Guid.NewGuid();
+        var periodFrom = new DateTimeOffset(2026, 8, 20, 10, 0, 0, TimeSpan.Zero);
+        var context = CreateSubscriptionContext(
+            subscriptionId,
+            "MONTHLY",
+            periodFrom,
+            periodFrom.AddDays(10));
+
+        var action = () => SubscriptionPaymentContextCodec.ValidateAndSerialize(context, subscriptionId);
+
+        action.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData("MONTHLY")]
+    [InlineData("YEARLY")]
+    public void ValidateAndSerialize_WhenSubscriptionPeriodExceedsBillingUpperBound_RejectsContext(string billingPeriod)
+    {
+        var subscriptionId = Guid.NewGuid();
+        var periodFrom = new DateTimeOffset(2026, 8, 20, 10, 0, 0, TimeSpan.Zero);
+        var periodTo = billingPeriod == "MONTHLY"
+            ? periodFrom.AddMonths(1).AddTicks(1)
+            : periodFrom.AddYears(1).AddTicks(1);
+        var context = CreateSubscriptionContext(subscriptionId, billingPeriod, periodFrom, periodTo);
+
+        var action = () => SubscriptionPaymentContextCodec.ValidateAndSerialize(context, subscriptionId);
+
+        action.Should().Throw<CodedValidationException>()
+            .Where(exception => exception.ErrorCode == "VALIDATION_ERROR");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void ValidateAndSerialize_WhenSubscriptionPeriodIsNotPositive_RejectsContext(int offsetTicks)
+    {
+        var subscriptionId = Guid.NewGuid();
+        var periodFrom = new DateTimeOffset(2026, 8, 20, 10, 0, 0, TimeSpan.Zero);
+        var context = CreateSubscriptionContext(
+            subscriptionId,
+            "MONTHLY",
+            periodFrom,
+            periodFrom.AddTicks(offsetTicks));
+
+        var action = () => SubscriptionPaymentContextCodec.ValidateAndSerialize(context, subscriptionId);
+
+        action.Should().Throw<CodedValidationException>()
+            .Where(exception => exception.ErrorCode == "VALIDATION_ERROR");
+    }
+
     [Fact]
     public void DeserializeTrusted_WhenLegacySubscriptionBuyerContainsAddressDistrict_RemainsCompatible()
     {
@@ -172,4 +252,27 @@ public sealed class PaymentContextCodecTests
         action.Should().Throw<CodedValidationException>()
             .Where(exception => exception.ErrorCode == "PAYMENT_CONTEXT_INVALID");
     }
+
+    private static SubscriptionPaymentContextV1 CreateSubscriptionContext(
+        Guid subscriptionId,
+        string billingPeriod,
+        DateTimeOffset periodFrom,
+        DateTimeOffset periodTo)
+        => new(
+            1,
+            subscriptionId,
+            Guid.NewGuid(),
+            "Business",
+            billingPeriod,
+            periodFrom,
+            periodTo,
+            new SubscriptionBuyerSnapshotV1(
+                "VietRide Bus",
+                "BRN-001",
+                "0312345678",
+                "billing@vietride.test",
+                "+84901234567",
+                null,
+                null,
+                "Ho Chi Minh City"));
 }

@@ -16,6 +16,11 @@ public sealed class SubscriptionPlanRepository : ISubscriptionPlanRepository
     public Task<SubscriptionPlan?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
         => _dbContext.SubscriptionPlans.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
+    public Task<SubscriptionPlan?> GetByIdForUpdateAsync(Guid id, CancellationToken cancellationToken = default)
+        => _dbContext.SubscriptionPlans
+            .FromSqlInterpolated($"SELECT * FROM vietride_identity.subscription_plans WHERE id = {id} FOR UPDATE")
+            .FirstOrDefaultAsync(cancellationToken);
+
     public Task<SubscriptionPlan> AddAsync(SubscriptionPlan entity, CancellationToken cancellationToken = default)
     {
         _dbContext.SubscriptionPlans.Add(entity);

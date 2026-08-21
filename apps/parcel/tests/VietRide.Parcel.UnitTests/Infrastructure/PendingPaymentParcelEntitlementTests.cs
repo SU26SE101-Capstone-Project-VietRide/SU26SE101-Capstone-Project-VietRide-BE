@@ -65,6 +65,28 @@ public sealed class PendingPaymentParcelEntitlementTests
         result.ErrorCode.Should().Be("SUBSCRIPTION_EXPIRED");
     }
 
+    [Fact]
+    public async Task ActivePersistedStatus_WithInactiveEntitlementFlag_ReturnsSubscriptionExpired()
+    {
+        var payload = $$"""
+            {
+              "operatorId": "{{OperatorId:D}}",
+              "status": "ACTIVE",
+              "entitlementActive": false,
+              "plan": { "modules": { "enableParcel": true } }
+            }
+            """;
+        var client = BuildClient(new FakeMessageHandler(HttpStatusCode.OK, payload));
+
+        var result = await client.GetSubscriptionWriteEligibilityAsync(
+            OperatorId,
+            requireParcelModule: true);
+
+        result.IsAllowed.Should().BeFalse();
+        result.FailureStatusCode.Should().Be(402);
+        result.ErrorCode.Should().Be("SUBSCRIPTION_EXPIRED");
+    }
+
     [Theory]
     [InlineData("PENDING_APPROVAL")]
     [InlineData("UNKNOWN")]

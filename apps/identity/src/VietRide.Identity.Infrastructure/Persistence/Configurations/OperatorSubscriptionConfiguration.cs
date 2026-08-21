@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
+using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Identity.Infrastructure.Persistence.Configurations;
 
@@ -51,6 +52,12 @@ internal sealed class OperatorSubscriptionConfiguration : IEntityTypeConfigurati
             .HasColumnName("billing_period")
             .HasColumnType("subscription_billing_period")
             .IsRequired(false);
+
+        builder.Property(s => s.CyclePriceAmount)
+            .HasColumnName("cycle_price_amount")
+            .HasColumnType("bigint")
+            .HasConversion(money => money.Amount, amount => Money.FromRaw(amount))
+            .IsRequired();
 
         builder.Property(s => s.CurrentVehicles)
             .HasColumnName("current_vehicles")
@@ -130,5 +137,9 @@ internal sealed class OperatorSubscriptionConfiguration : IEntityTypeConfigurati
 
         builder.HasIndex(s => s.PlanId)
             .HasDatabaseName("idx_operator_subscriptions_active_plan_id");
+
+        builder.ToTable(table => table.HasCheckConstraint(
+            "chk_operator_subscriptions_cycle_price_non_negative",
+            "cycle_price_amount >= 0"));
     }
 }

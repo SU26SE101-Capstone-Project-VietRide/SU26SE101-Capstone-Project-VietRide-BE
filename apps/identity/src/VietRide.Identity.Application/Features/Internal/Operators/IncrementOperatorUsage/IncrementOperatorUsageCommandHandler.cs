@@ -2,10 +2,12 @@ using MediatR;
 using VietRide.Identity.Application.Abstractions;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperatorSubscription;
+using VietRide.Identity.Application.Features.Subscriptions;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Domain.Exceptions;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Identity.Application.Features.Internal.Operators.IncrementOperatorUsage;
 
@@ -15,15 +17,18 @@ public sealed class IncrementOperatorUsageCommandHandler
     private readonly IOperatorRepository _operators;
     private readonly IOperatorSubscriptionRepository _operatorSubscriptions;
     private readonly ISubscriptionUsageWarningPublisher _usageWarnings;
+    private readonly IClock _clock;
 
     public IncrementOperatorUsageCommandHandler(
         IOperatorRepository operators,
         IOperatorSubscriptionRepository operatorSubscriptions,
-        ISubscriptionUsageWarningPublisher usageWarnings)
+        ISubscriptionUsageWarningPublisher usageWarnings,
+        IClock? clock = null)
     {
         _operators = operators;
         _operatorSubscriptions = operatorSubscriptions;
         _usageWarnings = usageWarnings;
+        _clock = clock ?? new SystemClock();
     }
 
     public async Task<InternalOperatorSubscriptionDto> Handle(
@@ -38,13 +43,15 @@ public sealed class IncrementOperatorUsageCommandHandler
             cancellationToken)
             ?? throw new NotFoundException(nameof(OperatorSubscription), request.OperatorId);
 
-        EnsureSubscriptionCanIncrement(current.Subscription);
+        var decisionAt = _clock.UtcNow;
+        EnsureSubscriptionCanIncrement(current.Subscription, decisionAt);
 
         var resource = Enum.Parse<SubscriptionUsageResource>(request.Resource, ignoreCase: false);
         var updated = await _operatorSubscriptions.TryIncrementUsageWithinLimitAsync(
             request.OperatorId,
             resource,
             request.Delta,
+            decisionAt,
             cancellationToken);
 
         if (updated is null)
@@ -60,12 +67,14 @@ public sealed class IncrementOperatorUsageCommandHandler
             null,
             cancellationToken);
 
-        return InternalOperatorSubscriptionMapper.ToDto(updated.Value.Subscription, updated.Value.Plan);
+        return InternalOperatorSubscriptionMapper.ToDto(updated.Value.Subscription, updated.Value.Plan, decisionAt);
     }
 
-    private static void EnsureSubscriptionCanIncrement(OperatorSubscription subscription)
+    private static void EnsureSubscriptionCanIncrement(
+        OperatorSubscription subscription,
+        DateTimeOffset decisionAt)
     {
-        switch (subscription.Status)
+        switch (SubscriptionEffectiveState.GetStatus(subscription, decisionAt))
         {
             case SubscriptionStatus.ACTIVE:
             case SubscriptionStatus.PENDING_PAYMENT:

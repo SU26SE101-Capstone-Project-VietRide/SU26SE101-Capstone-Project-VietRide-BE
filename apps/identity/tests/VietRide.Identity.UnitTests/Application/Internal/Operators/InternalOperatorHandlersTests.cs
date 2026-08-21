@@ -9,6 +9,7 @@ using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Domain.Exceptions;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Identity.UnitTests.Application.Internal.Operators;
@@ -83,7 +84,8 @@ public sealed class InternalOperatorHandlersTests
         var plan = SubscriptionPlan.CreateStarter();
         var handler = new GetInternalOperatorSubscriptionQueryHandler(
             new FakeOperatorRepository(CreateOperator()),
-            new FakeOperatorSubscriptionRepository((subscription, plan), null));
+            new FakeOperatorSubscriptionRepository((subscription, plan), null),
+            CreateClock());
 
         var result = await handler.Handle(new GetInternalOperatorSubscriptionQuery(OperatorId), CancellationToken.None);
 
@@ -156,7 +158,8 @@ public sealed class InternalOperatorHandlersTests
         var handler = new IncrementOperatorUsageCommandHandler(
             new FakeOperatorRepository(CreateOperator()),
             new FakeOperatorSubscriptionRepository((current, plan), (updated, plan)),
-            usageWarnings);
+            usageWarnings,
+            CreateClock());
 
         await handler.Handle(
             new IncrementOperatorUsageCommand(
@@ -180,7 +183,15 @@ public sealed class InternalOperatorHandlersTests
         return new IncrementOperatorUsageCommandHandler(
             new FakeOperatorRepository(CreateOperator()),
             subscriptions,
-            Substitute.For<ISubscriptionUsageWarningPublisher>());
+            Substitute.For<ISubscriptionUsageWarningPublisher>(),
+            CreateClock());
+    }
+
+    private static IClock CreateClock()
+    {
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now.AddDays(1));
+        return clock;
     }
 
     private static Operator CreateOperator()
@@ -288,6 +299,7 @@ public sealed class InternalOperatorHandlersTests
 
         public SubscriptionUsageResource? CapturedResource { get; private set; }
         public int? CapturedDelta { get; private set; }
+        public DateTimeOffset? CapturedDecisionAt { get; private set; }
 
         public Task<(OperatorSubscription Subscription, SubscriptionPlan Plan)?> GetCurrentWithPlanByOperatorIdAsync(
             Guid operatorId,
@@ -298,10 +310,12 @@ public sealed class InternalOperatorHandlersTests
             Guid operatorId,
             SubscriptionUsageResource resource,
             int delta,
+            DateTimeOffset decisionAt,
             CancellationToken cancellationToken = default)
         {
             CapturedResource = resource;
             CapturedDelta = delta;
+            CapturedDecisionAt = decisionAt;
             return Task.FromResult(_incremented);
         }
 
@@ -325,6 +339,7 @@ public sealed class InternalOperatorHandlersTests
             EmailVerificationToken initialPasswordToken,
             ActivityLog activityLog,
             UserRole role,
+            DateTimeOffset decisionAt,
             CancellationToken cancellationToken = default)
             => Task.FromResult(false);
     }

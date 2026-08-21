@@ -1,15 +1,19 @@
+using VietRide.Identity.Application.Features.Subscriptions;
 using VietRide.Identity.Domain.Entities;
 
 namespace VietRide.Identity.Application.Features.Internal.Operators.GetInternalOperatorSubscription;
 
 internal static class InternalOperatorSubscriptionMapper
 {
-    public static InternalOperatorSubscriptionDto ToDto(OperatorSubscription subscription, SubscriptionPlan plan)
+    public static InternalOperatorSubscriptionDto ToDto(
+        OperatorSubscription subscription,
+        SubscriptionPlan plan,
+        DateTimeOffset decisionAt)
     {
         return new InternalOperatorSubscriptionDto(
             subscription.OperatorId,
             subscription.Id,
-            subscription.Status.ToString(),
+            SubscriptionEffectiveState.GetStatus(subscription, decisionAt).ToString(),
             subscription.StartedAt,
             subscription.ExpiresAt,
             new InternalSubscriptionPlanDto(
@@ -33,6 +37,7 @@ internal static class InternalOperatorSubscriptionMapper
                 subscription.CurrentOperatorUsers,
                 subscription.CurrentRoutes,
                 subscription.CurrentTripsThisMonth),
-            subscription.LastResetAt);
+            subscription.LastResetAt,
+            SubscriptionEffectiveState.IsEntitlementActive(subscription, decisionAt));
     }
 }

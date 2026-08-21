@@ -45,7 +45,8 @@ public sealed class SubscriptionPaymentInboxTests
     {
         await using var scope = factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
-        var now = DateTimeOffset.UtcNow;
+        var rawNow = DateTimeOffset.UtcNow;
+        var now = rawNow.AddTicks(-(rawNow.Ticks % TimeSpan.TicksPerMicrosecond));
         var paymentId = Guid.NewGuid();
         var operatorTenant = Operator.CreatePending(
             $"Inbox Test {suffix}",

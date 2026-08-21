@@ -144,6 +144,24 @@ public sealed class IdentityInternalClientTests
     }
 
     [Fact]
+    public async Task ValidateOperatorSubscriptionCanWriteAsync_UsesEntitlementFlagAtExpiryBoundary()
+    {
+        using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,
+            """
+            {"status":"ACTIVE","entitlementActive":false,"plan":{"modules":{"enableShuttle":true}}}
+            """));
+        var client = new IdentityInternalClient(httpClient);
+
+        var result = await client.ValidateOperatorSubscriptionCanWriteAsync(
+            OperatorId,
+            requireShuttleModule: true);
+
+        result.IsAllowed.Should().BeFalse();
+        result.FailureStatusCode.Should().Be(402);
+        result.ErrorCode.Should().Be("SUBSCRIPTION_EXPIRED");
+    }
+
+    [Fact]
     public async Task ValidateOperatorSubscriptionCanWriteAsync_ReturnsForbidden_WhenShuttleModuleDisabled()
     {
         using var httpClient = CreateHttpClient(new JsonResponseHandler(HttpStatusCode.OK,

@@ -88,11 +88,13 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
         Guid operatorId,
         SubscriptionUsageResource resource,
         int delta,
+        DateTimeOffset decisionAt,
         CancellationToken cancellationToken = default)
     {
         var subscriptionId = await _dbContext.OperatorSubscriptions
             .Where(x => x.OperatorId == operatorId)
             .Where(x => x.Status == SubscriptionStatus.ACTIVE || x.Status == SubscriptionStatus.PENDING_PAYMENT)
+            .Where(x => x.ExpiresAt > decisionAt)
             .OrderByDescending(x => x.StartedAt ?? x.LastResetAt)
             .Select(x => x.Id)
             .FirstOrDefaultAsync(cancellationToken);
@@ -124,13 +126,14 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
         EmailVerificationToken initialPasswordToken,
         ActivityLog activityLog,
         UserRole role,
+        DateTimeOffset decisionAt,
         CancellationToken cancellationToken = default)
     {
         var subscriptionId = await _dbContext.OperatorSubscriptions
             .Where(x => x.OperatorId == operatorId)
             .Where(x => x.Status == SubscriptionStatus.PENDING_APPROVAL
-                || x.Status == SubscriptionStatus.ACTIVE
-                || x.Status == SubscriptionStatus.PENDING_PAYMENT)
+                || ((x.Status == SubscriptionStatus.ACTIVE || x.Status == SubscriptionStatus.PENDING_PAYMENT)
+                    && x.ExpiresAt > decisionAt))
             .OrderByDescending(x => x.StartedAt ?? x.LastResetAt)
             .Select(x => x.Id)
             .FirstOrDefaultAsync(cancellationToken);
@@ -210,6 +213,13 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
             .Where(subscription => subscription.Id == subscriptionId)
             .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
                 plan.Id == subscription.PlanId && subscription.CurrentVehicles + delta <= plan.MaxVehicles))
+            .Where(subscription => subscription.Status != SubscriptionStatus.PENDING_PAYMENT
+                || _dbContext.SubscriptionUpgradeAttempts
+                    .Where(attempt => attempt.SubscriptionId == subscription.Id
+                        && attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING
+                        && attempt.LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING)
+                    .Join(_dbContext.SubscriptionPlans, attempt => attempt.TargetPlanId, plan => plan.Id, (_, plan) => plan)
+                    .All(plan => subscription.CurrentVehicles + delta <= plan.MaxVehicles))
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(
                     subscription => subscription.CurrentVehicles,
@@ -221,6 +231,13 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
             .Where(subscription => subscription.Id == subscriptionId)
             .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
                 plan.Id == subscription.PlanId && subscription.CurrentDrivers + delta <= plan.MaxDrivers))
+            .Where(subscription => subscription.Status != SubscriptionStatus.PENDING_PAYMENT
+                || _dbContext.SubscriptionUpgradeAttempts
+                    .Where(attempt => attempt.SubscriptionId == subscription.Id
+                        && attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING
+                        && attempt.LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING)
+                    .Join(_dbContext.SubscriptionPlans, attempt => attempt.TargetPlanId, plan => plan.Id, (_, plan) => plan)
+                    .All(plan => subscription.CurrentDrivers + delta <= plan.MaxDrivers))
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(
                     subscription => subscription.CurrentDrivers,
@@ -232,6 +249,13 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
             .Where(subscription => subscription.Id == subscriptionId)
             .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
                 plan.Id == subscription.PlanId && subscription.CurrentAssistants + delta <= plan.MaxAssistants))
+            .Where(subscription => subscription.Status != SubscriptionStatus.PENDING_PAYMENT
+                || _dbContext.SubscriptionUpgradeAttempts
+                    .Where(attempt => attempt.SubscriptionId == subscription.Id
+                        && attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING
+                        && attempt.LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING)
+                    .Join(_dbContext.SubscriptionPlans, attempt => attempt.TargetPlanId, plan => plan.Id, (_, plan) => plan)
+                    .All(plan => subscription.CurrentAssistants + delta <= plan.MaxAssistants))
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(
                     subscription => subscription.CurrentAssistants,
@@ -243,6 +267,13 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
             .Where(subscription => subscription.Id == subscriptionId)
             .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
                 plan.Id == subscription.PlanId && subscription.CurrentOperatorUsers + delta <= plan.MaxOperatorUsers))
+            .Where(subscription => subscription.Status != SubscriptionStatus.PENDING_PAYMENT
+                || _dbContext.SubscriptionUpgradeAttempts
+                    .Where(attempt => attempt.SubscriptionId == subscription.Id
+                        && attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING
+                        && attempt.LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING)
+                    .Join(_dbContext.SubscriptionPlans, attempt => attempt.TargetPlanId, plan => plan.Id, (_, plan) => plan)
+                    .All(plan => subscription.CurrentOperatorUsers + delta <= plan.MaxOperatorUsers))
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(
                     subscription => subscription.CurrentOperatorUsers,
@@ -254,6 +285,13 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
             .Where(subscription => subscription.Id == subscriptionId)
             .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
                 plan.Id == subscription.PlanId && subscription.CurrentRoutes + delta <= plan.MaxRoutes))
+            .Where(subscription => subscription.Status != SubscriptionStatus.PENDING_PAYMENT
+                || _dbContext.SubscriptionUpgradeAttempts
+                    .Where(attempt => attempt.SubscriptionId == subscription.Id
+                        && attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING
+                        && attempt.LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING)
+                    .Join(_dbContext.SubscriptionPlans, attempt => attempt.TargetPlanId, plan => plan.Id, (_, plan) => plan)
+                    .All(plan => subscription.CurrentRoutes + delta <= plan.MaxRoutes))
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(
                     subscription => subscription.CurrentRoutes,
@@ -265,6 +303,13 @@ public sealed class OperatorSubscriptionRepository : IOperatorSubscriptionReposi
             .Where(subscription => subscription.Id == subscriptionId)
             .Where(subscription => _dbContext.SubscriptionPlans.Any(plan =>
                 plan.Id == subscription.PlanId && subscription.CurrentTripsThisMonth + delta <= plan.MaxTripsPerMonth))
+            .Where(subscription => subscription.Status != SubscriptionStatus.PENDING_PAYMENT
+                || _dbContext.SubscriptionUpgradeAttempts
+                    .Where(attempt => attempt.SubscriptionId == subscription.Id
+                        && attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING
+                        && attempt.LatestPaymentStatus == SubscriptionPaymentSessionStatus.PENDING)
+                    .Join(_dbContext.SubscriptionPlans, attempt => attempt.TargetPlanId, plan => plan.Id, (_, plan) => plan)
+                    .All(plan => subscription.CurrentTripsThisMonth + delta <= plan.MaxTripsPerMonth))
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(
                     subscription => subscription.CurrentTripsThisMonth,
