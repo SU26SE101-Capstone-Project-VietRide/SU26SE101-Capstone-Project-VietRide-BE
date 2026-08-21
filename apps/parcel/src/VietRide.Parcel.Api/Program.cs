@@ -111,6 +111,11 @@ if (registerMessaging)
         job => job.RunAsync(CancellationToken.None),
         "*/5 * * * *",
         new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
+    recurringJobs.AddOrUpdate<ParcelIncidentSearchExpiryJob>(
+        ParcelIncidentSearchExpiryJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/15 * * * *",
+        new RecurringJobOptions { TimeZone = TimeZoneInfo.Utc });
     recurringJobs.AddOrUpdate<PendingTransferClaimRecoveryJob>(
         PendingTransferClaimRecoveryJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),

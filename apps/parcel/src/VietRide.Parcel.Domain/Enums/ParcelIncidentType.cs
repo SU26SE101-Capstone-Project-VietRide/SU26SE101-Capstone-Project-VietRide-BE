@@ -1,0 +1,14 @@
+namespace VietRide.Parcel.Domain.Enums;
+
+public enum ParcelIncidentType
+{
+    MISSING,
+    WRONG_STOP,
+    DELIVERY_NOT_RECEIVED,
+    PARTIAL_LOSS,
+    DAMAGED,
+    SCAN_IDENTITY_MISMATCH,
+    PACKAGE_IDENTITY_MISMATCH,
+    UNSCANNED_HANDOFF,
+    MISSING_AFTER_DEPARTURE,
+}

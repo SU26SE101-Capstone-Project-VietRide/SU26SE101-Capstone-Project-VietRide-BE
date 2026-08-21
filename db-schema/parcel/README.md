@@ -7,7 +7,7 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 - **Database:** `vietride_parcel`
 - **Framework:** .NET Core 8 + EF Core 8
 - **Extensions:** `pgcrypto`
-- **Hangfire schema:** `hangfire.*` trong cùng DB. Jobs: undo-reject 15m, EXTRA_LARGE auto-reject 24h, PENDING auto-reject 30m sau IN_PROGRESS, PENDING_ADDITIONAL_PAYMENT timeout (5m), PENDING_TRANSFER_CONFIRM 30m escalation, Day-32 cargo-recovery replay (5m), PENDING_OPERATOR_ACTION 2h re-alert, DELIVERED_PENDING_CONFIRM 7-day re-alert (daily 9am).
+- **Hangfire schema:** `hangfire.*` trong cùng DB. Jobs: undo-reject 15m, EXTRA_LARGE auto-reject 24h, PENDING auto-reject 30m sau IN_PROGRESS, PENDING_ADDITIONAL_PAYMENT timeout (5m), PENDING_TRANSFER_CONFIRM 30m escalation, Day-32 cargo-recovery replay (5m), PENDING_OPERATOR_ACTION 2h re-alert, DELIVERED_PENDING_CONFIRM 7-day re-alert (daily 9am), Parcel incident search expiry (15m).
 
 ## Entity List
 
@@ -16,6 +16,15 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | `Parcel` | Hàng ký gửi (40+ field). | `parcelCode` UNIQUE, `senderUserId` NOT NULL, `recipientUserId` nullable, `dropoffStopId` nullable, `sizeCategory` enum, deposit/additional pricing, delivery-confirmation, transfer/return/review fields, full status machine |
 | `ParcelDeliveryToken` | Lịch sử token xác nhận giao hàng chỉ lưu hash. | `tokenHash` UNIQUE, tối đa một token chưa revoke mỗi Parcel, expiry/revocation/issuer/reason |
 | `ParcelCargoRecoveryOperation` | Durable Day-32 transfer/return orchestration history. | Stable UUID-v4 Trip key, frozen source/target/refund facts, `PENDING|COMPLETED|FAILED`, one pending operation per Parcel |
+| `ParcelTransitLeg` | Một chặng vật lý của Parcel trên một Trip. | Sequence bất biến, expected/actual endpoints, vehicle snapshot, forwarding/multi-leg status |
+| `ParcelCustodyEvent` | Chain of custody append-only. | Expected/actual location, Trip/vehicle, actor role, evidence reference, source, idempotency key, sequence |
+| `ParcelCurrentCustody` | Projection vị trí đã xác nhận gần nhất. | Last location/time, current Trip/vehicle, `CONFIRMED_SCAN|MANUAL_EXCEPTION|INFERRED_FROM_MANIFEST|UNKNOWN` |
+| `ParcelIncident` | Vụ việc missing/wrong-stop/unscanned/not-received/damage. | Search deadline, last known location, operational breach, recovery/loss state |
+| `ParcelSearchTask` | Checklist điều tra giao cho crew/station/operator. | Type/location/assignee/deadline/result/evidence/completedAt |
+| `ParcelClaim` | Claim do sender sở hữu, snapshot policy và award. | Rate/cap/fallback/version, direct loss, awards, decision actor/time, payout reference và appeal audit riêng |
+| `ParcelClaimEvidence` | Chứng từ claim. | Invoice/receipt/payment proof/photo/serial/biên bản reference và uploader |
+| `ParcelCompensationPolicy` | Active versioned policy per operator. | Default 50%/30m, fallback 4x freight, claim/search/decision/payout SLA |
+| `UnidentifiedParcelPackage` | Kiện không đọc được QR ở station. | Temporary tag, location, description/weight/evidence, matched Parcel audit |
 | `ParcelStatusHistory` | Dòng thời gian trạng thái bất biến do trigger sở hữu. | `status`, `occurredAt`, `actorType`, `actorId`, `source`, `reason` |
 | `ParcelRouteFare` | Operator config giá per route per size. | composite PK `(routeId, sizeCategory)`, future-dated effective window |
 | `ParcelStats` | Counter table per operator per day. | UNIQUE `(operatorId, statDate)` |
@@ -40,6 +49,10 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 - **Sáu `trip_snapshot_*` nullable** — lưu cố định route, tên bến và xe tại lúc tạo Parcel để UI hiển thị ổn định khi dữ liệu Trip/Route/Vehicle về sau đổi hoặc bị soft-delete. Migration không gọi Trip; job `parcel.trip-display-snapshot-backfill` xử lý tối đa 100 Parcel mỗi lần bằng một batch API, ghi nguyên tuple với CAS và không bịa dữ liệu khi Trip thiếu.
 - **`parcels.status` enum** với 22 value, gồm cả compatibility states `PENDING` và `PENDING_ADDITIONAL_PAYMENT`. Mọi transition validate ở handler.
 - **`parcel_status_history` bất biến và do trigger ghi** — mọi câu `UPDATE` đổi `parcels.status`, kể cả EF bulk update và raw SQL, tạo đúng một dòng. Migration chỉ ghi một `MIGRATION_BASELINE` theo trạng thái hiện tại của Parcel cũ tại thời điểm migration; không dựng lại transition lịch sử. Parcel mới không có dòng lúc `INSERT`, chỉ có history từ transition thật đầu tiên. `actor_type` là `USER`/`RECIPIENT` khi có bằng chứng persisted, `UNKNOWN` khi không thể suy ra chính xác; `SYSTEM` chỉ dùng cho baseline.
+- **`parcel_custody_events` append-only** — trigger chặn cả UPDATE và DELETE. `ParcelStatusHistory` mô tả state machine; custody event mô tả bàn giao vật lý và không được dùng GPS để bịa vị trí.
+- **Transit leg/search terminalization** — `LOADED` chuyển leg sang `ACTIVE`, unload hợp lệ tại đích chuyển `COMPLETED`, forwarding giữ leg cũ `FORWARDED` và leg mới `ACTIVE`, còn `LOST_CONFIRMED` chuyển leg chưa kết thúc sang `LOST`. Khi tìm thấy hàng, task chưa xong chuyển `CANCELLED`; khi xác nhận mất, task chưa xong chuyển `FAILED`; task đã hoàn tất giữ nguyên result/evidence.
+- **`LOST` không thuộc ParcelStatus** — nhánh mất do `parcel_incidents.status=LOST_CONFIRMED` sở hữu. Custody exception tạm dùng `PENDING_OPERATOR_ACTION/CUSTODY_EXCEPTION` và giữ resume status.
+- **Policy frozen per Parcel/claim** — default 50% thiệt hại trực tiếp, cap 30.000.000 VND; operator policy thay đổi không hồi tố. Sender là beneficiary duy nhất.
 - **`parcels` 1 mega-table thay vì split** — query "parcel detail page" lấy 1 row đủ; tránh N+1.
 - **2 CHECK constraints** cho weight: `estimated_weight_kg > 0` (bắt buộc), `actual_weight_kg > 0 OR NULL`.
 - **`parcels` indexes nặng vào status + updated_at partial** — Hangfire scan các state cần processing (PENDING_*, DELIVERED_PENDING_CONFIRM, TRANSFER_*, DELIVERY_REJECTED) hiệu quả qua composite index.
@@ -70,6 +83,13 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | `idx_parcels_trip_id_status` | `(trip_id, status)` | B-tree | Trip detail page (parcels of trip) |
 | `idx_parcels_operator_id_status` | `(operator_id, status)` | B-tree | Operator dashboard list |
 | `idx_parcel_status_history_parcel_occurred_id` | `(parcel_id, occurred_at, id)` | B-tree | Đọc timeline theo thứ tự xác định |
+| `uq_parcel_custody_events_idempotency` | `(parcel_id, idempotency_key)` partial | unique | Một custody fact cho mỗi Parcel/idempotency identity |
+| `idx_parcel_custody_events_timeline` | `(parcel_id, occurred_at, id)` | B-tree | Đọc physical custody timeline |
+| `uq_parcel_transit_legs_parcel_sequence` | `(parcel_id, sequence)` | unique | Thứ tự leg bất biến, forwarding không sửa leg cũ |
+| `uq_parcel_incidents_active_type` | `(parcel_id, type)` partial | unique | Không mở trùng active incident cùng type |
+| `idx_parcel_incidents_search_deadline` | `(search_deadline, status)` | B-tree | Search expiry scan 15 phút |
+| `uq_parcel_claims_incident` | `incident_id` | unique | Một claim cho mỗi lost incident |
+| `uq_parcel_compensation_policies_operator` | `operator_id` | unique | Một active policy/version per operator |
 | `uq_parcel_status_history_migration_baseline` | `parcel_id` partial khi `source = 'MIGRATION_BASELINE'` | unique | Tối đa một baseline cho mỗi Parcel |
 | `idx_parcels_trip_snapshot_backfill` | `(created_at, id)` partial khi bất kỳ snapshot còn null | B-tree | Bounded application backfill không full scan |
 | `idx_parcels_status_updated_at` | `(status, updated_at)` partial | B-tree | Hangfire scan all transient states |
@@ -88,7 +108,7 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | Column | References | Enforcement |
 |---|---|---|
 | `Parcel.senderUserId/recipientUserId/reviewedByUserId/confirmedByUserId/transferConfirmedByUserId/transferConfirmationClaimedByUserId/returnedByUserId`, `ParcelDeliveryToken.issuedByUserId`, nullable `ParcelCargoRecoveryOperation.actorUserId` | `identity.User.id` | app-layer; system `RELEASE` operations have no actor |
-| `Parcel.operatorId`, `ParcelRouteFare.operatorId`, `ParcelStats.operatorId`, `ParcelCargoRecoveryOperation.operatorId` | `identity.Operator.id` | app-layer + tenant filter |
+| `Parcel.operatorId`, `ParcelRouteFare.operatorId`, `ParcelStats.operatorId`, `ParcelCargoRecoveryOperation.operatorId`, Reliability entities `operatorId` | `identity.Operator.id` | app-layer + tenant filter |
 | `Parcel.tripId`, `Parcel.transferTargetTripId`, `ParcelCargoRecoveryOperation.sourceTripId/targetTripId` | `trip.Trip.id` | app-layer |
 | `Parcel.dropoffStopId` | `trip.Stop.id` | app-layer validate `allowDropoff=true` |
 | `ParcelRouteFare.routeId` | `trip.Route.id` | app-layer |

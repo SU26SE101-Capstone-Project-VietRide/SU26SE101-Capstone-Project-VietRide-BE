@@ -74,4 +74,19 @@ public sealed class DevIdentityServiceClient : IIdentityServiceClient
 
         return Task.FromResult(new OperatorLookupOutcome(OperatorLookupOutcomeKind.Success, opInfo, null));
     }
+
+    public Task<IdentityOperatorBatchOutcome> GetOperatorsAsync(
+        IReadOnlyCollection<Guid> operatorIds,
+        CancellationToken cancellationToken = default)
+    {
+        var summaries = operatorIds
+            .Distinct()
+            .Select(operatorId => new IdentityOperatorSummary(
+                operatorId,
+                "Dev Operator",
+                null,
+                "+84901234567"))
+            .ToArray();
+        return Task.FromResult(IdentityOperatorBatchOutcome.Success(summaries));
+    }
 }

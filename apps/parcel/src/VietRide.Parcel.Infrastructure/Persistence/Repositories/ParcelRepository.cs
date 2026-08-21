@@ -294,6 +294,22 @@ internal sealed class ParcelRepository : IParcelRepository
     public async Task<ParcelEntity?> FindByParcelCodeAsync(string parcelCode, CancellationToken ct = default)
         => await _db.Parcels.FirstOrDefaultAsync(p => p.ParcelCode == parcelCode, ct);
 
+    public async Task<IReadOnlyList<ParcelEntity>> ListByIdsAsync(
+        IReadOnlyCollection<Guid> parcelIds,
+        CancellationToken ct = default)
+    {
+        var ids = parcelIds.Where(id => id != Guid.Empty).Distinct().ToArray();
+        if (ids.Length == 0)
+            return [];
+        if (ids.Length > 100)
+            throw new ArgumentOutOfRangeException(nameof(parcelIds), "At most 100 parcel ids are allowed.");
+
+        return await _db.Parcels
+            .AsNoTracking()
+            .Where(parcel => ids.Contains(parcel.Id))
+            .ToArrayAsync(ct);
+    }
+
     // ---- Payment deposit transitions (PENDING_PAYMENT) ----
 
     public async Task<ParcelPaymentTransitionSnapshot?> TryMarkDepositSucceededAsync(
@@ -385,7 +401,8 @@ internal sealed class ParcelRepository : IParcelRepository
         string reason,
         Money? refundAmount,
         DateTimeOffset now,
-        CancellationToken ct)
+        CancellationToken ct,
+        ParcelStatus? resumeStatus = null)
     {
         var affected = await _db.Parcels
             .Where(p => p.Id == parcelId
@@ -397,6 +414,7 @@ internal sealed class ParcelRepository : IParcelRepository
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.PENDING_OPERATOR_ACTION)
                 .SetProperty(p => p.PendingActionType, actionType)
+                .SetProperty(p => p.PendingActionResumeStatus, resumeStatus)
                 .SetProperty(p => p.PendingActionReason, reason)
                 .SetProperty(p => p.RefundAmount, refundAmount ?? Money.Zero)
                 .SetProperty(p => p.UpdatedAt, now), ct);
@@ -1277,6 +1295,34 @@ internal sealed class ParcelRepository : IParcelRepository
         return affected > 0 ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct)) : null;
     }
 
+    public async Task<ParcelPaymentTransitionSnapshot?> TryRequestReliabilityForwardingAsync(
+        Guid parcelId,
+        Guid operatorId,
+        Guid targetTripId,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var affected = await _db.Parcels
+            .Where(p => p.Id == parcelId
+                && p.OperatorId == operatorId
+                && p.TripId != targetTripId
+                && (p.Status == ParcelStatus.PENDING_OPERATOR_ACTION
+                    || p.Status == ParcelStatus.LOADED
+                    || p.Status == ParcelStatus.IN_TRANSIT))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(p => p.Status, ParcelStatus.PENDING_TRANSFER_CONFIRM)
+                .SetProperty(p => p.PendingActionType, (PendingActionType?)null)
+                .SetProperty(p => p.PendingActionResumeStatus, (ParcelStatus?)null)
+                .SetProperty(p => p.PendingActionReason, (string?)null)
+                .SetProperty(p => p.TransferTargetTripId, targetTripId)
+                .SetProperty(p => p.TransferRequestedAt, now)
+                .SetProperty(p => p.UpdatedAt, now), ct);
+
+        return affected > 0
+            ? BuildSnapshot(await _db.Parcels.AsNoTracking().FirstAsync(p => p.Id == parcelId, ct))
+            : null;
+    }
+
     public async Task<ParcelPaymentTransitionSnapshot?> TryCompleteRecoveryTransferAsync(
         Guid parcelId,
         Guid operatorId,
@@ -2038,6 +2084,150 @@ internal sealed class ParcelRepository : IParcelRepository
 
         return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
     }
+
+    public async Task<PagedResult<ParcelEntity>> ListByTripAndOperatorFilteredAsync(
+        Guid tripId,
+        Guid operatorId,
+        Guid? stopId,
+        ParcelStatus? status,
+        bool? hasException,
+        string? search,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var query = _db.Parcels
+            .AsNoTracking()
+            .Where(parcel => parcel.TripId == tripId && parcel.OperatorId == operatorId);
+        if (stopId.HasValue)
+            query = query.Where(parcel => parcel.DropoffStopId == stopId.Value);
+        if (status.HasValue)
+            query = query.Where(parcel => parcel.Status == status.Value);
+        if (hasException.HasValue)
+        {
+            query = hasException.Value
+                ? query.Where(parcel => _db.ParcelIncidents.Any(incident =>
+                    incident.ParcelId == parcel.Id
+                    && incident.Status != ParcelIncidentStatus.CLOSED
+                    && incident.Status != ParcelIncidentStatus.RESOLVED))
+                : query.Where(parcel => !_db.ParcelIncidents.Any(incident =>
+                    incident.ParcelId == parcel.Id
+                    && incident.Status != ParcelIncidentStatus.CLOSED
+                    && incident.Status != ParcelIncidentStatus.RESOLVED));
+        }
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var pattern = $"%{search.Trim()}%";
+            query = query.Where(parcel =>
+                EF.Functions.ILike(parcel.ParcelCode, pattern)
+                || EF.Functions.ILike(parcel.RecipientName, pattern)
+                || EF.Functions.ILike(parcel.Description ?? string.Empty, pattern));
+        }
+
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .OrderBy(parcel => parcel.DropoffStopId)
+            .ThenBy(parcel => parcel.ParcelCode)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToArrayAsync(ct);
+        return PagedResult<ParcelEntity>.Create(items, page, pageSize, total);
+    }
+
+    public async Task<AssistantParcelManifestCounts> GetAssistantManifestCountsAsync(
+        Guid tripId,
+        Guid operatorId,
+        Guid? currentStopId,
+        CancellationToken ct)
+    {
+        var parcels = _db.Parcels
+            .AsNoTracking()
+            .Where(parcel => parcel.TripId == tripId && parcel.OperatorId == operatorId);
+        var grouped = await parcels
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Total = group.Count(),
+                CheckedIn = group.Count(parcel => parcel.Status == ParcelStatus.CHECKED_IN),
+                Loaded = group.Count(parcel => parcel.Status == ParcelStatus.LOADED
+                    || parcel.Status == ParcelStatus.IN_TRANSIT),
+                ExpectedAtCurrentStop = currentStopId.HasValue
+                    ? group.Count(parcel => parcel.DropoffStopId == currentStopId.Value)
+                    : 0,
+                Unloaded = group.Count(parcel => parcel.Status == ParcelStatus.UNLOADED
+                    || parcel.Status == ParcelStatus.DELIVERED_PENDING_CONFIRM
+                    || parcel.Status == ParcelStatus.DELIVERY_CONFIRMED),
+            })
+            .SingleOrDefaultAsync(ct);
+        var incidentCounts = await _db.ParcelIncidents
+            .AsNoTracking()
+            .Where(incident => incident.OperatorId == operatorId
+                && incident.TripId == tripId
+                && incident.Status != ParcelIncidentStatus.CLOSED
+                && incident.Status != ParcelIncidentStatus.RESOLVED)
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                ExceptionCount = group.Count(),
+                UnresolvedCount = group.Count(incident =>
+                    incident.Status != ParcelIncidentStatus.LOST_CONFIRMED),
+            })
+            .SingleOrDefaultAsync(ct);
+        return new AssistantParcelManifestCounts(
+            grouped?.Total ?? 0,
+            grouped?.CheckedIn ?? 0,
+            grouped?.Loaded ?? 0,
+            grouped?.ExpectedAtCurrentStop ?? 0,
+            grouped?.Unloaded ?? 0,
+            incidentCounts?.ExceptionCount ?? 0,
+            incidentCounts?.UnresolvedCount ?? 0);
+    }
+
+    public async Task<IReadOnlyList<ParcelEntity>> ListPendingDropoffByTripAndStopAsync(
+        Guid tripId,
+        Guid stopId,
+        CancellationToken ct = default)
+        => await _db.Parcels
+            .AsNoTracking()
+            .Where(x => x.TripId == tripId
+                && x.DropoffStopId == stopId
+                && (x.Status == ParcelStatus.LOADED || x.Status == ParcelStatus.IN_TRANSIT))
+            .OrderBy(x => x.Id)
+            .ToArrayAsync(ct);
+
+    public async Task<IReadOnlyList<ParcelEntity>> ListPendingTerminalDropoffByTripAsync(
+        Guid tripId,
+        CancellationToken ct = default)
+        => await _db.Parcels
+            .AsNoTracking()
+            .Where(x => x.TripId == tripId
+                && x.DropoffStopId == null
+                && (x.Status == ParcelStatus.LOADED || x.Status == ParcelStatus.IN_TRANSIT))
+            .OrderBy(x => x.Id)
+            .ToArrayAsync(ct);
+
+    public async Task<IReadOnlyList<ParcelEntity>> ListDropoffManifestByTripAndStopAsync(
+        Guid tripId,
+        Guid stopId,
+        CancellationToken ct = default)
+        => await _db.Parcels
+            .AsNoTracking()
+            .Where(x => x.TripId == tripId
+                && x.DropoffStopId == stopId
+                && (x.Status == ParcelStatus.LOADED
+                    || x.Status == ParcelStatus.IN_TRANSIT
+                    || x.Status == ParcelStatus.UNLOADED
+                    || x.Status == ParcelStatus.DELIVERED_PENDING_CONFIRM
+                    || x.Status == ParcelStatus.DELIVERY_CONFIRMED
+                    || x.Status == ParcelStatus.DELIVERY_REJECTED
+                    || x.Status == ParcelStatus.RETURN_INITIATED
+                    || x.Status == ParcelStatus.RETURNED
+                    || (x.Status == ParcelStatus.PENDING_OPERATOR_ACTION
+                        && x.PendingActionType == PendingActionType.CUSTODY_EXCEPTION)))
+            .OrderBy(x => x.Id)
+            .ToArrayAsync(ct);
 
     public async Task<PagedResult<ParcelEntity>> ListByOperatorAsync(
         Guid operatorId,

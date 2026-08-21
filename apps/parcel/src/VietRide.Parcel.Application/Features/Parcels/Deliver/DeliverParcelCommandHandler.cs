@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
@@ -21,6 +22,7 @@ public sealed class DeliverParcelCommandHandler
     private readonly IParcelDeliveryEmailClient _deliveryEmailClient;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IParcelCustodyService? _custody;
 
     public DeliverParcelCommandHandler(
         IParcelRepository parcelRepository,
@@ -28,7 +30,8 @@ public sealed class DeliverParcelCommandHandler
         ITripServiceClient tripClient,
         IParcelDeliveryEmailClient deliveryEmailClient,
         IIntegrationEventOutbox outbox,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IParcelCustodyService? custody = null)
     {
         _parcelRepository = parcelRepository;
         _deliveryTokenRepository = deliveryTokenRepository;
@@ -36,6 +39,7 @@ public sealed class DeliverParcelCommandHandler
         _deliveryEmailClient = deliveryEmailClient;
         _outbox = outbox;
         _unitOfWork = unitOfWork;
+        _custody = custody;
     }
 
     public async Task<DeliverParcelResponse> Handle(
@@ -86,6 +90,27 @@ public sealed class DeliverParcelCommandHandler
                 parcel.Id,
                 now,
                 cancellationToken);
+
+            if (_custody is not null)
+            {
+                await _custody.AppendAsync(
+                    parcel,
+                    ParcelCustodyEventType.HANDOFF,
+                    parcel.DropoffStopId.HasValue
+                        ? ParcelCustodyLocationType.ROUTE_STOP
+                        : ParcelCustodyLocationType.DESTINATION_STATION,
+                    parcel.DropoffStopId,
+                    parcel.DropoffStopId.HasValue
+                        ? $"STOP:{parcel.DropoffStopId:D}"
+                        : parcel.TripSnapshotDestinationStationName,
+                    command.ActorUserId,
+                    "ASSISTANT",
+                    "DELIVERY_HANDOFF",
+                    null,
+                    command.PhotoUrls,
+                    null,
+                    cancellationToken);
+            }
 
             DateTimeOffset? expiresAt = null;
             if (!string.IsNullOrWhiteSpace(parcel.RecipientEmail))

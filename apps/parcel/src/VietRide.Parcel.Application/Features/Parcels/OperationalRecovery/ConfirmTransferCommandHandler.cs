@@ -3,6 +3,7 @@ using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -21,19 +22,22 @@ public sealed class ConfirmTransferCommandHandler
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IClock _clock;
+    private readonly IParcelReliabilityRepository? _reliability;
 
     public ConfirmTransferCommandHandler(
         IParcelRepository parcelRepository,
         ITripServiceClient tripClient,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
-        IClock clock)
+        IClock clock,
+        IParcelReliabilityRepository? reliability = null)
     {
         _parcelRepository = parcelRepository;
         _tripClient = tripClient;
         _outbox = outbox;
         _unitOfWork = unitOfWork;
         _clock = clock;
+        _reliability = reliability;
     }
 
     public async Task<OperationalParcelResponse> Handle(
@@ -53,39 +57,164 @@ public sealed class ConfirmTransferCommandHandler
         var claimId = claimed.ClaimId!.Value;
         var targetTripId = claimed.TargetTripId!.Value;
         var confirmedByUserId = claimed.ClaimedByUserId!.Value;
+        var plannedReliabilityLeg = _reliability is null
+            ? null
+            : await _reliability.GetTransitLegAsync(claimed.ParcelId, targetTripId, cancellationToken);
 
         var transfer = await _tripClient.TransferCargoAsync(
             claimed.SourceTripId,
             claimed.ParcelId,
             targetTripId,
             "LOADED",
-            allowCapacityOverflow: true,
+            allowCapacityOverflow: plannedReliabilityLeg is null,
             claimId,
             cancellationToken);
 
-        return transfer.Kind switch
+        if (transfer.Kind == TripCargoTransferOutcomeKind.Success)
         {
-            TripCargoTransferOutcomeKind.Success => ToResponse(
-                await CompleteAsync(
-                    claimed,
-                    targetTripId,
-                    claimId,
-                    confirmedByUserId,
-                    cancellationToken)),
-            TripCargoTransferOutcomeKind.TripNotFound
-                or TripCargoTransferOutcomeKind.ParcelCargoNotFound
-                or TripCargoTransferOutcomeKind.Conflict
-                or TripCargoTransferOutcomeKind.CapacityExceeded
-                => await ClearClaimAndThrowAsync(
-                    claimed.ParcelId,
-                    claimId,
-                    transfer,
-                    cancellationToken),
-            _ => throw new ParcelDependencyUnavailableException(
-                "TRIP_SERVICE_UNAVAILABLE",
-                transfer.ErrorMessage ?? "Trip cargo transfer outcome is unknown."),
-        };
+            var completed = await CompleteAsync(
+                claimed,
+                targetTripId,
+                claimId,
+                confirmedByUserId,
+                cancellationToken);
+            await RecordForwardingCustodyAsync(
+                claimed.ParcelId,
+                claimed.SourceTripId,
+                targetTripId,
+                claimId,
+                confirmedByUserId,
+                cancellationToken);
+            return ToResponse(completed);
+        }
+
+        if (transfer.Kind is TripCargoTransferOutcomeKind.TripNotFound
+            or TripCargoTransferOutcomeKind.ParcelCargoNotFound
+            or TripCargoTransferOutcomeKind.Conflict
+            or TripCargoTransferOutcomeKind.CapacityExceeded)
+        {
+            return await ClearClaimAndThrowAsync(
+                claimed.ParcelId,
+                claimId,
+                transfer,
+                cancellationToken);
+        }
+
+        throw new ParcelDependencyUnavailableException(
+            "TRIP_SERVICE_UNAVAILABLE",
+            transfer.ErrorMessage ?? "Trip cargo transfer outcome is unknown.");
     }
+
+    private async Task RecordForwardingCustodyAsync(
+        Guid parcelId,
+        Guid sourceTripId,
+        Guid targetTripId,
+        Guid operationId,
+        Guid actorUserId,
+        CancellationToken cancellationToken)
+    {
+        if (_reliability is null)
+            return;
+
+        var parcel = await _parcelRepository.GetByIdAsync(parcelId, cancellationToken);
+        if (parcel is null)
+            return;
+
+        var target = await _tripClient.GetTripParcelSnapshotAsync(targetTripId, cancellationToken);
+        var targetVehicleId = target.Snapshot?.VehicleId;
+        var oldLeg = await _reliability.GetTransitLegAsync(parcel.Id, sourceTripId, cancellationToken);
+        var targetLeg = await _reliability.GetTransitLegAsync(parcel.Id, targetTripId, cancellationToken);
+        var existingEvents = await _reliability.ListCustodyEventsAsync(parcel.Id, cancellationToken);
+        var sequence = existingEvents.Count == 0 ? 1 : existingEvents.Max(x => x.Sequence) + 1;
+        var current = await _reliability.GetCurrentCustodyAsync(parcel.Id, cancellationToken);
+        var now = _clock.UtcNow;
+
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            if (oldLeg is not null)
+            {
+                oldLeg.MarkForwarded(now);
+                await _reliability.UpdateTransitLegAsync(oldLeg, cancellationToken);
+                var forwardedOut = ParcelCustodyEvent.Create(
+                    parcel.Id,
+                    oldLeg.Id,
+                    sourceTripId,
+                    ParcelCustodyEventType.FORWARDED_OUT,
+                    parcel.DropoffStopId.HasValue ? ParcelCustodyLocationType.ROUTE_STOP : ParcelCustodyLocationType.DESTINATION_STATION,
+                    parcel.DropoffStopId,
+                    current?.LastLocationType,
+                    current?.LastLocationId,
+                    current?.LastLocationSnapshot,
+                    current?.CurrentVehicleId,
+                    actorUserId,
+                    "ASSISTANT",
+                    now,
+                    "TRANSFER_CONFIRMATION",
+                    $"forward:{operationId:D}:out",
+                    null,
+                    null,
+                    sequence++);
+                await _reliability.AddCustodyEventAsync(forwardedOut, cancellationToken);
+            }
+
+            var newLeg = targetLeg ?? ParcelTransitLeg.Create(
+                parcel.Id,
+                targetTripId,
+                parcel.OperatorId,
+                (oldLeg?.Sequence ?? 0) + 1,
+                current?.LastLocationId,
+                parcel.DropoffStopId,
+                current?.LastLocationSnapshot,
+                parcel.DropoffStopId.HasValue
+                    ? $"STOP:{parcel.DropoffStopId:D}"
+                    : parcel.TripSnapshotDestinationStationName,
+                targetVehicleId,
+                null);
+            newLeg.Start(now);
+            if (targetLeg is null)
+                await _reliability.AddTransitLegAsync(newLeg, cancellationToken);
+            else
+                await _reliability.UpdateTransitLegAsync(newLeg, cancellationToken);
+
+            var forwardedIn = ParcelCustodyEvent.Create(
+                parcel.Id,
+                newLeg.Id,
+                targetTripId,
+                ParcelCustodyEventType.FORWARDED_IN,
+                parcel.DropoffStopId.HasValue ? ParcelCustodyLocationType.ROUTE_STOP : ParcelCustodyLocationType.DESTINATION_STATION,
+                parcel.DropoffStopId,
+                ParcelCustodyLocationType.VEHICLE,
+                targetVehicleId,
+                targetVehicleId.HasValue ? $"VEHICLE:{targetVehicleId:D}" : $"TRIP:{targetTripId:D}",
+                targetVehicleId,
+                actorUserId,
+                "ASSISTANT",
+                now,
+                "TRANSFER_CONFIRMATION",
+                $"forward:{operationId:D}:in",
+                null,
+                null,
+                sequence);
+            await _reliability.AddCustodyEventAsync(forwardedIn, cancellationToken);
+            if (current is null)
+                await _reliability.AddCurrentCustodyAsync(ParcelCurrentCustody.Create(parcel.Id, forwardedIn), cancellationToken);
+            else
+            {
+                current.Apply(forwardedIn);
+                await _reliability.UpdateCurrentCustodyAsync(current, cancellationToken);
+            }
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _unitOfWork.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
 
     private async Task<ParcelTransferConfirmationSnapshot> AcquireClaimAsync(
         ParcelTransferConfirmationSnapshot initial,

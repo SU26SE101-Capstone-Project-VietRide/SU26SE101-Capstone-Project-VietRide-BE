@@ -50,7 +50,7 @@ public sealed class Day39UnloadDeliverTests
             Substitute.For<IUnitOfWork>());
 
         var action = () => handler.Handle(
-            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            ValidRouteUnloadCommand(),
             CancellationToken.None);
 
         var exception = (await action.Should().ThrowAsync<ForbiddenException>()).Which;
@@ -82,7 +82,7 @@ public sealed class Day39UnloadDeliverTests
             Substitute.For<IUnitOfWork>());
 
         var action = () => handler.Handle(
-            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            ValidRouteUnloadCommand(),
             CancellationToken.None);
 
         var exception = (await action.Should().ThrowAsync<ForbiddenException>()).Which;
@@ -108,6 +108,8 @@ public sealed class Day39UnloadDeliverTests
                 TripSnapshotOutcomeKind.Success,
                 TripSnapshot(destinationArrivedAt: DateTimeOffset.UtcNow, stopStatus: "PENDING"),
                 null));
+        tripClient.GetTripOperationalLocationAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(OperationalLocation(currentStopId: null, currentStopStatus: null));
 
         var handler = new UnloadParcelCommandHandler(
             repository,
@@ -116,7 +118,7 @@ public sealed class Day39UnloadDeliverTests
             Substitute.For<IUnitOfWork>());
 
         var action = () => handler.Handle(
-            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            ValidRouteUnloadCommand(),
             CancellationToken.None);
 
         var exception = (await action.Should().ThrowAsync<CodedValidationException>()).Which;
@@ -124,6 +126,144 @@ public sealed class Day39UnloadDeliverTests
         await repository.DidNotReceive().TryMarkUnloadedAsync(
             Arg.Any<Guid>(),
             Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Unload_StopPreviouslyArrivedButAlreadyDeparted_IsRejectedWithoutRelease()
+    {
+        var parcel = CreateParcel(ParcelStatus.IN_TRANSIT);
+        var repository = Substitute.For<IParcelRepository>();
+        var tripClient = AuthorizedTripClient();
+        repository.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        tripClient.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(
+                TripSnapshotOutcomeKind.Success,
+                TripSnapshot(
+                    destinationArrivedAt: null,
+                    actualDepartureTime: DateTimeOffset.UtcNow),
+                null));
+        tripClient.GetTripOperationalLocationAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(OperationalLocation(currentStopId: null, currentStopStatus: null));
+
+        var handler = new UnloadParcelCommandHandler(
+            repository,
+            tripClient,
+            Substitute.For<IIntegrationEventOutbox>(),
+            Substitute.For<IUnitOfWork>());
+
+        var action = () => handler.Handle(
+            new UnloadParcelCommand(
+                ParcelId,
+                AssistantUserId,
+                OperatorId,
+                ActualLocationKind: "ROUTE_STOP",
+                ActualLocationId: DropoffStopId,
+                ScannedParcelCode: "VRP-001"),
+            CancellationToken.None);
+
+        var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
+        exception.ErrorCode.Should().Be("PARCEL_CUSTODY_LOCATION_MISMATCH");
+        await repository.DidNotReceive().TryMarkUnloadedAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
+        await tripClient.DidNotReceive().ReleaseCargoAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            Arg.Any<decimal>(),
+            Arg.Any<decimal>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Unload_ScannedQrBelongsToAnotherParcel_IsRejectedBeforeAuthorization()
+    {
+        var parcel = CreateParcel(ParcelStatus.IN_TRANSIT);
+        var repository = Substitute.For<IParcelRepository>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        repository.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        var handler = new UnloadParcelCommandHandler(
+            repository,
+            tripClient,
+            Substitute.For<IIntegrationEventOutbox>(),
+            Substitute.For<IUnitOfWork>());
+
+        var action = () => handler.Handle(
+            new UnloadParcelCommand(
+                ParcelId,
+                AssistantUserId,
+                OperatorId,
+                ActualLocationKind: "ROUTE_STOP",
+                ActualLocationId: DropoffStopId,
+                ScannedParcelCode: "VRP-OTHER"),
+            CancellationToken.None);
+
+        var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
+        exception.ErrorCode.Should().Be("SCAN_IDENTITY_MISMATCH");
+        await tripClient.DidNotReceive().AuthorizeAssistantForTripAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Unload_WithoutQrScan_IsRejectedBeforeAuthorization()
+    {
+        var parcel = CreateParcel(ParcelStatus.IN_TRANSIT);
+        var repository = Substitute.For<IParcelRepository>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        repository.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        var handler = new UnloadParcelCommandHandler(
+            repository,
+            tripClient,
+            Substitute.For<IIntegrationEventOutbox>(),
+            Substitute.For<IUnitOfWork>());
+
+        var action = () => handler.Handle(
+            new UnloadParcelCommand(
+                ParcelId,
+                AssistantUserId,
+                OperatorId,
+                ActualLocationKind: "ROUTE_STOP",
+                ActualLocationId: DropoffStopId),
+            CancellationToken.None);
+
+        var exception = (await action.Should().ThrowAsync<CodedValidationException>()).Which;
+        exception.ErrorCode.Should().Be("PARCEL_SCAN_REQUIRED");
+        await tripClient.DidNotReceive().AuthorizeAssistantForTripAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Unload_WithoutActualLocation_IsRejectedBeforeTripLookup()
+    {
+        var parcel = CreateParcel(ParcelStatus.IN_TRANSIT);
+        var repository = Substitute.For<IParcelRepository>();
+        var tripClient = AuthorizedTripClient();
+        repository.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        var handler = new UnloadParcelCommandHandler(
+            repository,
+            tripClient,
+            Substitute.For<IIntegrationEventOutbox>(),
+            Substitute.For<IUnitOfWork>());
+
+        var action = () => handler.Handle(
+            new UnloadParcelCommand(
+                ParcelId,
+                AssistantUserId,
+                OperatorId,
+                ScannedParcelCode: "VRP-001"),
+            CancellationToken.None);
+
+        var exception = (await action.Should().ThrowAsync<CodedValidationException>()).Which;
+        exception.ErrorCode.Should().Be("PARCEL_CUSTODY_LOCATION_REQUIRED");
+        await tripClient.DidNotReceive().GetTripParcelSnapshotAsync(
+            Arg.Any<Guid>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -161,7 +301,7 @@ public sealed class Day39UnloadDeliverTests
             unitOfWork);
 
         var response = await handler.Handle(
-            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            ValidRouteUnloadCommand(),
             CancellationToken.None);
 
         response.Status.Should().Be("UNLOADED");
@@ -208,7 +348,7 @@ public sealed class Day39UnloadDeliverTests
             Substitute.For<IUnitOfWork>());
 
         var action = () => handler.Handle(
-            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            ValidRouteUnloadCommand(),
             CancellationToken.None);
 
         var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
@@ -257,7 +397,7 @@ public sealed class Day39UnloadDeliverTests
             Substitute.For<IUnitOfWork>());
 
         var action = () => handler.Handle(
-            new UnloadParcelCommand(ParcelId, AssistantUserId, OperatorId),
+            ValidRouteUnloadCommand(),
             CancellationToken.None);
 
         var exception = (await action.Should()
@@ -389,8 +529,35 @@ public sealed class Day39UnloadDeliverTests
                 OperatorId,
                 Arg.Any<CancellationToken>())
             .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+        client.GetTripOperationalLocationAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(OperationalLocation());
         return client;
     }
+
+    private static TripOperationalLocationOutcome OperationalLocation(
+        Guid? currentStopId = null,
+        string? currentStopStatus = "ARRIVED")
+        => new(
+            TripOperationalLocationOutcomeKind.Success,
+            new TripOperationalLocationSnapshot(
+                TripId,
+                Guid.NewGuid(),
+                "IN_PROGRESS",
+                currentStopId ?? (currentStopStatus is null ? null : DropoffStopId),
+                currentStopStatus,
+                currentStopStatus is null ? null : DateTimeOffset.UtcNow,
+                null,
+                null),
+            null);
+
+    private static UnloadParcelCommand ValidRouteUnloadCommand()
+        => new(
+            ParcelId,
+            AssistantUserId,
+            OperatorId,
+            ActualLocationKind: "ROUTE_STOP",
+            ActualLocationId: DropoffStopId,
+            ScannedParcelCode: "VRP-001");
 
     private static bool HasCanonicalDeliveryPayload(string payloadJson)
     {
@@ -424,7 +591,8 @@ public sealed class Day39UnloadDeliverTests
 
     private static TripParcelSnapshot TripSnapshot(
         DateTimeOffset? destinationArrivedAt,
-        string stopStatus = "ARRIVED")
+        string stopStatus = "ARRIVED",
+        DateTimeOffset? actualDepartureTime = null)
         => new(
             TripId,
             OperatorId,
@@ -445,7 +613,8 @@ public sealed class Day39UnloadDeliverTests
                 0,
                 null,
                 stopStatus,
-                stopStatus == "ARRIVED" ? DateTimeOffset.UtcNow : null)],
+                stopStatus == "ARRIVED" ? DateTimeOffset.UtcNow : null,
+                actualDepartureTime)],
             new TripSeatSummaryDto(40, 20),
             null,
             destinationArrivedAt);

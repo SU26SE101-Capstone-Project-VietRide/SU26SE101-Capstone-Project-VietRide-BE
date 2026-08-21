@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Features.PassengerHistory;
+using VietRide.Parcel.Application.Features.Reliability.ReadModels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Kernel.Primitives;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
@@ -13,11 +15,16 @@ public sealed class SentParcelHistoryReader
     private const int MaxTripEnrichmentConcurrency = 4;
     private readonly IParcelRepository _parcels;
     private readonly ITripServiceClient _trips;
+    private readonly IParcelReliabilityReadModelService? _screenModels;
 
-    public SentParcelHistoryReader(IParcelRepository parcels, ITripServiceClient trips)
+    public SentParcelHistoryReader(
+        IParcelRepository parcels,
+        ITripServiceClient trips,
+        IParcelReliabilityReadModelService? screenModels = null)
     {
         _parcels = parcels;
         _trips = trips;
+        _screenModels = screenModels;
     }
 
     public async Task<PagedResult<SentParcelHistoryItemDto>> ReadAsync(
@@ -38,7 +45,7 @@ public sealed class SentParcelHistoryReader
             pageSize,
             cancellationToken);
         var items = context.Page.Items
-            .Select(parcel => MapHistoryItem(parcel, context.TripSnapshots))
+            .Select(parcel => MapHistoryItem(parcel, context.TripSnapshots, context.ScreenModels))
             .ToList();
 
         return PagedResult<SentParcelHistoryItemDto>.Create(
@@ -66,7 +73,7 @@ public sealed class SentParcelHistoryReader
             pageSize,
             cancellationToken);
         var items = context.Page.Items.Select(parcel => new PassengerParcelHistoryProjection(
-            MapHistoryItem(parcel, context.TripSnapshots),
+            MapHistoryItem(parcel, context.TripSnapshots, context.ScreenModels),
             parcel.Status,
             parcel.DepositPaymentId,
             parcel.BalancePaymentId,
@@ -75,7 +82,8 @@ public sealed class SentParcelHistoryReader
             parcel.LatestCheckInAt,
             parcel.FinalPaymentDeadline,
             parcel.DropoffStopId,
-            context.TripSnapshots.GetValueOrDefault(parcel.TripId)?.DestinationStation.Id))
+            context.ScreenModels.GetValueOrDefault(parcel.Id)?.Trip.Route?.Destination.Id
+                ?? context.TripSnapshots.GetValueOrDefault(parcel.TripId)?.DestinationStation.Id))
             .ToList();
 
         return PagedResult<PassengerParcelHistoryProjection>.Create(
@@ -106,18 +114,35 @@ public sealed class SentParcelHistoryReader
             page,
             pageSize,
             cancellationToken);
-        var snapshots = await LoadTripSnapshotsAsync(
-            result.Items.Select(parcel => parcel.TripId).Distinct(),
-            cancellationToken);
+        IReadOnlyDictionary<Guid, ParcelScreenReadModel> screenModels =
+            new Dictionary<Guid, ParcelScreenReadModel>();
+        IReadOnlyDictionary<Guid, TripParcelSnapshot> snapshots =
+            new Dictionary<Guid, TripParcelSnapshot>();
+        if (_screenModels is not null)
+        {
+            screenModels = await _screenModels.BuildAsync(
+                result.Items,
+                userId,
+                includeClaim: true,
+                cancellationToken);
+        }
+        else
+        {
+            snapshots = await LoadTripSnapshotsAsync(
+                result.Items.Select(parcel => parcel.TripId).Distinct(),
+                cancellationToken);
+        }
 
-        return new SentHistoryReadContext(result, snapshots);
+        return new SentHistoryReadContext(result, snapshots, screenModels);
     }
 
     private static SentParcelHistoryItemDto MapHistoryItem(
         ParcelEntity parcel,
-        IReadOnlyDictionary<Guid, TripParcelSnapshot> snapshots)
+        IReadOnlyDictionary<Guid, TripParcelSnapshot> snapshots,
+        IReadOnlyDictionary<Guid, ParcelScreenReadModel> screenModels)
     {
         snapshots.TryGetValue(parcel.TripId, out var trip);
+        screenModels.TryGetValue(parcel.Id, out var screen);
         return new SentParcelHistoryItemDto(
             parcel.Id,
             parcel.ParcelCode,
@@ -125,15 +150,18 @@ public sealed class SentParcelHistoryReader
             parcel.Status.ToString(),
             parcel.CreatedAt,
             parcel.TotalPrice.Amount,
-            trip?.OriginStation.Name,
-            trip?.DestinationStation.Name,
-            trip?.DepartureDateTime,
-            trip?.EstimatedArrivalTime,
+            screen?.Trip.Route?.Origin.Name ?? trip?.OriginStation.Name,
+            screen?.Trip.Route?.Destination.Name ?? trip?.DestinationStation.Name,
+            screen?.Trip.DepartureAt ?? trip?.DepartureDateTime,
+            screen?.Trip.Eta ?? trip?.EstimatedArrivalTime,
             parcel.BookingId,
             parcel.RecipientName,
             parcel.SizeCategory.ToString(),
             parcel.PhotoUrl,
-            parcel.DeliveryMethod.ToString());
+            parcel.DeliveryMethod.ToString(),
+            screen?.Operator,
+            screen?.DropoffLocation,
+            screen?.Reliability);
     }
 
     private static long RemainingAmount(long required, long paid)
@@ -174,5 +202,6 @@ public sealed class SentParcelHistoryReader
 
     private sealed record SentHistoryReadContext(
         PagedResult<ParcelEntity> Page,
-        IReadOnlyDictionary<Guid, TripParcelSnapshot> TripSnapshots);
+        IReadOnlyDictionary<Guid, TripParcelSnapshot> TripSnapshots,
+        IReadOnlyDictionary<Guid, ParcelScreenReadModel> ScreenModels);
 }

@@ -1,3 +1,6 @@
+using VietRide.Parcel.Application.Features.Parcels.Create;
+using VietRide.Parcel.Application.Features.Reliability.ReadModels;
+
 namespace VietRide.Parcel.Application.Features.Parcels.Detail;
 
 public sealed record ParcelDetailResponse(
@@ -12,6 +15,7 @@ public sealed record ParcelDetailResponse(
     Guid TripId,
     Guid? DropoffStopId,
     string? Description,
+    int Quantity,
     string? PhotoUrl,
     IReadOnlyCollection<string>? CheckInPhotoUrls,
     IReadOnlyCollection<string>? DeliveryPhotoUrls,
@@ -73,4 +77,10 @@ public sealed record ParcelDetailResponse(
     DateTimeOffset? RejectedAt,
     string? OriginStationName,
     string? DestinationStationName,
-    DateTimeOffset? Eta);
+    DateTimeOffset? Eta,
+    ReliabilityOperatorResponse? Operator = null,
+    ReliabilityTripResponse? Trip = null,
+    ReliabilityLocationResponse? DropoffLocation = null,
+    ParcelCompensationPolicySnapshotResponse? CompensationPolicySnapshot = null,
+    ParcelReliabilitySummaryResponse? ReliabilitySummary = null,
+    IReadOnlyList<string>? AvailableActions = null);

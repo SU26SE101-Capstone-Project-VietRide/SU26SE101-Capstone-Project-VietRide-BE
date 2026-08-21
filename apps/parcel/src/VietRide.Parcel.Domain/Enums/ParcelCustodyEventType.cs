@@ -1,0 +1,21 @@
+namespace VietRide.Parcel.Domain.Enums;
+
+public enum ParcelCustodyEventType
+{
+    ACCEPTED,
+    CHECKED_IN,
+    LOADED,
+    TRIP_STARTED,
+    ARRIVED_AT_STOP,
+    UNLOADED,
+    HANDOFF,
+    FORWARDED_OUT,
+    FORWARDED_IN,
+    RETURNED_TO_STATION,
+    FOUND,
+    DELIVERED,
+    MANUAL_CUSTODY_EXCEPTION,
+    UNIDENTIFIED_PACKAGE_CREATED,
+    IDENTIFIED_MANUALLY,
+    EXCEPTION_REPORTED,
+}

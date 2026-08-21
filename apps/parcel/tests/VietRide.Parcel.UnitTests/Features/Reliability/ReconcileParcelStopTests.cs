@@ -1,0 +1,243 @@
+using System.Reflection;
+using FluentAssertions;
+using NSubstitute;
+using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Features.Reliability.Reconciliation;
+using VietRide.Parcel.Domain.Entities;
+using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
+using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.ValueObjects;
+using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
+
+namespace VietRide.Parcel.UnitTests.Features.Reliability;
+
+public sealed class ReconcileParcelStopTests
+{
+    private static readonly Guid TripId = Guid.NewGuid();
+    private static readonly Guid StopId = Guid.NewGuid();
+    private static readonly Guid OperatorId = Guid.NewGuid();
+    private static readonly Guid AssistantId = Guid.NewGuid();
+    private static readonly Guid ParcelId = Guid.NewGuid();
+
+    [Fact]
+    public async Task Handle_StopAlreadyDeparted_RejectsStaleTripSnapshot()
+    {
+        var (handler, parcels, _) = CreateHandler(atCurrentStop: false);
+
+        var action = () => handler.Handle(
+            new ReconcileParcelStopCommand(
+                TripId,
+                StopId,
+                AssistantId,
+                OperatorId,
+                Array.Empty<Guid>(),
+                Array.Empty<Guid>(),
+                null,
+                null),
+            CancellationToken.None);
+
+        var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
+        exception.ErrorCode.Should().Be("PARCEL_CUSTODY_LOCATION_MISMATCH");
+        await parcels.DidNotReceive().ListDropoffManifestByTripAndStopAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_DerivesScannedCountFromPersistedUnloadCustodyEvent()
+    {
+        var parcel = CreateManifestParcel(ParcelStatus.UNLOADED);
+        var custodyEvent = ParcelCustodyEvent.Create(
+            ParcelId,
+            null,
+            TripId,
+            ParcelCustodyEventType.UNLOADED,
+            ParcelCustodyLocationType.ROUTE_STOP,
+            StopId,
+            ParcelCustodyLocationType.ROUTE_STOP,
+            StopId,
+            "Stop B",
+            null,
+            AssistantId,
+            "ASSISTANT",
+            DateTimeOffset.UtcNow,
+            "UNLOAD",
+            Guid.NewGuid().ToString("D"),
+            null,
+            null,
+            1);
+        var (handler, parcels, reliability) = CreateHandler();
+        parcels.ListDropoffManifestByTripAndStopAsync(TripId, StopId, Arg.Any<CancellationToken>())
+            .Returns(new[] { parcel });
+        reliability.ListCustodyEventsByParcelsAsync(
+                Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(new[] { ParcelId })),
+                Arg.Any<CancellationToken>())
+            .Returns(new[] { custodyEvent });
+        reliability.ListActiveIncidentsByParcelsAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<ParcelIncident>());
+        reliability.ListCurrentCustodiesAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<ParcelCurrentCustody>());
+
+        var result = await handler.Handle(
+            new ReconcileParcelStopCommand(
+                TripId,
+                StopId,
+                AssistantId,
+                OperatorId,
+                new[] { ParcelId },
+                Array.Empty<Guid>(),
+                null,
+                null),
+            CancellationToken.None);
+
+        result.ExpectedCount.Should().Be(1);
+        result.ScannedCount.Should().Be(1);
+        result.UnresolvedParcelIds.Should().BeEmpty();
+        result.CanDepart.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Handle_RejectsClientAssertedScanWithoutMatchingCustodyEvent()
+    {
+        var parcel = CreateManifestParcel(ParcelStatus.IN_TRANSIT);
+        var (handler, parcels, reliability) = CreateHandler();
+        parcels.ListDropoffManifestByTripAndStopAsync(TripId, StopId, Arg.Any<CancellationToken>())
+            .Returns(new[] { parcel });
+        reliability.ListCustodyEventsByParcelsAsync(
+                Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(new[] { ParcelId })),
+                Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<ParcelCustodyEvent>());
+
+        var action = () => handler.Handle(
+            new ReconcileParcelStopCommand(
+                TripId,
+                StopId,
+                AssistantId,
+                OperatorId,
+                new[] { ParcelId },
+                Array.Empty<Guid>(),
+                null,
+                null),
+            CancellationToken.None);
+
+        var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
+        exception.ErrorCode.Should().Be("PARCEL_CUSTODY_EVENT_NOT_FOUND");
+    }
+
+    private static (
+        ReconcileParcelStopCommandHandler Handler,
+        IParcelRepository Parcels,
+        IParcelReliabilityRepository Reliability) CreateHandler(bool atCurrentStop = true)
+    {
+        var parcels = Substitute.For<IParcelRepository>();
+        var reliability = Substitute.For<IParcelReliabilityRepository>();
+        var trips = Substitute.For<ITripServiceClient>();
+        trips.AuthorizeAssistantForTripAsync(
+                TripId,
+                AssistantId,
+                OperatorId,
+                Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+        trips.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(
+                TripSnapshotOutcomeKind.Success,
+                CreateTripSnapshot(),
+                null));
+        trips.GetTripOperationalLocationAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripOperationalLocationOutcome(
+                TripOperationalLocationOutcomeKind.Success,
+                new TripOperationalLocationSnapshot(
+                    TripId,
+                    Guid.NewGuid(),
+                    "IN_PROGRESS",
+                    atCurrentStop ? StopId : null,
+                    atCurrentStop ? "ARRIVED" : null,
+                    atCurrentStop ? DateTimeOffset.UtcNow : null,
+                    null,
+                    null),
+                null));
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        return (
+            new ReconcileParcelStopCommandHandler(
+                parcels,
+                reliability,
+                trips,
+                Substitute.For<IIntegrationEventOutbox>(),
+                clock),
+            parcels,
+            reliability);
+    }
+
+    private static TripParcelSnapshot CreateTripSnapshot()
+    {
+        var station = new TripStationDto(Guid.NewGuid(), "Station");
+        return new TripParcelSnapshot(
+            TripId,
+            OperatorId,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "IN_PROGRESS",
+            DateTimeOffset.UtcNow.AddHours(-1),
+            DateTimeOffset.UtcNow.AddHours(1),
+            100_000,
+            station,
+            station,
+            new[]
+            {
+                new TripStopDto(
+                    StopId,
+                    1,
+                    false,
+                    true,
+                    DateTimeOffset.UtcNow,
+                    10,
+                    null,
+                    "ARRIVED",
+                    DateTimeOffset.UtcNow,
+                    null),
+            },
+            new TripSeatSummaryDto(40, 20),
+            null);
+    }
+
+    private static ParcelEntity CreateManifestParcel(ParcelStatus status)
+    {
+        var parcel = ParcelEntity.CreatePendingPayment(
+            "VRP-RECONCILE-001",
+            Guid.NewGuid(),
+            null,
+            "Recipient",
+            PhoneNumber.Normalize("0912345678"),
+            null,
+            OperatorId,
+            TripId,
+            StopId,
+            null,
+            "Item",
+            null,
+            ParcelSizeCategory.MEDIUM,
+            5m,
+            ParcelDeliveryMethod.TERMINAL_PICKUP,
+            Money.FromRaw(100_000));
+        Set(parcel, nameof(parcel.Id), ParcelId);
+        Set(parcel, nameof(parcel.Status), status);
+        return parcel;
+    }
+
+    private static void Set<T>(object target, string propertyName, T value)
+    {
+        var property = target.GetType().GetProperty(
+            propertyName,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        property!.SetValue(target, value);
+    }
+}

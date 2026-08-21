@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -14,15 +15,18 @@ public sealed class CheckInParcelCommandHandler
     private readonly IParcelRepository _parcels;
     private readonly ITripServiceClient _trips;
     private readonly IClock _clock;
+    private readonly IParcelCustodyService? _custody;
 
     public CheckInParcelCommandHandler(
         IParcelRepository parcels,
         ITripServiceClient trips,
-        IClock clock)
+        IClock clock,
+        IParcelCustodyService? custody = null)
     {
         _parcels = parcels;
         _trips = trips;
         _clock = clock;
+        _custody = custody;
     }
 
     public async Task<CheckInParcelResponse> Handle(
@@ -64,6 +68,23 @@ public sealed class CheckInParcelCommandHandler
             now,
             cancellationToken)
             ?? throw new CodedConflictException("RACE_LOST", "Parcel status changed during check-in.");
+
+        if (_custody is not null)
+        {
+            await _custody.AppendAsync(
+                parcel,
+                ParcelCustodyEventType.CHECKED_IN,
+                ParcelCustodyLocationType.ORIGIN_STATION,
+                null,
+                parcel.TripSnapshotOriginStationName,
+                command.AssistantUserId,
+                "ASSISTANT",
+                "CHECK_IN",
+                null,
+                command.PhotoUrls,
+                null,
+                cancellationToken);
+        }
 
         return new CheckInParcelResponse(
             snapshot.ParcelId,

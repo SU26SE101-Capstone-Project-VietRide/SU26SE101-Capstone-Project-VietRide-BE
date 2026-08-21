@@ -5,4 +5,5 @@ public enum PendingActionType
     CAPACITY_EXCEEDED,
     RESERVE_FAILED,
     REFUND_CONFIRMATION,
+    CUSTODY_EXCEPTION,
 }

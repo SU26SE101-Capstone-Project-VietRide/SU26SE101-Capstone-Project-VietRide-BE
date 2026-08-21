@@ -270,6 +270,62 @@ public sealed class IdentityServiceClient : IIdentityServiceClient
         }
     }
 
+    public async Task<IdentityOperatorBatchOutcome> GetOperatorsAsync(
+        IReadOnlyCollection<Guid> operatorIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (operatorIds.Any(operatorId => operatorId == Guid.Empty))
+            throw new ArgumentException("Operator ids cannot contain an empty UUID.", nameof(operatorIds));
+
+        var distinctOperatorIds = operatorIds.Distinct().ToArray();
+        if (distinctOperatorIds.Length == 0)
+            return IdentityOperatorBatchOutcome.Success([]);
+        if (distinctOperatorIds.Length > 100)
+            throw new ArgumentOutOfRangeException(nameof(operatorIds), "At most 100 distinct operator ids are allowed.");
+
+        try
+        {
+            using var response = await _httpClient
+                .PostAsJsonAsync(
+                    "/internal/v1/operators/summaries/batch",
+                    new { operatorIds = distinctOperatorIds },
+                    JsonOptions,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.OK)
+            {
+                return IdentityOperatorBatchOutcome.TransportFailure(
+                    $"Identity operator batch returned status {(int)response.StatusCode}.");
+            }
+
+            var operators = await response.Content
+                .ReadFromJsonAsync<IReadOnlyList<IdentityOperatorSummary>>(JsonOptions, cancellationToken)
+                .ConfigureAwait(false);
+            if (operators is null)
+                return IdentityOperatorBatchOutcome.TransportFailure("Identity operator batch returned a null body.");
+
+            var requestedIds = distinctOperatorIds.ToHashSet();
+            var responseIds = operators.Select(operatorTenant => operatorTenant.OperatorId).ToArray();
+            var malformed = responseIds.Distinct().Count() != responseIds.Length
+                || operators.Any(operatorTenant =>
+                    !requestedIds.Contains(operatorTenant.OperatorId)
+                    || string.IsNullOrWhiteSpace(operatorTenant.OperatorName));
+            return malformed
+                ? IdentityOperatorBatchOutcome.TransportFailure("Identity operator batch returned an invalid payload.")
+                : IdentityOperatorBatchOutcome.Success(operators);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "IdentityServiceClient.GetOperatorsAsync failed.");
+            return IdentityOperatorBatchOutcome.TransportFailure(
+                $"Identity operator batch transport failure: {ex.Message}");
+        }
+    }
+
     public async Task<SubscriptionWriteEligibilityOutcome> GetSubscriptionWriteEligibilityAsync(
         Guid operatorId,
         bool requireParcelModule,

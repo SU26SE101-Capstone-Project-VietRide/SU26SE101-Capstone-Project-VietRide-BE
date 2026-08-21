@@ -82,6 +82,25 @@ public sealed class DevTripServiceClient : ITripServiceClient
         return Task.FromResult(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, snapshot, null));
     }
 
+    public Task<TripOperationalLocationOutcome> GetTripOperationalLocationAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return Task.FromResult(new TripOperationalLocationOutcome(
+            TripOperationalLocationOutcomeKind.Success,
+            new TripOperationalLocationSnapshot(
+                tripId,
+                Guid.Parse("33333333-3333-4333-8333-333333333333"),
+                "IN_PROGRESS",
+                Guid.Parse("66666666-6666-4666-8666-666666666666"),
+                "ARRIVED",
+                now,
+                null,
+                now),
+            null));
+    }
+
     public Task<TripSummaryBatchOutcome> GetTripSummariesAsync(
         IReadOnlyCollection<Guid> tripIds,
         CancellationToken cancellationToken = default)
@@ -111,6 +130,38 @@ public sealed class DevTripServiceClient : ITripServiceClient
                     "ACTIVE")))
             .ToArray();
         return Task.FromResult(TripSummaryBatchOutcome.Success(summaries));
+    }
+
+    public async Task<TripForwardingOptionsOutcome> GetForwardingOptionsAsync(
+        Guid operatorId,
+        Guid? excludedTripId,
+        string pickupLocationType,
+        Guid pickupLocationId,
+        string targetLocationType,
+        Guid targetLocationId,
+        decimal weightKg,
+        decimal volumeM3,
+        DateTimeOffset earliestDeparture,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var tripId = Guid.Parse("77777777-7777-4777-8777-777777777777");
+        var summary = (await GetTripSummariesAsync([tripId], cancellationToken)).Summaries.Single();
+        return TripForwardingOptionsOutcome.Success(
+        [
+            new TripForwardingOptionSnapshot(
+                summary,
+                pickupLocationId,
+                pickupLocationType,
+                "Dev pickup",
+                targetLocationId,
+                targetLocationType,
+                "Dev target",
+                earliestDeparture.AddHours(1),
+                earliestDeparture.AddHours(5),
+                true,
+                null),
+        ]);
     }
 
     public Task<RouteOwnershipOutcome> ValidateRouteOwnershipAsync(

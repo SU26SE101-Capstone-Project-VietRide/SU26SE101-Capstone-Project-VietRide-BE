@@ -1,0 +1,12 @@
+namespace VietRide.Parcel.Domain.Enums;
+
+public enum ParcelSearchTaskType
+{
+    VEHICLE_SWEEP,
+    CREW_CONFIRMATION,
+    STATION_INVENTORY,
+    LOST_AND_FOUND_CHECK,
+    NEXT_TRIP_CHECK,
+    MANIFEST_RECONCILIATION,
+    MANUAL_IDENTIFICATION,
+}

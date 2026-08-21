@@ -23,10 +23,61 @@ public interface ITripServiceClient
         Guid tripId,
         CancellationToken cancellationToken = default);
 
+    async Task<TripOperationalLocationOutcome> GetTripOperationalLocationAsync(
+        Guid tripId,
+        CancellationToken cancellationToken = default)
+    {
+        var outcome = await GetTripParcelSnapshotAsync(tripId, cancellationToken);
+        if (outcome.Kind == TripSnapshotOutcomeKind.TripNotFound)
+            return new TripOperationalLocationOutcome(
+                TripOperationalLocationOutcomeKind.TripNotFound,
+                null,
+                outcome.ErrorMessage);
+        if (outcome.Kind != TripSnapshotOutcomeKind.Success || outcome.Snapshot is null)
+            return new TripOperationalLocationOutcome(
+                TripOperationalLocationOutcomeKind.TransportError,
+                null,
+                outcome.ErrorMessage);
+
+        var trip = outcome.Snapshot;
+        var currentStop = trip.Stops
+            .Where(stop => string.Equals(stop.Status, "ARRIVED", StringComparison.OrdinalIgnoreCase)
+                && !stop.ActualDepartureTime.HasValue)
+            .OrderByDescending(stop => stop.OrderIndex)
+            .FirstOrDefault();
+        return new TripOperationalLocationOutcome(
+            TripOperationalLocationOutcomeKind.Success,
+            new TripOperationalLocationSnapshot(
+                trip.TripId,
+                trip.VehicleId,
+                trip.Status,
+                currentStop?.StopId,
+                currentStop?.Status,
+                currentStop?.ActualArrivalTime,
+                currentStop?.ActualDepartureTime,
+                trip.DestinationArrivedAt),
+            null);
+    }
+
     Task<TripSummaryBatchOutcome> GetTripSummariesAsync(
         IReadOnlyCollection<Guid> tripIds,
         CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Trip summary batch lookup is not implemented by this client.");
+
+    Task<TripForwardingOptionsOutcome> GetForwardingOptionsAsync(
+        Guid operatorId,
+        Guid? excludedTripId,
+        string pickupLocationType,
+        Guid pickupLocationId,
+        string targetLocationType,
+        Guid targetLocationId,
+        decimal weightKg,
+        decimal volumeM3,
+        DateTimeOffset earliestDeparture,
+        int limit,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(TripForwardingOptionsOutcome.Failure(
+            "Forwarding option search is not implemented by this Trip client."));
 
     Task<RouteOwnershipOutcome> ValidateRouteOwnershipAsync(
         Guid routeId,

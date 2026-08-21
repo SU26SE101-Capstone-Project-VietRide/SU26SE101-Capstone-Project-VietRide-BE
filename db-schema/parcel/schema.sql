@@ -77,9 +77,21 @@ CREATE TABLE parcels (
     booking_id UUID NULL,         -- logical FK booking.bookings; null = parcel-only
     -- parcel info
     description TEXT NULL,
+    quantity INT NOT NULL DEFAULT 1,
     photo_url TEXT NULL,
     check_in_photo_urls JSONB NULL,
     delivery_photo_urls JSONB NULL,
+    declared_value_vnd BIGINT NULL,
+    declaration_accepted_at TIMESTAMPTZ NULL,
+    declaration_policy_version INT NOT NULL DEFAULT 1,
+    compensation_rate_percent_snapshot INT NOT NULL DEFAULT 50,
+    compensation_policy_cap_vnd_snapshot BIGINT NOT NULL DEFAULT 30000000,
+    no_proof_fallback_multiplier_snapshot INT NOT NULL DEFAULT 4,
+    compensation_policy_version_snapshot INT NOT NULL DEFAULT 1,
+    claim_window_days_snapshot INT NOT NULL DEFAULT 30,
+    search_sla_hours_snapshot INT NOT NULL DEFAULT 72,
+    decision_sla_business_days_snapshot INT NOT NULL DEFAULT 7,
+    payout_sla_business_days_snapshot INT NOT NULL DEFAULT 3,
     size_category parcel_size_category NOT NULL,
     estimated_size_category parcel_size_category NOT NULL,
     actual_size_category parcel_size_category NULL,
@@ -186,6 +198,8 @@ CREATE TABLE parcels (
         CHECK (estimated_volume_m3 > 0),
     CONSTRAINT chk_parcels_weight_positive
         CHECK (estimated_weight_kg > 0),
+    CONSTRAINT chk_parcels_quantity_positive
+        CHECK (quantity > 0),
     CONSTRAINT chk_parcels_actual_weight_positive
         CHECK (actual_weight_kg IS NULL OR actual_weight_kg > 0),
     CONSTRAINT chk_parcels_check_in_photo_urls_max_three
@@ -538,6 +552,244 @@ CREATE UNIQUE INDEX uq_parcel_stats_operator_date ON parcel_stats (operator_id, 
 CREATE INDEX idx_parcel_stats_stat_date ON parcel_stats (stat_date DESC);
 
 -- -----------------------------------------------------------------------------
+-- Parcel Reliability v2: operator policy, custody, incidents, search and claims
+-- -----------------------------------------------------------------------------
+CREATE TABLE parcel_compensation_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    operator_id UUID NOT NULL,
+    compensation_rate_percent INT NOT NULL,
+    max_compensation_vnd BIGINT NOT NULL,
+    no_proof_fallback_multiplier INT NOT NULL,
+    claim_window_days INT NOT NULL,
+    search_sla_hours INT NOT NULL,
+    decision_sla_business_days INT NOT NULL,
+    payout_sla_business_days INT NOT NULL,
+    version INT NOT NULL,
+    below_default_acknowledged BOOLEAN NOT NULL,
+    updated_by_user_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_parcel_compensation_policy_rate CHECK (compensation_rate_percent BETWEEN 1 AND 100),
+    CONSTRAINT chk_parcel_compensation_policy_cap CHECK (max_compensation_vnd > 0),
+    CONSTRAINT chk_parcel_compensation_policy_sla CHECK (
+        claim_window_days > 0 AND search_sla_hours > 0
+        AND decision_sla_business_days > 0 AND payout_sla_business_days > 0)
+);
+CREATE UNIQUE INDEX uq_parcel_compensation_policies_operator
+    ON parcel_compensation_policies (operator_id);
+
+CREATE TABLE parcel_transit_legs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parcel_id UUID NOT NULL REFERENCES parcels(id) ON DELETE CASCADE,
+    trip_id UUID NOT NULL,
+    operator_id UUID NOT NULL,
+    sequence INT NOT NULL,
+    expected_origin_id UUID NULL,
+    expected_destination_id UUID NULL,
+    expected_origin_name VARCHAR(255) NULL,
+    expected_destination_name VARCHAR(255) NULL,
+    actual_origin_id UUID NULL,
+    actual_destination_id UUID NULL,
+    vehicle_id UUID NULL,
+    vehicle_license_plate VARCHAR(20) NULL,
+    status VARCHAR(16) NOT NULL,
+    started_at TIMESTAMPTZ NULL,
+    ended_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_parcel_transit_legs_sequence_positive CHECK (sequence > 0)
+);
+CREATE UNIQUE INDEX uq_parcel_transit_legs_parcel_sequence
+    ON parcel_transit_legs (parcel_id, sequence);
+CREATE INDEX idx_parcel_transit_legs_trip_status ON parcel_transit_legs (trip_id, status);
+CREATE INDEX idx_parcel_transit_legs_operator_status ON parcel_transit_legs (operator_id, status);
+
+CREATE TABLE parcel_custody_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parcel_id UUID NOT NULL REFERENCES parcels(id) ON DELETE RESTRICT,
+    leg_id UUID NULL REFERENCES parcel_transit_legs(id) ON DELETE RESTRICT,
+    trip_id UUID NULL,
+    event_type VARCHAR(40) NOT NULL,
+    expected_location_type VARCHAR(32) NULL,
+    expected_location_id UUID NULL,
+    actual_location_type VARCHAR(32) NULL,
+    actual_location_id UUID NULL,
+    location_snapshot VARCHAR(500) NULL,
+    vehicle_id UUID NULL,
+    actor_id UUID NULL,
+    actor_role VARCHAR(32) NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    source VARCHAR(100) NOT NULL,
+    idempotency_key VARCHAR(100) NULL,
+    evidence_references_json JSONB NULL,
+    reason VARCHAR(1000) NULL,
+    sequence INT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_parcel_custody_events_sequence_positive CHECK (sequence > 0)
+);
+CREATE UNIQUE INDEX uq_parcel_custody_events_idempotency
+    ON parcel_custody_events (parcel_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+CREATE INDEX idx_parcel_custody_events_timeline
+    ON parcel_custody_events (parcel_id, occurred_at, id);
+CREATE INDEX idx_parcel_custody_events_trip_location
+    ON parcel_custody_events (trip_id, actual_location_id, occurred_at);
+
+CREATE OR REPLACE FUNCTION prevent_parcel_custody_event_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'parcel_custody_events is append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_parcel_custody_events_append_only
+BEFORE UPDATE OR DELETE ON parcel_custody_events
+FOR EACH ROW EXECUTE FUNCTION prevent_parcel_custody_event_mutation();
+
+CREATE TABLE parcel_current_custody (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parcel_id UUID NOT NULL REFERENCES parcels(id) ON DELETE CASCADE,
+    last_event_type VARCHAR(40) NOT NULL,
+    last_location_type VARCHAR(32) NULL,
+    last_location_id UUID NULL,
+    last_location_snapshot VARCHAR(500) NULL,
+    last_confirmed_at TIMESTAMPTZ NOT NULL,
+    current_trip_id UUID NULL,
+    current_vehicle_id UUID NULL,
+    tracking_confidence VARCHAR(32) NOT NULL,
+    last_sequence INT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX uq_parcel_current_custody_parcel ON parcel_current_custody (parcel_id);
+CREATE INDEX idx_parcel_current_custody_location_time
+    ON parcel_current_custody (last_location_id, last_confirmed_at);
+
+CREATE TABLE parcel_incidents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parcel_id UUID NOT NULL REFERENCES parcels(id) ON DELETE RESTRICT,
+    operator_id UUID NOT NULL,
+    trip_id UUID NULL,
+    leg_id UUID NULL,
+    type VARCHAR(40) NOT NULL,
+    status VARCHAR(24) NOT NULL,
+    expected_location VARCHAR(500) NULL,
+    last_known_location VARCHAR(500) NULL,
+    reporter_id UUID NULL,
+    reporter_source VARCHAR(32) NOT NULL,
+    description TEXT NULL,
+    evidence_json JSONB NULL,
+    search_deadline TIMESTAMPTZ NOT NULL,
+    escalated_at TIMESTAMPTZ NULL,
+    resolved_at TIMESTAMPTZ NULL,
+    resolution_code VARCHAR(64) NULL,
+    resolution_note TEXT NULL,
+    operator_process_breach BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX uq_parcel_incidents_active_type
+    ON parcel_incidents (parcel_id, type)
+    WHERE status NOT IN ('CLOSED', 'RESOLVED');
+CREATE INDEX idx_parcel_incidents_operator_status
+    ON parcel_incidents (operator_id, status, created_at);
+CREATE INDEX idx_parcel_incidents_search_deadline ON parcel_incidents (search_deadline, status);
+
+CREATE TABLE parcel_search_tasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    incident_id UUID NOT NULL REFERENCES parcel_incidents(id) ON DELETE CASCADE,
+    parcel_id UUID NOT NULL REFERENCES parcels(id) ON DELETE RESTRICT,
+    task_type VARCHAR(40) NOT NULL,
+    location VARCHAR(500) NULL,
+    assignee_id UUID NULL,
+    deadline TIMESTAMPTZ NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    result TEXT NULL,
+    evidence_json JSONB NULL,
+    completed_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_parcel_search_tasks_incident_status ON parcel_search_tasks (incident_id, status);
+CREATE INDEX idx_parcel_search_tasks_assignee_deadline
+    ON parcel_search_tasks (assignee_id, status, deadline);
+
+CREATE TABLE parcel_claims (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parcel_id UUID NOT NULL REFERENCES parcels(id) ON DELETE RESTRICT,
+    incident_id UUID NOT NULL REFERENCES parcel_incidents(id) ON DELETE RESTRICT,
+    operator_id UUID NOT NULL,
+    beneficiary_user_id UUID NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    declared_value_vnd BIGINT NULL,
+    proven_direct_loss_vnd BIGINT NULL,
+    compensation_rate_percent INT NOT NULL,
+    policy_cap_vnd BIGINT NOT NULL,
+    cargo_award_vnd BIGINT NOT NULL DEFAULT 0,
+    freight_refund_vnd BIGINT NOT NULL DEFAULT 0,
+    total_award_vnd BIGINT NOT NULL DEFAULT 0,
+    policy_version INT NOT NULL,
+    no_proof_fallback_multiplier INT NOT NULL,
+    decision_reason TEXT NULL,
+    decided_by UUID NULL,
+    decided_at TIMESTAMPTZ NULL,
+    payout_reference_id UUID NULL,
+    paid_at TIMESTAMPTZ NULL,
+    appeal_reason TEXT NULL,
+    appealed_by_user_id UUID NULL,
+    appealed_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_parcel_claims_rate CHECK (compensation_rate_percent BETWEEN 1 AND 100),
+    CONSTRAINT chk_parcel_claims_amounts CHECK (
+        policy_cap_vnd > 0 AND cargo_award_vnd >= 0
+        AND freight_refund_vnd >= 0 AND total_award_vnd >= 0)
+);
+CREATE UNIQUE INDEX uq_parcel_claims_incident ON parcel_claims (incident_id);
+CREATE INDEX idx_parcel_claims_operator_status ON parcel_claims (operator_id, status, created_at);
+CREATE INDEX idx_parcel_claims_beneficiary ON parcel_claims (beneficiary_user_id, created_at);
+
+CREATE TABLE parcel_claim_evidence (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    claim_id UUID NOT NULL REFERENCES parcel_claims(id) ON DELETE CASCADE,
+    evidence_type VARCHAR(64) NOT NULL,
+    reference VARCHAR(2000) NOT NULL,
+    note TEXT NULL,
+    uploaded_by_user_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_parcel_claim_evidence_claim_time
+    ON parcel_claim_evidence (claim_id, created_at);
+
+CREATE TABLE unidentified_parcel_packages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    temporary_exception_tag VARCHAR(100) NOT NULL,
+    operator_id UUID NOT NULL,
+    trip_id UUID NULL,
+    location_type VARCHAR(32) NOT NULL,
+    location_id UUID NOT NULL,
+    location_snapshot VARCHAR(500) NULL,
+    description TEXT NOT NULL,
+    observed_weight_kg NUMERIC(10,3) NULL,
+    evidence_references_json JSONB NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    created_by_user_id UUID NOT NULL,
+    matched_parcel_id UUID NULL,
+    matched_at TIMESTAMPTZ NULL,
+    matched_by_user_id UUID NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX uq_unidentified_parcel_packages_operator_tag
+    ON unidentified_parcel_packages (operator_id, temporary_exception_tag);
+CREATE INDEX idx_unidentified_parcel_packages_operator_status
+    ON unidentified_parcel_packages (operator_id, status, created_at);
+CREATE INDEX idx_unidentified_parcel_packages_match
+    ON unidentified_parcel_packages (matched_parcel_id) WHERE matched_parcel_id IS NOT NULL;
+
+-- -----------------------------------------------------------------------------
 -- outbox_events
 -- -----------------------------------------------------------------------------
 -- -----------------------------------------------------------------------------
@@ -607,6 +859,32 @@ CREATE TRIGGER trg_parcel_route_fares_updated_at BEFORE UPDATE ON parcel_route_f
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_parcel_stats_updated_at BEFORE UPDATE ON parcel_stats
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_parcel_compensation_policies_updated_at BEFORE UPDATE ON parcel_compensation_policies
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_parcel_transit_legs_updated_at BEFORE UPDATE ON parcel_transit_legs
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_parcel_current_custody_updated_at BEFORE UPDATE ON parcel_current_custody
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_parcel_incidents_updated_at BEFORE UPDATE ON parcel_incidents
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_parcel_search_tasks_updated_at BEFORE UPDATE ON parcel_search_tasks
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_parcel_claims_updated_at BEFORE UPDATE ON parcel_claims
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_unidentified_parcel_packages_updated_at BEFORE UPDATE ON unidentified_parcel_packages
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+CREATE FUNCTION reject_parcel_custody_event_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'parcel_custody_events is append-only'
+        USING ERRCODE = '55000';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_parcel_custody_events_immutable
+    BEFORE UPDATE OR DELETE ON parcel_custody_events
+    FOR EACH ROW EXECUTE FUNCTION reject_parcel_custody_event_mutation();
 
 CREATE FUNCTION capture_parcel_status_history()
 RETURNS TRIGGER AS $$

@@ -27,9 +27,21 @@ public sealed class Parcel : BaseEntity<Guid>
     public Guid? BookingId { get; private set; }
 
     public string? Description { get; private set; }
+    public int Quantity { get; private set; } = 1;
     public string? PhotoUrl { get; private set; }
     public IReadOnlyCollection<string>? CheckInPhotoUrls { get; private set; }
     public IReadOnlyCollection<string>? DeliveryPhotoUrls { get; private set; }
+    public long? DeclaredValueVnd { get; private set; }
+    public DateTimeOffset? DeclarationAcceptedAt { get; private set; }
+    public int DeclarationPolicyVersion { get; private set; }
+    public int CompensationRatePercentSnapshot { get; private set; }
+    public long CompensationPolicyCapVndSnapshot { get; private set; }
+    public int NoProofFallbackMultiplierSnapshot { get; private set; }
+    public int CompensationPolicyVersionSnapshot { get; private set; }
+    public int ClaimWindowDaysSnapshot { get; private set; }
+    public int SearchSlaHoursSnapshot { get; private set; }
+    public int DecisionSlaBusinessDaysSnapshot { get; private set; }
+    public int PayoutSlaBusinessDaysSnapshot { get; private set; }
     public ParcelSizeCategory SizeCategory { get; private set; }
     public ParcelSizeCategory EstimatedSizeCategory { get; private set; }
     public ParcelSizeCategory? ActualSizeCategory { get; private set; }
@@ -126,6 +138,51 @@ public sealed class Parcel : BaseEntity<Guid>
     public void AssignAdditionalPaymentId(Guid paymentId)
     {
         AdditionalPaymentId = paymentId;
+    }
+
+    public void AcceptDeclaration(
+        long? declaredValueVnd,
+        int declarationPolicyVersion,
+        DateTimeOffset acceptedAt,
+        int compensationRatePercent = ParcelCompensationPolicy.DefaultRatePercent,
+        long compensationPolicyCapVnd = ParcelCompensationPolicy.DefaultMaximumCompensationVnd,
+        int noProofFallbackMultiplier = ParcelCompensationPolicy.DefaultNoProofFallbackMultiplier,
+        int compensationPolicyVersion = 1,
+        int claimWindowDays = ParcelCompensationPolicy.DefaultClaimWindowDays,
+        int searchSlaHours = ParcelCompensationPolicy.DefaultSearchSlaHours,
+        int decisionSlaBusinessDays = ParcelCompensationPolicy.DefaultDecisionSlaBusinessDays,
+        int payoutSlaBusinessDays = ParcelCompensationPolicy.DefaultPayoutSlaBusinessDays,
+        int quantity = 1)
+    {
+        if (declaredValueVnd is < 0)
+            throw new ArgumentOutOfRangeException(nameof(declaredValueVnd));
+        if (declarationPolicyVersion <= 0)
+            throw new ArgumentOutOfRangeException(nameof(declarationPolicyVersion));
+        if (compensationRatePercent is < 1 or > 100
+            || compensationPolicyCapVnd <= 0
+            || noProofFallbackMultiplier <= 0
+            || compensationPolicyVersion <= 0
+            || claimWindowDays <= 0
+            || searchSlaHours <= 0
+            || decisionSlaBusinessDays <= 0
+            || payoutSlaBusinessDays <= 0)
+            throw new ArgumentOutOfRangeException(nameof(compensationRatePercent));
+
+        if (quantity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(quantity));
+
+        Quantity = quantity;
+        DeclaredValueVnd = declaredValueVnd;
+        DeclarationPolicyVersion = declarationPolicyVersion;
+        DeclarationAcceptedAt = acceptedAt;
+        CompensationRatePercentSnapshot = compensationRatePercent;
+        CompensationPolicyCapVndSnapshot = compensationPolicyCapVnd;
+        NoProofFallbackMultiplierSnapshot = noProofFallbackMultiplier;
+        CompensationPolicyVersionSnapshot = compensationPolicyVersion;
+        ClaimWindowDaysSnapshot = claimWindowDays;
+        SearchSlaHoursSnapshot = searchSlaHours;
+        DecisionSlaBusinessDaysSnapshot = decisionSlaBusinessDays;
+        PayoutSlaBusinessDaysSnapshot = payoutSlaBusinessDays;
     }
 
     public void CaptureTripDisplaySnapshot(

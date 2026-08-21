@@ -16,4 +16,6 @@ public sealed record CreateParcelRequest(
     string DeliveryMethod,
     string PaymentMethod,
     string? VoucherCode,
-    string? QuoteToken = null);
+    string? QuoteToken = null,
+    long? DeclaredValueVnd = null,
+    int Quantity = 1);

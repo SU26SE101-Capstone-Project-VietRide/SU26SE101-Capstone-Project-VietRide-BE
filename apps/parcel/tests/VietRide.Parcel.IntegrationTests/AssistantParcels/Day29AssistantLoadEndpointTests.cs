@@ -21,6 +21,7 @@ using StackExchange.Redis;
 using VietRide.Parcel.Api.Controllers;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Features.Parcels.AssistantActions;
 using VietRide.Parcel.Application.Features.Parcels.MarkLoaded;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Parcel.Infrastructure;
@@ -253,7 +254,7 @@ public sealed class Day29AssistantLoadEndpointTests
         var responseTypes = loadMethod.GetCustomAttributes<ProducesResponseTypeAttribute>()
             .ToDictionary(attribute => attribute.StatusCode);
         responseTypes.Keys.Should().BeEquivalentTo(new[] { 200, 401, 403, 404, 409, 422 });
-        responseTypes[200].Type.Should().Be(typeof(ApiResponse<MarkParcelLoadedResponse>));
+        responseTypes[200].Type.Should().Be(typeof(ApiResponse<AssistantParcelActionResponse>));
         foreach (var statusCode in new[] { 401, 403, 404, 409, 422 })
         {
             responseTypes[statusCode].Type.Should().Be(typeof(ApiResponse));
@@ -294,10 +295,10 @@ public sealed class Day29AssistantLoadEndpointTests
         var root = json.RootElement;
         root.GetProperty("success").GetBoolean().Should().BeTrue();
         root.GetProperty("statusCode").GetInt32().Should().Be(200);
-        var data = root.GetProperty("data");
-        data.GetProperty("parcelId").GetGuid().Should().Be(fixture.ParcelId);
-        data.GetProperty("parcelCode").GetString().Should().Be(fixture.ParcelCode);
-        data.GetProperty("status").GetString().Should().Be("LOADED");
+        var parcelState = root.GetProperty("data").GetProperty("parcelState");
+        parcelState.GetProperty("parcelId").GetGuid().Should().Be(fixture.ParcelId);
+        parcelState.GetProperty("parcelCode").GetString().Should().Be(fixture.ParcelCode);
+        parcelState.GetProperty("status").GetString().Should().Be("LOADED");
     }
 
     private static async Task<string> ReadErrorCodeAsync(HttpResponseMessage response)
@@ -426,8 +427,10 @@ public sealed class Day29AssistantLoadWebApplicationFactory : WebApplicationFact
         parcel.Status.Should().Be(expectedStatus);
         var outboxRows = await db.OutboxEvents.AsNoTracking().ToListAsync();
         var statsRows = await db.ParcelStats.AsNoTracking().ToListAsync();
-        outboxRows.Should().HaveCount(expectedWrites);
+        outboxRows.Should().HaveCount(expectedWrites == 0 ? 0 : 2);
         statsRows.Should().HaveCount(expectedWrites);
+        var custodyRows = await db.ParcelCustodyEvents.AsNoTracking().ToListAsync();
+        custodyRows.Should().HaveCount(expectedWrites);
 
         if (expectedWrites == 0)
         {
@@ -438,7 +441,15 @@ public sealed class Day29AssistantLoadWebApplicationFactory : WebApplicationFact
 
         parcel.LoadedAt.Should().NotBeNull();
         parcel.LoadedByUserId.Should().Be(fixture.AssistantUserId);
-        var loaded = outboxRows.Should().ContainSingle().Subject;
+        var loaded = outboxRows.Should()
+            .ContainSingle(row => row.EventType == "parcel.parcel.loaded")
+            .Subject;
+        var custodyRecorded = outboxRows.Should()
+            .ContainSingle(row => row.EventType == "parcel.custody.event_recorded")
+            .Subject;
+        custodyRecorded.Status.Should().Be(OutboxEventStatus.PENDING);
+        custodyRows.Should().ContainSingle(row => row.ParcelId == fixture.ParcelId
+            && row.EventType == ParcelCustodyEventType.LOADED);
         loaded.EventType.Should().Be("parcel.parcel.loaded");
         loaded.Status.Should().Be(OutboxEventStatus.PENDING);
         loaded.PublishedAt.Should().BeNull();
@@ -641,6 +652,26 @@ internal sealed class ControlledTripServiceClient : ITripServiceClient
         decimal weightKg,
         CancellationToken cancellationToken = default)
         => LoadCargoAsync(tripId, parcelId, weightKg, 0.0001m, cancellationToken);
+
+    public Task<TripSummaryBatchOutcome> GetTripSummariesAsync(
+        IReadOnlyCollection<Guid> tripIds,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(TripSummaryBatchOutcome.Success(
+            tripIds.Select(tripId => new TripSummarySnapshot(
+                tripId,
+                "BOARDING",
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow.AddHours(1),
+                new TripRouteSummarySnapshot(
+                    Guid.NewGuid(),
+                    "Integration test route",
+                    "Origin",
+                    "Destination"),
+                new TripVehicleSummarySnapshot(
+                    Guid.NewGuid(),
+                    "TEST-LOAD",
+                    "ACTIVE")))
+                .ToArray()));
 
     public Task<TripSnapshotOutcome> GetTripParcelSnapshotAsync(Guid tripId, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();

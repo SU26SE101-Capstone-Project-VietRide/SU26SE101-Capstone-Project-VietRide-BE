@@ -33,6 +33,12 @@ public static class ParcelOutboxEvents
     public const string PendingOperatorActionRealerted = "parcel.parcel.pending_operator_action_realerted";
     public const string DeliveryConfirmationRealerted = "parcel.parcel.delivery_confirmation_realerted";
     public const string RefundInitiated = "parcel.refund.initiated";
+    public const string CustodyEventRecorded = "parcel.custody.event_recorded";
+    public const string IncidentOpened = "parcel.incident.opened";
+    public const string IncidentUpdated = "parcel.incident.updated";
+    public const string ParcelClaimSubmitted = "parcel.claim.submitted";
+    public const string ParcelClaimDecided = "parcel.claim.decided";
+    public const string ParcelClaimAppealed = "parcel.claim.appealed";
 
     public static Task EnqueueAsync(
         IIntegrationEventOutbox outbox,

@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Caching;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -15,19 +16,22 @@ public sealed class ConfirmDeliveryCommandHandler
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IParcelStatsRepository _statsRepository;
     private readonly IDeliveryConfirmationRateLimiter _rateLimiter;
+    private readonly IParcelCustodyService? _custody;
 
     public ConfirmDeliveryCommandHandler(
         IParcelRepository parcelRepository,
         IParcelDeliveryTokenRepository deliveryTokenRepository,
         IIntegrationEventOutbox outbox,
         IParcelStatsRepository statsRepository,
-        IDeliveryConfirmationRateLimiter rateLimiter)
+        IDeliveryConfirmationRateLimiter rateLimiter,
+        IParcelCustodyService? custody = null)
     {
         _parcelRepository = parcelRepository;
         _deliveryTokenRepository = deliveryTokenRepository;
         _outbox = outbox;
         _statsRepository = statsRepository;
         _rateLimiter = rateLimiter;
+        _custody = custody;
     }
 
     public async Task<ConfirmDeliveryResponse> Handle(
@@ -88,6 +92,27 @@ public sealed class ConfirmDeliveryCommandHandler
             throw new CodedConflictException(
                 "RACE_LOST",
                 $"Parcel '{parcel.Id}' delivery token changed concurrently; cannot confirm delivery.");
+        }
+
+        if (_custody is not null)
+        {
+            await _custody.AppendAsync(
+                parcel,
+                ParcelCustodyEventType.DELIVERED,
+                parcel.DropoffStopId.HasValue
+                    ? ParcelCustodyLocationType.ROUTE_STOP
+                    : ParcelCustodyLocationType.DESTINATION_STATION,
+                parcel.DropoffStopId,
+                parcel.DropoffStopId.HasValue
+                    ? $"STOP:{parcel.DropoffStopId:D}"
+                    : parcel.TripSnapshotDestinationStationName,
+                null,
+                "RECIPIENT",
+                "DELIVERY_CONFIRMATION",
+                deliveryToken.Id.ToString("D"),
+                null,
+                null,
+                cancellationToken);
         }
 
         await ParcelOutboxEvents.EnqueueAsync(
