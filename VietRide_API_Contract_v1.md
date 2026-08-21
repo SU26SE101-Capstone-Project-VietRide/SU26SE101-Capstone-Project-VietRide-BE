@@ -7088,10 +7088,14 @@ comma-separated `status=SCHEDULED,IN_PROGRESS,COMPLETED,CANCELLED`. `from/to` ar
 `to` includes the whole day. Without a status filter all statuses, including `CANCELLED`, are
 returned. Default ordering is `scheduledDepartureTime DESC, shuttleTripId DESC`.
 
-Response `200`: `PagedResult<OperatorShuttleTripListItemDto>` with `vehicle { id, licensePlate }`,
-`driver { id, displayName, phone }`, `passengerCount`, and `stopCount`, plus scheduled/actual
-departure and completion timestamps. Invalid status returns `422 VALIDATION_ERROR`; Identity
-profile transport failure returns `503 UPSTREAM_UNAVAILABLE`.
+Response `200`: `PagedResult<OperatorShuttleTripListItemDto>` keeps all existing fields and adds
+`mainTrip { tripId, routeName, departureDateTime, estimatedArrivalTime, hardCutoffAt }`,
+`station { stationId, name }`, `vehicle.typeDisplayName`, `vehicle.usablePassengerCapacity`, and
+`passengerProgress { pending, pickedUp, delivered, noShow, cancelled }`. `passengerCount` counts
+non-cancelled passenger manifests; `stopCount` counts unique non-cancelled `pickupOrder` values.
+Usable capacity is derived from the vehicle seat layout and excludes disabled seats and
+`DRIVER_AREA`; it is not sourced from `totalSeats`. Invalid status returns `422 VALIDATION_ERROR`;
+Identity profile transport failure returns `503 UPSTREAM_UNAVAILABLE`.
 
 ### POST `/v1/operator/shuttle-trips`
 

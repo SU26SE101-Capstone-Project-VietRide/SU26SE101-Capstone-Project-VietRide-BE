@@ -156,14 +156,37 @@ public sealed record OperatorShuttleTripListItemDto(
     DateTimeOffset ScheduledEndTime,
     DateTimeOffset? ActualDepartureTime,
     DateTimeOffset? CompletedAt,
+    OperatorShuttleMainTripDto MainTrip,
+    OperatorShuttleStationDto Station,
     OperatorShuttleVehicleDto Vehicle,
     OperatorShuttleDriverDto Driver,
     int PassengerCount,
-    int StopCount);
+    int StopCount,
+    OperatorShuttlePassengerProgressDto PassengerProgress);
 
-public sealed record OperatorShuttleVehicleDto(Guid Id, string LicensePlate);
+public sealed record OperatorShuttleMainTripDto(
+    Guid TripId,
+    string RouteName,
+    DateTimeOffset DepartureDateTime,
+    DateTimeOffset EstimatedArrivalTime,
+    DateTimeOffset HardCutoffAt);
+
+public sealed record OperatorShuttleStationDto(Guid StationId, string Name);
+
+public sealed record OperatorShuttleVehicleDto(
+    Guid Id,
+    string LicensePlate,
+    string TypeDisplayName,
+    int UsablePassengerCapacity);
 
 public sealed record OperatorShuttleDriverDto(Guid Id, string? DisplayName, string? Phone);
+
+public sealed record OperatorShuttlePassengerProgressDto(
+    int Pending,
+    int PickedUp,
+    int Delivered,
+    int NoShow,
+    int Cancelled);
 
 public sealed record ShuttleTrackingContext(
     Guid ShuttleTripId,

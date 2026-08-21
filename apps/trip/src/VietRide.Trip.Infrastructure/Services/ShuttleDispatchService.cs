@@ -281,7 +281,11 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         var totalItems = await query.CountAsync(cancellationToken);
         var rows = await (
             from shuttle in query
+            join mainTrip in _db.Trips.AsNoTracking() on shuttle.MainTripId equals mainTrip.Id
+            join route in _db.Routes.AsNoTracking() on mainTrip.RouteId equals route.Id
+            join station in _db.Stations.AsNoTracking() on shuttle.StationId equals station.Id
             join vehicle in _db.Vehicles.AsNoTracking() on shuttle.VehicleId equals vehicle.Id
+            join vehicleType in _db.VehicleTypes.AsNoTracking() on vehicle.VehicleTypeId equals vehicleType.Id
             orderby shuttle.ScheduledDepartureTime descending, shuttle.Id descending
             select new
             {
@@ -293,8 +297,15 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 shuttle.ScheduledEndTime,
                 shuttle.ActualDepartureTime,
                 shuttle.CompletedAt,
+                MainTripDepartureDateTime = mainTrip.DepartureDateTime,
+                MainTripEstimatedArrivalTime = mainTrip.EstimatedArrivalTime,
+                RouteName = route.Name,
+                StationId = station.Id,
+                StationName = station.Name,
                 VehicleId = vehicle.Id,
                 vehicle.LicensePlate,
+                vehicle.SeatLayoutJson,
+                VehicleTypeDisplayName = vehicleType.DisplayName,
                 shuttle.DriverUserId,
                 PassengerCount = _db.ShuttlePassengers.Count(passenger =>
                     passenger.ShuttleTripId == shuttle.Id
@@ -306,6 +317,21 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                     .Select(passenger => passenger.PickupOrder)
                     .Distinct()
                     .Count(),
+                PendingPassengerCount = _db.ShuttlePassengers.Count(passenger =>
+                    passenger.ShuttleTripId == shuttle.Id
+                    && passenger.Status == ShuttlePassenger.PendingStatus),
+                PickedUpPassengerCount = _db.ShuttlePassengers.Count(passenger =>
+                    passenger.ShuttleTripId == shuttle.Id
+                    && passenger.Status == ShuttlePassenger.PickedUpStatus),
+                DeliveredPassengerCount = _db.ShuttlePassengers.Count(passenger =>
+                    passenger.ShuttleTripId == shuttle.Id
+                    && passenger.Status == ShuttlePassenger.DeliveredStatus),
+                NoShowPassengerCount = _db.ShuttlePassengers.Count(passenger =>
+                    passenger.ShuttleTripId == shuttle.Id
+                    && passenger.Status == ShuttlePassenger.NoShowStatus),
+                CancelledPassengerCount = _db.ShuttlePassengers.Count(passenger =>
+                    passenger.ShuttleTripId == shuttle.Id
+                    && passenger.Status == ShuttlePassenger.CancelledStatus),
             })
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -322,12 +348,33 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             row.ScheduledEndTime,
             row.ActualDepartureTime,
             row.CompletedAt,
-            new OperatorShuttleVehicleDto(row.VehicleId, row.LicensePlate),
+            new OperatorShuttleMainTripDto(
+                row.MainTripId,
+                row.RouteName,
+                row.MainTripDepartureDateTime,
+                row.MainTripEstimatedArrivalTime,
+                row.Direction == ShuttleTrip.InboundDirection
+                    ? row.MainTripDepartureDateTime.AddMinutes(-ArrivalBufferMinutes)
+                    : row.MainTripEstimatedArrivalTime.AddMinutes(ArrivalBufferMinutes)),
+            new OperatorShuttleStationDto(row.StationId, row.StationName),
+            new OperatorShuttleVehicleDto(
+                row.VehicleId,
+                row.LicensePlate,
+                row.VehicleTypeDisplayName,
+                SeatLayoutMetrics.CountUsablePassengerSeats(
+                    row.SeatLayoutJson.Deserialize<SeatLayoutDto>(JsonOptions)
+                    ?? throw new InvalidOperationException("Stored vehicle seat layout is invalid."))),
             profiles.TryGetValue(row.DriverUserId, out var profile)
                 ? new OperatorShuttleDriverDto(row.DriverUserId, profile.DisplayName, profile.Phone)
                 : new OperatorShuttleDriverDto(row.DriverUserId, null, null),
             row.PassengerCount,
-            row.StopCount)).ToArray();
+            row.StopCount,
+            new OperatorShuttlePassengerProgressDto(
+                row.PendingPassengerCount,
+                row.PickedUpPassengerCount,
+                row.DeliveredPassengerCount,
+                row.NoShowPassengerCount,
+                row.CancelledPassengerCount))).ToArray();
 
         return PagedResult<OperatorShuttleTripListItemDto>.Create(items, page, pageSize, totalItems);
     }

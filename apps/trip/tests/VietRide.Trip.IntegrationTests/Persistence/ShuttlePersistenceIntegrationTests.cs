@@ -377,6 +377,110 @@ public sealed class ShuttlePersistenceIntegrationTests
     }
 
     [Fact]
+    public async Task GetHistoryAsync_ProjectsMainTripStationUsableCapacityAndPassengerProgress()
+    {
+        var databaseName = $"vietride_trip_shuttle_history_projection_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond));
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var seed = await SeedBaseAsync(db, now.AddHours(4));
+            var shuttleVehicle = await db.Vehicles.SingleAsync(vehicle => vehicle.Id == seed.ShuttleVehicleId);
+            var shuttleLayout = JsonSerializer.SerializeToElement(new
+            {
+                version = 1,
+                vehicleTypeCode = "SHUTTLE_TEST",
+                totalSeats = 6,
+                rows = 6,
+                cols = 1,
+                decks = 1,
+                aisles = Array.Empty<object>(),
+                seats = new object[]
+                {
+                    CreateSeat("A01", 1, "DRIVER_AREA", disabled: false),
+                    CreateSeat("A02", 2, "STANDARD", disabled: true),
+                    CreateSeat("A03", 3, "STANDARD", disabled: false),
+                    CreateSeat("A04", 4, "STANDARD", disabled: false),
+                    CreateSeat("A05", 5, "STANDARD", disabled: false),
+                    CreateSeat("A06", 6, "STANDARD", disabled: false),
+                },
+            });
+            shuttleVehicle.UpdateSeatLayout(shuttleLayout, totalSeats: 6);
+
+            var originStation = await db.Stations.SingleAsync(station => station.Name == "Shuttle Origin");
+            var shuttleTrip = ShuttleTrip.Create(
+                seed.OperatorId,
+                seed.MainTripId,
+                originStation.Id,
+                seed.ShuttleDriverId,
+                seed.ShuttleVehicleId,
+                now.AddHours(1),
+                now.AddHours(2),
+                null);
+            var manifests = Enumerable.Range(0, 5)
+                .Select(index => ShuttlePassenger.Request(
+                    seed.MainTripId,
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    $"Pickup {index + 1}",
+                    10.7731m,
+                    106.7032m))
+                .ToArray();
+            manifests[0].Assign(shuttleTrip.Id, 1);
+            manifests[1].Assign(shuttleTrip.Id, 2);
+            manifests[1].MarkPickedUp(now);
+            manifests[2].Assign(shuttleTrip.Id, 2);
+            manifests[2].MarkPickedUp(now);
+            manifests[2].MarkDelivered(now.AddMinutes(1));
+            manifests[3].Assign(shuttleTrip.Id, 3);
+            manifests[3].MarkNoShow("Passenger unavailable");
+            manifests[4].Assign(shuttleTrip.Id, 4);
+            manifests[4].Cancel("Booking cancelled");
+            db.AddRange(shuttleTrip);
+            db.AddRange(manifests);
+            await db.SaveChangesAsync();
+
+            var service = CreateDispatchService(db, clock, seed.OperatorId);
+            var result = await service.GetHistoryAsync(
+                seed.OperatorId,
+                page: 1,
+                pageSize: 20,
+                from: null,
+                to: null,
+                statuses: null,
+                CancellationToken.None);
+
+            var item = result.Items.Should().ContainSingle().Subject;
+            item.MainTrip.Should().Be(new OperatorShuttleMainTripDto(
+                seed.MainTripId,
+                "Shuttle integration route",
+                now.AddHours(4),
+                now.AddHours(7),
+                now.AddHours(3.5)));
+            item.Station.Should().Be(new OperatorShuttleStationDto(originStation.Id, "Shuttle Origin"));
+            item.Vehicle.TypeDisplayName.Should().Be("Shuttle integration vehicle");
+            item.Vehicle.UsablePassengerCapacity.Should().Be(4);
+            item.PassengerCount.Should().Be(4);
+            item.StopCount.Should().Be(3);
+            item.PassengerProgress.Should().Be(new OperatorShuttlePassengerProgressDto(
+                Pending: 1,
+                PickedUp: 1,
+                Delivered: 1,
+                NoShow: 1,
+                Cancelled: 1));
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task ConfirmedFanOut_RealInbox_FailureBeforeMarker_RollsBackManifestsAndMarker()
     {
         var databaseName = $"vietride_trip_shuttle_inbox_failure_{Guid.NewGuid():N}";
@@ -941,6 +1045,19 @@ public sealed class ShuttlePersistenceIntegrationTests
                 disabled = false,
             }),
         });
+
+    private static object CreateSeat(string seatNumber, int row, string type, bool disabled)
+        => new
+        {
+            seatNumber,
+            row,
+            col = 1,
+            deck = 1,
+            type,
+            isWindow = true,
+            isAisle = false,
+            disabled,
+        };
 
     private static BookingShuttleConfirmedIntegrationEvent CreateConfirmedEvent(
         Guid tripId,
