@@ -103,6 +103,65 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
     }
 
     [Fact]
+    public async Task CustomRequests_ListAndDetail_ReturnOperatorNamesIncludingSoftDeletedOperator()
+    {
+        await _factory.ResetAsync();
+        await _factory.SeedSystemAdminAsync(SystemAdminId);
+        var activeOperatorId = await _factory.SeedOperatorAsync(
+            "Alpha Custom Transit",
+            "BRN-CUSTOM-ALPHA",
+            "TAX-CUSTOM-ALPHA",
+            OperatorRegistrationStatus.APPROVED);
+        var deletedOperatorId = await _factory.SeedOperatorAsync(
+            "Deleted Custom Transit",
+            "BRN-CUSTOM-DELETED",
+            "TAX-CUSTOM-DELETED",
+            OperatorRegistrationStatus.APPROVED);
+        await _factory.SeedCustomRequestAsync(activeOperatorId);
+        var deletedOperatorRequestId = await _factory.SeedCustomRequestAsync(deletedOperatorId);
+        await _factory.SoftDeleteOperatorAsync(deletedOperatorId);
+        using var client = _factory.CreateIdempotentClient();
+        using var listRequest = AuthorizedGet(
+            "/v1/admin/subscription-plans/custom-requests?status=PENDING_REVIEW");
+
+        var listResponse = await client.SendAsync(listRequest);
+
+        listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var listDocument = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(listDocument, 200);
+        var items = listDocument.RootElement.GetProperty("data").EnumerateArray().ToArray();
+        items.Should().HaveCount(2);
+        items.Single(item => item.GetProperty("operatorId").GetGuid() == activeOperatorId)
+            .GetProperty("operatorName").GetString().Should().Be("Alpha Custom Transit");
+        items.Single(item => item.GetProperty("operatorId").GetGuid() == deletedOperatorId)
+            .GetProperty("operatorName").GetString().Should().Be("Deleted Custom Transit");
+
+        using var detailRequest = AuthorizedGet(
+            $"/v1/admin/subscription-plans/custom-requests/{deletedOperatorRequestId}");
+        var detailResponse = await client.SendAsync(detailRequest);
+
+        detailResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var detailDocument = JsonDocument.Parse(await detailResponse.Content.ReadAsStringAsync());
+        AssertSuccessEnvelope(detailDocument, 200);
+        var detail = detailDocument.RootElement.GetProperty("data");
+        detail.GetProperty("operatorId").GetGuid().Should().Be(deletedOperatorId);
+        detail.GetProperty("operatorName").GetString().Should().Be("Deleted Custom Transit");
+    }
+
+    [Fact]
+    public async Task CustomRequests_NonSystemAdmin_Returns403()
+    {
+        using var client = _factory.CreateIdempotentClient();
+        using var request = AuthorizedGet(
+            "/v1/admin/subscription-plans/custom-requests",
+            UserRole.OPERATOR_ADMIN.ToString());
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
     public async Task Approve_PendingOperator_Returns200PersistsActiveTrialActivityLogAndOutboxEvent()
     {
         await _factory.ResetAsync();
@@ -571,6 +630,37 @@ public sealed class AdminOperatorsLifecycleEndpointsTests : IClassFixture<AdminO
             await db.Operators.AddAsync(operatorEntity);
             await db.SaveChangesAsync();
             return operatorEntity.Id;
+        }
+
+        public async Task<Guid> SeedCustomRequestAsync(Guid operatorId)
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var request = SubscriptionCustomRequest.Create(
+                operatorId,
+                30,
+                40,
+                10,
+                8,
+                50,
+                5000,
+                true,
+                true,
+                true,
+                SubscriptionBillingPeriod.MONTHLY,
+                "Custom request integration test");
+            await db.SubscriptionCustomRequests.AddAsync(request);
+            await db.SaveChangesAsync();
+            return request.Id;
+        }
+
+        public async Task SoftDeleteOperatorAsync(Guid operatorId)
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var operatorTenant = await db.Operators.SingleAsync(item => item.Id == operatorId);
+            operatorTenant.SoftDelete(DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
         }
 
         public async Task<int> CountActivityLogsAsync()

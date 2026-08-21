@@ -6421,6 +6421,10 @@ Auth: `SYSTEM_ADMIN`:
 - `POST /v1/admin/subscription-plans/custom-requests/{requestId}/approve` — `Idempotency-Key` required.
 - `POST /v1/admin/subscription-plans/custom-requests/{requestId}/reject` — `Idempotency-Key` required and body `{ "reason": "..." }`.
 
+Both admin GET responses preserve the Custom Request fields and additionally return non-null
+`operatorName` beside `operatorId`. The name is resolved by Identity from the owning Operator,
+including a soft-deleted Operator, so Admin FE must not issue one Operator-detail request per row.
+
 Approve accepts final independent `pricePerMonth`/`pricePerYear`, six granted limits, and module flags. It atomically creates one owner-scoped immutable Custom plan and marks the request approved. Every granted limit must be at least the operator's locked current usage; otherwise `422 CUSTOM_PLAN_LIMIT_BELOW_CURRENT_USAGE` returns field errors whose message includes requested, granted, and current-usage values. Terminal requests return `409 CUSTOM_REQUEST_ALREADY_REVIEWED`.
 
 ### POST `/v1/operators/register`

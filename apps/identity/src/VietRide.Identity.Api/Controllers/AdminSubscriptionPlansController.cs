@@ -63,19 +63,19 @@ public sealed class AdminSubscriptionPlansController : ControllerBase
     }
 
     [HttpGet("custom-requests")]
-    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<SubscriptionCustomRequestDto>>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IReadOnlyList<SubscriptionCustomRequestDto>>> ListCustomRequestsAsync(
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<AdminSubscriptionCustomRequestDto>>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<AdminSubscriptionCustomRequestDto>>> ListCustomRequestsAsync(
         [FromQuery] string? status,
         CancellationToken cancellationToken)
-        => Ok(await _sender.Send(new ListSubscriptionCustomRequestsQuery(null, status), cancellationToken));
+        => Ok(await _sender.Send(new ListAdminSubscriptionCustomRequestsQuery(status), cancellationToken));
 
     [HttpGet("custom-requests/{requestId:guid}")]
-    [ProducesResponseType(typeof(ApiResponse<SubscriptionCustomRequestDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<AdminSubscriptionCustomRequestDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<SubscriptionCustomRequestDto>> GetCustomRequestAsync(
+    public async Task<ActionResult<AdminSubscriptionCustomRequestDto>> GetCustomRequestAsync(
         Guid requestId,
         CancellationToken cancellationToken)
-        => Ok(await _sender.Send(new GetSubscriptionCustomRequestQuery(requestId, null), cancellationToken));
+        => Ok(await _sender.Send(new GetAdminSubscriptionCustomRequestQuery(requestId), cancellationToken));
 
     [HttpPost("custom-requests/{requestId:guid}/approve")]
     [IdempotencyOpenApi]

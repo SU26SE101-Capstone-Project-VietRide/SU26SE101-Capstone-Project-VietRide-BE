@@ -1,4 +1,5 @@
 using VietRide.Identity.Domain.Entities;
+using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Repositories;
 
 namespace VietRide.Identity.Application.Abstractions.Repositories;
@@ -11,5 +12,9 @@ public interface ISubscriptionCustomRequestRepository : IRepository<Subscription
 
     Task<SubscriptionCustomRequest?> GetPendingByOperatorIdAsync(
         Guid operatorId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<SubscriptionCustomRequest>> ListForAdminAsync(
+        SubscriptionCustomRequestStatus? status,
         CancellationToken cancellationToken = default);
 }
