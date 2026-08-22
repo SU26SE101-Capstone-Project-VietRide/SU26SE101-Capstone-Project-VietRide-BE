@@ -54,11 +54,27 @@ public sealed class OperatorShuttleController : ControllerBase
             cancellationToken));
     }
 
+    [HttpGet("shuttle-trips/{shuttleTripId:guid}/passengers")]
+    [Authorize(Roles = "OPERATOR_ADMIN,OPERATOR_STAFF")]
+    [ProducesResponseType(typeof(ApiResponse<ShuttlePassengerContactResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ShuttlePassengerContactResponse>> GetPassengerContacts(
+        Guid shuttleTripId,
+        CancellationToken cancellationToken)
+    {
+        Response.Headers.CacheControl = "private, no-store";
+        return Ok(await _sender.Send(
+            new GetShuttlePassengerContactsQuery(GetOperatorId(), shuttleTripId),
+            cancellationToken));
+    }
+
     [HttpGet("shuttle-requests")]
     [AllowedQueryParameters("page", "pageSize", "from", "to", "mainTripId", "search")]
     [Authorize(Roles = "OPERATOR_STAFF,OPERATOR_ADMIN")]
-    [ProducesResponseType(typeof(ApiResponse<PagedResult<ShuttleRequestTripGroup>>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResult<ShuttleRequestTripGroup>>> GetRequests(
+    [ProducesResponseType(typeof(ApiResponse<ShuttleRequestPage>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ShuttleRequestPage>> GetRequests(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         [FromQuery] DateOnly? from = null,
@@ -87,6 +103,7 @@ public sealed class OperatorShuttleController : ControllerBase
     {
         var result = await _sender.Send(new CreateShuttleTripCommand(
             GetOperatorId(),
+            CurrentUserClaims.GetUserId(User),
             request.MainTripId,
             request.DriverUserId,
             request.VehicleId,
@@ -97,6 +114,28 @@ public sealed class OperatorShuttleController : ControllerBase
             request.Direction ?? string.Empty), cancellationToken);
         return StatusCode(StatusCodes.Status201Created, result);
     }
+
+    [HttpPatch("shuttle-trips/{shuttleTripId:guid}/assignment")]
+    [Authorize(Roles = "OPERATOR_ADMIN")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<ReassignShuttleTripResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ReassignShuttleTripResult>> ReassignTrip(
+        Guid shuttleTripId,
+        [FromBody] ReassignShuttleTripRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await _sender.Send(
+            new ReassignShuttleTripCommand(
+                GetOperatorId(),
+                shuttleTripId,
+                request.DriverUserId,
+                request.VehicleId,
+                request.Reason),
+            cancellationToken));
 
     [HttpPost("shuttle-trips/availability-check")]
     [Authorize(Roles = "OPERATOR_ADMIN")]
@@ -139,7 +178,7 @@ public sealed class OperatorShuttleController : ControllerBase
         [FromBody] CancelShuttleRequest request,
         CancellationToken cancellationToken)
         => Ok(await _sender.Send(new CancelShuttleTripCommand(
-            GetOperatorId(), shuttleTripId, request.Reason), cancellationToken));
+            GetOperatorId(), shuttleTripId, CurrentUserClaims.GetUserId(User), request.Reason), cancellationToken));
 
     private Guid GetOperatorId()
         => CurrentUserClaims.GetOperatorId(User)

@@ -161,6 +161,21 @@ POST /v1/admin/subscription-plans/custom-requests/{requestId}/approve
 POST /v1/admin/subscription-plans/custom-requests/{requestId}/reject
 ```
 
+Hai API GET admin trả thêm tên nhà xe ngay cạnh ID:
+
+```json
+{
+  "requestId": "uuid",
+  "operatorId": "uuid",
+  "operatorName": "Nhà xe Phương Trang",
+  "requestedLimits": {},
+  "requestedModules": {},
+  "status": "PENDING_REVIEW"
+}
+```
+
+`operatorName` luôn có giá trị, kể cả khi nhà xe đã bị soft-delete. Admin FE render trực tiếp field này và không gọi thêm API lấy chi tiết nhà xe cho từng dòng.
+
 Approve nhập độc lập `pricePerMonth` và `pricePerYear`; ít nhất một giá phải lớn hơn 0. Admin nhập quota/module cuối cùng, không có công thức auto-pricing.
 
 Nếu quota duyệt thấp hơn usage đang có, BE trả:

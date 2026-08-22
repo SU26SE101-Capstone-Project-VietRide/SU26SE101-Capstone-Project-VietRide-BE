@@ -1464,13 +1464,6 @@ Response `200`:
         "bookingGroupId": null,
         "tripDirection": null,
         "routeName": "TP.HCM - Hà Nội",
-        "vehicle": {
-          "licensePlate": "51B-123.45",
-          "vehicleType": {
-            "code": "LIMOUSINE",
-            "displayName": "Limousine"
-          }
-        },
         "tickets": [
           {
             "ticketId": "uuid",
@@ -1480,6 +1473,25 @@ Response `200`:
             "paidAmount": 350000
           }
         ],
+        "shuttleRequests": [
+          {
+            "direction": "INBOUND_TO_STATION",
+            "address": "12 Nguyễn Huệ, Quận 1, TP.HCM",
+            "latitude": 10.7731,
+            "longitude": 106.7032,
+            "roadDistanceMeters": 3200,
+            "isActive": true,
+            "requestedAt": "2026-05-01T16:00:00+07:00",
+            "cancelledAt": null
+          }
+        ],
+        "vehicle": {
+          "licensePlate": "51B-123.45",
+          "vehicleType": {
+            "code": "LIMOUSINE",
+            "displayName": "Limousine"
+          }
+        },
         "paymentRedirectUrl": null
       }
     ],
@@ -1509,6 +1521,14 @@ non-success responses, timeouts, and transport failures leave only the affected 
 and do not fail the base history response. No vehicle ID, status, seat layout, capacity, image, or
 other management field is exposed.
 
+`shuttleRequests` is always serialized by this public endpoint and is `[]` when the Booking never
+requested Shuttle service. Each item is Booking-owned request history with `direction` equal to
+`INBOUND_TO_STATION` or `OUTBOUND_FROM_STATION`, the requested service address and coordinates,
+nullable road-distance snapshot, current `isActive`, `requestedAt`, and nullable `cancelledAt`.
+Both active and inactive intents are returned so cancellation does not erase passenger-visible
+history. Items are ordered by `requestedAt ASC, id ASC`. This projection does not enrich Trip-owned
+assignment data such as `shuttleTripId`, Vehicle, Driver, pickup order, or dispatch status.
+
 `paymentRedirectUrl` is the final root property of every item and is always serialized. It is
 non-null only for a `PENDING_PAYMENT` Booking whose latest eligible VNPay Payment lookup matches
 the owner, reference, exact amount, trusted VNPay authority, and a persisted future `dueAt`.
@@ -1522,9 +1542,10 @@ failing the base history response.
 Auth: Internal JWT. Caller: Parcel Service. Never exposed through Gateway.
 
 Query: required `userId`, plus the same `status?`, `from?`, `to?`, `page=1`, and `pageSize=20`
-semantics as the public Booking history endpoint. It returns the same paged data DTO, preserving
-Booking ownership, per-Booking pagination, nested Ticket summaries, nullable current Vehicle
-projection, and deterministic ordering.
+semantics as the public Booking history endpoint. It preserves Booking ownership, per-Booking
+pagination, nested Ticket summaries, nullable current Vehicle projection, and deterministic
+ordering. It does not load or return the public-only `shuttleRequests` field, so Parcel does not
+receive passenger Shuttle addresses or coordinates.
 
 ### GET `/internal/v1/bookings/{bookingId}`
 
@@ -5087,6 +5108,9 @@ Allowed action types are `OPEN_BOOKING_DETAIL`, `OPEN_CREW_TRIP_BOOKING`, `OPEN_
 navigation data resolves to `NONE`; it never fails the inbox read. IDs remain in `data` and
 `action.params` for client navigation but system-generated `title`/`body` use human-readable
 codes/names or a natural-language fallback instead of raw UUIDs. Existing rows are not backfilled.
+For Shuttle notifications, `OPEN_SHUTTLE_TRACKING.params` always contains `shuttleTripId` and
+additively preserves `bookingId` plus `pickupOrder` when the event identifies a passenger pickup,
+so clients can select the correct stop when one Shuttle Trip serves multiple Booking groups.
 
 `PARCEL_RESERVED` is emitted to the Assistant currently assigned to the Parcel's Trip only after
 the sender's deposit succeeds and the Trip cargo reservation is confirmed. It is stored in the
@@ -5624,7 +5648,11 @@ Response `200` uses the ADR 0004 envelope with `data`:
       "isStation": false,
       "serviceAddress": "123 Nguyen Hue, Quan 1",
       "serviceOrder": 1,
-      "roadDistanceMeters": 4200
+      "roadDistanceMeters": 4200,
+      "passengerCount": 2,
+      "pickedUpAt": null,
+      "deliveredAt": null,
+      "statusReason": null
     }
   ],
   "station": {
@@ -5639,7 +5667,10 @@ Response `200` uses the ADR 0004 envelope with `data`:
 
 - `stops` contains all ordered passenger and Station stops for the owned Shuttle Trip. Passenger
   stop status uses `PENDING`, `PICKED_UP`, `DELIVERED`, `NO_SHOW`, or `CANCELLED`; `bookingId` is
-  `null` for the Station stop. Passenger names and phone numbers are not returned.
+  `null` for the Station stop. `passengerCount` counts manifest passengers and is `null` for the
+  Station stop. `pickedUpAt` and `deliveredAt` are nullable lifecycle timestamps. `statusReason`
+  contains the reason for both `NO_SHOW` and `CANCELLED`, otherwise it is null. Passenger names and
+  phone numbers are not returned, and `scheduledPickupTime` is not part of this runtime contract.
 - Internal authorization markers such as `isOwnPickup` and distance snapshot compatibility fields
   are never returned. `station` is nullable when valid Station coordinates are unavailable.
 - Response sets `Cache-Control: private, no-store` because passenger service addresses are PII.
@@ -6400,6 +6431,10 @@ Auth: `SYSTEM_ADMIN`:
 - `POST /v1/admin/subscription-plans/custom-requests/{requestId}/approve` — `Idempotency-Key` required.
 - `POST /v1/admin/subscription-plans/custom-requests/{requestId}/reject` — `Idempotency-Key` required and body `{ "reason": "..." }`.
 
+Both admin GET responses preserve the Custom Request fields and additionally return non-null
+`operatorName` beside `operatorId`. The name is resolved by Identity from the owning Operator,
+including a soft-deleted Operator, so Admin FE must not issue one Operator-detail request per row.
+
 Approve accepts final independent `pricePerMonth`/`pricePerYear`, six granted limits, and module flags. It atomically creates one owner-scoped immutable Custom plan and marks the request approved. Every granted limit must be at least the operator's locked current usage; otherwise `422 CUSTOM_PLAN_LIMIT_BELOW_CURRENT_USAGE` returns field errors whose message includes requested, granted, and current-usage values. Terminal requests return `409 CUSTOM_REQUEST_ALREADY_REVIEWED`.
 
 ### POST `/v1/operators/register`
@@ -7046,7 +7081,9 @@ Shuttle được nhóm theo `mainTripId + direction`, trong đó `direction` là
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant lấy từ JWT. Query phân trang theo main Trip.
 
-Response là `PagedResult<ShuttleRequestTripGroup>`, trả `mainTripId`, `routeName`, Station theo direction, `direction`, `hardCutoffAt`, tổng pending, các nhóm Booking (`bookingId`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `roadDistanceMeters`, `requestedAt`) và `suggestedBookingOrder`. Pagination gồm `items`, `page`, `pageSize`, `totalItems`, `totalPages`, `hasNextPage`, `hasPreviousPage`. Thứ tự gợi ý dùng road-distance snapshot, xa nhất trước, hòa thì `requestedAt ASC`; không dùng Haversine để quyết định eligibility.
+Response là `ShuttleRequestPage`, giữ `items`, `page`, `pageSize`, `totalItems`, `totalPages`, `hasNextPage`, `hasPreviousPage` và thêm `summary { totalPendingPassengerCount, totalPendingGroupCount }`. Mỗi group trả `mainTripId`, `routeName`, Station theo direction, `direction`, `hardCutoffAt`, `pendingPassengerCount`, `assignedPassengerCount`, `totalShuttlePassengerCount`, `dispatchedShuttleTripCount`, các nhóm Booking (`bookingId`, nullable `bookingCode`, `passengerCount`, `pickupAddress`, `pickupLat`, `pickupLng`, `roadDistanceMeters`, `requestedAt`) và `suggestedBookingOrder`.
+
+`from/to` lọc theo `Trip.departureDateTime` tại ICT. Thứ tự mặc định trước pagination là `hardCutoffAt ASC`, `departureDateTime ASC`, `mainTripId ASC`, `direction ASC`. Thứ tự gợi ý Booking vẫn dùng road-distance snapshot, xa nhất trước, hòa thì `requestedAt ASC`; không dùng Haversine để quyết định eligibility.
 
 Pending shuttle `BookingGroup` responses always include non-null nested `passengers[]`. Each item contains
 `passengerUserId`, nullable `displayName` and `phone`, and aggregated `ticketIds[]`. The result
@@ -7061,16 +7098,36 @@ comma-separated `status=SCHEDULED,IN_PROGRESS,COMPLETED,CANCELLED`. `from/to` ar
 `to` includes the whole day. Without a status filter all statuses, including `CANCELLED`, are
 returned. Default ordering is `scheduledDepartureTime DESC, shuttleTripId DESC`.
 
-Response `200`: `PagedResult<OperatorShuttleTripListItemDto>` with `vehicle { id, licensePlate }`,
-`driver { id, displayName, phone }`, `passengerCount`, and `stopCount`, plus scheduled/actual
-departure and completion timestamps. Invalid status returns `422 VALIDATION_ERROR`; Identity
-profile transport failure returns `503 UPSTREAM_UNAVAILABLE`.
+Response `200`: `PagedResult<OperatorShuttleTripListItemDto>` keeps all existing fields and adds
+`mainTrip { tripId, routeName, departureDateTime, estimatedArrivalTime, hardCutoffAt }`,
+`station { stationId, name }`, `vehicle.typeDisplayName`, `vehicle.usablePassengerCapacity`, and
+`passengerProgress { pending, pickedUp, delivered, noShow, cancelled }`. `passengerCount` counts
+non-cancelled passenger manifests; `stopCount` counts unique non-cancelled `pickupOrder` values.
+Usable capacity is derived from the vehicle seat layout and excludes disabled seats and
+`DRIVER_AREA`; it is not sourced from `totalSeats`. Invalid status returns `422 VALIDATION_ERROR`;
+Identity profile transport failure returns `503 UPSTREAM_UNAVAILABLE`.
+
+History items also expose nullable dispatch audit data: `notes`, `createdAt`, `createdBy`,
+`cancelledAt`, `cancelReason`, and `cancelledBy`. `createdBy` and `cancelledBy` are actor user IDs.
+Rows created before audit capture may return null actor IDs. Cancellation writes dedicated audit
+fields and does not append or parse cancellation text in `notes`.
+
+### GET `/v1/operator/shuttle-trips/{shuttleTripId}/passengers`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`, scoped to the operator tenant from JWT. Response groups
+manifest rows by `(pickupOrder, bookingId)` and returns `bookingCode`, `pickupAddress`,
+`passengerCount`, and `passengers[] { passengerUserId, displayName, phone, ticketIds }`. Missing
+Identity profiles preserve the passenger ID and return null `displayName`/`phone`; Identity
+transport failure returns `503 UPSTREAM_UNAVAILABLE`. Response caching is disabled with
+`Cache-Control: private, no-store`.
 
 ### POST `/v1/operator/shuttle-trips`
 
 Request bắt buộc có thêm `direction`. Inbound dùng origin Station và `scheduledEndTime <= departureDateTime - 30 phút`; outbound dùng destination Station và `scheduledDepartureTime >= estimatedArrivalTime + 30 phút`.
 
 Auth: `OPERATOR_ADMIN`. `Idempotency-Key` bắt buộc.
+
+The authenticated actor is persisted as `createdBy`; clients do not submit this field.
 
 ```json
 {
@@ -7103,6 +7160,29 @@ Shuttle dispatch also uses the shared Driver/Vehicle interval + turnaround + rep
 Conflicts retain `SHUTTLE_DRIVER_CONFLICT`/`SHUTTLE_VEHICLE_CONFLICT` and carry the canonical
 `conflictReason` field. Google/missing-coordinate failure returns
 `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE` and writes no ShuttleTrip or partial reservation.
+
+### PATCH `/v1/operator/shuttle-trips/{shuttleTripId}/assignment`
+
+Auth: `OPERATOR_ADMIN`. Header `Idempotency-Key` is required.
+
+```json
+{
+  "driverUserId": "uuid",
+  "vehicleId": "uuid",
+  "reason": "Xe cũ cần bảo trì"
+}
+```
+
+At least one of `driverUserId` or `vehicleId` and a non-empty `reason` are required. Only a
+`SCHEDULED` Shuttle Trip may be reassigned. Driver and vehicle must be active and belong to the
+same operator; usable vehicle capacity is derived from the seat layout. The shared availability
+engine excludes the Shuttle Trip being edited, and assignment plus reservation replacement commit
+atomically. Passenger manifests, pickup order, and schedule are unchanged.
+
+Response `200` returns `shuttleTripId`, the effective `driverUserId`, and the effective `vehicleId`.
+Errors include `404 SHUTTLE_TRIP_NOT_FOUND`, `404 DRIVER_NOT_FOUND`, `404 VEHICLE_NOT_FOUND`,
+`409 SHUTTLE_TRIP_INVALID_STATE`, `409 SHUTTLE_DRIVER_CONFLICT`, `409 SHUTTLE_VEHICLE_CONFLICT`,
+`409 SHUTTLE_CAPACITY_EXCEEDED`, `422 VALIDATION_ERROR`, and `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`.
 
 ### POST `/v1/operator/shuttle-trips/availability-check`
 

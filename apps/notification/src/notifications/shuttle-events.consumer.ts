@@ -7,12 +7,16 @@ import {
   TRIP_SHUTTLE_DELIVERED_ROUTING_KEY,
   TRIP_SHUTTLE_NO_SHOW_ROUTING_KEY,
   TRIP_SHUTTLE_PICKED_UP_ROUTING_KEY,
+  TRIP_SHUTTLE_REASSIGNED_ROUTING_KEY,
+  TRIP_SHUTTLE_STARTED_ROUTING_KEY,
   TRIP_SHUTTLE_UNFULFILLED_ROUTING_KEY,
   TRIP_SHUTTLE_WARNING_ROUTING_KEY,
   TRIP_ASSIGNMENT_START_BLOCKED_ROUTING_KEY,
   TripAssignmentStartBlockedEventSchema,
   TripShuttleAssignedEventSchema,
   TripShuttleLifecycleEventSchema,
+  TripShuttleReassignedEventSchema,
+  TripShuttleStartedEventSchema,
   TripShuttleUnfulfilledEventSchema,
   TripShuttleWarningEventSchema,
 } from '@vietride/contracts';
@@ -35,6 +39,8 @@ const bindings = [
   { queue: 'notification:shuttle-delivered', routingKey: TRIP_SHUTTLE_DELIVERED_ROUTING_KEY },
   { queue: 'notification:shuttle-no-show', routingKey: TRIP_SHUTTLE_NO_SHOW_ROUTING_KEY },
   { queue: 'notification:shuttle-completed', routingKey: TRIP_SHUTTLE_COMPLETED_ROUTING_KEY },
+  { queue: 'notification:shuttle-started', routingKey: TRIP_SHUTTLE_STARTED_ROUTING_KEY },
+  { queue: 'notification:shuttle-reassigned', routingKey: TRIP_SHUTTLE_REASSIGNED_ROUTING_KEY },
   {
     queue: 'notification:trip-assignment-start-blocked',
     routingKey: TRIP_ASSIGNMENT_START_BLOCKED_ROUTING_KEY,
@@ -74,7 +80,7 @@ export class ShuttleEventsConsumer implements OnModuleInit {
     const payloadEventId = z.object({ eventId: z.string().uuid() }).safeParse(payload);
     const messageId = payloadEventId.success
       ? payloadEventId.data.eventId
-      : raw.properties.messageId ?? raw.properties.correlationId;
+      : (raw.properties.messageId ?? raw.properties.correlationId);
     if (!messageId) throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     const state = await this.idempotency.begin(routingKey, messageId, raw.content);
     if (state === 'duplicate') return;
@@ -155,6 +161,99 @@ export class ShuttleEventsConsumer implements OnModuleInit {
       ]);
       return 2;
     }
+    if (routingKey === TRIP_SHUTTLE_STARTED_ROUTING_KEY) {
+      const event = TripShuttleStartedEventSchema.parse(payload);
+      const eventData = Object.fromEntries(
+        Object.entries(event).filter(([key]) => key !== 'passengers'),
+      );
+      const passengerNotifications = event.passengers.map((passenger) =>
+        this.notifications.createNotification({
+          userId: passenger.passengerUserId,
+          type: NotificationType.SHUTTLE_STARTED,
+          title: 'Xe trung chuyển đã bắt đầu chạy',
+          body: 'Bạn có thể theo dõi vị trí và thời gian dự kiến của xe trung chuyển.',
+          data: {
+            ...eventData,
+            bookingId: passenger.bookingId,
+            pickupOrder: passenger.pickupOrder,
+          },
+          dedupeKey: `${event.eventId}:passenger:${passenger.passengerUserId}:${passenger.bookingId ?? 'none'}`,
+        }),
+      );
+      const operatorUserIds = await this.resolveShuttleDispatchRecipientUserIds(event.operatorId);
+      await Promise.all([
+        ...passengerNotifications,
+        ...operatorUserIds.map((userId) =>
+          this.notifications.createNotification({
+            userId,
+            type: NotificationType.SHUTTLE_STARTED,
+            title: 'Chuyến trung chuyển đã xuất phát',
+            body: 'Tài xế đã bắt đầu chuyến trung chuyển.',
+            data: eventData,
+            dedupeKey: `${event.eventId}:operator:${userId}`,
+          }),
+        ),
+      ]);
+      return passengerNotifications.length + operatorUserIds.length;
+    }
+    if (routingKey === TRIP_SHUTTLE_REASSIGNED_ROUTING_KEY) {
+      const event = TripShuttleReassignedEventSchema.parse(payload);
+      const eventData = Object.fromEntries(
+        Object.entries(event).filter(([key]) => key !== 'passengers'),
+      );
+      const passengerNotifications = event.passengers.map((passenger) =>
+        this.notifications.createNotification({
+          userId: passenger.passengerUserId,
+          type: NotificationType.SHUTTLE_REASSIGNED,
+          title: 'Thông tin xe trung chuyển đã thay đổi',
+          body: `Xe ${event.newVehicle.licensePlate}, tài xế ${event.newDriver.displayName ?? 'đang cập nhật'}.`,
+          data: {
+            ...eventData,
+            bookingId: passenger.bookingId,
+            pickupOrder: passenger.pickupOrder,
+          },
+          dedupeKey: `${event.eventId}:passenger:${passenger.passengerUserId}:${passenger.bookingId ?? 'none'}`,
+        }),
+      );
+      const driverNotifications = [
+        this.notifications.createNotification({
+          userId: event.newDriver.userId,
+          type: NotificationType.SHUTTLE_REASSIGNED,
+          title: 'Phân công trung chuyển được cập nhật',
+          body: `Bạn được phân công xe ${event.newVehicle.licensePlate}.`,
+          data: eventData,
+          dedupeKey: `${event.eventId}:new-driver:${event.newDriver.userId}`,
+        }),
+      ];
+      if (event.oldDriverUserId !== event.newDriver.userId) {
+        driverNotifications.push(
+          this.notifications.createNotification({
+            userId: event.oldDriverUserId,
+            type: NotificationType.SHUTTLE_REASSIGNED,
+            title: 'Đã gỡ phân công chuyến trung chuyển',
+            body: 'Nhà xe đã chuyển chuyến trung chuyển này sang tài xế khác.',
+            data: eventData,
+            dedupeKey: `${event.eventId}:old-driver:${event.oldDriverUserId}`,
+          }),
+        );
+      }
+      const operatorUserIds = await this.resolveShuttleDispatchRecipientUserIds(event.operatorId);
+      await Promise.all([
+        ...passengerNotifications,
+        ...driverNotifications,
+        ...operatorUserIds.map((userId) =>
+          this.notifications.createNotification({
+            userId,
+            type: NotificationType.SHUTTLE_REASSIGNED,
+            title: 'Đã đổi phân công trung chuyển',
+            body: `Xe mới ${event.newVehicle.licensePlate}. Lý do: ${event.reason}`,
+            data: eventData,
+            dedupeKey: `${event.eventId}:operator:${userId}`,
+          }),
+        ),
+      ]);
+      return passengerNotifications.length + driverNotifications.length + operatorUserIds.length;
+    }
     if (routingKey === TRIP_SHUTTLE_UNFULFILLED_ROUTING_KEY) {
       const event = TripShuttleUnfulfilledEventSchema.parse(payload);
       await this.notifications.createNotification({
@@ -183,7 +282,11 @@ export class ShuttleEventsConsumer implements OnModuleInit {
         [TRIP_SHUTTLE_COMPLETED_ROUTING_KEY]: NotificationType.SHUTTLE_COMPLETED,
       } as const;
       const type = typeByRoutingKey[routingKey as keyof typeof typeByRoutingKey];
-      const data = { ...event, eventId: event.eventId };
+      const data = {
+        ...event,
+        eventId: event.eventId,
+        ...(event.serviceOrder ? { pickupOrder: event.serviceOrder } : {}),
+      };
       let count = 0;
       if (event.passengerUserId) {
         await this.notifications.createNotification({
@@ -196,21 +299,38 @@ export class ShuttleEventsConsumer implements OnModuleInit {
         });
         count++;
       }
-      const operatorUserIds = [...new Set(await this.recipients.resolveOperatorRecipientUserIds(event.operatorId))];
-      await Promise.all(operatorUserIds.map((userId) => this.notifications.createNotification({
-        userId,
-        type,
-        title: `Trung chuyển: ${event.status}`,
-        body: event.reason ?? 'Chuyến trung chuyển đã cập nhật trạng thái.',
-        data,
-        dedupeKey: `${eventId}:operator:${userId}`,
-      })));
+      const operatorUserIds = await this.resolveShuttleDispatchRecipientUserIds(event.operatorId);
+      await Promise.all(
+        operatorUserIds.map((userId) =>
+          this.notifications.createNotification({
+            userId,
+            type,
+            title: `Trung chuyển: ${event.status}`,
+            body: event.reason ?? 'Chuyến trung chuyển đã cập nhật trạng thái.',
+            data,
+            dedupeKey: `${eventId}:operator:${userId}`,
+          }),
+        ),
+      );
+      if (
+        routingKey === TRIP_SHUTTLE_CANCELLED_ROUTING_KEY &&
+        event.cancellationScope === 'SHUTTLE_TRIP' &&
+        event.driverUserId
+      ) {
+        await this.notifications.createNotification({
+          userId: event.driverUserId,
+          type: NotificationType.SHUTTLE_CANCELLED,
+          title: 'Chuyến trung chuyển đã bị huỷ',
+          body: event.reason ?? 'Nhà xe đã huỷ chuyến trung chuyển được phân công.',
+          data,
+          dedupeKey: `${routingKey}:${event.shuttleTripId}:driver:${event.driverUserId}`,
+        });
+        count++;
+      }
       return count + operatorUserIds.length;
     }
     const event = TripShuttleWarningEventSchema.parse(payload);
-    const userIds = [
-      ...new Set(await this.recipients.resolveOperatorRecipientUserIds(event.operatorId)),
-    ];
+    const userIds = [...(await this.resolveShuttleDispatchRecipientUserIds(event.operatorId))];
     await Promise.all(
       userIds.map((userId) =>
         this.notifications.createNotification({
@@ -227,5 +347,12 @@ export class ShuttleEventsConsumer implements OnModuleInit {
       ),
     );
     return userIds.length;
+  }
+
+  private async resolveShuttleDispatchRecipientUserIds(operatorId: string): Promise<string[]> {
+    const userIds = this.recipients.resolveShuttleDispatchRecipientUserIds
+      ? await this.recipients.resolveShuttleDispatchRecipientUserIds(operatorId)
+      : await this.recipients.resolveOperatorRecipientUserIds(operatorId);
+    return [...new Set(userIds)];
   }
 }

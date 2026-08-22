@@ -1,5 +1,6 @@
 export interface OperatorRecipientProvider {
   resolveOperatorRecipientUserIds(operatorId: string): Promise<string[]>;
+  resolveShuttleDispatchRecipientUserIds?(operatorId: string): Promise<string[]>;
   resolveOperatorRecipientEmails?(
     operatorId: string,
     userIds: string[],

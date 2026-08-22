@@ -21,6 +21,18 @@ class ShuttleOperatorStopSwaggerDto {
   @ApiProperty({ example: false })
   isStation!: boolean;
 
+  @ApiProperty({ example: 2, nullable: true })
+  passengerCount!: number | null;
+
+  @ApiProperty({ example: '2026-08-15T10:05:00.000Z', nullable: true })
+  pickedUpAt!: string | null;
+
+  @ApiProperty({ example: '2026-08-15T10:25:00.000Z', nullable: true })
+  deliveredAt!: string | null;
+
+  @ApiProperty({ example: 'Passenger unavailable', nullable: true })
+  statusReason!: string | null;
+
   @ApiPropertyOptional({ example: '123 Nguyen Hue, Quan 1' })
   serviceAddress?: string;
 

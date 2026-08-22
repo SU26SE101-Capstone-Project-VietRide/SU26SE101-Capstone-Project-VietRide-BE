@@ -30,6 +30,10 @@ internal sealed class ShuttleTripConfiguration : IEntityTypeConfiguration<Shuttl
         builder.Property(x => x.ActualDepartureTime).HasColumnName("actual_departure_time");
         builder.Property(x => x.CompletedAt).HasColumnName("completed_at");
         builder.Property(x => x.Notes).HasColumnName("notes");
+        builder.Property(x => x.CreatedByUserId).HasColumnName("created_by_user_id");
+        builder.Property(x => x.CancelledAt).HasColumnName("cancelled_at");
+        builder.Property(x => x.CancelReason).HasColumnName("cancel_reason");
+        builder.Property(x => x.CancelledByUserId).HasColumnName("cancelled_by_user_id");
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
         builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()");
         builder.HasIndex(x => x.MainTripId).HasDatabaseName("idx_shuttle_trips_main_trip");

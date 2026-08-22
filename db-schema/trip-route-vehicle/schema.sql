@@ -784,6 +784,10 @@ CREATE TABLE shuttle_trips (
     actual_departure_time TIMESTAMPTZ NULL,
     completed_at TIMESTAMPTZ NULL,
     notes TEXT NULL,
+    created_by_user_id UUID NULL,
+    cancelled_at TIMESTAMPTZ NULL,
+    cancel_reason TEXT NULL,
+    cancelled_by_user_id UUID NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_shuttle_trips_schedule CHECK (scheduled_end_time > scheduled_departure_time),
@@ -809,6 +813,7 @@ CREATE TABLE shuttle_passengers (
     shuttle_trip_id UUID NULL REFERENCES shuttle_trips (id) ON DELETE SET NULL,
     main_trip_id UUID NOT NULL REFERENCES trips (id) ON DELETE RESTRICT,
     booking_id UUID NULL,    -- logical FK → booking.bookings
+    booking_code VARCHAR(30) NULL,
     ticket_id UUID NULL,
     passenger_user_id UUID NULL,
     direction VARCHAR(30) NOT NULL,

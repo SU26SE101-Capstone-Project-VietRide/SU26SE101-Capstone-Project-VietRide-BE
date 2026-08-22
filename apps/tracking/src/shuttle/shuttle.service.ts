@@ -37,6 +37,10 @@ export const shuttleTrackingStopSchema = z.object({
   serviceOrder: z.number().int().positive().optional(),
   roadDistanceMeters: z.number().nonnegative().optional(),
   roadDistanceSnapshotMeters: z.number().nonnegative().nullable().optional(),
+  passengerCount: z.number().int().nonnegative().nullable().optional(),
+  pickedUpAt: z.string().datetime({ offset: true }).nullable().optional(),
+  deliveredAt: z.string().datetime({ offset: true }).nullable().optional(),
+  statusReason: z.string().nullable().optional(),
 });
 export const shuttleTrackingStationSchema = z.object({
   stationId: z.string().uuid(),
@@ -101,6 +105,10 @@ export interface ShuttleOperatorStopDto {
   serviceAddress?: string;
   serviceOrder?: number;
   roadDistanceMeters?: number;
+  passengerCount: number | null;
+  pickedUpAt: string | null;
+  deliveredAt: string | null;
+  statusReason: string | null;
 }
 
 export interface ShuttleOperatorContextDto {
@@ -315,6 +323,10 @@ export class ShuttleService {
         longitude: stop.longitude,
         status: stop.status,
         isStation: stop.isStation,
+        passengerCount: stop.isStation ? null : (stop.passengerCount ?? null),
+        pickedUpAt: stop.isStation ? null : (stop.pickedUpAt ?? null),
+        deliveredAt: stop.isStation ? null : (stop.deliveredAt ?? null),
+        statusReason: stop.isStation ? null : (stop.statusReason ?? null),
         ...(stop.serviceAddress !== undefined ? { serviceAddress: stop.serviceAddress } : {}),
         ...(stop.serviceOrder !== undefined ? { serviceOrder: stop.serviceOrder } : {}),
         ...(stop.roadDistanceMeters !== undefined

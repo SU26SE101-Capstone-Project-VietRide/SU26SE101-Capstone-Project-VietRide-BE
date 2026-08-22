@@ -46,6 +46,58 @@ public sealed class ShuttleLifecycleDomainTests
     }
 
     [Fact]
+    public void ShuttleTrip_CreateAndCancel_PreservesNotesAndRecordsActors()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var createdByUserId = Guid.NewGuid();
+        var cancelledByUserId = Guid.NewGuid();
+        var shuttleTrip = ShuttleTrip.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            now,
+            now.AddMinutes(30),
+            "Fragile luggage",
+            createdByUserId: createdByUserId);
+
+        shuttleTrip.Cancel(now.AddMinutes(5), cancelledByUserId, "Vehicle unavailable")
+            .Should().BeTrue();
+
+        shuttleTrip.CreatedByUserId.Should().Be(createdByUserId);
+        shuttleTrip.CancelledAt.Should().Be(now.AddMinutes(5));
+        shuttleTrip.CancelReason.Should().Be("Vehicle unavailable");
+        shuttleTrip.CancelledByUserId.Should().Be(cancelledByUserId);
+        shuttleTrip.Notes.Should().Be("Fragile luggage");
+    }
+
+    [Fact]
+    public void ShuttleTrip_ChangeAssignment_OnlyChangesResourcesWhileScheduled()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var shuttleTrip = ShuttleTrip.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            now,
+            now.AddMinutes(30),
+            null);
+        var replacementDriverId = Guid.NewGuid();
+        var replacementVehicleId = Guid.NewGuid();
+
+        shuttleTrip.ChangeAssignment(replacementDriverId, replacementVehicleId);
+
+        shuttleTrip.DriverUserId.Should().Be(replacementDriverId);
+        shuttleTrip.VehicleId.Should().Be(replacementVehicleId);
+        shuttleTrip.Start(now);
+        FluentActions.Invoking(() => shuttleTrip.ChangeAssignment(Guid.NewGuid(), Guid.NewGuid()))
+            .Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
     public void ShuttlePassenger_DeliverRequiresPickup_AndNoShowRequiresReason()
     {
         var passenger = ShuttlePassenger.Request(

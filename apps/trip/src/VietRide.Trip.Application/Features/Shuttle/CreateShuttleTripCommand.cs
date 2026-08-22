@@ -7,6 +7,7 @@ namespace VietRide.Trip.Application.Features.Shuttle;
 [SkipTransaction]
 public sealed record CreateShuttleTripCommand(
     Guid OperatorId,
+    Guid ActorUserId,
     Guid MainTripId,
     Guid DriverUserId,
     Guid VehicleId,

@@ -66,6 +66,31 @@ export class IdentityOperatorRecipientProvider implements OperatorRecipientProvi
     return OperatorRecipientResponseSchema.parse(await response.json());
   }
 
+  async resolveShuttleDispatchRecipientUserIds(operatorId: string): Promise<string[]> {
+    const url = new URL(
+      `/internal/v1/operators/${operatorId}/shuttle-dispatch-recipient-users`,
+      this.env.IDENTITY_INTERNAL_BASE_URL,
+    );
+    const response = await fetch(url, {
+      headers: { [INTERNAL_AUTH_HEADER]: `Bearer ${await this.signInternalJwt()}` },
+      signal: AbortSignal.timeout(IDENTITY_LOOKUP_TIMEOUT_MS),
+    });
+    if (response.status === 401) {
+      throw new UnauthorizedException({
+        errorCode: 'IDENTITY_INTERNAL_AUTH_FAILED',
+        detail: 'Identity rejected notification internal auth token',
+      });
+    }
+    if (!response.ok) {
+      this.logger.warn(
+        { operatorId, statusCode: response.status },
+        'Identity Shuttle dispatch recipient lookup failed',
+      );
+      throw new Error(`IDENTITY_SHUTTLE_DISPATCH_RECIPIENT_LOOKUP_FAILED_${response.status}`);
+    }
+    return OperatorRecipientResponseSchema.parse(await response.json());
+  }
+
   async resolveOperatorRecipientEmails(
     operatorId: string,
     userIds: string[],

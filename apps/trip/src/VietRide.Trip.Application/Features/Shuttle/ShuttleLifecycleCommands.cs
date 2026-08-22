@@ -29,5 +29,9 @@ public sealed record CancelShuttleRequestCommand(
     string Reason) : IRequest<ShuttleLifecycleResult>;
 
 [SkipTransaction]
-public sealed record CancelShuttleTripCommand(Guid OperatorId, Guid ShuttleTripId, string Reason)
+public sealed record CancelShuttleTripCommand(
+    Guid OperatorId,
+    Guid ShuttleTripId,
+    Guid ActorUserId,
+    string Reason)
     : IRequest<ShuttleLifecycleResult>;

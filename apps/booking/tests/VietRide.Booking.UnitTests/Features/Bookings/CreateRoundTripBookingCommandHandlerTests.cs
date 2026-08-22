@@ -500,7 +500,8 @@ public class CreateRoundTripBookingCommandHandlerTests
         await _outbox.Received(2).EnqueueAsync(
             "booking.booking.confirmed",
             Arg.Is<string>(payload => payload.Contains("\"shuttlePickup\"", StringComparison.Ordinal)
-                && payload.Contains("\"tickets\"", StringComparison.Ordinal)),
+                && payload.Contains("\"tickets\"", StringComparison.Ordinal)
+                && payload.Contains("\"bookingCode\"", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
     }
 

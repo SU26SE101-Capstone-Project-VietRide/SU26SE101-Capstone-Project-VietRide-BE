@@ -27,6 +27,17 @@ public sealed class SubscriptionCustomRequestRepository : ISubscriptionCustomReq
             x => x.OperatorId == operatorId && x.Status == SubscriptionCustomRequestStatus.PENDING_REVIEW,
             cancellationToken);
 
+    public async Task<IReadOnlyList<SubscriptionCustomRequest>> ListForAdminAsync(
+        SubscriptionCustomRequestStatus? status,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _dbContext.SubscriptionCustomRequests.AsNoTracking();
+        if (status.HasValue)
+            query = query.Where(request => request.Status == status.Value);
+
+        return await query.OrderByDescending(request => request.CreatedAt).ToListAsync(cancellationToken);
+    }
+
     public Task<SubscriptionCustomRequest> AddAsync(SubscriptionCustomRequest entity, CancellationToken cancellationToken = default)
     {
         _dbContext.SubscriptionCustomRequests.Add(entity);

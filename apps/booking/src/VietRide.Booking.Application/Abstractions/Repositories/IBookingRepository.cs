@@ -46,7 +46,8 @@ public interface IBookingRepository : IRepository<BookingEntity, Guid>
         DateTimeOffset? to,
         int page,
         int pageSize,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool includeShuttleRequests = false)
         => throw new NotSupportedException("Passenger booking history is not implemented by this repository.");
 
     Task<IReadOnlyDictionary<Guid, long>> GetBookingGroupNetTotalsAsync(

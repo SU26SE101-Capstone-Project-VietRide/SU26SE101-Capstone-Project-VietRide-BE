@@ -34,6 +34,7 @@ public sealed class CreateShuttleTripCommandHandler : IRequestHandler<CreateShut
 
         return await _service.CreateAsync(new CreateShuttleTripInput(
             request.OperatorId,
+            request.ActorUserId,
             request.MainTripId,
             request.DriverUserId,
             request.VehicleId,

@@ -200,5 +200,6 @@ FE-REPORT-shuttle-dispatch-2026-08-10-RESPONSE.md
 vietride-user-chat-knowledge-base.md
 FE-RESPONSE-realtime-websocket-gaps-2026-08-11.md
 IDEMPOTENCY_CLIENT_MIGRATION_GUIDE.md
+FE-RESPONSE-booking-history-shuttle-requests.md
 # ── Prisma / Generated code ──────────────────────────────────────────────────
 **/src/generated/

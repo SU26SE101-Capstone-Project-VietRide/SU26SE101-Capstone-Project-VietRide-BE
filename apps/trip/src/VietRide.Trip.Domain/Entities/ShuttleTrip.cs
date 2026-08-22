@@ -22,6 +22,10 @@ public sealed class ShuttleTrip : BaseEntity<Guid>
     public DateTimeOffset? ActualDepartureTime { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
     public string? Notes { get; private set; }
+    public Guid? CreatedByUserId { get; private set; }
+    public DateTimeOffset? CancelledAt { get; private set; }
+    public string? CancelReason { get; private set; }
+    public Guid? CancelledByUserId { get; private set; }
 
     private ShuttleTrip() { }
 
@@ -34,7 +38,8 @@ public sealed class ShuttleTrip : BaseEntity<Guid>
         DateTimeOffset scheduledDepartureTime,
         DateTimeOffset scheduledEndTime,
         string? notes,
-        string direction = InboundDirection)
+        string direction = InboundDirection,
+        Guid? createdByUserId = null)
     {
         ValidateId(operatorId, nameof(operatorId));
         ValidateId(mainTripId, nameof(mainTripId));
@@ -51,6 +56,11 @@ public sealed class ShuttleTrip : BaseEntity<Guid>
             throw new ArgumentOutOfRangeException(nameof(direction));
         }
 
+        if (createdByUserId == Guid.Empty)
+        {
+            throw new ArgumentException("Created-by user ID cannot be empty.", nameof(createdByUserId));
+        }
+
         return new ShuttleTrip
         {
             Id = Guid.NewGuid(),
@@ -63,6 +73,7 @@ public sealed class ShuttleTrip : BaseEntity<Guid>
             ScheduledDepartureTime = scheduledDepartureTime,
             ScheduledEndTime = scheduledEndTime,
             Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim(),
+            CreatedByUserId = createdByUserId,
         };
     }
 
@@ -100,12 +111,27 @@ public sealed class ShuttleTrip : BaseEntity<Guid>
         return true;
     }
 
-    public bool Cancel(string reason)
+    public void ChangeAssignment(Guid driverUserId, Guid vehicleId)
+    {
+        if (Status != ScheduledStatus)
+        {
+            throw new InvalidOperationException("Only scheduled Shuttle trips can be reassigned.");
+        }
+
+        ValidateId(driverUserId, nameof(driverUserId));
+        ValidateId(vehicleId, nameof(vehicleId));
+        DriverUserId = driverUserId;
+        VehicleId = vehicleId;
+    }
+
+    public bool Cancel(DateTimeOffset cancelledAt, Guid cancelledByUserId, string reason)
     {
         if (string.IsNullOrWhiteSpace(reason))
         {
             throw new ArgumentException("A cancellation reason is required.", nameof(reason));
         }
+
+        ValidateId(cancelledByUserId, nameof(cancelledByUserId));
 
         if (Status == CancelledStatus)
         {
@@ -118,9 +144,9 @@ public sealed class ShuttleTrip : BaseEntity<Guid>
         }
 
         Status = CancelledStatus;
-        Notes = string.IsNullOrWhiteSpace(Notes)
-            ? $"Cancelled: {reason.Trim()}"
-            : $"{Notes}; Cancelled: {reason.Trim()}";
+        CancelledAt = cancelledAt;
+        CancelReason = reason.Trim();
+        CancelledByUserId = cancelledByUserId;
         return true;
     }
 

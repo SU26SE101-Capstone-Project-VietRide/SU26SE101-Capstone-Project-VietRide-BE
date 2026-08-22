@@ -68,6 +68,11 @@ public interface IUserRepository : IRepository<User, Guid>
         Guid operatorId,
         CancellationToken ct = default);
 
+    Task<IReadOnlyList<Guid>> ListActiveShuttleDispatchRecipientIdsAsync(
+        Guid operatorId,
+        CancellationToken ct = default)
+        => ListActiveOperatorAdminIdsAsync(operatorId, ct);
+
     Task<IReadOnlyList<Guid>> ListOperatorAdminIdsAsync(
         Guid operatorId,
         CancellationToken ct = default)

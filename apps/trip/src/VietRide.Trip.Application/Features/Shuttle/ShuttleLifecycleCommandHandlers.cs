@@ -48,5 +48,10 @@ public sealed class CancelShuttleTripCommandHandler : IRequestHandler<CancelShut
     private readonly IShuttleDispatchService _service;
     public CancelShuttleTripCommandHandler(IShuttleDispatchService service) => _service = service;
     public Task<ShuttleLifecycleResult> Handle(CancelShuttleTripCommand request, CancellationToken cancellationToken)
-        => _service.CancelShuttleTripAsync(request.OperatorId, request.ShuttleTripId, request.Reason, cancellationToken);
+        => _service.CancelShuttleTripAsync(
+            request.OperatorId,
+            request.ShuttleTripId,
+            request.ActorUserId,
+            request.Reason,
+            cancellationToken);
 }

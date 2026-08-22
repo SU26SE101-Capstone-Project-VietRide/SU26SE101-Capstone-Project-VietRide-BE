@@ -69,6 +69,25 @@ describe('IdentityOperatorRecipientProvider', () => {
     expect(requestUrl.pathname).toBe(`/internal/v1/operators/${OPERATOR_ID}/recipient-users`);
   });
 
+  it('loads active Shuttle dispatch admin and staff recipient ids', async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify([FIRST_USER_ID, SECOND_USER_ID]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    const provider = new IdentityOperatorRecipientProvider(createEnv());
+
+    await expect(provider.resolveShuttleDispatchRecipientUserIds(OPERATOR_ID)).resolves.toEqual([
+      FIRST_USER_ID,
+      SECOND_USER_ID,
+    ]);
+    const requestUrl = (global.fetch as jest.Mock).mock.calls[0]?.[0] as URL;
+    expect(requestUrl.pathname).toBe(
+      `/internal/v1/operators/${OPERATOR_ID}/shuttle-dispatch-recipient-users`,
+    );
+  });
+
   it('rejects an invalid recipient response so RabbitMQ can retry', async () => {
     global.fetch = jest.fn().mockResolvedValue(
       new Response(JSON.stringify([{ userId: FIRST_USER_ID }]), {

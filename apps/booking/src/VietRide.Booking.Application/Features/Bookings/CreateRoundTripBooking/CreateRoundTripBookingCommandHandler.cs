@@ -961,6 +961,7 @@ public sealed class CreateRoundTripBookingCommandHandler
         var confirmedEvent = new
         {
             bookingId = booking.Id,
+            bookingCode = booking.BookingCode.Value,
             tripId = booking.TripId,
             totalAmount = booking.TotalAmount.Amount,
             userId = booking.PassengerUserId,

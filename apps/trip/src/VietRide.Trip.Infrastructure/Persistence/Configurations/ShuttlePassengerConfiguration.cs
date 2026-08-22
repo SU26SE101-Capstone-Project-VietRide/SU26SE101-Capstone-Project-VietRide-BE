@@ -22,6 +22,7 @@ internal sealed class ShuttlePassengerConfiguration : IEntityTypeConfiguration<S
         builder.Property(x => x.ShuttleTripId).HasColumnName("shuttle_trip_id");
         builder.Property(x => x.MainTripId).HasColumnName("main_trip_id");
         builder.Property(x => x.BookingId).HasColumnName("booking_id");
+        builder.Property(x => x.BookingCode).HasColumnName("booking_code").HasMaxLength(30);
         builder.Property(x => x.TicketId).HasColumnName("ticket_id");
         builder.Property(x => x.PassengerUserId).HasColumnName("passenger_user_id");
         builder.Property(x => x.Direction).HasColumnName("direction").HasMaxLength(30);

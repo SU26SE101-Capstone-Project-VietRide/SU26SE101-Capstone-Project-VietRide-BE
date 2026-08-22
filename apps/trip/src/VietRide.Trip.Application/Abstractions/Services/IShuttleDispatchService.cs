@@ -6,13 +6,13 @@ namespace VietRide.Trip.Application.Abstractions.Services;
 
 public interface IShuttleDispatchService
 {
-    Task<PagedResult<ShuttleRequestTripGroup>> GetPendingAsync(
+    Task<ShuttleRequestPage> GetPendingAsync(
         Guid operatorId,
         int page,
         int pageSize,
         CancellationToken cancellationToken);
 
-    Task<PagedResult<ShuttleRequestTripGroup>> GetPendingFilteredAsync(
+    Task<ShuttleRequestPage> GetPendingFilteredAsync(
         Guid operatorId, int page, int pageSize, DateTimeOffset? fromUtc,
         DateTimeOffset? toUtcExclusive, Guid? mainTripId, string? search,
         IReadOnlyCollection<Guid> passengerUserIds, CancellationToken cancellationToken)
@@ -27,12 +27,21 @@ public interface IShuttleDispatchService
         IReadOnlyCollection<string>? statuses,
         CancellationToken cancellationToken);
 
+    Task<ShuttlePassengerContactResponse> GetPassengerContactsAsync(
+        Guid operatorId,
+        Guid shuttleTripId,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<OperatorTrackingShuttleTripDto>> GetTrackingProjectionAsync(
         Guid operatorId,
         CancellationToken cancellationToken);
 
     Task<CreateShuttleTripResult> CreateAsync(
         CreateShuttleTripInput input,
+        CancellationToken cancellationToken);
+
+    Task<ReassignShuttleTripResult> ReassignAsync(
+        ReassignShuttleTripInput input,
         CancellationToken cancellationToken);
 
     Task<ShuttleTrackingContext> GetTrackingContextAsync(
@@ -93,12 +102,14 @@ public interface IShuttleDispatchService
     Task<ShuttleLifecycleResult> CancelShuttleTripAsync(
         Guid operatorId,
         Guid shuttleTripId,
+        Guid actorUserId,
         string reason,
         CancellationToken cancellationToken);
 }
 
 public sealed record CreateShuttleTripInput(
     Guid OperatorId,
+    Guid ActorUserId,
     Guid MainTripId,
     Guid DriverUserId,
     Guid VehicleId,
@@ -114,6 +125,18 @@ public sealed record CreateShuttleTripResult(
     int AssignedPassengerCount,
     int RemainingPassengerCount);
 
+public sealed record ReassignShuttleTripInput(
+    Guid OperatorId,
+    Guid ShuttleTripId,
+    Guid? DriverUserId,
+    Guid? VehicleId,
+    string Reason);
+
+public sealed record ReassignShuttleTripResult(
+    Guid ShuttleTripId,
+    Guid DriverUserId,
+    Guid VehicleId);
+
 public sealed record ShuttleRequestTripGroup(
     Guid MainTripId,
     string RouteName,
@@ -123,11 +146,15 @@ public sealed record ShuttleRequestTripGroup(
     Guid StationId,
     string StationName,
     int PendingPassengerCount,
+    int AssignedPassengerCount,
+    int TotalShuttlePassengerCount,
+    int DispatchedShuttleTripCount,
     IReadOnlyList<ShuttleBookingGroup> BookingGroups,
     IReadOnlyList<Guid> SuggestedBookingOrder);
 
 public sealed record ShuttleBookingGroup(
     Guid BookingId,
+    string? BookingCode,
     int PassengerCount,
     string PickupAddress,
     decimal PickupLat,
@@ -152,14 +179,61 @@ public sealed record OperatorShuttleTripListItemDto(
     DateTimeOffset ScheduledEndTime,
     DateTimeOffset? ActualDepartureTime,
     DateTimeOffset? CompletedAt,
+    OperatorShuttleMainTripDto MainTrip,
+    OperatorShuttleStationDto Station,
     OperatorShuttleVehicleDto Vehicle,
     OperatorShuttleDriverDto Driver,
     int PassengerCount,
-    int StopCount);
+    int StopCount,
+    OperatorShuttlePassengerProgressDto PassengerProgress,
+    string? Notes,
+    DateTimeOffset CreatedAt,
+    Guid? CreatedBy,
+    DateTimeOffset? CancelledAt,
+    string? CancelReason,
+    Guid? CancelledBy);
 
-public sealed record OperatorShuttleVehicleDto(Guid Id, string LicensePlate);
+public sealed record OperatorShuttleMainTripDto(
+    Guid TripId,
+    string RouteName,
+    DateTimeOffset DepartureDateTime,
+    DateTimeOffset EstimatedArrivalTime,
+    DateTimeOffset HardCutoffAt);
+
+public sealed record OperatorShuttleStationDto(Guid StationId, string Name);
+
+public sealed record OperatorShuttleVehicleDto(
+    Guid Id,
+    string LicensePlate,
+    string TypeDisplayName,
+    int UsablePassengerCapacity);
 
 public sealed record OperatorShuttleDriverDto(Guid Id, string? DisplayName, string? Phone);
+
+public sealed record OperatorShuttlePassengerProgressDto(
+    int Pending,
+    int PickedUp,
+    int Delivered,
+    int NoShow,
+    int Cancelled);
+
+public sealed record ShuttlePassengerContactResponse(
+    Guid ShuttleTripId,
+    IReadOnlyList<ShuttlePassengerContactGroupDto> Groups);
+
+public sealed record ShuttlePassengerContactGroupDto(
+    int PickupOrder,
+    Guid? BookingId,
+    string? BookingCode,
+    string PickupAddress,
+    int PassengerCount,
+    IReadOnlyList<ShuttlePassengerContactDto> Passengers);
+
+public sealed record ShuttlePassengerContactDto(
+    Guid? PassengerUserId,
+    string? DisplayName,
+    string? Phone,
+    IReadOnlyList<Guid> TicketIds);
 
 public sealed record ShuttleTrackingContext(
     Guid ShuttleTripId,
@@ -183,7 +257,11 @@ public sealed record ShuttleTrackingStop(
     bool IsOwnPickup = false,
     string? ServiceAddress = null,
     int? ServiceOrder = null,
-    int? RoadDistanceSnapshotMeters = null);
+    int? RoadDistanceSnapshotMeters = null,
+    int? PassengerCount = null,
+    DateTimeOffset? PickedUpAt = null,
+    DateTimeOffset? DeliveredAt = null,
+    string? StatusReason = null);
 
 public sealed record ShuttleDriverAssignmentPage(
     DateOnly From,

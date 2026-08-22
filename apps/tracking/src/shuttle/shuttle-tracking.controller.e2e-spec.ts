@@ -63,6 +63,10 @@ describe('ShuttleTrackingController contexts (e2e)', () => {
         longitude: stop.longitude,
         status: stop.status,
         isStation: stop.isStation,
+        passengerCount: stop.isStation ? null : (stop.passengerCount ?? null),
+        pickedUpAt: stop.isStation ? null : (stop.pickedUpAt ?? null),
+        deliveredAt: stop.isStation ? null : (stop.deliveredAt ?? null),
+        statusReason: stop.isStation ? null : (stop.statusReason ?? null),
       })),
       station: null,
     }));
@@ -168,11 +172,21 @@ describe('ShuttleTrackingController contexts (e2e)', () => {
     'returns the owning operator context with private no-store for %s',
     async (token) => {
       const response = await request('/operator-context', token);
-      const body = (await response.json()) as ApiEnvelope<{ stops: unknown[] }>;
+      const body = (await response.json()) as ApiEnvelope<{
+        stops: Array<Record<string, unknown>>;
+      }>;
 
       expect(response.status).toBe(200);
       expect(response.headers.get('cache-control')).toBe('private, no-store');
       expect(body.data?.stops).toHaveLength(1);
+      expect(body.data?.stops[0]).toMatchObject({
+        passengerCount: 1,
+        pickedUpAt: null,
+        deliveredAt: null,
+        statusReason: null,
+      });
+      expect(JSON.stringify(body.data)).not.toContain('displayName');
+      expect(JSON.stringify(body.data)).not.toContain('phone');
       expect(getOperatorContext).toHaveBeenCalledTimes(1);
     },
   );
@@ -255,6 +269,12 @@ function createContext(status = 'PENDING', allowed = true): ShuttleTrackingConte
       status,
       isStation: false,
       isOwnPickup: true,
+      passengerCount: 1,
+      pickedUpAt: null,
+      deliveredAt: null,
+      statusReason: status === 'NO_SHOW' || status === 'CANCELLED'
+        ? 'Passenger unavailable'
+        : null,
     }],
     station: {
       stationId: '66666666-6666-4666-8666-666666666666',

@@ -253,6 +253,61 @@ public sealed class SubscriptionQuoteAndCustomRequestTests
         await action.Should().ThrowAsync<NotFoundException>();
     }
 
+    [Fact]
+    public async Task ListAdminCustomRequests_ReturnsOperatorNamesWithSingleBulkLookup()
+    {
+        var firstOperator = CreateOperator("Alpha Transit");
+        var secondOperator = CreateOperator("Beta Transit");
+        var firstRequest = CreateCustomRequest(firstOperator.Id);
+        var secondRequest = CreateCustomRequest(secondOperator.Id);
+        var requests = Substitute.For<ISubscriptionCustomRequestRepository>();
+        requests.ListForAdminAsync(
+                SubscriptionCustomRequestStatus.PENDING_REVIEW,
+                Arg.Any<CancellationToken>())
+            .Returns(new[] { secondRequest, firstRequest });
+        var operators = Substitute.For<IOperatorRepository>();
+        operators.ListSummariesByIdsAsync(
+                Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 2
+                    && ids.Contains(firstOperator.Id)
+                    && ids.Contains(secondOperator.Id)),
+                Arg.Any<CancellationToken>())
+            .Returns(new[] { firstOperator, secondOperator });
+        var handler = new ListAdminSubscriptionCustomRequestsQueryHandler(requests, operators);
+
+        var result = await handler.Handle(
+            new ListAdminSubscriptionCustomRequestsQuery(SubscriptionCustomRequestStatus.PENDING_REVIEW.ToString()),
+            CancellationToken.None);
+
+        result.Select(item => (item.OperatorId, item.OperatorName)).Should().Equal(
+            (secondOperator.Id, secondOperator.Name),
+            (firstOperator.Id, firstOperator.Name));
+        await operators.Received(1).ListSummariesByIdsAsync(
+            Arg.Any<IReadOnlyCollection<Guid>>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetAdminCustomRequest_ReturnsOperatorName()
+    {
+        var operatorTenant = CreateOperator("Gamma Transit");
+        var request = CreateCustomRequest(operatorTenant.Id);
+        var requests = Substitute.For<ISubscriptionCustomRequestRepository>();
+        requests.GetByIdAsync(request.Id, Arg.Any<CancellationToken>()).Returns(request);
+        var operators = Substitute.For<IOperatorRepository>();
+        operators.ListSummariesByIdsAsync(
+                Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(new[] { operatorTenant.Id })),
+                Arg.Any<CancellationToken>())
+            .Returns(new[] { operatorTenant });
+        var handler = new GetAdminSubscriptionCustomRequestQueryHandler(requests, operators);
+
+        var result = await handler.Handle(
+            new GetAdminSubscriptionCustomRequestQuery(request.Id),
+            CancellationToken.None);
+
+        result.OperatorId.Should().Be(operatorTenant.Id);
+        result.OperatorName.Should().Be(operatorTenant.Name);
+    }
+
     private static ConfirmFixture CreateConfirmFixture()
     {
         var operatorId = Guid.NewGuid();
@@ -310,6 +365,29 @@ public sealed class SubscriptionQuoteAndCustomRequestTests
             CreateClock());
         return new ConfirmFixture(operatorId, subscription, targetPlan, attempt, payments, handler);
     }
+
+    private static Operator CreateOperator(string name)
+        => Operator.CreatePending(
+            name,
+            $"BR-{Guid.NewGuid():N}",
+            $"TAX-{Guid.NewGuid():N}",
+            $"{Guid.NewGuid():N}@example.com",
+            "+84901234567");
+
+    private static SubscriptionCustomRequest CreateCustomRequest(Guid operatorId)
+        => SubscriptionCustomRequest.Create(
+            operatorId,
+            10,
+            10,
+            10,
+            10,
+            10,
+            100,
+            false,
+            false,
+            false,
+            SubscriptionBillingPeriod.MONTHLY,
+            null);
 
     private static OperatorSubscription CreatePaidSubscription(Guid operatorId, Guid planId, long cyclePrice)
     {

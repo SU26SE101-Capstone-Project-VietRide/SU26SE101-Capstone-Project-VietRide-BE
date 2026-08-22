@@ -72,11 +72,11 @@ internal sealed class BookingShuttleConfirmedIntegrationEventHandler
 
                     await _db.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO vietride_trip.shuttle_passengers (
-                        id, main_trip_id, booking_id, ticket_id, passenger_user_id,
+                        id, main_trip_id, booking_id, booking_code, ticket_id, passenger_user_id,
                         direction, pickup_address, pickup_lat, pickup_lng,
                         road_distance_meters, status, created_at, updated_at)
                     VALUES (
-                        {Guid.NewGuid()}, {integrationEvent.TripId}, {integrationEvent.BookingId},
+                        {Guid.NewGuid()}, {integrationEvent.TripId}, {integrationEvent.BookingId}, {integrationEvent.BookingCode},
                         {ticket.TicketId}, {passengerUserId}, {request.Direction},
                         {request.Address}, {request.Latitude},
                         {request.Longitude}, {roadDistanceMeters}, 'PENDING_ASSIGNMENT', now(), now())

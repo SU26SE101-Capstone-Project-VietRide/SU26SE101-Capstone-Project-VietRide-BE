@@ -205,8 +205,20 @@ describe('ShuttleService', () => {
           status: 'DELIVERED',
           isStation: false,
           roadDistanceMeters: 4_500,
+          passengerCount: 2,
+          pickedUpAt: '2026-08-15T10:05:00.000Z',
+          deliveredAt: '2026-08-15T10:25:00.000Z',
+          statusReason: null,
         }),
-        expect.objectContaining({ pickupOrder: 2, bookingId: null, isStation: true }),
+        expect.objectContaining({
+          pickupOrder: 2,
+          bookingId: null,
+          isStation: true,
+          passengerCount: null,
+          pickedUpAt: null,
+          deliveredAt: null,
+          statusReason: null,
+        }),
       ],
       station: expect.objectContaining({
         stationId: '66666666-6666-4666-8666-666666666666',
@@ -215,6 +227,8 @@ describe('ShuttleService', () => {
     });
     expect(JSON.stringify(result)).not.toContain('isOwnPickup');
     expect(JSON.stringify(result)).not.toContain('roadDistanceSnapshotMeters');
+    expect(JSON.stringify(result)).not.toContain('displayName');
+    expect(JSON.stringify(result)).not.toContain('phone');
   });
 
   it('returns null operator station for incomplete coordinates and fails closed on malformed context', () => {
@@ -279,6 +293,10 @@ describe('ShuttleService', () => {
         isStation: true,
         isOwnPickup: false,
         roadDistanceSnapshotMeters: null,
+        passengerCount: null,
+        pickedUpAt: null,
+        deliveredAt: null,
+        statusReason: null,
       },
     ]);
     context.station = {
@@ -390,5 +408,9 @@ function createStop(
     isOwnPickup,
     serviceAddress: bookingId ? `Service ${bookingId}` : 'Service stop',
     serviceOrder: pickupOrder,
+    passengerCount: 2,
+    pickedUpAt: '2026-08-15T10:05:00.000Z',
+    deliveredAt: '2026-08-15T10:25:00.000Z',
+    statusReason: status === 'NO_SHOW' || status === 'CANCELLED' ? 'Passenger unavailable' : null,
   };
 }

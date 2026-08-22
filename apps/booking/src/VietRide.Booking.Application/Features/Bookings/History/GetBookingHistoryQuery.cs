@@ -9,4 +9,5 @@ public sealed record GetBookingHistoryQuery(
     string? From,
     string? To,
     int Page,
-    int PageSize) : IQuery<PagedResult<BookingHistoryItemDto>>;
+    int PageSize,
+    bool IncludeShuttleRequests = false) : IQuery<PagedResult<BookingHistoryItemDto>>;

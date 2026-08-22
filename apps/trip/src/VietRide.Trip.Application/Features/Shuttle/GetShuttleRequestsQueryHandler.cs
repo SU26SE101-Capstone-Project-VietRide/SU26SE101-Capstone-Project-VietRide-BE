@@ -1,6 +1,5 @@
 using MediatR;
 using VietRide.Shared.Application.Exceptions;
-using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Services;
@@ -9,7 +8,7 @@ using VietRide.Trip.Application.Features.Trips.Operations;
 namespace VietRide.Trip.Application.Features.Shuttle;
 
 public sealed class GetShuttleRequestsQueryHandler
-    : IRequestHandler<GetShuttleRequestsQuery, PagedResult<ShuttleRequestTripGroup>>
+    : IRequestHandler<GetShuttleRequestsQuery, ShuttleRequestPage>
 {
     private readonly IShuttleDispatchService _service;
     private readonly IIdentityInternalClient? _identity;
@@ -20,7 +19,7 @@ public sealed class GetShuttleRequestsQueryHandler
         _identity = identity;
     }
 
-    public async Task<PagedResult<ShuttleRequestTripGroup>> Handle(
+    public async Task<ShuttleRequestPage> Handle(
         GetShuttleRequestsQuery request,
         CancellationToken cancellationToken)
     {

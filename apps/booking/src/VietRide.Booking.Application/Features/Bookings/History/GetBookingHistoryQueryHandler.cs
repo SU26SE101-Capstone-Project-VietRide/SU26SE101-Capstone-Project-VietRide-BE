@@ -39,7 +39,8 @@ public sealed class GetBookingHistoryQueryHandler
             range.To,
             request.Page,
             request.PageSize,
-            cancellationToken);
+            cancellationToken,
+            request.IncludeShuttleRequests);
 
         var pendingBookings = page.Items
             .Where(booking => booking.Status == BookingStatus.PENDING_PAYMENT)
@@ -75,6 +76,21 @@ public sealed class GetBookingHistoryQueryHandler
                 .ToList(),
             booking.DropoffStationId,
             booking.DropoffStopId,
+            request.IncludeShuttleRequests
+                ? booking.ShuttleIntents
+                    .OrderBy(intent => intent.CreatedAt)
+                    .ThenBy(intent => intent.Id)
+                    .Select(intent => new BookingHistoryShuttleRequestDto(
+                        intent.Direction,
+                        intent.PickupAddress,
+                        intent.PickupLatitude,
+                        intent.PickupLongitude,
+                        intent.RoadDistanceMeters,
+                        intent.IsActive,
+                        intent.CreatedAt,
+                        intent.CancelledAt))
+                    .ToList()
+                : null,
             vehicles.TryGetValue(booking.TripId, out var vehicle)
                 ? new BookingHistoryVehicleDto(
                     vehicle.LicensePlate,
