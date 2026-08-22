@@ -115,6 +115,28 @@ public sealed class OperatorShuttleController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
+    [HttpPatch("shuttle-trips/{shuttleTripId:guid}/assignment")]
+    [Authorize(Roles = "OPERATOR_ADMIN")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<ReassignShuttleTripResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ReassignShuttleTripResult>> ReassignTrip(
+        Guid shuttleTripId,
+        [FromBody] ReassignShuttleTripRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await _sender.Send(
+            new ReassignShuttleTripCommand(
+                GetOperatorId(),
+                shuttleTripId,
+                request.DriverUserId,
+                request.VehicleId,
+                request.Reason),
+            cancellationToken));
+
     [HttpPost("shuttle-trips/availability-check")]
     [Authorize(Roles = "OPERATOR_ADMIN")]
     [SkipIdempotency("Availability preview is read-only and never creates a reservation.")]

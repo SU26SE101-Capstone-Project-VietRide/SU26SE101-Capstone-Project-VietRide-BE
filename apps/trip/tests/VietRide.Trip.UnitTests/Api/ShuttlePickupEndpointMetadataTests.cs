@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers;
+using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Shuttle;
 using VietRide.Trip.UnitTests.Features.Vehicles;
@@ -104,5 +105,20 @@ public sealed class ShuttlePickupEndpointMetadataTests
         result.Result.Should().BeOfType<OkObjectResult>()
             .Which.Value.Should().Be(response);
         controller.Response.Headers.CacheControl.ToString().Should().Be("private, no-store");
+    }
+
+    [Fact]
+    public void OperatorShuttleReassignment_IsAdminOnlyPatchAndRequiresIdempotencyKey()
+    {
+        var method = typeof(OperatorShuttleController)
+            .GetMethod(nameof(OperatorShuttleController.ReassignTrip))!;
+
+        method.GetCustomAttribute<HttpPatchAttribute>()!.Template
+            .Should().Be("shuttle-trips/{shuttleTripId:guid}/assignment");
+        method.GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_ADMIN");
+        method.GetCustomAttribute<RequireIdempotencyKeyAttribute>().Should().NotBeNull();
+        method.GetCustomAttributes<ProducesResponseTypeAttribute>()
+            .Select(attribute => attribute.StatusCode)
+            .Should().BeEquivalentTo([200, 403, 404, 409, 422, 503]);
     }
 }

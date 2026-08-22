@@ -111,6 +111,19 @@ public sealed class ShuttleTrip : BaseEntity<Guid>
         return true;
     }
 
+    public void ChangeAssignment(Guid driverUserId, Guid vehicleId)
+    {
+        if (Status != ScheduledStatus)
+        {
+            throw new InvalidOperationException("Only scheduled Shuttle trips can be reassigned.");
+        }
+
+        ValidateId(driverUserId, nameof(driverUserId));
+        ValidateId(vehicleId, nameof(vehicleId));
+        DriverUserId = driverUserId;
+        VehicleId = vehicleId;
+    }
+
     public bool Cancel(DateTimeOffset cancelledAt, Guid cancelledByUserId, string reason)
     {
         if (string.IsNullOrWhiteSpace(reason))

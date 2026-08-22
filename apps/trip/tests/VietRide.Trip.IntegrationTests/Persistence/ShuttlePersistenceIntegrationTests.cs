@@ -748,6 +748,219 @@ public sealed class ShuttlePersistenceIntegrationTests
     }
 
     [Fact]
+    public async Task ReassignAsync_ScheduledTrip_AtomicallyReplacesResourcesAndPreservesManifest()
+    {
+        var databaseName = $"vietride_trip_shuttle_reassign_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var (seed, service, created) = await SeedAssignedShuttleAsync(db, clock, now);
+            var vehicleTypeId = await db.Vehicles
+                .Where(vehicle => vehicle.Id == seed.ShuttleVehicleId)
+                .Select(vehicle => vehicle.VehicleTypeId)
+                .SingleAsync();
+            var replacementVehicle = Vehicle.Create(
+                seed.OperatorId,
+                vehicleTypeId,
+                $"REPL-{Guid.NewGuid():N}"[..20],
+                CreateSeatLayout("SHUTTLE_TEST", 3),
+                3,
+                100m,
+                2m);
+            db.Vehicles.Add(replacementVehicle);
+            await db.SaveChangesAsync();
+            var replacementDriverId = Guid.NewGuid();
+            var manifestBefore = await db.ShuttlePassengers.AsNoTracking()
+                .Where(manifest => manifest.ShuttleTripId == created.ShuttleTripId)
+                .OrderBy(manifest => manifest.Id)
+                .Select(manifest => new
+                {
+                    manifest.Id,
+                    manifest.BookingId,
+                    manifest.TicketId,
+                    manifest.PickupOrder,
+                    manifest.Status,
+                })
+                .ToArrayAsync();
+
+            var result = await service.ReassignAsync(
+                new ReassignShuttleTripInput(
+                    seed.OperatorId,
+                    created.ShuttleTripId,
+                    replacementDriverId,
+                    replacementVehicle.Id,
+                    "Original vehicle needs maintenance"),
+                CancellationToken.None);
+
+            db.ChangeTracker.Clear();
+            var persisted = await db.ShuttleTrips.AsNoTracking()
+                .SingleAsync(shuttle => shuttle.Id == created.ShuttleTripId);
+            var reservations = await db.ResourceReservations.AsNoTracking()
+                .Where(reservation => reservation.ShuttleTripId == created.ShuttleTripId
+                    && reservation.Status == ResourceReservationStatus.RESERVED)
+                .OrderBy(reservation => reservation.ResourceRole)
+                .ToArrayAsync();
+            var manifestAfter = await db.ShuttlePassengers.AsNoTracking()
+                .Where(manifest => manifest.ShuttleTripId == created.ShuttleTripId)
+                .OrderBy(manifest => manifest.Id)
+                .Select(manifest => new
+                {
+                    manifest.Id,
+                    manifest.BookingId,
+                    manifest.TicketId,
+                    manifest.PickupOrder,
+                    manifest.Status,
+                })
+                .ToArrayAsync();
+
+            result.Should().Be(new ReassignShuttleTripResult(
+                created.ShuttleTripId,
+                replacementDriverId,
+                replacementVehicle.Id));
+            persisted.Status.Should().Be(ShuttleTrip.ScheduledStatus);
+            persisted.DriverUserId.Should().Be(replacementDriverId);
+            persisted.VehicleId.Should().Be(replacementVehicle.Id);
+            reservations.Should().HaveCount(2);
+            reservations.Should().ContainSingle(reservation =>
+                reservation.ResourceRole == ResourceReservationRole.DRIVER
+                && reservation.ResourceId == replacementDriverId);
+            reservations.Should().ContainSingle(reservation =>
+                reservation.ResourceRole == ResourceReservationRole.VEHICLE
+                && reservation.ResourceId == replacementVehicle.Id);
+            manifestAfter.Should().BeEquivalentTo(manifestBefore, options => options.WithStrictOrdering());
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReassignAsync_CapacityOrDriverConflict_PreservesOriginalAssignmentAndReservations()
+    {
+        var databaseName = $"vietride_trip_shuttle_reassign_failure_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var (seed, service, created) = await SeedAssignedShuttleAsync(db, clock, now);
+            var target = await db.ShuttleTrips.SingleAsync(shuttle => shuttle.Id == created.ShuttleTripId);
+            var vehicleTypeId = await db.Vehicles
+                .Where(vehicle => vehicle.Id == seed.ShuttleVehicleId)
+                .Select(vehicle => vehicle.VehicleTypeId)
+                .SingleAsync();
+            var undersizedVehicle = Vehicle.Create(
+                seed.OperatorId,
+                vehicleTypeId,
+                $"SMALL-{Guid.NewGuid():N}"[..20],
+                CreateSeatLayout("SHUTTLE_TEST", 1),
+                1,
+                100m,
+                2m);
+            var conflictingDriverId = Guid.NewGuid();
+            var blocker = ShuttleTrip.Create(
+                seed.OperatorId,
+                seed.MainTripId,
+                target.StationId,
+                conflictingDriverId,
+                seed.ShuttleVehicleId,
+                target.ScheduledDepartureTime,
+                target.ScheduledEndTime,
+                null);
+            var conflictingReservation = ResourceReservation.CreateForShuttleTrip(
+                seed.OperatorId,
+                ResourceReservationType.CREW,
+                ResourceReservationRole.DRIVER,
+                conflictingDriverId,
+                blocker.Id,
+                target.ScheduledDepartureTime,
+                target.ScheduledEndTime,
+                null,
+                target.StationId,
+                10.7731m,
+                106.7032m,
+                10.7769m,
+                106.7009m);
+            db.AddRange(undersizedVehicle, blocker, conflictingReservation);
+            await db.SaveChangesAsync();
+
+            var capacityFailure = async () => await service.ReassignAsync(
+                new ReassignShuttleTripInput(
+                    seed.OperatorId,
+                    created.ShuttleTripId,
+                    null,
+                    undersizedVehicle.Id,
+                    "Use a smaller vehicle"),
+                CancellationToken.None);
+            await capacityFailure.Should().ThrowAsync<CodedConflictException>()
+                .Where(error => error.ErrorCode == "SHUTTLE_CAPACITY_EXCEEDED");
+
+            var conflictFailure = async () => await service.ReassignAsync(
+                new ReassignShuttleTripInput(
+                    seed.OperatorId,
+                    created.ShuttleTripId,
+                    conflictingDriverId,
+                    null,
+                    "Use another driver"),
+                CancellationToken.None);
+            await conflictFailure.Should().ThrowAsync<CodedConflictException>()
+                .Where(error => error.ErrorCode == "SHUTTLE_DRIVER_CONFLICT");
+
+            var foreignTenant = async () => await service.ReassignAsync(
+                new ReassignShuttleTripInput(
+                    Guid.NewGuid(),
+                    created.ShuttleTripId,
+                    Guid.NewGuid(),
+                    null,
+                    "Foreign tenant attempt"),
+                CancellationToken.None);
+            await foreignTenant.Should().ThrowAsync<CodedNotFoundException>()
+                .Where(error => error.ErrorCode == "SHUTTLE_TRIP_NOT_FOUND");
+
+            db.ChangeTracker.Clear();
+            var persisted = await db.ShuttleTrips.AsNoTracking()
+                .SingleAsync(shuttle => shuttle.Id == created.ShuttleTripId);
+            var reservations = await db.ResourceReservations.AsNoTracking()
+                .Where(reservation => reservation.ShuttleTripId == created.ShuttleTripId
+                    && reservation.Status == ResourceReservationStatus.RESERVED)
+                .ToArrayAsync();
+            persisted.DriverUserId.Should().Be(seed.ShuttleDriverId);
+            persisted.VehicleId.Should().Be(seed.ShuttleVehicleId);
+            reservations.Should().ContainSingle(reservation =>
+                reservation.ResourceRole == ResourceReservationRole.DRIVER
+                && reservation.ResourceId == seed.ShuttleDriverId);
+            reservations.Should().ContainSingle(reservation =>
+                reservation.ResourceRole == ResourceReservationRole.VEHICLE
+                && reservation.ResourceId == seed.ShuttleVehicleId);
+
+            var mutable = await db.ShuttleTrips.SingleAsync(shuttle => shuttle.Id == created.ShuttleTripId);
+            mutable.Start(now);
+            await db.SaveChangesAsync();
+            var invalidState = async () => await service.ReassignAsync(
+                new ReassignShuttleTripInput(
+                    seed.OperatorId,
+                    created.ShuttleTripId,
+                    Guid.NewGuid(),
+                    null,
+                    "Trip already started"),
+                CancellationToken.None);
+            await invalidState.Should().ThrowAsync<CodedConflictException>()
+                .Where(error => error.ErrorCode == "SHUTTLE_TRIP_INVALID_STATE");
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task ConfirmedFanOut_RealInbox_FailureBeforeMarker_RollsBackManifestsAndMarker()
     {
         var databaseName = $"vietride_trip_shuttle_inbox_failure_{Guid.NewGuid():N}";

@@ -7158,6 +7158,29 @@ Conflicts retain `SHUTTLE_DRIVER_CONFLICT`/`SHUTTLE_VEHICLE_CONFLICT` and carry 
 `conflictReason` field. Google/missing-coordinate failure returns
 `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE` and writes no ShuttleTrip or partial reservation.
 
+### PATCH `/v1/operator/shuttle-trips/{shuttleTripId}/assignment`
+
+Auth: `OPERATOR_ADMIN`. Header `Idempotency-Key` is required.
+
+```json
+{
+  "driverUserId": "uuid",
+  "vehicleId": "uuid",
+  "reason": "Xe cũ cần bảo trì"
+}
+```
+
+At least one of `driverUserId` or `vehicleId` and a non-empty `reason` are required. Only a
+`SCHEDULED` Shuttle Trip may be reassigned. Driver and vehicle must be active and belong to the
+same operator; usable vehicle capacity is derived from the seat layout. The shared availability
+engine excludes the Shuttle Trip being edited, and assignment plus reservation replacement commit
+atomically. Passenger manifests, pickup order, and schedule are unchanged.
+
+Response `200` returns `shuttleTripId`, the effective `driverUserId`, and the effective `vehicleId`.
+Errors include `404 SHUTTLE_TRIP_NOT_FOUND`, `404 DRIVER_NOT_FOUND`, `404 VEHICLE_NOT_FOUND`,
+`409 SHUTTLE_TRIP_INVALID_STATE`, `409 SHUTTLE_DRIVER_CONFLICT`, `409 SHUTTLE_VEHICLE_CONFLICT`,
+`409 SHUTTLE_CAPACITY_EXCEEDED`, `422 VALIDATION_ERROR`, and `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`.
+
 ### POST `/v1/operator/shuttle-trips/availability-check`
 
 Auth: `OPERATOR_ADMIN`. Read-only and requires no `Idempotency-Key`. Body equals Shuttle create

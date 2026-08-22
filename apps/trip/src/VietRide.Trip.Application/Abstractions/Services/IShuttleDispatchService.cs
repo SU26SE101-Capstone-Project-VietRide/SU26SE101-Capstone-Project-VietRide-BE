@@ -40,6 +40,10 @@ public interface IShuttleDispatchService
         CreateShuttleTripInput input,
         CancellationToken cancellationToken);
 
+    Task<ReassignShuttleTripResult> ReassignAsync(
+        ReassignShuttleTripInput input,
+        CancellationToken cancellationToken);
+
     Task<ShuttleTrackingContext> GetTrackingContextAsync(
         Guid shuttleTripId,
         Guid userId,
@@ -120,6 +124,18 @@ public sealed record CreateShuttleTripResult(
     Guid MainTripId,
     int AssignedPassengerCount,
     int RemainingPassengerCount);
+
+public sealed record ReassignShuttleTripInput(
+    Guid OperatorId,
+    Guid ShuttleTripId,
+    Guid? DriverUserId,
+    Guid? VehicleId,
+    string Reason);
+
+public sealed record ReassignShuttleTripResult(
+    Guid ShuttleTripId,
+    Guid DriverUserId,
+    Guid VehicleId);
 
 public sealed record ShuttleRequestTripGroup(
     Guid MainTripId,

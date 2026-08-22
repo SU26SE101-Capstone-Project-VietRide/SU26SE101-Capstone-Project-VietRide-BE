@@ -660,6 +660,113 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         return new CreateShuttleTripResult(shuttleTrip.Id, input.MainTripId, manifests.Length, remaining);
     }
 
+    public async Task<ReassignShuttleTripResult> ReassignAsync(
+        ReassignShuttleTripInput input,
+        CancellationToken cancellationToken)
+    {
+        if ((!input.DriverUserId.HasValue && !input.VehicleId.HasValue)
+            || string.IsNullOrWhiteSpace(input.Reason))
+        {
+            throw new CodedValidationException(
+                "VALIDATION_ERROR",
+                "At least one assignment ID and a reason are required.");
+        }
+
+        await ValidateShuttleMutationEligibilityAsync(input.OperatorId, cancellationToken);
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+        await AcquireLockAsync("shuttle-assignment", input.ShuttleTripId, cancellationToken);
+        var shuttleTrip = await _db.ShuttleTrips.SingleOrDefaultAsync(
+            shuttle => shuttle.Id == input.ShuttleTripId && shuttle.OperatorId == input.OperatorId,
+            cancellationToken)
+            ?? throw new CodedNotFoundException("SHUTTLE_TRIP_NOT_FOUND", "Shuttle trip was not found.");
+        if (shuttleTrip.Status != ShuttleTrip.ScheduledStatus)
+        {
+            throw new CodedConflictException(
+                "SHUTTLE_TRIP_INVALID_STATE",
+                "Only scheduled Shuttle trips can be reassigned.");
+        }
+
+        var driverUserId = input.DriverUserId ?? shuttleTrip.DriverUserId;
+        var vehicleId = input.VehicleId ?? shuttleTrip.VehicleId;
+        var vehicle = await _db.Vehicles.SingleOrDefaultAsync(
+            candidate => candidate.Id == vehicleId
+                && candidate.OperatorId == input.OperatorId
+                && candidate.IsActive,
+            cancellationToken)
+            ?? throw new CodedNotFoundException("VEHICLE_NOT_FOUND", "Vehicle was not found.");
+        if (vehicle.Status != VehicleStatus.ACTIVE)
+        {
+            throw new CodedConflictException("SHUTTLE_VEHICLE_CONFLICT", "Vehicle is not active.");
+        }
+
+        var driver = await _identity.GetUserAsync(driverUserId, cancellationToken);
+        if (!driver.Found || driver.OperatorId != input.OperatorId
+            || !string.Equals(driver.Role, "DRIVER", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(driver.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CodedNotFoundException("DRIVER_NOT_FOUND", "An active driver was not found.");
+        }
+
+        var manifests = await _db.ShuttlePassengers.AsNoTracking()
+            .Where(manifest => manifest.ShuttleTripId == shuttleTrip.Id)
+            .OrderBy(manifest => manifest.PickupOrder)
+            .ThenBy(manifest => manifest.CreatedAt)
+            .ThenBy(manifest => manifest.Id)
+            .ToArrayAsync(cancellationToken);
+        var passengerCount = manifests.Count(manifest => manifest.Status != ShuttlePassenger.CancelledStatus);
+        var vehicleLayout = vehicle.SeatLayoutJson.Deserialize<SeatLayoutDto>(JsonOptions)
+            ?? throw new CodedValidationException("VALIDATION_ERROR", "Vehicle seat layout is invalid.");
+        if (passengerCount > SeatLayoutMetrics.CountUsablePassengerSeats(vehicleLayout))
+        {
+            throw new CodedConflictException(
+                "SHUTTLE_CAPACITY_EXCEEDED",
+                "Assigned passengers exceed vehicle capacity.");
+        }
+
+        var orderedBookingIds = manifests
+            .Where(manifest => manifest.BookingId.HasValue)
+            .GroupBy(manifest => manifest.BookingId!.Value)
+            .Select(group => group.First())
+            .OrderBy(manifest => manifest.PickupOrder)
+            .ThenBy(manifest => manifest.CreatedAt)
+            .ThenBy(manifest => manifest.Id)
+            .Select(manifest => manifest.BookingId!.Value)
+            .ToArray();
+        if (orderedBookingIds.Length == 0)
+        {
+            throw new CodedConflictException(
+                "SHUTTLE_REQUEST_SET_CHANGED",
+                "The Shuttle trip has no assignable Booking groups.");
+        }
+
+        var availabilityInput = new ShuttleAvailabilityInput(
+            shuttleTrip.OperatorId,
+            shuttleTrip.MainTripId,
+            shuttleTrip.Direction,
+            driverUserId,
+            vehicleId,
+            shuttleTrip.ScheduledDepartureTime,
+            shuttleTrip.ScheduledEndTime,
+            orderedBookingIds,
+            shuttleTrip.Id);
+        ResourceAvailabilityConflictGuard.EnsureAvailable(
+            await _resourceAvailability.CheckShuttleAsync(
+                availabilityInput,
+                acquireLocks: true,
+                cancellationToken),
+            AssignmentSourceType.SHUTTLE_TRIP);
+
+        shuttleTrip.ChangeAssignment(driverUserId, vehicleId);
+        await _resourceAvailability.ReserveShuttleTripAsync(
+            shuttleTrip,
+            orderedBookingIds,
+            cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new ReassignShuttleTripResult(shuttleTrip.Id, driverUserId, vehicleId);
+    }
+
     public async Task<ShuttleDriverAssignmentPage> GetDriverAssignmentsAsync(
         Guid driverUserId,
         DateOnly? from,

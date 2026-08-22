@@ -73,6 +73,31 @@ public sealed class ShuttleLifecycleDomainTests
     }
 
     [Fact]
+    public void ShuttleTrip_ChangeAssignment_OnlyChangesResourcesWhileScheduled()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var shuttleTrip = ShuttleTrip.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            now,
+            now.AddMinutes(30),
+            null);
+        var replacementDriverId = Guid.NewGuid();
+        var replacementVehicleId = Guid.NewGuid();
+
+        shuttleTrip.ChangeAssignment(replacementDriverId, replacementVehicleId);
+
+        shuttleTrip.DriverUserId.Should().Be(replacementDriverId);
+        shuttleTrip.VehicleId.Should().Be(replacementVehicleId);
+        shuttleTrip.Start(now);
+        FluentActions.Invoking(() => shuttleTrip.ChangeAssignment(Guid.NewGuid(), Guid.NewGuid()))
+            .Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
     public void ShuttlePassenger_DeliverRequiresPickup_AndNoShowRequiresReason()
     {
         var passenger = ShuttlePassenger.Request(

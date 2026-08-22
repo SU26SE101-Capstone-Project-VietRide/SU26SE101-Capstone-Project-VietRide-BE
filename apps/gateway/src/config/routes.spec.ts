@@ -511,6 +511,20 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes exact scheduled Shuttle reassignment PATCH to Trip for operator admins', () => {
+    const path =
+      '/v1/operator/shuttle-trips/11111111-1111-4111-8111-111111111111/assignment';
+    const route = matchRoute(routes, path, 'PATCH');
+
+    expect(route).toMatchObject({
+      prefix: '/v1/operator/shuttle-trips/{shuttleTripId}/assignment',
+      method: 'PATCH',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    });
+  });
+
   it('routes trip search through the mixed public subpath without a duplicate prefix', () => {
     const route = matchRoute(routes, '/v1/trips/search');
 
