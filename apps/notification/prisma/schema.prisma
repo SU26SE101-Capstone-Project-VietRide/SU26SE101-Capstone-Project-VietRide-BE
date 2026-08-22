@@ -71,6 +71,8 @@ enum NotificationType {
   SHUTTLE_COMPLETED
   SHUTTLE_UNFULFILLED
   SHUTTLE_WARNING
+  SHUTTLE_STARTED
+  SHUTTLE_REASSIGNED
   TRIP_ASSIGNMENT_START_BLOCKED
   DRIVER_STOP_DEPARTED_WITH_PENDING
   ROUTE_CHANGE_PROPOSAL_CREATED
@@ -169,7 +171,7 @@ model NotificationDelivery {
 model EmailDelivery {
   id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   notificationId    String?             @map("notification_id") @db.Uuid
-  dedupeKey          String?             @unique @map("dedupe_key") @db.VarChar(200)
+  dedupeKey         String?             @unique @map("dedupe_key") @db.VarChar(200)
   toEmail           String              @map("to_email") @db.VarChar(320)
   templateKey       EmailTemplateKey    @map("template_key")
   subject           String              @db.VarChar(255)

@@ -21,7 +21,10 @@ export type NotificationActionDto =
   | { type: 'OPEN_PARCEL_DETAIL'; params: { parcelId: string } }
   | { type: 'OPEN_WALLET'; params: Record<string, never> }
   | { type: 'OPEN_SUBSCRIPTION'; params: Record<string, never> }
-  | { type: 'OPEN_SHUTTLE_TRACKING'; params: { shuttleTripId: string } }
+  | {
+      type: 'OPEN_SHUTTLE_TRACKING';
+      params: { shuttleTripId: string; bookingId?: string; pickupOrder?: number };
+    }
   | { type: 'NONE'; params: Record<string, never> };
 
 const ActionDataSchema = z
@@ -30,6 +33,7 @@ const ActionDataSchema = z
     tripId: z.string().uuid().nullish(),
     parcelId: z.string().uuid().nullish(),
     shuttleTripId: z.string().uuid().nullish(),
+    pickupOrder: z.number().int().positive().nullish(),
     deepLink: z.string().trim().min(1).nullish(),
   })
   .passthrough();
@@ -142,7 +146,11 @@ export function resolveNotificationAction(
     if (data.shuttleTripId) {
       return {
         type: 'OPEN_SHUTTLE_TRACKING',
-        params: { shuttleTripId: data.shuttleTripId },
+        params: {
+          shuttleTripId: data.shuttleTripId,
+          ...(data.bookingId ? { bookingId: data.bookingId } : {}),
+          ...(data.pickupOrder ? { pickupOrder: data.pickupOrder } : {}),
+        },
       };
     }
     if (type === NotificationType.SHUTTLE_UNFULFILLED && data.bookingId) {

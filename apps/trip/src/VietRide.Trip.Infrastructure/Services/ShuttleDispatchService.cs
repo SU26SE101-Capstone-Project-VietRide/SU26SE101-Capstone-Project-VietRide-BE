@@ -8,6 +8,7 @@ using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.Time;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Services;
+using VietRide.Trip.Application.Events;
 using VietRide.Trip.Application.Features.Internal.Trips.Tracking;
 using VietRide.Trip.Application.Features.ResourceAvailability;
 using VietRide.Trip.Application.Features.Stops;
@@ -687,8 +688,10 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                 "Only scheduled Shuttle trips can be reassigned.");
         }
 
-        var driverUserId = input.DriverUserId ?? shuttleTrip.DriverUserId;
-        var vehicleId = input.VehicleId ?? shuttleTrip.VehicleId;
+        var oldDriverUserId = shuttleTrip.DriverUserId;
+        var oldVehicleId = shuttleTrip.VehicleId;
+        var driverUserId = input.DriverUserId ?? oldDriverUserId;
+        var vehicleId = input.VehicleId ?? oldVehicleId;
         var vehicle = await _db.Vehicles.SingleOrDefaultAsync(
             candidate => candidate.Id == vehicleId
                 && candidate.OperatorId == input.OperatorId
@@ -699,6 +702,12 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         {
             throw new CodedConflictException("SHUTTLE_VEHICLE_CONFLICT", "Vehicle is not active.");
         }
+        var oldVehicle = oldVehicleId == vehicle.Id
+            ? vehicle
+            : await _db.Vehicles.IgnoreQueryFilters().AsNoTracking().SingleAsync(
+                candidate => candidate.Id == oldVehicleId
+                    && candidate.OperatorId == input.OperatorId,
+                cancellationToken);
 
         var driver = await _identity.GetUserAsync(driverUserId, cancellationToken);
         if (!driver.Found || driver.OperatorId != input.OperatorId
@@ -762,6 +771,42 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             shuttleTrip,
             orderedBookingIds,
             cancellationToken);
+        if (oldDriverUserId != driverUserId || oldVehicleId != vehicleId)
+        {
+            var occurredAt = _clock.UtcNow;
+            var integrationEvent = new ShuttleReassignedIntegrationEvent(
+                Guid.NewGuid(),
+                occurredAt,
+                shuttleTrip.Id,
+                shuttleTrip.MainTripId,
+                shuttleTrip.OperatorId,
+                shuttleTrip.Direction,
+                oldDriverUserId,
+                new ShuttleReassignedIntegrationEvent.DriverSnapshot(
+                    driverUserId,
+                    driver.DisplayName,
+                    driver.Phone),
+                new ShuttleReassignedIntegrationEvent.VehicleSnapshot(
+                    oldVehicle.Id,
+                    oldVehicle.LicensePlate),
+                new ShuttleReassignedIntegrationEvent.VehicleSnapshot(
+                    vehicle.Id,
+                    vehicle.LicensePlate),
+                input.Reason.Trim(),
+                manifests
+                    .Where(manifest => manifest.PassengerUserId.HasValue && manifest.PickupOrder.HasValue)
+                    .Select(manifest => new ShuttleReassignedIntegrationEvent.PassengerRecipient(
+                        manifest.PassengerUserId!.Value,
+                        manifest.BookingId,
+                        manifest.PickupOrder!.Value))
+                    .Distinct()
+                    .ToArray());
+            await _outbox.EnqueueAsync(
+                integrationEvent.EventId,
+                integrationEvent.EventType,
+                JsonSerializer.Serialize(integrationEvent, JsonOptions),
+                cancellationToken);
+        }
         await _db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new ReassignShuttleTripResult(shuttleTrip.Id, driverUserId, vehicleId);
@@ -1226,6 +1271,31 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         {
             throw new CodedConflictException("SHUTTLE_TRIP_INVALID_STATE", exception.Message);
         }
+        var manifests = await _db.ShuttlePassengers.AsNoTracking()
+            .Where(manifest => manifest.ShuttleTripId == shuttleTripId
+                && manifest.Status != ShuttlePassenger.CancelledStatus)
+            .ToArrayAsync(cancellationToken);
+        var integrationEvent = new ShuttleStartedIntegrationEvent(
+            Guid.NewGuid(),
+            now,
+            shuttleTrip.Id,
+            shuttleTrip.MainTripId,
+            shuttleTrip.OperatorId,
+            shuttleTrip.DriverUserId,
+            shuttleTrip.Direction,
+            manifests
+                .Where(manifest => manifest.PassengerUserId.HasValue && manifest.PickupOrder.HasValue)
+                .Select(manifest => new ShuttleStartedIntegrationEvent.PassengerRecipient(
+                    manifest.PassengerUserId!.Value,
+                    manifest.BookingId,
+                    manifest.PickupOrder!.Value))
+                .Distinct()
+                .ToArray());
+        await _outbox.EnqueueAsync(
+            integrationEvent.EventId,
+            integrationEvent.EventType,
+            JsonSerializer.Serialize(integrationEvent, JsonOptions),
+            cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new ShuttleLifecycleResult(shuttleTripId, shuttleTrip.Status, 0, now);
@@ -1506,7 +1576,10 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         await _resourceAvailability.CancelShuttleTripAsync(shuttleTripId, now, cancellationToken);
         var manifests = await _db.ShuttlePassengers
             .Where(x => x.ShuttleTripId == shuttleTripId)
+            .OrderBy(x => x.PickupOrder)
+            .ThenBy(x => x.Id)
             .ToArrayAsync(cancellationToken);
+        var notifyAssignedDriver = true;
         foreach (var manifest in manifests)
         {
             if (!manifest.Cancel(reason)) continue;
@@ -1527,8 +1600,11 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                     status = ShuttlePassenger.CancelledStatus,
                     reason,
                     roadDistanceMeters = manifest.RoadDistanceMeters,
+                    driverUserId = notifyAssignedDriver ? shuttleTrip.DriverUserId : (Guid?)null,
+                    cancellationScope = notifyAssignedDriver ? "SHUTTLE_TRIP" : null,
                 }),
                 cancellationToken);
+            notifyAssignedDriver = false;
         }
 
         await _db.SaveChangesAsync(cancellationToken);

@@ -151,10 +151,25 @@ describe('resolveNotificationAction', () => {
     NotificationType.SHUTTLE_NO_SHOW,
     NotificationType.SHUTTLE_COMPLETED,
     NotificationType.SHUTTLE_WARNING,
+    NotificationType.SHUTTLE_STARTED,
+    NotificationType.SHUTTLE_REASSIGNED,
   ])('maps %s to shuttle tracking', (type) => {
     expect(resolveNotificationAction(type, { shuttleTripId: SHUTTLE_TRIP_ID })).toEqual({
       type: 'OPEN_SHUTTLE_TRACKING',
       params: { shuttleTripId: SHUTTLE_TRIP_ID },
+    });
+  });
+
+  it('preserves booking and pickup context for Shuttle tracking navigation', () => {
+    expect(
+      resolveNotificationAction(NotificationType.SHUTTLE_REASSIGNED, {
+        shuttleTripId: SHUTTLE_TRIP_ID,
+        bookingId: BOOKING_ID,
+        pickupOrder: 2,
+      }),
+    ).toEqual({
+      type: 'OPEN_SHUTTLE_TRACKING',
+      params: { shuttleTripId: SHUTTLE_TRIP_ID, bookingId: BOOKING_ID, pickupOrder: 2 },
     });
   });
 
@@ -181,15 +196,13 @@ describe('resolveNotificationAction', () => {
     });
   });
 
-  it.each([
-    null,
-    'not-an-object',
-    { bookingId: 'not-a-uuid' },
-    { tripId: 42 },
-  ])('returns NONE for missing or malformed action data %#', (data) => {
-    expect(resolveNotificationAction(NotificationType.BOOKING_CONFIRMED, data)).toEqual({
-      type: 'NONE',
-      params: {},
-    });
-  });
+  it.each([null, 'not-an-object', { bookingId: 'not-a-uuid' }, { tripId: 42 }])(
+    'returns NONE for missing or malformed action data %#',
+    (data) => {
+      expect(resolveNotificationAction(NotificationType.BOOKING_CONFIRMED, data)).toEqual({
+        type: 'NONE',
+        params: {},
+      });
+    },
+  );
 });

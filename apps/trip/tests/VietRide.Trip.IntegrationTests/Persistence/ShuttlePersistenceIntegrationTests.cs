@@ -568,6 +568,15 @@ public sealed class ShuttlePersistenceIntegrationTests
                 10.7731m,
                 106.7032m,
                 roadDistanceMeters: 1_000));
+            db.ShuttlePassengers.Add(ShuttlePassenger.Request(
+                seed.MainTripId,
+                bookingId,
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                "12 Nguyen Hue, District 1",
+                10.7731m,
+                106.7032m,
+                roadDistanceMeters: 1_000));
             await db.SaveChangesAsync();
 
             var createdByUserId = Guid.NewGuid();
@@ -598,6 +607,17 @@ public sealed class ShuttlePersistenceIntegrationTests
             persisted.CancelReason.Should().Be("Vehicle unavailable");
             persisted.CancelledByUserId.Should().Be(cancelledByUserId);
             persisted.Notes.Should().Be("Call before pickup");
+            var cancelledEvents = await db.OutboxEvents.AsNoTracking()
+                .Where(item => item.EventType == "trip.shuttle.cancelled")
+                .ToArrayAsync();
+            cancelledEvents.Should().HaveCount(2);
+            cancelledEvents.Count(item =>
+            {
+                using var payload = JsonDocument.Parse(item.Payload);
+                return payload.RootElement.GetProperty("driverUserId").ValueKind == JsonValueKind.String
+                    && payload.RootElement.GetProperty("driverUserId").GetGuid() == seed.ShuttleDriverId
+                    && payload.RootElement.GetProperty("cancellationScope").GetString() == "SHUTTLE_TRIP";
+            }).Should().Be(1);
 
             var history = await service.GetHistoryAsync(
                 seed.OperatorId,
@@ -795,6 +815,14 @@ public sealed class ShuttlePersistenceIntegrationTests
                     replacementVehicle.Id,
                     "Original vehicle needs maintenance"),
                 CancellationToken.None);
+            await service.ReassignAsync(
+                new ReassignShuttleTripInput(
+                    seed.OperatorId,
+                    created.ShuttleTripId,
+                    replacementDriverId,
+                    replacementVehicle.Id,
+                    "Repeat same assignment"),
+                CancellationToken.None);
 
             db.ChangeTracker.Clear();
             var persisted = await db.ShuttleTrips.AsNoTracking()
@@ -816,6 +844,9 @@ public sealed class ShuttlePersistenceIntegrationTests
                     manifest.Status,
                 })
                 .ToArrayAsync();
+            var reassignedEvent = await db.OutboxEvents.AsNoTracking()
+                .SingleAsync(item => item.EventType == "trip.shuttle.reassigned");
+            using var reassignedPayload = JsonDocument.Parse(reassignedEvent.Payload);
 
             result.Should().Be(new ReassignShuttleTripResult(
                 created.ShuttleTripId,
@@ -832,6 +863,17 @@ public sealed class ShuttlePersistenceIntegrationTests
                 reservation.ResourceRole == ResourceReservationRole.VEHICLE
                 && reservation.ResourceId == replacementVehicle.Id);
             manifestAfter.Should().BeEquivalentTo(manifestBefore, options => options.WithStrictOrdering());
+            reassignedEvent.Status.Should().Be(OutboxEventStatus.PENDING);
+            reassignedPayload.RootElement.GetProperty("eventId").GetGuid()
+                .Should().Be(reassignedEvent.Id);
+            reassignedPayload.RootElement.GetProperty("oldDriverUserId").GetGuid()
+                .Should().Be(seed.ShuttleDriverId);
+            reassignedPayload.RootElement.GetProperty("newDriver").GetProperty("userId").GetGuid()
+                .Should().Be(replacementDriverId);
+            reassignedPayload.RootElement.GetProperty("newVehicle").GetProperty("licensePlate")
+                .GetString().Should().Be(replacementVehicle.LicensePlate);
+            reassignedPayload.RootElement.GetProperty("reason").GetString()
+                .Should().Be("Original vehicle needs maintenance");
         }
         finally
         {
@@ -1193,6 +1235,15 @@ public sealed class ShuttlePersistenceIntegrationTests
                 created.ShuttleTripId,
                 seed.ShuttleDriverId,
                 CancellationToken.None);
+            var startedEvent = await db.OutboxEvents.AsNoTracking()
+                .SingleAsync(item => item.EventType == "trip.shuttle.started");
+            using (var payload = JsonDocument.Parse(startedEvent.Payload))
+            {
+                payload.RootElement.GetProperty("eventId").GetGuid().Should().Be(startedEvent.Id);
+                payload.RootElement.GetProperty("driverUserId").GetGuid()
+                    .Should().Be(seed.ShuttleDriverId);
+                payload.RootElement.GetProperty("passengers").GetArrayLength().Should().Be(1);
+            }
             var first = await service.MarkPickupAsync(
                 created.ShuttleTripId,
                 1,

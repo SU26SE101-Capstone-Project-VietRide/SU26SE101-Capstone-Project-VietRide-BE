@@ -5108,6 +5108,9 @@ Allowed action types are `OPEN_BOOKING_DETAIL`, `OPEN_CREW_TRIP_BOOKING`, `OPEN_
 navigation data resolves to `NONE`; it never fails the inbox read. IDs remain in `data` and
 `action.params` for client navigation but system-generated `title`/`body` use human-readable
 codes/names or a natural-language fallback instead of raw UUIDs. Existing rows are not backfilled.
+For Shuttle notifications, `OPEN_SHUTTLE_TRACKING.params` always contains `shuttleTripId` and
+additively preserves `bookingId` plus `pickupOrder` when the event identifies a passenger pickup,
+so clients can select the correct stop when one Shuttle Trip serves multiple Booking groups.
 
 `PARCEL_RESERVED` is emitted to the Assistant currently assigned to the Parcel's Trip only after
 the sender's deposit succeeds and the Trip cargo reservation is confirmed. It is stored in the

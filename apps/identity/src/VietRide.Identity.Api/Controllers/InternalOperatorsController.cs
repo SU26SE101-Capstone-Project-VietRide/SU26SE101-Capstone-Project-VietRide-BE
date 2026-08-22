@@ -7,6 +7,7 @@ using VietRide.Identity.Application.Features.Internal.Operators.GetInternalOpera
 using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorCrewUserIds;
 using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorRecipientUsers;
 using VietRide.Identity.Application.Features.Internal.Operators.GetOperatorSummaries;
+using VietRide.Identity.Application.Features.Internal.Operators.GetShuttleDispatchRecipientUsers;
 using VietRide.Identity.Application.Features.Internal.Operators.IncrementOperatorUsage;
 using VietRide.Identity.Application.Features.Internal.Operators.QuotaAllocations;
 using VietRide.Identity.Application.Features.Internal.Operators.SearchOperatorCrew;
@@ -63,6 +64,20 @@ public sealed class InternalOperatorsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var result = await _mediator.Send(new GetOperatorRecipientUsersQuery(operatorId), cancellationToken);
+
+        return Ok(result);
+    }
+
+    [HttpGet("{operatorId:guid}/shuttle-dispatch-recipient-users")]
+    [ProducesResponseType(typeof(IReadOnlyList<Guid>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<IReadOnlyList<Guid>>> GetShuttleDispatchRecipientUsersAsync(
+        Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        var result = await _mediator.Send(
+            new GetShuttleDispatchRecipientUsersQuery(operatorId),
+            cancellationToken);
 
         return Ok(result);
     }
