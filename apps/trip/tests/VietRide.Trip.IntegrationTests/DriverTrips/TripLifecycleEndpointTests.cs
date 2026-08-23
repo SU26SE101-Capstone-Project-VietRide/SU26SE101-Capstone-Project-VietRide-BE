@@ -457,7 +457,7 @@ public sealed class TripLifecycleEndpointTests
             persisted.CompletedByUserId.Should().Be(actorId);
 
             var outbox = await assertionDb.OutboxEvents.SingleAsync(item => item.EventType == "trip.trip.completed");
-            AssertCompletedPayload(outbox.Payload, trip.Id, now);
+            AssertCompletedPayload(outbox.Payload, trip.Id, trip.TripCode!, now);
             var audit = await assertionDb.TripAuditLogs.SingleAsync(item => item.TripId == trip.Id);
             AssertManualAudit(audit, trip.Id, actorId, role, now);
         }
@@ -635,7 +635,7 @@ public sealed class TripLifecycleEndpointTests
             persisted.CompletedAt.Should().Be(now);
             persisted.CompletedByUserId.Should().Be(actorId);
             var outbox = await assertionDb.OutboxEvents.SingleAsync(item => item.EventType == "trip.trip.completed");
-            AssertCompletedPayload(outbox.Payload, trip.Id, now);
+            AssertCompletedPayload(outbox.Payload, trip.Id, trip.TripCode!, now);
             var audit = await assertionDb.TripAuditLogs.SingleAsync(item => item.TripId == trip.Id);
             AssertManualAudit(audit, trip.Id, actorId, role, now);
         }
@@ -959,7 +959,11 @@ public sealed class TripLifecycleEndpointTests
         root.GetProperty("boardingStartedAt").GetDateTimeOffset().Should().Be(now);
     }
 
-    private static void AssertCompletedPayload(string payload, Guid tripId, DateTimeOffset now)
+    private static void AssertCompletedPayload(
+        string payload,
+        Guid tripId,
+        string tripCode,
+        DateTimeOffset now)
     {
         using var document = JsonDocument.Parse(payload);
         var root = document.RootElement;
@@ -969,6 +973,7 @@ public sealed class TripLifecycleEndpointTests
                 "occurredAt",
                 "eventType",
                 "tripId",
+                "tripCode",
                 "operatorId",
                 "terminalAt",
                 "completedAt",
@@ -978,6 +983,7 @@ public sealed class TripLifecycleEndpointTests
         root.GetProperty("occurredAt").GetDateTime().Should().NotBe(default);
         root.GetProperty("eventType").GetString().Should().Be("trip.trip.completed");
         root.GetProperty("tripId").GetGuid().Should().Be(tripId);
+        root.GetProperty("tripCode").GetString().Should().Be(tripCode);
         root.GetProperty("operatorId").GetGuid().Should().NotBeEmpty();
         root.GetProperty("terminalAt").GetDateTimeOffset().Should().Be(now);
         root.GetProperty("completedAt").GetDateTimeOffset().Should().Be(now);
