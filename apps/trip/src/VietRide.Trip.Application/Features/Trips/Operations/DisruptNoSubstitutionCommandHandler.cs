@@ -77,7 +77,8 @@ public sealed class DisruptNoSubstitutionCommandHandler : IRequestHandler<Disrup
                 trip.OperatorId,
                 now,
                 hasSubstitution: false,
-                reason);
+                reason,
+                trip.TripCode);
             await outbox.EnqueueAsync(
                 eventId,
                 evt.EventType,

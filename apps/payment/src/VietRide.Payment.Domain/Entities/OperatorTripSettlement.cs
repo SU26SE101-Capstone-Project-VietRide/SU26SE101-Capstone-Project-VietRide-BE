@@ -1,15 +1,19 @@
 using VietRide.Payment.Domain.Enums;
 using VietRide.Payment.Domain.ValueObjects;
+using VietRide.Shared.Kernel.Identifiers;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Payment.Domain.Entities;
 
-public sealed class OperatorTripSettlement : BaseEntity<Guid>
+public sealed class OperatorTripSettlement : BaseEntity<Guid>, IBusinessCodeEntity
 {
+    string IBusinessCodeEntity.BusinessCodeConstraintName => "uq_operator_trip_settlements_code";
     private OperatorTripSettlement() { }
 
     public Guid OperatorId { get; private set; }
+    public string? SettlementCode { get; private set; }
     public Guid TripId { get; private set; }
+    public string? TripCode { get; private set; }
     public long NetAmount { get; private set; }
     public DateTimeOffset TripTerminalAt { get; private set; }
     public DateTimeOffset EligibleAt { get; private set; }
@@ -34,7 +38,8 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>
     public static OperatorTripSettlement CreatePending(
         Guid operatorId,
         Guid tripId,
-        DateTimeOffset terminalAt)
+        DateTimeOffset terminalAt,
+        string? tripCode = null)
     {
         if (operatorId == Guid.Empty || tripId == Guid.Empty)
             throw new ArgumentException("Settlement operator and trip are required.");
@@ -42,13 +47,39 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>
         return new OperatorTripSettlement
         {
             Id = Guid.NewGuid(),
+            SettlementCode = BusinessCodeGenerator.Generate("STL", terminalAt),
             OperatorId = operatorId,
             TripId = tripId,
+            TripCode = NormalizeTripCode(tripCode),
             TripTerminalAt = terminalAt,
             EligibleAt = terminalAt.AddDays(7),
             Status = OperatorTripSettlementStatus.PENDING_HOLD,
         };
     }
+
+    public void SetTripCode(string tripCode)
+    {
+        var normalized = NormalizeTripCode(tripCode)
+            ?? throw new ArgumentException("Trip code is required.", nameof(tripCode));
+        if (TripCode is not null && !string.Equals(TripCode, normalized, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Settlement Trip code is immutable once assigned.");
+        }
+
+        TripCode = normalized;
+    }
+
+    public void BackfillBusinessCodes(string? tripCode = null)
+    {
+        SettlementCode ??= BusinessCodeGenerator.Generate("STL", TripTerminalAt);
+        if (TripCode is null && tripCode is not null)
+        {
+            SetTripCode(tripCode);
+        }
+    }
+
+    void IBusinessCodeEntity.RegenerateBusinessCode()
+        => SettlementCode = BusinessCodeGenerator.Generate("STL", TripTerminalAt);
 
     public void RefreshEligibility(long netAmount, DateTimeOffset now)
     {
@@ -113,6 +144,22 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>
             ActiveFailureCode = null;
             FailureResolvedAt = settledAt;
         }
+    }
+
+    private static string? NormalizeTripCode(string? tripCode)
+    {
+        if (tripCode is null)
+        {
+            return null;
+        }
+
+        var normalized = tripCode.Trim().ToUpperInvariant();
+        if (normalized.Length == 0 || normalized.Length > 30)
+        {
+            throw new ArgumentException("Trip code must contain 1 to 30 characters.", nameof(tripCode));
+        }
+
+        return normalized;
     }
 
     public void MarkCancelled(

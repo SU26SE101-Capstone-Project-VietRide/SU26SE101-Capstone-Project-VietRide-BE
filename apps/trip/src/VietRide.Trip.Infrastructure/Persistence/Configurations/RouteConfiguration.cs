@@ -37,6 +37,11 @@ internal sealed class RouteConfiguration : IEntityTypeConfiguration<Route>
             .HasMaxLength(255)
             .IsRequired();
 
+        builder.Property(x => x.Code)
+            .HasColumnName("code")
+            .HasMaxLength(20)
+            .IsRequired(false);
+
         builder.Property(x => x.OriginStationId)
             .HasColumnName("origin_station_id")
             .HasColumnType("uuid")
@@ -119,6 +124,11 @@ internal sealed class RouteConfiguration : IEntityTypeConfiguration<Route>
         builder.HasIndex(x => x.ReturnRouteId)
             .HasDatabaseName("idx_routes_return_route_id")
             .HasFilter("return_route_id IS NOT NULL");
+
+        builder.HasIndex(x => new { x.OperatorId, x.Code })
+            .HasDatabaseName("uq_routes_operator_code")
+            .HasFilter("deleted_at IS NULL AND code IS NOT NULL")
+            .IsUnique();
 
         RemoveConventionIndex(builder, nameof(Route.DestinationStationId));
 

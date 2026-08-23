@@ -9,6 +9,9 @@ public sealed class UpsertFullRouteValidator : AbstractValidator<UpsertFullRoute
         RuleFor(command => command.OperatorId).NotEmpty();
         RuleFor(command => command.RouteId).NotEqual(Guid.Empty).When(command => command.RouteId.HasValue);
         RuleFor(command => command.Name).NotEmpty().MaximumLength(255);
+        RuleFor(command => command.Code)
+            .Matches("^[A-Za-z0-9][A-Za-z0-9-]{1,19}$")
+            .When(command => command.Code is not null);
         RuleFor(command => command.OriginStationId).NotEmpty();
         RuleFor(command => command.DestinationStationId).NotEmpty();
         RuleFor(command => command.BaseFare).GreaterThanOrEqualTo(0);

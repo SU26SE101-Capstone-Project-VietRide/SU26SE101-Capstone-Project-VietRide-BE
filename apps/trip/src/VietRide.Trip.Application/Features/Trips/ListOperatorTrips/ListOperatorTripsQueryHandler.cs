@@ -79,7 +79,8 @@ public sealed class ListOperatorTripsQueryHandler
                 row.RouteId,
                 row.RouteName,
                 row.OriginName,
-                row.DestinationName),
+                row.DestinationName,
+                row.RouteCode),
             new OperatorTripVehicleDto(
                 row.VehicleId,
                 row.LicensePlate,
@@ -91,7 +92,8 @@ public sealed class ListOperatorTripsQueryHandler
             row.DepartureAt,
             row.ArrivalEstimate,
             TripVehicleSubstitutionPolicy.CanSubstitute(row.Status),
-            row.SourceScheduleId);
+            row.SourceScheduleId,
+            row.TripCode);
 
     private static OperatorTripCrewDto? ToCrew(
         Guid userId,

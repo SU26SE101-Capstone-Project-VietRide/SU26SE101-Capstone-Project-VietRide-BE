@@ -6233,11 +6233,27 @@ chỉ cộng `netAmount` của settlement `SETTLED`, không bao gồm adjustment
 
 ### GET `/v1/operator/wallet/transactions`
 
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `type?`, `referenceType?`, `from?`, `to?`, `dateField?` (chỉ `createdAt`), `search?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items giữ các field cũ và thêm `signedAmount` (CREDIT dương, DEBIT âm), `currency: "VND"`, nullable `relatedSettlement { settlementId, tripId, method }`, `actorType`, nullable `actor`, nullable `adjustmentReason`, `dataCompleteness`, `missingFields`. `amount` cũ luôn dương. Adjustment liên kết actor qua ledger `referenceId=transactionId`; subscription luôn có `relatedSettlement=null`.
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `type?`, `referenceType?`, `from?`, `to?`, `dateField?` (chỉ `createdAt`), `search?`, `sortBy?` (`createdAt|amount`), `sortDir?`. Items giữ các field cũ và thêm nullable Release-A `transactionCode`, `signedAmount` (CREDIT dương, DEBIT âm), `currency: "VND"`, nullable `relatedSettlement { settlementId, settlementCode, tripId, tripCode, method }`, `actorType`, nullable `actor`, nullable `adjustmentReason`, `dataCompleteness`, `missingFields`. Text search match prefix `transactionCode` ngoài các điều kiện cũ. `amount` cũ luôn dương. Adjustment liên kết actor qua ledger `referenceId=transactionId`; subscription luôn có `relatedSettlement=null`.
+
+```json
+{
+  "id": "uuid",
+  "transactionCode": "OWT-20260823-7K3M2QPX",
+  "type": "CREDIT",
+  "amount": 1250000,
+  "relatedSettlement": {
+    "settlementId": "uuid",
+    "settlementCode": "STL-20260823-P9R4TX2W",
+    "tripId": "uuid",
+    "tripCode": "TRIP-20260816-M5Q7WV3D",
+    "method": "AUTO_WEEKLY"
+  }
+}
+```
 
 ### GET `/v1/operator/trip-settlements`
 
-Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `status?`, `tripId?`, `from?`, `to?`, `dateField?` (`createdAt|tripTerminalAt|eligibleAt|settledAt`), `search?`, `sortBy?` (`createdAt|eligibleAt|settledAt|netAmount`), `sortDir?`. Items giữ các field cũ và thêm `tripTerminalAt`, `walletTransactionId`, `financialBreakdown { grossSalesAmount, passengerPaidAmount, vietRideFundedAmount, operatorFundedDiscountAmount, refundAmount, recognizedAdjustmentAmount, netEntitlementAmount }`, `processingState`, `nextScheduledSettlementAttemptAt`, nullable `delayReason`, `attemptCount`, nullable `lastAttemptAt`, nullable `nextRetryAt`, nullable `cancelReason`, nullable `trip { departureAt, routeId, routeName, originName, destinationName }`, và `dataCompleteness`. `settledBy=null` xác định auto weekly; manual settlement trả snapshot admin khi có.
+Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `status?`, `tripId?`, `from?`, `to?`, `dateField?` (`createdAt|tripTerminalAt|eligibleAt|settledAt`), `search?`, `sortBy?` (`createdAt|eligibleAt|settledAt|netAmount`), `sortDir?`. Items giữ các field cũ và thêm nullable Release-A `settlementCode`, `tripTerminalAt`, `walletTransactionId`, `financialBreakdown { grossSalesAmount, passengerPaidAmount, vietRideFundedAmount, operatorFundedDiscountAmount, refundAmount, recognizedAdjustmentAmount, netEntitlementAmount }`, `processingState`, `nextScheduledSettlementAttemptAt`, nullable `delayReason`, `attemptCount`, nullable `lastAttemptAt`, nullable `nextRetryAt`, nullable `cancelReason`, nullable `trip { departureAt, routeId, routeName, originName, destinationName, tripCode }`, và `dataCompleteness`. Text search match prefix `settlementCode`/`tripCode` trước count/paging. `settledBy=null` xác định auto weekly; manual settlement trả snapshot admin khi có.
 
 `processingState` là `ON_HOLD|READY_FOR_SETTLEMENT|RETRY_SCHEDULED|COMPLETED|CANCELLED`.
 Operator chỉ nhận `delayReason=SYSTEM_PROCESSING_DELAY`; raw
@@ -6262,11 +6278,11 @@ hiện có trả cùng field. JSON cũ không có field vẫn deserialize hợp 
 
 ### GET `/v1/admin/trip-settlements`
 
-Auth: `SYSTEM_ADMIN`. Query: operator filters plus `operatorId?`, `stuckOnly?`, `severity?`, `search?`. UUID search matches settlement/trip ID. Text search matches persisted operator name or active failure code by case-insensitive contains, and persisted ledger reference/trip code by case-insensitive prefix. Search is applied before count/paging and performs no live cross-service lookup. A stuck row is unresolved `ELIGIBLE` with `activeFailureCode != null`; `HIGH` means failure count `>=3` **or** stuck age `>21 days`.
+Auth: `SYSTEM_ADMIN`. Query: operator filters plus `operatorId?`, `stuckOnly?`, `severity?`, `search?`. UUID search matches settlement/trip ID. Text search matches persisted operator name or active failure code by case-insensitive contains, and persisted `settlementCode`, Trip snapshot `tripCode`, hoặc ledger `referenceCode` by case-insensitive prefix. Search is applied before count/paging and performs no live cross-service lookup. Items add nullable Release-A `settlementCode` and `tripCode`. A stuck row is unresolved `ELIGIBLE` with `activeFailureCode != null`; `HIGH` means failure count `>=3` **or** stuck age `>21 days`.
 
 ### POST `/v1/admin/trip-settlements/{settlementId}/settle`
 
-Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Body is empty. Only `PENDING_HOLD|ELIGIBLE` can settle. Response `200` data contains `settlementId`, `tripId`, `operatorId`, `netAmount`, `status`, `settlementMethod: "ADMIN_MANUAL"`, `settledAt`.
+Auth: `SYSTEM_ADMIN`. `Idempotency-Key`: required. Body is empty. Only `PENDING_HOLD|ELIGIBLE` can settle. Response `200` data contains `settlementId`, nullable Release-A `settlementCode`, `tripId`, nullable Release-A `tripCode`, `operatorId`, `netAmount`, `status`, `settlementMethod: "ADMIN_MANUAL"`, `settledAt`.
 
 The settlement marker remains the single per-Trip/per-operator row. If recomputed
 `netAmount <= 0`, this request returns that row with `status: "CANCELLED"` and
@@ -6396,7 +6412,9 @@ Auth: `SYSTEM_ADMIN`. Returns `{ platformWalletId, balance, updatedAt }`.
 
 ### GET `/v1/admin/platform-wallet/transactions`
 
-Auth: `SYSTEM_ADMIN`. Paged query supports `type?`, `referenceType?`, `from?`, `to?`, `search?`, `sortBy=createdAt|amount`, `sortDir?`. UUID search matches transaction/reference ID. Text search matches note or persisted actor display name by case-insensitive contains, and an exact `referenceType` enum name. Search is applied before count/paging. Items contain transaction identity, direction, positive amount, balance snapshots, reference, note and created time.
+Auth: `SYSTEM_ADMIN`. Paged query supports `type?`, `referenceType?`, `from?`, `to?`, `search?`, `sortBy=createdAt|amount`, `sortDir?`. UUID search matches transaction/reference ID. Text search matches nullable Release-A `transactionCode` by prefix, note or persisted actor display name by case-insensitive contains, and an exact `referenceType` enum name. Search is applied before count/paging. Items contain transaction identity, nullable `transactionCode`, direction, positive amount, balance snapshots, reference, note and created time.
+
+Ví dụ một item: `{ "id": "uuid", "transactionCode": "PWT-20260823-4F8N2KQJ", "type": "DEBIT", "amount": 1250000, "referenceType": "TRIP_SETTLEMENT", "referenceId": "uuid" }`.
 
 ### POST `/v1/admin/platform-wallet/adjust`
 
@@ -7831,9 +7849,20 @@ Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
 
 Query: `page?`, `pageSize?`, `search?`.
 
-Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Optional `search` follows BSOT §5.8 and is allow-listed to Route `name`; `isActive` is a boolean activation filter applied before count/paging.
+Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`). Optional `search` follows BSOT §5.8 and matches Route `name` hoặc prefix nullable `code`; `isActive` is a boolean activation filter applied before count/paging. Release A accepts optional `code` on create/full-create and returns it on Route list/detail/mutation DTOs; Release B makes it required for new Route after FE rollout. Code is normalized uppercase, unique per active/non-deleted operator scope, and duplicates return `409 ROUTE_CODE_DUPLICATED`.
 
 Response `200`: `PagedResult<RouteListItemDto>` in the ADR 0004 success envelope.
+
+```json
+{
+  "id": "uuid",
+  "code": "SG-DL-01",
+  "name": "Hồ Chí Minh - Đà Lạt",
+  "originStationId": "uuid",
+  "destinationStationId": "uuid",
+  "isActive": true
+}
+```
 
 ### GET `/v1/operator/routes/{id}`
 
@@ -9333,6 +9362,7 @@ refunds only from `booking.booking.cancelled`; Payment and Notification do not c
   "tripId": "uuid",
   "operatorId": "uuid",
   "terminalAt": "2026-07-30T03:00:00Z",
+  "tripCode": "TRIP-20260730-M5Q7WV3D",
   "hasSubstitution": false,
   "reason": "Road closure"
 }
@@ -9866,6 +9896,13 @@ owns the source database:
 | `GET /v1/operator/reports/cancellation/export` | Booking | `Cancellations` | `cancellation-report` |
 | `GET /v1/operator/reports/refunds/export` | Payment | `Refunds` | `refunds-report` |
 
+Payment revenue/refund workbooks preserve every legacy identifier column and add reconciliation
+columns in this exact order: `entry_id`, `reference_code`, `trip_code`, `entry_type`,
+`reference_type`, `reference_id`, `trip_id`, `amount_vnd`,
+`occurred_at_asia_ho_chi_minh`, `note`. `reference_code` is the persisted Booking/Parcel code.
+`trip_code` prefers the Payment settlement snapshot and may be blank when Trip enrichment is
+temporarily unavailable; the workbook still succeeds and retains `trip_id`.
+
 All routes require `OPERATOR_ADMIN` or `OPERATOR_STAFF`. `operatorId` is read only from the
 authenticated operator claim; query/body values are ignored and are not accepted. `from` and `to`
 are optional Asia/Ho_Chi_Minh dates, inclusive. The default is the last 30 Asia/Ho_Chi_Minh calendar days including `to`;
@@ -9979,7 +10016,8 @@ require `Idempotency-Key`. Internal successes are raw DTOs and require Internal 
 - Admin Station endpoints and frontend changes are outside this scope.
 - `POST /v1/operator/trips/{tripId}/substitute-vehicle` and all existing single-size Parcel fare
   endpoints are unchanged.
-- No `tripCode`, `routeCode`, Trip schema/index or fare-history version is introduced.
+- Release A introduces nullable `tripCode` and Route `code` additively; fare-history versioning is
+  still outside scope.
 - Additive objects do not remove, rename or retype existing response fields.
 
 ### GET `/v1/operator/trips`
@@ -9988,7 +10026,7 @@ Auth: `OPERATOR_ADMIN` only. The operator is read from the JWT; `operatorId` is 
 
 Query: `search?`, `status?`, `from?`, `to?`, `page=1`, `pageSize=20` (1..100),
 `sortBy=departureAt`, `sortDir=asc|desc`. `from`/`to` are Asia/Ho_Chi_Minh dates and `from <= to`.
-`search` matches route name case-insensitively and vehicle plate after removing separators.
+`search` matches nullable `tripCode`/`route.code` by prefix, route name case-insensitively and vehicle plate after removing separators. Items add nullable Release-A `tripCode`; nested `route` adds nullable `code`. Trip detail and internal batch summaries expose the same codes additively.
 The date range is inclusive theo lịch Asia/Ho_Chi_Minh nhưng mọi filter persistence dùng timestamp UTC
 `[fromUtc, toUtcExclusive)`, với hai mốc được chuẩn hóa từ local midnight; không query DB bằng
 timestamp mang offset Asia/Ho_Chi_Minh.
@@ -9998,9 +10036,11 @@ Each paged item is:
 ```json
 {
   "tripId": "uuid",
+  "tripCode": "TRIP-20260729-M5Q7WV3D",
   "status": "IN_PROGRESS",
   "route": {
     "routeId": "uuid",
+    "code": "SG-DL-01",
     "name": "HCM - Đà Lạt",
     "originName": "Hồ Chí Minh",
     "destinationName": "Đà Lạt"

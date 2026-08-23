@@ -57,6 +57,7 @@ public sealed class ListDriverSchedulesHandler(
         {
             var search = request.Search.Trim();
             var normalizedSearch = search.ToLowerInvariant();
+            var normalizedCode = search.ToUpperInvariant();
             var crewSearch = await identityClient.SearchOperatorCrewAsync(
                 request.OperatorId,
                 search,
@@ -70,7 +71,8 @@ public sealed class ListDriverSchedulesHandler(
             var crewUserIds = crewSearch.Users.Select(user => user.UserId).ToArray();
             var routeIds = routeRepository.QueryNoTracking()
                 .Where(route => route.OperatorId == request.OperatorId
-                    && route.Name.ToLower().Contains(normalizedSearch))
+                    && (route.Name.ToLower().Contains(normalizedSearch)
+                        || route.Code != null && route.Code.StartsWith(normalizedCode)))
                 .Select(route => route.Id);
             var licensePlateMatchIds = vehicleRepository.QueryNoTracking()
                 .Where(vehicle => vehicle.OperatorId == request.OperatorId

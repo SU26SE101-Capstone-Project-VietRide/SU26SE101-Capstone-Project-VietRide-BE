@@ -8,4 +8,5 @@ public sealed record CreateRouteRequest(
     long BaseFare,
     decimal? TotalDistanceKm,
     int? EstimatedDurationMinutes,
-    bool? IsActive);
+    bool? IsActive,
+    string? Code = null);

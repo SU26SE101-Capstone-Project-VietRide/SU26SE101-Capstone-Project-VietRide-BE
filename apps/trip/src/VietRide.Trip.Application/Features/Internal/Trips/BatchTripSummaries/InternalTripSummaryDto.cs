@@ -10,5 +10,6 @@ public sealed record InternalTripSummaryDto(
     Guid DriverUserId,
     Guid? AssistantUserId)
 {
+    public string? TripCode { get; init; }
     public IReadOnlyList<InternalTripStopSummaryDto> Stops { get; init; } = [];
 }

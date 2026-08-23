@@ -13,6 +13,21 @@ public interface IRouteRepository : IRepository<Route, Guid>
 
     Task<bool> ExistsActiveOwnedByOperatorAsync(Guid operatorId, Guid routeId, CancellationToken cancellationToken);
 
+    Task<Route?> FindByCodeAsync(
+        Guid operatorId,
+        string code,
+        Guid? excludedRouteId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var normalizedCode = code.Trim().ToUpperInvariant();
+        return Task.FromResult(QueryNoTracking()
+            .FirstOrDefault(route => route.OperatorId == operatorId
+                && route.DeletedAt == null
+                && route.Code == normalizedCode
+                && (!excludedRouteId.HasValue || route.Id != excludedRouteId.Value)));
+    }
+
     Task<Route?> FindDuplicateWithTransactionLockAsync(
         Guid operatorId,
         string name,

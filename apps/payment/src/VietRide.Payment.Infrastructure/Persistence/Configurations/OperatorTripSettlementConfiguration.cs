@@ -21,8 +21,10 @@ internal sealed class OperatorTripSettlementConfiguration : IEntityTypeConfigura
         });
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).HasColumnName("id").HasColumnType("uuid").HasDefaultValueSql("gen_random_uuid()");
+        builder.Property(x => x.SettlementCode).HasColumnName("settlement_code").HasMaxLength(30);
         builder.Property(x => x.OperatorId).HasColumnName("operator_id").HasColumnType("uuid").IsRequired();
         builder.Property(x => x.TripId).HasColumnName("trip_id").HasColumnType("uuid").IsRequired();
+        builder.Property(x => x.TripCode).HasColumnName("trip_code").HasMaxLength(30);
         builder.Property(x => x.NetAmount).HasColumnName("net_amount").HasColumnType("bigint").HasDefaultValue(0L).IsRequired();
         builder.Property(x => x.TripTerminalAt).HasColumnName("trip_terminal_at").IsRequired();
         builder.Property(x => x.EligibleAt).HasColumnName("eligible_at").IsRequired();
@@ -47,6 +49,11 @@ internal sealed class OperatorTripSettlementConfiguration : IEntityTypeConfigura
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()").IsRequired();
         builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()").IsRequired();
         builder.HasIndex(x => new { x.OperatorId, x.TripId }).HasDatabaseName("uq_operator_trip_settlements_operator_trip").IsUnique();
+        builder.HasIndex(x => x.SettlementCode)
+            .HasDatabaseName("uq_operator_trip_settlements_code")
+            .IsUnique()
+            .HasFilter("settlement_code IS NOT NULL");
+        builder.HasIndex(x => x.TripCode).HasDatabaseName("idx_operator_trip_settlements_trip_code");
         builder.HasIndex(x => new { x.Status, x.EligibleAt }).HasDatabaseName("idx_operator_trip_settlements_status_eligible").HasFilter("status IN ('PENDING_HOLD','ELIGIBLE')");
         builder.HasIndex(x => new { x.OperatorId, x.Status }).HasDatabaseName("idx_operator_trip_settlements_operator_status");
         builder.HasIndex(x => x.TripId).HasDatabaseName("idx_operator_trip_settlements_trip_id");

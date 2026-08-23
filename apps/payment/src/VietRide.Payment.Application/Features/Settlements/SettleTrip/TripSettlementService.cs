@@ -160,7 +160,8 @@ public sealed class TripSettlementService
                 operatorWallet.Balance,
                 OperatorWalletTransactionRef.TRIP_SETTLEMENT,
                 settlement.Id,
-                "Trip settlement");
+                "Trip settlement",
+                now);
             await _operatorTransactions.AddAsync(operatorTransaction, cancellationToken);
             settlement.MarkSettled(netAmount, method, now, settledBy, operatorTransaction.Id);
 

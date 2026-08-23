@@ -14,6 +14,9 @@ public sealed class UpdateRouteValidator : AbstractValidator<UpdateRouteCommand>
             .NotEmpty()
             .MaximumLength(255)
             .When(command => command.Name is not null);
+        RuleFor(command => command.Code)
+            .Matches("^[A-Za-z0-9][A-Za-z0-9-]{1,19}$")
+            .When(command => command.Code is not null);
         RuleFor(command => command.ReturnRouteId)
             .NotEmpty()
             .When(command => command.ReturnRouteId.HasValue);

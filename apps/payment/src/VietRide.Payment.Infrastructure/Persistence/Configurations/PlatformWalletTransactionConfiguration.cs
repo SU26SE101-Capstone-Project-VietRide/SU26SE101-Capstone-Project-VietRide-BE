@@ -27,6 +27,10 @@ internal sealed class PlatformWalletTransactionConfiguration : IEntityTypeConfig
             .HasColumnType("uuid")
             .HasDefaultValueSql("gen_random_uuid()");
 
+        builder.Property(x => x.TransactionCode)
+            .HasColumnName("transaction_code")
+            .HasMaxLength(30);
+
         builder.Property(x => x.Type)
             .HasColumnName("type")
             .HasColumnType($"{PaymentDbContext.SchemaName}.platform_wallet_transaction_type")
@@ -104,6 +108,11 @@ internal sealed class PlatformWalletTransactionConfiguration : IEntityTypeConfig
         builder.HasIndex(x => x.CreatedAt)
             .HasDatabaseName("idx_platform_wallet_transactions_created_at")
             .IsDescending();
+
+        builder.HasIndex(x => x.TransactionCode)
+            .HasDatabaseName("uq_platform_wallet_transactions_code")
+            .IsUnique()
+            .HasFilter("transaction_code IS NOT NULL");
 
         builder.HasIndex(x => new { x.ReferenceType, x.ReferenceId })
             .HasDatabaseName("idx_platform_wallet_transactions_reference")

@@ -25,7 +25,8 @@ internal static class RouteMapper
             route.UpdatedAt,
             departureSchedules,
             originStation,
-            destinationStation);
+            destinationStation,
+            route.Code);
 
     public static RouteDto ToDto(
         Route route,
@@ -48,5 +49,6 @@ internal static class RouteMapper
             route.UpdatedAt,
             originStation,
             destinationStation,
-            stops);
+            stops,
+            route.Code);
 }

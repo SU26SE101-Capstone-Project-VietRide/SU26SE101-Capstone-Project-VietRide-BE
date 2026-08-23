@@ -11,4 +11,5 @@ public sealed record UpdateRouteCommand(
     long? BaseFare,
     decimal? TotalDistanceKm,
     int? EstimatedDurationMinutes,
-    bool? IsActive) : IRequest<RouteDto>;
+    bool? IsActive,
+    string? Code = null) : IRequest<RouteDto>;

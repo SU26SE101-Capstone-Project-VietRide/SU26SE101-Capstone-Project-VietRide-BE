@@ -11,6 +11,10 @@ public sealed class CreateRouteValidator : AbstractValidator<CreateRouteCommand>
         RuleFor(command => command.Name)
             .NotEmpty()
             .MaximumLength(255);
+        RuleFor(command => command.Code)
+            .Matches("^[A-Za-z0-9][A-Za-z0-9-]{1,19}$")
+            .When(command => command.Code is not null)
+            .WithMessage("Route code must contain 2 to 20 uppercase letters, digits, or hyphens after normalization.");
         RuleFor(command => command.OriginStationId)
             .NotEmpty();
         RuleFor(command => command.DestinationStationId)

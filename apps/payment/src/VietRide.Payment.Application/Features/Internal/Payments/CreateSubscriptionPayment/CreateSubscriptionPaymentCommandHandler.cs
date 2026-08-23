@@ -120,7 +120,8 @@ public sealed class CreateSubscriptionPaymentCommandHandler
                     wallet.Balance,
                     OperatorWalletTransactionRef.SUBSCRIPTION_PAYMENT,
                     walletPayment.Id,
-                    "Subscription payment"),
+                    "Subscription payment",
+                    now),
                 cancellationToken).ConfigureAwait(false);
             await _platformWallets.CreditAsync(
                 amount,

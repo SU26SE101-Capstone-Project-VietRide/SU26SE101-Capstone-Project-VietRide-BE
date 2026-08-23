@@ -8,4 +8,6 @@ public sealed record OperatorLedgerReportRow(
     Guid? TripId,
     long AmountVnd,
     DateTimeOffset OccurredAt,
-    string? Note);
+    string? Note,
+    string? ReferenceCode = null,
+    string? TripCode = null);

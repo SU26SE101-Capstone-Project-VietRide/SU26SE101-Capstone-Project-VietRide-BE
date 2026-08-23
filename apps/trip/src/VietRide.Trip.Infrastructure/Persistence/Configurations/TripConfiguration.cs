@@ -24,6 +24,11 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
             .HasColumnName("id")
             .HasDefaultValueSql("gen_random_uuid()");
 
+        builder.Property(trip => trip.TripCode)
+            .HasColumnName("trip_code")
+            .HasMaxLength(30)
+            .IsRequired(false);
+
         builder.Property(trip => trip.OperatorId).HasColumnName("operator_id");
         builder.Property(trip => trip.RouteId).HasColumnName("route_id");
         builder.Property(trip => trip.AlternativeRouteId)
@@ -111,6 +116,10 @@ internal sealed class TripConfiguration : IEntityTypeConfiguration<Domain.Entiti
             .IsUnique()
             .HasDatabaseName("uq_trips_driver_departure")
             .HasFilter("status NOT IN ('CANCELLED')");
+        builder.HasIndex(trip => trip.TripCode)
+            .IsUnique()
+            .HasDatabaseName("uq_trips_trip_code")
+            .HasFilter("trip_code IS NOT NULL");
         builder.HasIndex(trip => new { trip.VehicleId, trip.DepartureDateTime })
             .IsUnique()
             .HasDatabaseName("uq_trips_vehicle_departure")

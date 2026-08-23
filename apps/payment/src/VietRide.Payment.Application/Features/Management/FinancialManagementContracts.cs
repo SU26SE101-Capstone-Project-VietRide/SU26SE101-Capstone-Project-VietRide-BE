@@ -35,7 +35,9 @@ public sealed record LastSettlementDto(
     Guid SettlementId,
     long Amount,
     string Method,
-    DateTimeOffset SettledAt);
+    DateTimeOffset SettledAt,
+    string? SettlementCode = null,
+    string? TripCode = null);
 
 public sealed record WalletTransactionDto(
     Guid TransactionId,
@@ -54,12 +56,15 @@ public sealed record WalletTransactionDto(
     FinancialActorDto? Actor = null,
     string? AdjustmentReason = null,
     string DataCompleteness = "COMPLETE",
-    IReadOnlyList<string>? MissingFields = null);
+    IReadOnlyList<string>? MissingFields = null,
+    string? TransactionCode = null);
 
 public sealed record RelatedSettlementDto(
     Guid SettlementId,
     Guid TripId,
-    string Method);
+    string Method,
+    string? SettlementCode = null,
+    string? TripCode = null);
 
 public sealed record SettlementDto(
     Guid SettlementId,
@@ -82,7 +87,8 @@ public sealed record SettlementDto(
     DateTimeOffset? NextRetryAt = null,
     string? CancelReason = null,
     SettlementTripDto? Trip = null,
-    string DataCompleteness = "COMPLETE");
+    string DataCompleteness = "COMPLETE",
+    string? SettlementCode = null);
 
 public sealed record SettlementFinancialBreakdownDto(
     long GrossSalesAmount,
@@ -98,7 +104,8 @@ public sealed record SettlementTripDto(
     Guid RouteId,
     string RouteName,
     string OriginName,
-    string DestinationName);
+    string DestinationName,
+    string? TripCode = null);
 
 public sealed record AdminSettlementDto(
     Guid SettlementId,
@@ -114,7 +121,9 @@ public sealed record AdminSettlementDto(
     string? ActiveFailureCode,
     string? Severity,
     FinancialOperatorDto? Operator,
-    FinancialActorDto? SettledBy);
+    FinancialActorDto? SettledBy,
+    string? SettlementCode = null,
+    string? TripCode = null);
 
 public sealed record FinancialOperatorDto(
     Guid OperatorId,
@@ -139,7 +148,8 @@ public sealed record PlatformWalletTransactionDto(
     string? Note,
     DateTimeOffset CreatedAt,
     string ActorType,
-    FinancialActorDto? Actor);
+    FinancialActorDto? Actor,
+    string? TransactionCode = null);
 
 public sealed record LedgerEntryDto(
     Guid LedgerEntryId,
@@ -168,7 +178,9 @@ public sealed record LedgerSettlementDto(
     string Status,
     DateTimeOffset EligibleAt,
     DateTimeOffset? SettledAt,
-    Guid? WalletTransactionId);
+    Guid? WalletTransactionId,
+    string? SettlementCode = null,
+    string? TripCode = null);
 
 public sealed record InvoiceListItemDto(
     Guid InvoiceId,
@@ -213,7 +225,8 @@ public sealed record AdjustmentResult(
     string ReferenceType,
     Guid? ReferenceId,
     string Note,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? TransactionCode = null);
 
 public sealed record ManualSettlementResult(
     Guid SettlementId,
@@ -222,7 +235,9 @@ public sealed record ManualSettlementResult(
     long NetAmount,
     string Status,
     string SettlementMethod,
-    DateTimeOffset? SettledAt);
+    DateTimeOffset? SettledAt,
+    string? SettlementCode = null,
+    string? TripCode = null);
 
 public interface IFinancialManagementService
 {

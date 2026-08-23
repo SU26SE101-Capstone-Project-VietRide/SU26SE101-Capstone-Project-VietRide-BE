@@ -9,4 +9,5 @@ public sealed record FullRouteRequest(
     bool? IsActive,
     string? PathPolyline,
     RouteManualMetricsRequest? ManualMetrics,
-    IReadOnlyList<FullRouteStopRequest>? Stops);
+    IReadOnlyList<FullRouteStopRequest>? Stops,
+    string? Code = null);

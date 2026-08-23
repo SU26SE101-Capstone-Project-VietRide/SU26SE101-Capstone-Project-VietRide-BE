@@ -54,6 +54,7 @@ public sealed class CreateRouteHandler : IRequestHandler<CreateRouteCommand, Rou
         ValidateOperatorStationLinks(request.OperatorId, request.OriginStationId, request.DestinationStationId);
         ValidateDifferentStations(request.OriginStationId, request.DestinationStationId);
         await ValidateReturnRouteAsync(request.OperatorId, request.ReturnRouteId, cancellationToken);
+        await EnsureCodeAvailableAsync(request.OperatorId, request.Code, null, cancellationToken);
         await EnsureNotDuplicatedAsync(
             request.OperatorId,
             request.Name!,
@@ -70,7 +71,8 @@ public sealed class CreateRouteHandler : IRequestHandler<CreateRouteCommand, Rou
             Money.FromRaw(request.BaseFare),
             request.TotalDistanceKm,
             request.EstimatedDurationMinutes,
-            request.ReturnRouteId);
+            request.ReturnRouteId,
+            request.Code);
 
         if (request.IsActive == false)
         {
@@ -181,6 +183,31 @@ public sealed class CreateRouteHandler : IRequestHandler<CreateRouteCommand, Rou
                 "ROUTE_DUPLICATED",
                 "A Route with the same normalized name and station pair already exists.",
                 [new ValidationError("existingRouteId", duplicate.Id.ToString("D"))]);
+        }
+    }
+
+    private async Task EnsureCodeAvailableAsync(
+        Guid operatorId,
+        string? code,
+        Guid? excludedRouteId,
+        CancellationToken cancellationToken)
+    {
+        if (code is null)
+        {
+            return;
+        }
+
+        var duplicate = await routeRepository.FindByCodeAsync(
+            operatorId,
+            code,
+            excludedRouteId,
+            cancellationToken);
+        if (duplicate is not null)
+        {
+            throw new CodedConflictException(
+                "ROUTE_CODE_DUPLICATED",
+                "A Route with this code already exists for the operator.",
+                [new ValidationError("code", "Route code is already in use.")]);
         }
     }
 }

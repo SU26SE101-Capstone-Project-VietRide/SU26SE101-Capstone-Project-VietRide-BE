@@ -1,14 +1,17 @@
 using VietRide.Payment.Domain.Enums;
+using VietRide.Shared.Kernel.Identifiers;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Payment.Domain.Entities;
 
-public sealed class OperatorWalletTransaction : BaseEntity<Guid>
+public sealed class OperatorWalletTransaction : BaseEntity<Guid>, IBusinessCodeEntity
 {
+    string IBusinessCodeEntity.BusinessCodeConstraintName => "uq_operator_wallet_transactions_code";
     private OperatorWalletTransaction() { }
 
     public Guid OperatorId { get; private set; }
+    public string? TransactionCode { get; private set; }
     public OperatorWalletTransactionType Type { get; private set; }
     public Money Amount { get; private set; }
     public Money BalanceBefore { get; private set; }
@@ -25,7 +28,8 @@ public sealed class OperatorWalletTransaction : BaseEntity<Guid>
         Money balanceAfter,
         OperatorWalletTransactionRef referenceType,
         Guid? referenceId,
-        string? note = null)
+        string? note = null,
+        DateTimeOffset? businessInstant = null)
     {
         if (operatorId == Guid.Empty)
             throw new ArgumentException("Operator id is required.", nameof(operatorId));
@@ -38,6 +42,7 @@ public sealed class OperatorWalletTransaction : BaseEntity<Guid>
         return new OperatorWalletTransaction
         {
             Id = Guid.NewGuid(),
+            TransactionCode = BusinessCodeGenerator.Generate("OWT", businessInstant ?? DateTimeOffset.UtcNow),
             OperatorId = operatorId,
             Type = type,
             Amount = amount,
@@ -48,4 +53,12 @@ public sealed class OperatorWalletTransaction : BaseEntity<Guid>
             Note = note,
         };
     }
+
+    public void BackfillTransactionCode(DateTimeOffset businessInstant)
+    {
+        TransactionCode ??= BusinessCodeGenerator.Generate("OWT", businessInstant);
+    }
+
+    void IBusinessCodeEntity.RegenerateBusinessCode()
+        => TransactionCode = BusinessCodeGenerator.Generate("OWT", CreatedAt);
 }

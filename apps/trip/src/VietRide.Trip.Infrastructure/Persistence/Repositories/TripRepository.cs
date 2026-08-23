@@ -68,7 +68,9 @@ internal sealed class TripRepository : ITripRepository
                    t.driver_user_id,
                    t.assistant_user_id,
                    origin.id,
-                   destination.id
+                   destination.id,
+                   t.trip_code,
+                   r.code
             FROM vietride_trip.trips AS t
             INNER JOIN vietride_trip.routes AS r ON r.id = t.route_id
             INNER JOIN vietride_trip.stations AS origin ON origin.id = r.origin_station_id
@@ -98,6 +100,7 @@ internal sealed class TripRepository : ITripRepository
                     {
                         OriginStationId = reader.GetGuid(15),
                         DestinationStationId = reader.GetGuid(16),
+                        Code = reader.IsDBNull(18) ? null : reader.GetString(18),
                     },
                     new InternalTripVehicleSummaryDto(
                         reader.GetGuid(8),
@@ -107,7 +110,10 @@ internal sealed class TripRepository : ITripRepository
                             reader.GetString(11),
                             reader.GetString(12))),
                     reader.GetGuid(13),
-                    reader.IsDBNull(14) ? null : reader.GetGuid(14)));
+                    reader.IsDBNull(14) ? null : reader.GetGuid(14))
+                {
+                    TripCode = reader.IsDBNull(17) ? null : reader.GetString(17),
+                });
             }
         }
 
@@ -292,6 +298,7 @@ internal sealed class TripRepository : ITripRepository
         }
 
         var routePattern = routeSearch is null ? null : $"%{EscapeLikePattern(routeSearch)}%";
+        var codePrefixPattern = routeSearch is null ? null : $"{EscapeLikePattern(routeSearch.Trim().ToUpperInvariant())}%";
         var platePattern = normalizedPlateSearch is null ? null : $"%{normalizedPlateSearch}%";
         if (routeSearch is not null || normalizedPlateSearch is not null)
         {
@@ -299,6 +306,8 @@ internal sealed class TripRepository : ITripRepository
             if (routePattern is not null)
             {
                 searchFilters.Add("r.name ILIKE @route_pattern ESCAPE '\\'");
+                searchFilters.Add("t.trip_code LIKE @code_prefix_pattern ESCAPE '\\'");
+                searchFilters.Add("r.code LIKE @code_prefix_pattern ESCAPE '\\'");
             }
 
             if (platePattern is not null)
@@ -332,6 +341,7 @@ internal sealed class TripRepository : ITripRepository
             countCommand,
             operatorId,
             routePattern,
+            codePrefixPattern,
             platePattern,
             status,
             fromUtc,
@@ -355,7 +365,9 @@ internal sealed class TripRepository : ITripRepository
                    t.assistant_user_id,
                    t.departure_date_time,
                    t.estimated_arrival_time,
-                   t.driver_schedule_id
+                   t.driver_schedule_id,
+                   t.trip_code,
+                   r.code
             FROM vietride_trip.trips AS t
             INNER JOIN vietride_trip.routes AS r ON r.id = t.route_id
             INNER JOIN vietride_trip.vehicles AS v ON v.id = t.vehicle_id
@@ -369,6 +381,7 @@ internal sealed class TripRepository : ITripRepository
             itemsCommand,
             operatorId,
             routePattern,
+            codePrefixPattern,
             platePattern,
             status,
             fromUtc,
@@ -394,7 +407,9 @@ internal sealed class TripRepository : ITripRepository
                 reader.IsDBNull(10) ? null : reader.GetGuid(10),
                 reader.GetFieldValue<DateTimeOffset>(11),
                 reader.GetFieldValue<DateTimeOffset>(12),
-                reader.IsDBNull(13) ? null : reader.GetGuid(13)));
+                reader.IsDBNull(13) ? null : reader.GetGuid(13),
+                reader.IsDBNull(14) ? null : reader.GetString(14),
+                reader.IsDBNull(15) ? null : reader.GetString(15)));
         }
 
         return PagedResult<OperatorTripListRow>.Create(items, page, pageSize, totalItems);
@@ -768,6 +783,7 @@ internal sealed class TripRepository : ITripRepository
         System.Data.Common.DbCommand command,
         Guid operatorId,
         string? routePattern,
+        string? codePrefixPattern,
         string? platePattern,
         TripStatus? status,
         DateTimeOffset? fromUtc,
@@ -777,6 +793,7 @@ internal sealed class TripRepository : ITripRepository
         if (routePattern is not null)
         {
             AddParameter(command, "route_pattern", routePattern);
+            AddParameter(command, "code_prefix_pattern", codePrefixPattern!);
         }
 
         if (platePattern is not null)

@@ -7,6 +7,54 @@ namespace VietRide.Payment.UnitTests.Domain;
 public sealed class OperatorTripSettlementTests
 {
     [Fact]
+    public void CreatePending_GeneratesSettlementCodeAndSnapshotsTripCode()
+    {
+        var terminalAt = new DateTimeOffset(2026, 8, 23, 0, 0, 0, TimeSpan.Zero);
+
+        var settlement = OperatorTripSettlement.CreatePending(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            terminalAt,
+            "TRIP-20260823-7K3M2QPX");
+
+        settlement.SettlementCode.Should().MatchRegex("^STL-20260823-[0-9ABCDEFGHJKMNPQRSTVWXYZ]{8}$");
+        settlement.TripCode.Should().Be("TRIP-20260823-7K3M2QPX");
+    }
+
+    [Fact]
+    public void TripCodeSnapshot_CannotBeChangedToAnotherCode()
+    {
+        var settlement = OperatorTripSettlement.CreatePending(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            new DateTimeOffset(2026, 8, 23, 0, 0, 0, TimeSpan.Zero),
+            "TRIP-20260823-7K3M2QPX");
+
+        var action = () => settlement.SetTripCode("TRIP-20260823-4F8N2KQJ");
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*immutable*");
+        settlement.TripCode.Should().Be("TRIP-20260823-7K3M2QPX");
+    }
+
+    [Fact]
+    public void BackfillBusinessCodes_IsIdempotentForExistingValues()
+    {
+        var settlement = OperatorTripSettlement.CreatePending(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            new DateTimeOffset(2026, 8, 23, 0, 0, 0, TimeSpan.Zero),
+            "TRIP-20260823-7K3M2QPX");
+        var originalSettlementCode = settlement.SettlementCode;
+
+        settlement.BackfillBusinessCodes("TRIP-20260823-4F8N2KQJ");
+        settlement.BackfillBusinessCodes("TRIP-20260823-4F8N2KQJ");
+
+        settlement.SettlementCode.Should().Be(originalSettlementCode);
+        settlement.TripCode.Should().Be("TRIP-20260823-7K3M2QPX");
+    }
+
+    [Fact]
     public void RefreshEligibility_NetNonPositive_CancelsWithoutWalletMovement()
     {
         var terminalAt = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
