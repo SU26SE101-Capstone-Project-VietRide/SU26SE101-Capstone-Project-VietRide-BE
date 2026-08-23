@@ -4,4 +4,5 @@ public sealed record OperatorTripRouteDto(
     Guid RouteId,
     string Name,
     string OriginName,
-    string DestinationName);
+    string DestinationName,
+    string? Code = null);

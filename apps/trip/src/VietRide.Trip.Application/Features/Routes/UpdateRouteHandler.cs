@@ -47,6 +47,23 @@ public sealed class UpdateRouteHandler : IRequestHandler<UpdateRouteCommand, Rou
         }
 
         await ValidateReturnRouteAsync(request.OperatorId, request.ReturnRouteId, cancellationToken);
+        if (request.Code is not null)
+        {
+            var duplicateCode = await routeRepository.FindByCodeAsync(
+                request.OperatorId,
+                request.Code,
+                route.Id,
+                cancellationToken);
+            if (duplicateCode is not null)
+            {
+                throw new CodedConflictException(
+                    "ROUTE_CODE_DUPLICATED",
+                    "A Route with this code already exists for the operator.",
+                    [new ValidationError("code", "Route code is already in use.")]);
+            }
+
+            route.SetCode(request.Code);
+        }
 
         var returnRouteId = request.HasReturnRouteId ? request.ReturnRouteId : route.ReturnRouteId;
         var effectiveName = request.Name ?? route.Name;

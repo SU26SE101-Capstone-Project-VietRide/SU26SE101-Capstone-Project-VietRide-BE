@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions;
 using Npgsql;
 using Npgsql.NameTranslation;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Persistence;
 using VietRide.Shared.Persistence.Inbox;
@@ -95,6 +96,30 @@ public sealed class TripDbContext : VietRideDbContextBase
 
     public DbSet<RouteChangeProposalStop> RouteChangeProposalStops => Set<RouteChangeProposalStop>();
 
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await base.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (DbUpdateException exception) when (IsRouteCodeUniqueViolation(exception))
+        {
+            throw RouteCodeDuplicated();
+        }
+    }
+
+    public override int SaveChanges()
+    {
+        try
+        {
+            return base.SaveChanges();
+        }
+        catch (DbUpdateException exception) when (IsRouteCodeUniqueViolation(exception))
+        {
+            throw RouteCodeDuplicated();
+        }
+    }
+
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Conventions.Remove(typeof(ForeignKeyIndexConvention));
@@ -139,4 +164,17 @@ public sealed class TripDbContext : VietRideDbContextBase
             entityType.RemoveIndex(index);
         }
     }
+
+    private static bool IsRouteCodeUniqueViolation(DbUpdateException exception)
+        => exception.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: "uq_routes_operator_code",
+        };
+
+    private static CodedConflictException RouteCodeDuplicated()
+        => new(
+            "ROUTE_CODE_DUPLICATED",
+            "A Route with this code already exists for the operator.",
+            [new ValidationError("code", "Route code is already in use.")]);
 }

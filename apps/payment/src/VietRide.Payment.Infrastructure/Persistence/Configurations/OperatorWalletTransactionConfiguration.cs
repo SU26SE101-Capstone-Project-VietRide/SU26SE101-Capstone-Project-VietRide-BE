@@ -16,6 +16,7 @@ internal sealed class OperatorWalletTransactionConfiguration : IEntityTypeConfig
         });
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).HasColumnName("id").HasColumnType("uuid").HasDefaultValueSql("gen_random_uuid()");
+        builder.Property(x => x.TransactionCode).HasColumnName("transaction_code").HasMaxLength(30);
         builder.Property(x => x.OperatorId).HasColumnName("operator_id").HasColumnType("uuid").IsRequired();
         builder.Property(x => x.Type).HasColumnName("type").HasColumnType($"{PaymentDbContext.SchemaName}.operator_wallet_transaction_type").IsRequired();
         builder.Property(x => x.Amount).HasColumnName("amount").HasColumnType("bigint").HasConversion(m => m.Amount, value => Money.FromRaw(value)).IsRequired();
@@ -28,6 +29,10 @@ internal sealed class OperatorWalletTransactionConfiguration : IEntityTypeConfig
         builder.Ignore(x => x.UpdatedAt);
         builder.Ignore(x => x.RowVersion);
         builder.HasIndex(x => new { x.OperatorId, x.CreatedAt }).HasDatabaseName("idx_operator_wallet_transactions_operator_id_created_at").IsDescending(false, true);
+        builder.HasIndex(x => x.TransactionCode)
+            .HasDatabaseName("uq_operator_wallet_transactions_code")
+            .IsUnique()
+            .HasFilter("transaction_code IS NOT NULL");
         builder.HasIndex(x => new { x.ReferenceType, x.ReferenceId }).HasDatabaseName("idx_operator_wallet_transactions_reference").HasFilter("reference_id IS NOT NULL");
         builder.HasIndex(x => new { x.OperatorId, x.Type, x.ReferenceType, x.ReferenceId })
             .HasDatabaseName("uq_operator_wallet_transactions_subscription")

@@ -6,6 +6,7 @@ public sealed record InternalTripRouteSummaryDto(
     string OriginName,
     string DestinationName)
 {
+    public string? Code { get; init; }
     public Guid OriginStationId { get; init; }
 
     public Guid DestinationStationId { get; init; }

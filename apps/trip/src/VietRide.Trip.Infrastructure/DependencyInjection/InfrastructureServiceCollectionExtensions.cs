@@ -117,6 +117,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<AutoStartFallbackJob>();
         services.AddScoped<AutoCompletedFallbackJob>();
         services.AddScoped<PlatformTripStatsBackfillJob>();
+        services.AddScoped<TripBusinessCodeBackfillJob>();
         if (backgroundWorkersEnabled)
         {
             services.AddVietRideEventConsumer<BookingShuttleConfirmedIntegrationEvent, BookingShuttleConfirmedIntegrationEventHandler>(options =>

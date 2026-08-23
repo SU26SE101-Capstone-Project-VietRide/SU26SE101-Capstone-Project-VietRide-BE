@@ -1,4 +1,5 @@
 using System.Text.Json;
+using VietRide.Shared.Kernel.Identifiers;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 
@@ -7,10 +8,12 @@ namespace VietRide.Trip.Domain.Entities;
 /// <summary>
 /// Scheduled execution of a route with vehicle/crew snapshots.
 /// </summary>
-public sealed class Trip : BaseEntity<Guid>
+public sealed class Trip : BaseEntity<Guid>, IBusinessCodeEntity
 {
+    string IBusinessCodeEntity.BusinessCodeConstraintName => "uq_trips_trip_code";
     private readonly List<TripSeat> seats = [];
 
+    public string? TripCode { get; private set; }
     public Guid OperatorId { get; private set; }
     public Guid RouteId { get; private set; }
     public Guid? AlternativeRouteId { get; private set; }
@@ -112,6 +115,7 @@ public sealed class Trip : BaseEntity<Guid>
         return new Trip
         {
             Id = Guid.NewGuid(),
+            TripCode = BusinessCodeGenerator.Generate("TRIP", departureDateTime),
             OperatorId = operatorId,
             RouteId = routeId,
             VehicleId = vehicleId,
@@ -138,6 +142,14 @@ public sealed class Trip : BaseEntity<Guid>
             Notes = NormalizeNotes(notes),
         };
     }
+
+    public void BackfillTripCode()
+    {
+        TripCode ??= BusinessCodeGenerator.Generate("TRIP", DepartureDateTime);
+    }
+
+    void IBusinessCodeEntity.RegenerateBusinessCode()
+        => TripCode = BusinessCodeGenerator.Generate("TRIP", DepartureDateTime);
 
     public void UpdateNotes(string? notes)
     {

@@ -102,9 +102,34 @@ public sealed class TripTests
         trip.AlternativeRouteId.Should().Be(alternativeRouteId);
     }
 
-    private static VietRide.Trip.Domain.Entities.Trip CreateTrip()
+    [Fact]
+    public void Create_GeneratesImmutableTripCodeFromOriginalDepartureDate()
     {
-        var departure = DateTimeOffset.UtcNow.AddHours(1);
+        var departure = new DateTimeOffset(2026, 8, 23, 1, 0, 0, TimeSpan.Zero);
+        var trip = CreateTrip(departure);
+        var originalCode = trip.TripCode;
+
+        trip.Reschedule(departure.AddDays(1), departure.AddDays(1).AddHours(4));
+
+        originalCode.Should().MatchRegex("^TRIP-20260823-[0-9ABCDEFGHJKMNPQRSTVWXYZ]{8}$");
+        trip.TripCode.Should().Be(originalCode);
+    }
+
+    [Fact]
+    public void BackfillTripCode_DoesNotChangeExistingCode()
+    {
+        var trip = CreateTrip();
+        var originalCode = trip.TripCode;
+
+        trip.BackfillTripCode();
+        trip.BackfillTripCode();
+
+        trip.TripCode.Should().Be(originalCode);
+    }
+
+    private static VietRide.Trip.Domain.Entities.Trip CreateTrip(DateTimeOffset? departureOverride = null)
+    {
+        var departure = departureOverride ?? DateTimeOffset.UtcNow.AddHours(1);
         return VietRide.Trip.Domain.Entities.Trip.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),

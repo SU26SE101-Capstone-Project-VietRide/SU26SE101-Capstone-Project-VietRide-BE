@@ -41,7 +41,9 @@ public sealed class ListRoutesHandler : IRequestHandler<ListRoutesQuery, PagedRe
         if (!string.IsNullOrWhiteSpace(request.Search))
         {
             var normalizedSearch = request.Search.Trim().ToLowerInvariant();
-            query = query.Where(route => route.Name.ToLower().Contains(normalizedSearch));
+            var normalizedCode = request.Search.Trim().ToUpperInvariant();
+            query = query.Where(route => route.Name.ToLower().Contains(normalizedSearch)
+                || route.Code != null && route.Code.StartsWith(normalizedCode));
         }
 
         if (request.IsActive.HasValue)

@@ -17,4 +17,5 @@ public sealed record UpsertFullRouteCommand(
     string? PathPolyline,
     decimal? ManualDistanceKm,
     int? ManualDurationMinutes,
-    IReadOnlyList<FullRouteStopInput> Stops) : IRequest<RouteDto>;
+    IReadOnlyList<FullRouteStopInput> Stops,
+    string? Code = null) : IRequest<RouteDto>;

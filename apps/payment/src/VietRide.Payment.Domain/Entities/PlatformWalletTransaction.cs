@@ -1,5 +1,6 @@
 using VietRide.Payment.Domain.Enums;
 using VietRide.Payment.Domain.ValueObjects;
+using VietRide.Shared.Kernel.Identifiers;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 
@@ -9,8 +10,10 @@ namespace VietRide.Payment.Domain.Entities;
 /// Immutable platform wallet money ledger. Nullable display snapshots may be resolved once;
 /// money, balance and reference fields are never updated or soft-deleted.
 /// </summary>
-public sealed class PlatformWalletTransaction : BaseEntity<Guid>
+public sealed class PlatformWalletTransaction : BaseEntity<Guid>, IBusinessCodeEntity
 {
+    string IBusinessCodeEntity.BusinessCodeConstraintName => "uq_platform_wallet_transactions_code";
+    public string? TransactionCode { get; private set; }
     public PlatformWalletTransactionType Type { get; private set; }
     public Money Amount { get; private set; }
     public Money BalanceBefore { get; private set; }
@@ -34,7 +37,8 @@ public sealed class PlatformWalletTransaction : BaseEntity<Guid>
         Money balanceAfter,
         PlatformWalletTransactionRef referenceType,
         Guid? referenceId = null,
-        string? note = null)
+        string? note = null,
+        DateTimeOffset? businessInstant = null)
     {
         if (amount.Amount <= 0)
             throw new ArgumentOutOfRangeException(nameof(amount), "Transaction amount must be positive.");
@@ -42,6 +46,7 @@ public sealed class PlatformWalletTransaction : BaseEntity<Guid>
         return new PlatformWalletTransaction
         {
             Id = Guid.NewGuid(),
+            TransactionCode = BusinessCodeGenerator.Generate("PWT", businessInstant ?? DateTimeOffset.UtcNow),
             Type = type,
             Amount = amount,
             BalanceBefore = balanceBefore,
@@ -51,6 +56,14 @@ public sealed class PlatformWalletTransaction : BaseEntity<Guid>
             Note = note,
         };
     }
+
+    public void BackfillTransactionCode(DateTimeOffset businessInstant)
+    {
+        TransactionCode ??= BusinessCodeGenerator.Generate("PWT", businessInstant);
+    }
+
+    void IBusinessCodeEntity.RegenerateBusinessCode()
+        => TransactionCode = BusinessCodeGenerator.Generate("PWT", CreatedAt);
 
     public static PlatformWalletTransaction CreatePaymentHold(
         PlatformWalletTransactionType type,

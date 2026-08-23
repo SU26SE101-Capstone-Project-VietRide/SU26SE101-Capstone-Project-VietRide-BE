@@ -35,7 +35,8 @@ public sealed class TripTerminalSettlementService
         Guid operatorId,
         Guid tripId,
         DateTimeOffset terminalAt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? tripCode = null)
     {
         await _unitOfWork.ExecuteInTransactionAsync(async () =>
         {
@@ -48,13 +49,17 @@ public sealed class TripTerminalSettlementService
                 cancellationToken);
             if (settlement is null)
             {
-                settlement = OperatorTripSettlement.CreatePending(operatorId, tripId, terminalAt);
+                settlement = OperatorTripSettlement.CreatePending(operatorId, tripId, terminalAt, tripCode);
                 var netAmount = await _ledger.SumTripNetAmountAsync(
                     operatorId,
                     tripId,
                     cancellationToken);
                 settlement.RefreshEligibility(netAmount, _clock.UtcNow);
                 await _settlements.AddAsync(settlement, cancellationToken);
+            }
+            else if (tripCode is not null)
+            {
+                settlement.SetTripCode(tripCode);
             }
 
             await _processed.AddAsync(
@@ -77,7 +82,8 @@ public sealed class TripCompletedSettlementEventHandler
             integrationEvent.OperatorId,
             integrationEvent.TripId,
             integrationEvent.TerminalAt,
-            cancellationToken);
+            cancellationToken,
+            integrationEvent.TripCode);
 }
 
 public sealed class TripDisruptedSettlementEventHandler
@@ -92,5 +98,6 @@ public sealed class TripDisruptedSettlementEventHandler
             integrationEvent.OperatorId,
             integrationEvent.TripId,
             integrationEvent.TerminalAt,
-            cancellationToken);
+            cancellationToken,
+            integrationEvent.TripCode);
 }

@@ -7,4 +7,6 @@ public sealed record TripRevenueSummaryItem(
     Guid RouteId,
     string RouteName,
     string OriginName,
-    string DestinationName);
+    string DestinationName,
+    string? TripCode = null,
+    string? RouteCode = null);

@@ -33,6 +33,43 @@ public sealed class RouteEntityAndModelTests
     }
 
     [Fact]
+    public void Route_Create_NormalizesOptionalOperatorCode()
+    {
+        var route = Route.Create(
+            Guid.NewGuid(),
+            "Main corridor",
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Money.FromRaw(123_456),
+            totalDistanceKm: null,
+            estimatedDurationMinutes: null,
+            code: "  sg-dl-01  ");
+
+        route.Code.Should().Be("SG-DL-01");
+    }
+
+    [Theory]
+    [InlineData("A")]
+    [InlineData("-BAD")]
+    [InlineData("BAD_CODE")]
+    [InlineData("ABCDEFGHIJKLMNOPQRSTUVWXYZ")]
+    public void Route_Create_RejectsInvalidOperatorCode(string code)
+    {
+        var action = () => Route.Create(
+            Guid.NewGuid(),
+            "Main corridor",
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Money.FromRaw(123_456),
+            totalDistanceKm: null,
+            estimatedDurationMinutes: null,
+            code: code);
+
+        action.Should().Throw<ArgumentException>()
+            .WithParameterName("code");
+    }
+
+    [Fact]
     public void Route_Create_RejectsBlankName()
     {
         var act = () => Route.Create(
@@ -113,6 +150,9 @@ public sealed class RouteEntityAndModelTests
         routeEntity.FindProperty(nameof(Route.Name))!.GetColumnName().Should().Be("name");
         routeEntity.FindProperty(nameof(Route.Name))!.GetMaxLength().Should().Be(255);
         routeEntity.FindProperty(nameof(Route.Name))!.IsNullable.Should().BeFalse();
+        routeEntity.FindProperty(nameof(Route.Code))!.GetColumnName().Should().Be("code");
+        routeEntity.FindProperty(nameof(Route.Code))!.GetMaxLength().Should().Be(20);
+        routeEntity.FindProperty(nameof(Route.Code))!.IsNullable.Should().BeTrue();
         routeEntity.FindProperty(nameof(Route.BaseFare))!.GetColumnType().Should().Be("bigint");
         routeEntity.FindProperty(nameof(Route.DeletedAt)).Should().NotBeNull();
         routeEntity.FindProperty(nameof(Route.IsActive)).Should().NotBeNull();
@@ -122,8 +162,13 @@ public sealed class RouteEntityAndModelTests
         {
             "idx_routes_operator_id",
             "idx_routes_return_route_id",
-            "idx_routes_origin_destination"
+            "idx_routes_origin_destination",
+            "uq_routes_operator_code"
         });
+        routeEntity.GetIndexes().Should().Contain(index =>
+            index.IsUnique
+            && index.GetDatabaseName() == "uq_routes_operator_code"
+            && index.GetFilter() == "deleted_at IS NULL AND code IS NOT NULL");
         routeEntity.GetCheckConstraints().Select(check => check.Name).Should().Contain(new[]
         {
             "chk_routes_origin_dest_different",

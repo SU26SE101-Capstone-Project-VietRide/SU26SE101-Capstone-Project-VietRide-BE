@@ -48,7 +48,8 @@ public sealed class OperatorRoutesController : ControllerBase
                 request.BaseFare,
                 request.TotalDistanceKm,
                 request.EstimatedDurationMinutes,
-                request.IsActive),
+                request.IsActive,
+                request.Code),
             cancellationToken);
 
         return StatusCode(StatusCodes.Status201Created, response);
@@ -156,7 +157,8 @@ public sealed class OperatorRoutesController : ControllerBase
                 request.BaseFare,
                 request.TotalDistanceKm,
                 request.EstimatedDurationMinutes,
-                request.IsActive),
+                request.IsActive,
+                request.Code),
             cancellationToken));
     }
 
@@ -344,7 +346,8 @@ public sealed class OperatorRoutesController : ControllerBase
                 stop.EstimatedDurationFromOriginMinutes,
                 stop.DistanceFromOriginKm,
                 stop.AllowPickup,
-                stop.AllowDropoff)).ToArray());
+                stop.AllowDropoff)).ToArray(),
+            request.Code);
 
     private Guid GetRequiredOperatorId()
         => CurrentUserClaims.GetOperatorId(User)

@@ -20,6 +20,12 @@ public interface IOperatorLedgerEntryRepository : IRepository<OperatorLedgerEntr
         bool refundOnly,
         CancellationToken ct = default)
         => throw new NotSupportedException("Operator ledger report is not implemented by this repository.");
+    Task<IReadOnlyList<Guid>> ListOperatorReportTripIdsAsync(
+        Guid operatorId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<Guid>>([]);
     Task<long> SumTripNetAmountAsync(Guid operatorId, Guid tripId, CancellationToken cancellationToken);
     Task<IReadOnlyList<TripFinancialProjection>> GetTripFinancialProjectionsAsync(
         Guid operatorId,

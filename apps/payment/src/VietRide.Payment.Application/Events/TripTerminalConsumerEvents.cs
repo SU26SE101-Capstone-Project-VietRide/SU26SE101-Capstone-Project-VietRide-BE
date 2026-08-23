@@ -9,7 +9,8 @@ public sealed record TripCompletedConsumerEvent(
     [property: JsonPropertyName("tripId")] Guid TripId,
     [property: JsonPropertyName("operatorId")] Guid OperatorId,
     [property: JsonPropertyName("terminalAt")] DateTimeOffset TerminalAt,
-    [property: JsonPropertyName("hasSubstitution")] bool HasSubstitution) : IIntegrationEvent
+    [property: JsonPropertyName("hasSubstitution")] bool HasSubstitution,
+    [property: JsonPropertyName("tripCode")] string? TripCode = null) : IIntegrationEvent
 {
     public const string EventTypeValue = "trip.trip.completed";
     [JsonIgnore]
@@ -25,7 +26,8 @@ public sealed record TripDisruptedConsumerEvent(
     [property: JsonPropertyName("operatorId")] Guid OperatorId,
     [property: JsonPropertyName("terminalAt")] DateTimeOffset TerminalAt,
     [property: JsonPropertyName("hasSubstitution")] bool HasSubstitution,
-    [property: JsonPropertyName("reason")] string? Reason = null) : IIntegrationEvent
+    [property: JsonPropertyName("reason")] string? Reason = null,
+    [property: JsonPropertyName("tripCode")] string? TripCode = null) : IIntegrationEvent
 {
     public const string EventTypeValue = "trip.trip.disrupted";
     [JsonIgnore]

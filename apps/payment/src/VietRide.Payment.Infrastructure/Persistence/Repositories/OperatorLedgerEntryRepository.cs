@@ -89,20 +89,25 @@ internal sealed class OperatorLedgerEntryRepository : IOperatorLedgerEntryReposi
             ? CanonicalRevenueSql.RefundPredicate
             : CanonicalRevenueSql.RecognizedPredicate;
         command.CommandText = $"""
-            SELECT id,
-                   entry_type::text,
-                   reference_type::text,
-                   reference_id,
-                   trip_id,
-                   amount,
-                   created_at,
-                   note
-            FROM vietride_payment.operator_ledger_entries
-            WHERE operator_id = @operator_id
-              AND created_at >= @from_utc
-              AND created_at < @to_utc
+            SELECT entry.id,
+                   entry.entry_type::text,
+                   entry.reference_type::text,
+                   entry.reference_id,
+                   entry.trip_id,
+                   entry.amount,
+                   entry.created_at,
+                   entry.note,
+                   entry.reference_code,
+                   settlement.trip_code
+            FROM vietride_payment.operator_ledger_entries AS entry
+            LEFT JOIN vietride_payment.operator_trip_settlements AS settlement
+              ON settlement.operator_id = entry.operator_id
+             AND settlement.trip_id = entry.trip_id
+            WHERE entry.operator_id = @operator_id
+              AND entry.created_at >= @from_utc
+              AND entry.created_at < @to_utc
               AND {predicate}
-            ORDER BY created_at, id;
+            ORDER BY entry.created_at, entry.id;
             """;
         command.Transaction = _db.Database.CurrentTransaction?.GetDbTransaction();
         AddParameter(command, "operator_id", operatorId);
@@ -120,9 +125,32 @@ internal sealed class OperatorLedgerEntryRepository : IOperatorLedgerEntryReposi
                 reader.IsDBNull(4) ? null : reader.GetGuid(4),
                 reader.GetInt64(5),
                 reader.GetFieldValue<DateTimeOffset>(6),
-                reader.IsDBNull(7) ? null : reader.GetString(7));
+                reader.IsDBNull(7) ? null : reader.GetString(7),
+                reader.IsDBNull(8) ? null : reader.GetString(8),
+                reader.IsDBNull(9) ? null : reader.GetString(9));
         }
     }
+
+    public async Task<IReadOnlyList<Guid>> ListOperatorReportTripIdsAsync(
+        Guid operatorId,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+        => await _db.OperatorLedgerEntries
+            .AsNoTracking()
+            .Where(item => item.OperatorId == operatorId
+                && item.TripId.HasValue
+                && item.CreatedAt >= fromUtc
+                && item.CreatedAt < toUtc
+                && !_db.OperatorTripSettlements.Any(settlement =>
+                    settlement.OperatorId == operatorId
+                    && settlement.TripId == item.TripId.Value
+                    && settlement.TripCode != null))
+            .Select(item => item.TripId!.Value)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArrayAsync(cancellationToken);
+
     public async Task<long> SumTripNetAmountAsync(
         Guid operatorId,
         Guid tripId,

@@ -191,9 +191,18 @@ internal sealed class TripRevenueAnalyticsClient : ITripRevenueAnalyticsClient
             routeId,
             routeName,
             originName,
-            destinationName);
+            destinationName,
+            OptionalString(item, "tripCode"),
+            OptionalString(route, "code"));
         return true;
     }
+
+    private static string? OptionalString(JsonElement item, string propertyName)
+        => item.TryGetProperty(propertyName, out var property)
+            && property.ValueKind == JsonValueKind.String
+            && !string.IsNullOrWhiteSpace(property.GetString())
+                ? property.GetString()
+                : null;
 
     private static void ValidateBatch(
         IReadOnlyList<Guid> ids,

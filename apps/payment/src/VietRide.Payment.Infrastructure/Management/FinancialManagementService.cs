@@ -126,7 +126,9 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                     lastSettlement.Id,
                     lastSettlement.NetAmount,
                     lastSettlement.SettlementMethod?.ToString() ?? "UNKNOWN",
-                    lastSettlement.SettledAt!.Value),
+                    lastSettlement.SettledAt!.Value,
+                    lastSettlement.SettlementCode,
+                    lastSettlement.TripCode),
             WithdrawalSupported: false,
             CalculatedAt: calculatedAt);
         if (readTransaction is not null)
@@ -172,7 +174,8 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                 var prefixPattern = EscapeLike(normalizedSearch) + "%";
                 var containsPattern = "%" + EscapeLike(normalizedSearch) + "%";
                 query = query.Where(item =>
-                    item.Note != null && EF.Functions.ILike(item.Note, containsPattern, "\\")
+                    item.TransactionCode != null && EF.Functions.ILike(item.TransactionCode, prefixPattern, "\\")
+                    || item.Note != null && EF.Functions.ILike(item.Note, containsPattern, "\\")
                     || item.ReferenceType == OperatorWalletTransactionRef.TRIP_SETTLEMENT
                         && settlements.Any(settlement =>
                             settlement.Id == item.ReferenceId
@@ -395,7 +398,9 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                 ? "HIGH"
                 : "WARNING",
             ToOperator(item, operators),
-            ToActor(item, users))).ToList();
+            ToActor(item, users),
+            item.SettlementCode,
+            item.TripCode)).ToList();
         return PagedResult<AdminSettlementDto>.Create(items, options.Page, options.PageSize, page.Total);
     }
 
@@ -424,6 +429,7 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             else
             {
                 var pattern = $"%{EscapeLike(normalizedSearch)}%";
+                var prefixPattern = $"{EscapeLike(normalizedSearch)}%";
                 var parsedSearchReference = Enum.TryParse<PlatformWalletTransactionRef>(
                     normalizedSearch,
                     ignoreCase: true,
@@ -434,10 +440,12 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                     ? query.Where(item =>
                         (item.Note != null && EF.Functions.ILike(item.Note, pattern, "\\"))
                         || (item.ActorDisplayName != null && EF.Functions.ILike(item.ActorDisplayName, pattern, "\\"))
+                        || (item.TransactionCode != null && EF.Functions.ILike(item.TransactionCode, prefixPattern, "\\"))
                         || item.ReferenceType == parsedSearchReference.Value)
                     : query.Where(item =>
                         (item.Note != null && EF.Functions.ILike(item.Note, pattern, "\\"))
-                        || (item.ActorDisplayName != null && EF.Functions.ILike(item.ActorDisplayName, pattern, "\\")));
+                        || (item.ActorDisplayName != null && EF.Functions.ILike(item.ActorDisplayName, pattern, "\\"))
+                        || (item.TransactionCode != null && EF.Functions.ILike(item.TransactionCode, prefixPattern, "\\")));
             }
         }
         query = ApplyDates(query, options);
@@ -453,7 +461,7 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         var actorFallbacks = await LoadPlatformActorFallbacksAsync(rows, ct);
         var items = rows.Select(item => new PlatformWalletTransactionDto(item.Id, item.Type.ToString(), item.Amount.Amount,
             item.BalanceBefore.Amount, item.BalanceAfter.Amount, item.ReferenceType.ToString(), item.ReferenceId,
-            item.Note, item.CreatedAt, item.ActorType.ToString(), ToActor(item, actorFallbacks))).ToList();
+            item.Note, item.CreatedAt, item.ActorType.ToString(), ToActor(item, actorFallbacks), item.TransactionCode)).ToList();
         return PagedResult<PlatformWalletTransactionDto>.Create(items, options.Page, options.PageSize, total);
     }
 
@@ -469,7 +477,7 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     {
         var identity = await _db.OperatorTripSettlements.AsNoTracking()
             .Where(item => item.Id == settlementId)
-            .Select(item => new { item.TripId, item.OperatorId, item.Status })
+            .Select(item => new { item.TripId, item.TripCode, item.OperatorId, item.Status, item.SettlementCode })
             .SingleOrDefaultAsync(ct)
             ?? throw NotFound("TRIP_SETTLEMENT_NOT_FOUND", "Settlement was not found.");
         if (identity.Status is OperatorTripSettlementStatus.SETTLED or OperatorTripSettlementStatus.CANCELLED)
@@ -488,7 +496,7 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             .SingleAsync(ct);
         return new ManualSettlementResult(result.SettlementId, identity.TripId, identity.OperatorId,
             result.NetAmount, result.Status, finalMethod?.ToString() ?? OperatorTripSettlementMethod.ADMIN_MANUAL.ToString(),
-            result.SettledAt);
+            result.SettledAt, identity.SettlementCode, identity.TripCode);
     }
 
     private async Task<PagedResult<SettlementDto>> ListSettlementsAsync(
@@ -595,7 +603,12 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                     method = "UNKNOWN";
                     missing.Add("relatedSettlement.method");
                 }
-                relatedSettlement = new RelatedSettlementDto(settlement.Id, settlement.TripId, method);
+                relatedSettlement = new RelatedSettlementDto(
+                    settlement.Id,
+                    settlement.TripId,
+                    method,
+                    settlement.SettlementCode,
+                    settlement.TripCode);
             }
         }
 
@@ -637,7 +650,8 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             Actor: actor,
             AdjustmentReason: adjustment?.AdjustmentReason?.ToString(),
             DataCompleteness: missing.Count == 0 ? "COMPLETE" : "PARTIAL",
-            MissingFields: missing);
+            MissingFields: missing,
+            TransactionCode: item.TransactionCode);
     }
 
     private static LedgerEntryDto ToLedgerEntry(
@@ -670,7 +684,9 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                 related.Status.ToString(),
                 related.EligibleAt,
                 related.SettledAt,
-                related.WalletTransactionId);
+                related.WalletTransactionId,
+                related.SettlementCode,
+                related.TripCode);
         }
 
         var affectsRevenue = IsCanonicalFinancialEntry(item);
@@ -761,10 +777,12 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                     trip.RouteId,
                     trip.RouteName,
                     trip.OriginName,
-                    trip.DestinationName),
+                    trip.DestinationName,
+                    item.TripCode),
             DataCompleteness: trip is not null && projection?.MetadataComplete == true
                 ? "COMPLETE"
-                : "PARTIAL");
+                : "PARTIAL",
+            SettlementCode: item.SettlementCode);
     }
 
     private static bool IsCanonicalFinancialEntry(OperatorLedgerEntry item)
@@ -847,6 +865,8 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                 query = query.Where(item =>
                     (item.OperatorName != null && EF.Functions.ILike(item.OperatorName, containsPattern, "\\"))
                     || (item.ActiveFailureCode != null && EF.Functions.ILike(item.ActiveFailureCode, containsPattern, "\\"))
+                    || (item.SettlementCode != null && EF.Functions.ILike(item.SettlementCode, prefixPattern, "\\"))
+                    || (item.TripCode != null && EF.Functions.ILike(item.TripCode, prefixPattern, "\\"))
                     || scopedLedger.Any(entry =>
                         entry.TripId == item.TripId
                         && entry.ReferenceCode != null
@@ -1142,7 +1162,8 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                 continue;
             }
             var movement = OperatorWalletTransaction.Create(operatorId, type, Money.FromRaw(request.Amount),
-                Money.FromRaw(before), Money.FromRaw(after), OperatorWalletTransactionRef.ADJUSTMENT, null, request.Note);
+                Money.FromRaw(before), Money.FromRaw(after), OperatorWalletTransactionRef.ADJUSTMENT, null, request.Note,
+                _clock.UtcNow);
             await _db.OperatorWalletTransactions.AddAsync(movement, ct);
             var signedAmount = type == OperatorWalletTransactionType.CREDIT ? request.Amount : -request.Amount;
             await _db.OperatorLedgerEntries.AddAsync(OperatorLedgerEntry.Create(operatorId, null,
@@ -1168,11 +1189,11 @@ internal sealed class FinancialManagementService : IFinancialManagementService
 
     private static AdjustmentResult ToAdjustment(PlatformWalletTransaction item, string note)
         => new(item.Id, item.Type.ToString(), item.Amount.Amount, item.BalanceBefore.Amount, item.BalanceAfter.Amount,
-            item.ReferenceType.ToString(), item.ReferenceId, note, item.CreatedAt);
+            item.ReferenceType.ToString(), item.ReferenceId, note, item.CreatedAt, item.TransactionCode);
 
     private static AdjustmentResult ToAdjustment(OperatorWalletTransaction item, string note)
         => new(item.Id, item.Type.ToString(), item.Amount.Amount, item.BalanceBefore.Amount, item.BalanceAfter.Amount,
-            item.ReferenceType.ToString(), item.ReferenceId, note, item.CreatedAt);
+            item.ReferenceType.ToString(), item.ReferenceId, note, item.CreatedAt, item.TransactionCode);
 
     private static long SumCurrentEntitlement(
         IReadOnlyCollection<OperatorTripSettlement> settlements,

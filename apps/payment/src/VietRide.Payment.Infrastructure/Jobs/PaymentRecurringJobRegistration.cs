@@ -55,6 +55,11 @@ public static class PaymentRecurringJobRegistration
             job => job.RunAsync(CancellationToken.None),
             "*/5 * * * *",
             UtcOptions());
+        recurringJobs.AddOrUpdate<PaymentBusinessCodeBackfillJob>(
+            PaymentBusinessCodeBackfillJob.RecurringJobId,
+            job => job.RunAsync(CancellationToken.None),
+            "*/5 * * * *",
+            UtcOptions());
     }
 
     public static void RegisterInvoiceJobs(

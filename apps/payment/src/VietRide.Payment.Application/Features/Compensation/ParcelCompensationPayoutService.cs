@@ -212,7 +212,8 @@ public sealed class ParcelCompensationPayoutService
                 wallet.Balance,
                 OperatorWalletTransactionRef.PARCEL_COMPENSATION,
                 payout.ClaimId,
-                "Parcel compensation"),
+                "Parcel compensation",
+                _clock.UtcNow),
             cancellationToken);
         return true;
     }

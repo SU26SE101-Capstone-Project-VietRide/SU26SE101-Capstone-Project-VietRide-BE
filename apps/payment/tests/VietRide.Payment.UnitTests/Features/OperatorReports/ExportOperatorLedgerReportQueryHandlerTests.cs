@@ -38,8 +38,13 @@ public sealed class ExportOperatorLedgerReportQueryHandlerTests
         repository.ToUtc.Should().Be(new DateTimeOffset(2026, 7, 18, 17, 0, 0, TimeSpan.Zero));
         writer.Spec!.SheetName.Should().Be(sheet);
         writer.Spec.FileName.Should().Be(fileName);
+        writer.Spec.Headers.Should().Equal(
+            "entry_id", "reference_code", "trip_code", "entry_type", "reference_type",
+            "reference_id", "trip_id", "amount_vnd", "occurred_at_asia_ho_chi_minh", "note");
         writer.Rows.Should().ContainSingle();
-        writer.Rows[0].Cells[5].Integer.Should().Be(refundOnly ? -50_000 : 50_000);
+        writer.Rows[0].Cells[1].Text.Should().Be("VR-20260718-7K3M2QPX");
+        writer.Rows[0].Cells[2].Text.Should().Be("TRIP-20260718-M5Q7WV3D");
+        writer.Rows[0].Cells[7].Integer.Should().Be(refundOnly ? -50_000 : 50_000);
     }
 
     private sealed class ReportLedgerRepository : IOperatorLedgerEntryRepository
@@ -68,7 +73,9 @@ public sealed class ExportOperatorLedgerReportQueryHandlerTests
                 Guid.NewGuid(),
                 refundOnly ? -50_000 : 50_000,
                 new DateTimeOffset(2026, 7, 18, 1, 0, 0, TimeSpan.Zero),
-                null);
+                null,
+                "VR-20260718-7K3M2QPX",
+                "TRIP-20260718-M5Q7WV3D");
             await Task.Yield();
         }
 

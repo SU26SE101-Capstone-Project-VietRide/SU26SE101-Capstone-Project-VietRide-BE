@@ -127,6 +127,8 @@ internal static class TripProjectionMapper
             })
         {
             AlternativeRouteId = trip.AlternativeRouteId,
+            TripCode = trip.TripCode,
+            RouteCode = route.Code,
             PlannedEtaQuality = trip.PlannedEtaSource == PlannedEtaSource.GOOGLE_ROUTES
                 ? "TRAFFIC_AWARE"
                 : "FALLBACK",

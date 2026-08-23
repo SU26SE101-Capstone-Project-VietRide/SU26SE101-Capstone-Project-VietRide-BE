@@ -13,6 +13,7 @@ public sealed class TripGenerationRecurringJobRegistrationHostedService : IHoste
     private const string DefaultQueueName = "trip";
     private const string GenerateActiveSchedulesJobId = "trip.generate-active-schedules";
     private const string WeeklySundayAt16UtcCron = "0 16 * * 0";
+    private const string EveryFiveMinutesCron = "*/5 * * * *";
 
     private readonly IConfiguration configuration;
     private readonly IRecurringJobManager recurringJobManager;
@@ -34,6 +35,15 @@ public sealed class TripGenerationRecurringJobRegistrationHostedService : IHoste
             GenerateActiveSchedulesJobId,
             Job.FromExpression<TripGenerationJob>(job => job.GenerateForActiveSchedulesAsync(CancellationToken.None)),
             WeeklySundayAt16UtcCron,
+            new RecurringJobOptions
+            {
+                QueueName = queueName,
+                TimeZone = TimeZoneInfo.Utc
+            });
+        recurringJobManager.AddOrUpdate(
+            TripBusinessCodeBackfillJob.RecurringJobId,
+            Job.FromExpression<TripBusinessCodeBackfillJob>(job => job.RunAsync(CancellationToken.None)),
+            EveryFiveMinutesCron,
             new RecurringJobOptions
             {
                 QueueName = queueName,

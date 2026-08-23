@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
+using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Payment.Infrastructure.Persistence.Repositories;
@@ -9,10 +10,12 @@ namespace VietRide.Payment.Infrastructure.Persistence.Repositories;
 internal sealed class PlatformWalletRepository : IPlatformWalletRepository
 {
     private readonly PaymentDbContext _db;
+    private readonly IClock _clock;
 
-    public PlatformWalletRepository(PaymentDbContext db)
+    public PlatformWalletRepository(PaymentDbContext db, IClock clock)
     {
         _db = db;
+        _clock = clock;
     }
 
     public async Task<PlatformWallet?> GetByIdAsync(Guid id, CancellationToken ct)
@@ -104,7 +107,7 @@ internal sealed class PlatformWalletRepository : IPlatformWalletRepository
                 setters => setters
                     .SetProperty(candidate => candidate.Balance, balanceAfter)
                     .SetProperty(candidate => candidate.RowVersion, candidate => candidate.RowVersion + 1)
-                    .SetProperty(candidate => candidate.UpdatedAt, DateTimeOffset.UtcNow),
+                    .SetProperty(candidate => candidate.UpdatedAt, _clock.UtcNow),
                 cancellationToken);
 
         if (updatedRows != 1)
@@ -117,7 +120,8 @@ internal sealed class PlatformWalletRepository : IPlatformWalletRepository
             balanceAfter,
             referenceType,
             referenceId,
-            note);
+            note,
+            _clock.UtcNow);
 
         await _db.PlatformWalletTransactions.AddAsync(transaction, cancellationToken);
 

@@ -170,6 +170,7 @@ CREATE INDEX idx_operator_stations_station_id ON operator_stations (station_id) 
 CREATE TABLE stops (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     operator_id UUID NOT NULL,
+    code VARCHAR(20) NULL,
     name VARCHAR(255) NOT NULL,
     description TEXT NULL,
     latitude DECIMAL(10,7) NOT NULL,
@@ -201,6 +202,7 @@ COMMENT ON COLUMN stops.replaced_by_stop_id IS
 CREATE TABLE routes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     operator_id UUID NOT NULL,
+    code VARCHAR(20) NULL, -- Release A; required only for newly created Routes after FE rollout
     name VARCHAR(255) NOT NULL,
     origin_station_id UUID NOT NULL REFERENCES stations (id) ON DELETE RESTRICT,
     destination_station_id UUID NOT NULL REFERENCES stations (id) ON DELETE RESTRICT,
@@ -221,6 +223,8 @@ CREATE INDEX idx_routes_operator_id ON routes (operator_id) WHERE is_active = TR
 CREATE INDEX idx_routes_origin_destination ON routes (origin_station_id, destination_station_id)
     WHERE is_active = TRUE;
 CREATE INDEX idx_routes_return_route_id ON routes (return_route_id) WHERE return_route_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_routes_operator_code ON routes (operator_id, code)
+    WHERE deleted_at IS NULL AND code IS NOT NULL;
 
 COMMENT ON COLUMN routes.return_route_id IS
     'Self-FK pointing to the reverse-direction Route. Used by DriverSchedule round-trip UX pairing.';
@@ -489,6 +493,7 @@ CREATE INDEX idx_driver_schedule_audit_logs_action_occurred
 -- -----------------------------------------------------------------------------
 CREATE TABLE trips (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_code VARCHAR(30) NULL, -- Release A; set NOT NULL only after backfill reaches zero NULL rows
     operator_id UUID NOT NULL,
     route_id UUID NOT NULL REFERENCES routes (id) ON DELETE RESTRICT,
     alternative_route_id UUID NULL REFERENCES alternative_routes (id),
@@ -535,6 +540,8 @@ CREATE TABLE trips (
 CREATE UNIQUE INDEX uq_trips_driver_departure
     ON trips (driver_user_id, departure_date_time)
     WHERE status NOT IN ('CANCELLED');
+CREATE UNIQUE INDEX uq_trips_trip_code ON trips (trip_code)
+    WHERE trip_code IS NOT NULL;
 CREATE UNIQUE INDEX uq_trips_vehicle_departure
     ON trips (vehicle_id, departure_date_time)
     WHERE status NOT IN ('CANCELLED');

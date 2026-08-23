@@ -128,6 +128,10 @@ if (registerMessaging)
         FinancialProjectionBackfillJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
         "*/5 * * * *");
+    recurringJobs.AddOrUpdate<PaymentBusinessCodeBackfillJob>(
+        PaymentBusinessCodeBackfillJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
     recurringJobs.AddOrUpdate<ParcelCompensationFundingRetryJob>(
         ParcelCompensationFundingRetryJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),

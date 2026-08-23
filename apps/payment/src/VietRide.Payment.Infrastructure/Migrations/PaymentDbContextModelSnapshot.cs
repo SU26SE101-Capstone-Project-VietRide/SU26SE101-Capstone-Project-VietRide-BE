@@ -459,6 +459,11 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("settled_by_user_id");
 
+                    b.Property<string>("SettlementCode")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("settlement_code");
+
                     b.Property<int>("SettlementFailureCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -474,6 +479,11 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("vietride_payment.operator_trip_settlement_status")
                         .HasColumnName("status")
                         .HasDefaultValueSql("'PENDING_HOLD'");
+
+                    b.Property<string>("TripCode")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("trip_code");
 
                     b.Property<Guid>("TripId")
                         .HasColumnType("uuid")
@@ -503,6 +513,14 @@ namespace VietRide.Payment.Infrastructure.Migrations
                     b.HasIndex("SettledByUserId")
                         .HasDatabaseName("idx_operator_trip_settlements_settled_by_user_id")
                         .HasFilter("settled_by_user_id IS NOT NULL");
+
+                    b.HasIndex("SettlementCode")
+                        .IsUnique()
+                        .HasDatabaseName("uq_operator_trip_settlements_code")
+                        .HasFilter("settlement_code IS NOT NULL");
+
+                    b.HasIndex("TripCode")
+                        .HasDatabaseName("idx_operator_trip_settlements_trip_code");
 
                     b.HasIndex("TripId")
                         .HasDatabaseName("idx_operator_trip_settlements_trip_id");
@@ -627,12 +645,22 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("vietride_payment.operator_wallet_transaction_ref")
                         .HasColumnName("reference_type");
 
+                    b.Property<string>("TransactionCode")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("transaction_code");
+
                     b.Property<OperatorWalletTransactionType>("Type")
                         .HasColumnType("vietride_payment.operator_wallet_transaction_type")
                         .HasColumnName("type");
 
                     b.HasKey("Id")
                         .HasName("pk_operator_wallet_transactions");
+
+                    b.HasIndex("TransactionCode")
+                        .IsUnique()
+                        .HasDatabaseName("uq_operator_wallet_transactions_code")
+                        .HasFilter("transaction_code IS NOT NULL");
 
                     b.HasIndex("OperatorId", "CreatedAt")
                         .IsDescending(false, true)
@@ -1003,6 +1031,11 @@ namespace VietRide.Payment.Infrastructure.Migrations
                         .HasColumnType("vietride_payment.platform_wallet_transaction_ref")
                         .HasColumnName("reference_type");
 
+                    b.Property<string>("TransactionCode")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("transaction_code");
+
                     b.Property<PlatformWalletTransactionType>("Type")
                         .HasColumnType("vietride_payment.platform_wallet_transaction_type")
                         .HasColumnName("type");
@@ -1017,6 +1050,11 @@ namespace VietRide.Payment.Infrastructure.Migrations
                     b.HasIndex("CreatedAt")
                         .IsDescending()
                         .HasDatabaseName("idx_platform_wallet_transactions_created_at");
+
+                    b.HasIndex("TransactionCode")
+                        .IsUnique()
+                        .HasDatabaseName("uq_platform_wallet_transactions_code")
+                        .HasFilter("transaction_code IS NOT NULL");
 
                     b.HasIndex("ReferenceType", "ReferenceId")
                         .HasDatabaseName("idx_platform_wallet_transactions_reference")

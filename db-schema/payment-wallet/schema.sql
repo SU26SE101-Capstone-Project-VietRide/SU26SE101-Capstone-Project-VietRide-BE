@@ -319,6 +319,7 @@ COMMENT ON COLUMN platform_wallets.row_version IS
 -- -----------------------------------------------------------------------------
 CREATE TABLE platform_wallet_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_code VARCHAR(30) NULL, -- Release A; set NOT NULL after backfill
     type platform_wallet_transaction_type NOT NULL,
     amount BIGINT NOT NULL,
     balance_before BIGINT NOT NULL,
@@ -342,6 +343,9 @@ CREATE TABLE platform_wallet_transactions (
 
 CREATE INDEX idx_platform_wallet_transactions_created_at
     ON platform_wallet_transactions (created_at DESC);
+CREATE UNIQUE INDEX uq_platform_wallet_transactions_code
+    ON platform_wallet_transactions (transaction_code)
+    WHERE transaction_code IS NOT NULL;
 CREATE INDEX idx_platform_wallet_transactions_reference
     ON platform_wallet_transactions (reference_type, reference_id)
     WHERE reference_id IS NOT NULL;
@@ -394,6 +398,7 @@ COMMENT ON COLUMN operator_wallets.row_version IS
 -- -----------------------------------------------------------------------------
 CREATE TABLE operator_wallet_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    transaction_code VARCHAR(30) NULL, -- Release A; set NOT NULL after backfill
     operator_id UUID NOT NULL,    -- denormalized for query convenience (also PK of wallet)
     type operator_wallet_transaction_type NOT NULL,
     amount BIGINT NOT NULL,        -- always positive; type determines sign
@@ -410,6 +415,9 @@ CREATE TABLE operator_wallet_transactions (
 
 CREATE INDEX idx_operator_wallet_transactions_operator_id_created_at
     ON operator_wallet_transactions (operator_id, created_at DESC);
+CREATE UNIQUE INDEX uq_operator_wallet_transactions_code
+    ON operator_wallet_transactions (transaction_code)
+    WHERE transaction_code IS NOT NULL;
 CREATE INDEX idx_operator_wallet_transactions_reference
     ON operator_wallet_transactions (reference_type, reference_id)
     WHERE reference_id IS NOT NULL;
@@ -521,8 +529,10 @@ COMMENT ON COLUMN operator_ledger_entries.operator_funded_voucher_amount IS
 -- -----------------------------------------------------------------------------
 CREATE TABLE operator_trip_settlements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    settlement_code VARCHAR(30) NULL, -- Release A; set NOT NULL after backfill
     operator_id UUID NOT NULL,    -- logical FK
     trip_id UUID NOT NULL,         -- logical FK trip.trips
+    trip_code VARCHAR(30) NULL,    -- immutable Trip snapshot; logical cross-service data only
     net_amount BIGINT NOT NULL DEFAULT 0,         -- computed at settle time (sum ledger entries for this trip)
     trip_terminal_at TIMESTAMPTZ NOT NULL,        -- = Trip.completedAt or Trip.disruptedAt
     eligible_at TIMESTAMPTZ NOT NULL,             -- = trip_terminal_at + 7 days
@@ -564,6 +574,11 @@ CREATE TABLE operator_trip_settlements (
 
 CREATE UNIQUE INDEX uq_operator_trip_settlements_operator_trip
     ON operator_trip_settlements (operator_id, trip_id);
+CREATE UNIQUE INDEX uq_operator_trip_settlements_code
+    ON operator_trip_settlements (settlement_code)
+    WHERE settlement_code IS NOT NULL;
+CREATE INDEX idx_operator_trip_settlements_trip_code
+    ON operator_trip_settlements (trip_code);
 CREATE INDEX idx_operator_trip_settlements_status_eligible
     ON operator_trip_settlements (status, eligible_at)
     WHERE status IN ('PENDING_HOLD', 'ELIGIBLE');

@@ -7,7 +7,8 @@ public sealed class TripCompletedIntegrationEvent(
     Guid tripId,
     Guid operatorId,
     DateTimeOffset terminalAt,
-    bool hasSubstitution) : IntegrationEventBase
+    bool hasSubstitution,
+    string? tripCode = null) : IntegrationEventBase
 {
     public override string EventType => "trip.trip.completed";
 
@@ -16,6 +17,7 @@ public sealed class TripCompletedIntegrationEvent(
     public DateTimeOffset TerminalAt { get; } = terminalAt;
     public DateTimeOffset CompletedAt => TerminalAt;
     public bool HasSubstitution { get; } = hasSubstitution;
+    public string? TripCode { get; } = tripCode;
 }
 
 public sealed class TripDisruptedIntegrationEvent(
@@ -23,7 +25,8 @@ public sealed class TripDisruptedIntegrationEvent(
     Guid operatorId,
     DateTimeOffset terminalAt,
     bool hasSubstitution,
-    string reason) : IntegrationEventBase
+    string reason,
+    string? tripCode = null) : IntegrationEventBase
 {
     [JsonIgnore]
     public override string EventType => "trip.trip.disrupted";
@@ -33,6 +36,7 @@ public sealed class TripDisruptedIntegrationEvent(
     public DateTimeOffset TerminalAt { get; } = terminalAt;
     public bool HasSubstitution { get; } = hasSubstitution;
     public string Reason { get; } = reason;
+    public string? TripCode { get; } = tripCode;
 
     public TripDisruptedIntegrationEvent(
         Guid eventId,
@@ -40,8 +44,9 @@ public sealed class TripDisruptedIntegrationEvent(
         Guid operatorId,
         DateTimeOffset terminalAt,
         bool hasSubstitution,
-        string reason)
-        : this(tripId, operatorId, terminalAt, hasSubstitution, reason)
+        string reason,
+        string? tripCode = null)
+        : this(tripId, operatorId, terminalAt, hasSubstitution, reason, tripCode)
     {
         EventId = eventId;
         OccurredAt = terminalAt.UtcDateTime;

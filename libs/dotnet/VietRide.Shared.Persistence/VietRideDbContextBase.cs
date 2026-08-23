@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Identifiers;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Persistence.Naming;
 using VietRide.Shared.Persistence.Outbox;
@@ -89,16 +91,67 @@ public abstract class VietRideDbContextBase : DbContext
         modelBuilder.ApplySnakeCaseNaming();
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         ApplyAuditing();
-        return base.SaveChangesAsync(cancellationToken);
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            try
+            {
+                return await base.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (DbUpdateException exception) when (attempt < 3 && TryRegenerateBusinessCodes(exception))
+            {
+            }
+        }
+
+        throw new InvalidOperationException("Business code collision retry exhausted unexpectedly.");
     }
 
     public override int SaveChanges()
     {
         ApplyAuditing();
-        return base.SaveChanges();
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            try
+            {
+                return base.SaveChanges();
+            }
+            catch (DbUpdateException exception) when (attempt < 3 && TryRegenerateBusinessCodes(exception))
+            {
+            }
+        }
+
+        throw new InvalidOperationException("Business code collision retry exhausted unexpectedly.");
+    }
+
+    private static bool TryRegenerateBusinessCodes(DbUpdateException exception)
+    {
+        if (exception.InnerException is not PostgresException
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation,
+                ConstraintName: { } constraintName,
+            })
+        {
+            return false;
+        }
+
+        var entities = exception.Entries
+            .Select(entry => entry.Entity)
+            .OfType<IBusinessCodeEntity>()
+            .Where(candidate => candidate.BusinessCodeConstraintName == constraintName)
+            .ToArray();
+        if (entities.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var entity in entities)
+        {
+            entity.RegenerateBusinessCode();
+        }
+
+        return true;
     }
 
     private void ApplyAuditing()

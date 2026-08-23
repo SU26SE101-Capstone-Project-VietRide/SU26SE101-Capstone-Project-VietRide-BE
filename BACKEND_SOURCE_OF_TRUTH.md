@@ -2405,8 +2405,8 @@ Parcel custody reconciliation; a positive exact Booking pending-count result add
 | `trip.trip.crew_changed` | Trip | Notification | `{ tripId, operatorId, oldDriverUserId, oldAssistantUserId?, driverUserId, assistantUserId?, routeName, vehiclePlateNumber?, departureDateTime }` |
 | `trip.trip.started` | Trip | Parcel (block new parcel), Tracking | `{ tripId, actualDepartureTime }` |
 | `trip.assignment.start_blocked` | Trip | Notification (operator) | Exact `{ eventId, occurredAt, tripId, operatorId, resourceRole, resourceId, conflictingSourceType, conflictingSourceId, conflictReason: RESOURCE_ACTIVE, blockingUntil? }`; emitted through Trip Outbox at most once per blocked Trip while any assigned reservation remains `ACTIVE`. Trip state is unchanged and Notification fans out to active operator admins. |
-| `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility), Tracking (runtime cleanup) | `{ eventId, occurredAt, tripId, operatorId, terminalAt, completedAt, hasSubstitution }`; `completedAt` equals `terminalAt` and is retained as the Booking compatibility alias |
-| `trip.trip.disrupted` | Trip | Booking, Parcel, Payment, Tracking (runtime cleanup) | Exact `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution, reason? }`; Booking and Parcel execute disruption recovery only when `hasSubstitution=false`, while Payment records settlement eligibility for either value. The event never carries a Trip-wide traveled ratio. |
+| `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility), Tracking (runtime cleanup) | `{ eventId, occurredAt, tripId, operatorId, terminalAt, completedAt, hasSubstitution, tripCode? }`; `completedAt` equals `terminalAt`; nullable `tripCode` is additive for queued legacy payload compatibility and Payment snapshots it when present. |
+| `trip.trip.disrupted` | Trip | Booking, Parcel, Payment, Tracking (runtime cleanup) | `{ eventId, occurredAt, tripId, operatorId, terminalAt, hasSubstitution, reason?, tripCode? }`; Booking and Parcel execute disruption recovery only when `hasSubstitution=false`, while Payment records settlement eligibility for either value. Nullable `tripCode` is additive; the event never carries a Trip-wide traveled ratio. |
 | `trip.trip.cancelled` | Trip | Booking, Parcel, Tracking (runtime cleanup) | { eventId, occurredAt, tripId, operatorId, cancelledAt, cancelReason } |
 | `trip.trip.vehicle_swapped` | Trip | Booking, Notification (crew only) | Exact `{ eventId,occurredAt,tripId,operatorId,oldVehicleId,newVehicleId,oldVehiclePlateNumber,newVehiclePlateNumber,departureDateTime,driverUserId,assistantUserId,seatImpacts:[{bookingId,seatNumbers,reason}] }`; `assistantUserId` present nullable, reasons exactly `SEAT_REMOVED\|SEAT_DISABLED\|SEAT_TYPE_DOWNGRADED` |
 | `trip.trip.vehicle_substituted` | Trip | Booking, Parcel (Day 35) | Exact `{eventId,occurredAt,substitutionId,disruptedAt,operatorId,oldTripId,oldTripStatus,oldVehicleId,newTripId,newTripStatus,newVehicleId,newVehiclePlateNumber,newTripDepartureDateTime,actorUserId,reason,notifyPassengers,mappings:[{bookingId,passengerId,originalSeatNumber,newSeatNumber,originalBoardingStatus}]}`; exactly one fact per substitution; `occurredAt = disruptedAt`; `substitutionId = eventId`; `oldTripStatus=DISRUPTED`; `newTripStatus=BOARDING`; both `originalSeatNumber` and `newSeatNumber` are nullable; `originalBoardingStatus=BOARDED\|PENDING`; `payload.eventId == Outbox row id == RabbitMQ MessageId`. |
@@ -2864,9 +2864,9 @@ new dependencies, cross-database foreign keys, or enrichment of the existing pub
   it does not depend on the Platform Report facade.
 - RAG owns generic `Policy` and immutable `PolicyAuditLog` Prisma aggregates. They are distinct
   from `KnowledgeDocument` and from Identity's operator cancellation/luggage/no-show JSON.
-- Trip exposes a tenant-scoped `GET /v1/operator/trips` selector for `OPERATOR_ADMIN`. Search is
-  limited to normalized vehicle plate and route name. No `tripCode`, `routeCode`, schema migration
-  or search index is authorized unless a later measured query plan establishes a separate task.
+- Trip exposes a tenant-scoped `GET /v1/operator/trips` selector for `OPERATOR_ADMIN`. Release A
+  additively returns nullable `tripCode` and `route.code`; search matches their prefix alongside
+  normalized vehicle plate and route name. UUID identity and all existing fields remain unchanged.
 - Parcel fare batch preserves the physical `(route_id, size_category)` key and atomically mutates
   that current row after checking the route belongs to the JWT operator; it does not introduce
   fare history. Existing single-size endpoints remain compatible.

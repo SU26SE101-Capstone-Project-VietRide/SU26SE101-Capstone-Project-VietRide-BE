@@ -72,6 +72,67 @@ public sealed class RouteHandlersTests
     }
 
     [Fact]
+    public async Task CreateRoute_AllowsCodeReuseAfterSoftDelete()
+    {
+        var origin = CreateStation("Origin", "origin");
+        var destination = CreateStation("Destination", "destination");
+        var deletedRoute = Route.Create(
+            OperatorId,
+            "Deleted route",
+            origin.Id,
+            destination.Id,
+            VietRide.Shared.Kernel.ValueObjects.Money.FromRaw(250000),
+            100m,
+            180,
+            code: "SG-DL-01");
+        deletedRoute.SoftDelete(new DateTimeOffset(2026, 8, 23, 0, 0, 0, TimeSpan.Zero));
+        var routeRepository = new FakeRouteRepository([deletedRoute]);
+        var handler = CreateHandler(
+            routeRepository,
+            new FakeStationRepository([origin, destination]),
+            new FakeOperatorStationRepository([
+                OperatorStation.Create(OperatorId, origin.Id),
+                OperatorStation.Create(OperatorId, destination.Id)]));
+
+        var result = await handler.Handle(
+            CreateCommand(origin.Id, destination.Id, code: "sg-dl-01"),
+            CancellationToken.None);
+
+        result.Code.Should().Be("SG-DL-01");
+        routeRepository.Entities.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task CreateRoute_ReturnsCodedConflictForActiveDuplicateCode()
+    {
+        var origin = CreateStation("Origin", "origin");
+        var destination = CreateStation("Destination", "destination");
+        var existingRoute = Route.Create(
+            OperatorId,
+            "Existing route",
+            origin.Id,
+            destination.Id,
+            VietRide.Shared.Kernel.ValueObjects.Money.FromRaw(250000),
+            100m,
+            180,
+            code: "SG-DL-01");
+        var handler = CreateHandler(
+            new FakeRouteRepository([existingRoute]),
+            new FakeStationRepository([origin, destination]),
+            new FakeOperatorStationRepository([
+                OperatorStation.Create(OperatorId, origin.Id),
+                OperatorStation.Create(OperatorId, destination.Id)]));
+
+        var action = () => handler.Handle(
+            CreateCommand(origin.Id, destination.Id, code: "SG-DL-01"),
+            CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<CodedConflictException>();
+        exception.Which.ErrorCode.Should().Be("ROUTE_CODE_DUPLICATED");
+        exception.Which.Errors.Should().ContainSingle(error => error.Field == "code");
+    }
+
+    [Fact]
     public async Task CreateRoute_ThrowsStationNotFound_BeforeOriginDestinationEqualityCheck()
     {
         var stationId = Guid.NewGuid();
@@ -531,8 +592,12 @@ public sealed class RouteHandlersTests
             routeRepository,
             new FakeUnitOfWork());
 
-    private static CreateRouteCommand CreateCommand(Guid originStationId, Guid destinationStationId, Guid? returnRouteId = null)
-        => new(OperatorId, "Da Nang to Hue", originStationId, destinationStationId, returnRouteId, 250500, 100m, 180, true);
+    private static CreateRouteCommand CreateCommand(
+        Guid originStationId,
+        Guid destinationStationId,
+        Guid? returnRouteId = null,
+        string? code = null)
+        => new(OperatorId, "Da Nang to Hue", originStationId, destinationStationId, returnRouteId, 250500, 100m, 180, true, code);
 
     private static Route CreateRoute(Guid operatorId, string name, bool isActive = true)
     {

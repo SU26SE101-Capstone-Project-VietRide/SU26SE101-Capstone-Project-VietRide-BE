@@ -18,6 +18,8 @@ public sealed record TripDetailDto(
     TripFareBreakdownDto FareBreakdown)
 {
     public Guid? AlternativeRouteId { get; init; }
+    public string? TripCode { get; init; }
+    public string? RouteCode { get; init; }
     public string? Notes { get; init; }
     public string PlannedEtaQuality { get; init; } = "FALLBACK";
     public int SurchargePercent { get; init; }

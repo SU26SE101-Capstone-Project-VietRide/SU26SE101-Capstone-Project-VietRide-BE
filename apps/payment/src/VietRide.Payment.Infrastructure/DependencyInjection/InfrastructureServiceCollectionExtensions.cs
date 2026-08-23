@@ -127,6 +127,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<RefundRetryService>();
         services.AddScoped<ParcelCompensationPayoutService>();
         services.AddScoped<ParcelCompensationFundingRetryJob>();
+        services.AddScoped<PaymentBusinessCodeBackfillJob>();
         services.Configure<VnPayOptions>(options =>
         {
             configuration.GetSection(VnPayOptions.SectionName).Bind(options);

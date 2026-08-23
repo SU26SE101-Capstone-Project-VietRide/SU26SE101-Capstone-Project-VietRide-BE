@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
@@ -10,7 +11,10 @@ namespace VietRide.Trip.Domain.Entities;
 /// </summary>
 public sealed class Route : BaseEntity<Guid>, ISoftDeletable, IActivatable
 {
+    private static readonly Regex CodePattern = new("^[A-Z0-9][A-Z0-9-]{1,19}$", RegexOptions.CultureInvariant);
+
     public Guid OperatorId { get; private set; }
+    public string? Code { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public Guid OriginStationId { get; private set; }
     public Guid DestinationStationId { get; private set; }
@@ -32,7 +36,8 @@ public sealed class Route : BaseEntity<Guid>, ISoftDeletable, IActivatable
         Money baseFare,
         decimal? totalDistanceKm,
         int? estimatedDurationMinutes,
-        Guid? returnRouteId = null)
+        Guid? returnRouteId = null,
+        string? code = null)
     {
         ValidateGuid(operatorId, nameof(operatorId));
         var normalizedName = ValidateName(name);
@@ -47,6 +52,7 @@ public sealed class Route : BaseEntity<Guid>, ISoftDeletable, IActivatable
         {
             Id = Guid.NewGuid(),
             OperatorId = operatorId,
+            Code = NormalizeCode(code),
             Name = normalizedName,
             OriginStationId = originStationId,
             DestinationStationId = destinationStationId,
@@ -89,6 +95,8 @@ public sealed class Route : BaseEntity<Guid>, ISoftDeletable, IActivatable
         ValidateOptionalGuid(returnRouteId, nameof(returnRouteId));
         ReturnRouteId = returnRouteId;
     }
+
+    public void SetCode(string code) => Code = NormalizeCode(code);
 
     public void SetPathGeometry(string? encodedPolyline) => PathPolyline = encodedPolyline;
 
@@ -143,6 +151,22 @@ public sealed class Route : BaseEntity<Guid>, ISoftDeletable, IActivatable
         }
 
         return normalizedName;
+    }
+
+    private static string? NormalizeCode(string? code)
+    {
+        if (code is null)
+        {
+            return null;
+        }
+
+        var normalized = code.Trim().ToUpperInvariant();
+        if (!CodePattern.IsMatch(normalized))
+        {
+            throw new ArgumentException("Route code must contain 2 to 20 uppercase letters, digits, or hyphens.", nameof(code));
+        }
+
+        return normalized;
     }
 
     private static void ValidateDifferentStations(Guid originStationId, Guid destinationStationId)

@@ -54,6 +54,7 @@ public sealed class DisruptNoSubstitutionCommandHandlerTests
         payload.GetProperty("terminalAt").GetDateTimeOffset().Should().Be(Now);
         payload.GetProperty("hasSubstitution").GetBoolean().Should().BeFalse();
         payload.GetProperty("reason").GetString().Should().Be("Road closure");
+        payload.GetProperty("tripCode").GetString().Should().Be(trip.TripCode);
         payload.TryGetProperty("traveledRatio", out _).Should().BeFalse();
         payload.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
             "eventId",
@@ -62,7 +63,8 @@ public sealed class DisruptNoSubstitutionCommandHandlerTests
             "operatorId",
             "terminalAt",
             "hasSubstitution",
-            "reason");
+            "reason",
+            "tripCode");
     }
 
     [Theory]

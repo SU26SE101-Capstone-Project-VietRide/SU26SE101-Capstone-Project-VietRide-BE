@@ -6,6 +6,8 @@ public sealed class UpdateRouteRequest
 
     public string? Name { get; init; }
 
+    public string? Code { get; init; }
+
     public Guid? ReturnRouteId
     {
         get => returnRouteId;

@@ -89,7 +89,8 @@ public sealed class UpsertFullRouteHandler : IRequestHandler<UpsertFullRouteComm
                     Money.FromRaw(request.BaseFare),
                     null,
                     null,
-                    request.ReturnRouteId);
+                    request.ReturnRouteId,
+                    request.Code);
             }
 
             if (isNew)
@@ -125,6 +126,8 @@ public sealed class UpsertFullRouteHandler : IRequestHandler<UpsertFullRouteComm
                 : RouteMetricsCalculator.Calculate(polyline);
             var distanceKm = metrics?.DistanceKm ?? request.ManualDistanceKm ?? route.TotalDistanceKm;
             var durationMinutes = metrics?.DurationMinutes ?? request.ManualDurationMinutes ?? route.EstimatedDurationMinutes;
+            if (!isNew && request.Code is not null)
+                route.SetCode(request.Code);
             route.UpdateDetails(
                 request.Name!,
                 route.OriginStationId,
@@ -190,6 +193,22 @@ public sealed class UpsertFullRouteHandler : IRequestHandler<UpsertFullRouteComm
                         "ROUTE_DUPLICATED",
                         "A Route with the same normalized name and station pair already exists.",
                         [new ValidationError("existingRouteId", duplicate.Id.ToString("D"))]);
+                }
+
+                if (request.Code is not null)
+                {
+                    var duplicateCode = await routes.FindByCodeAsync(
+                        request.OperatorId,
+                        request.Code,
+                        request.RouteId,
+                        cancellationToken);
+                    if (duplicateCode is not null)
+                    {
+                        throw new CodedConflictException(
+                            "ROUTE_CODE_DUPLICATED",
+                            "A Route with this code already exists for the operator.",
+                            [new ValidationError("code", "Route code is already in use.")]);
+                    }
                 }
 
                 if (isNew)
