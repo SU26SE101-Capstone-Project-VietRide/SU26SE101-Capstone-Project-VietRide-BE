@@ -181,8 +181,10 @@ public sealed class BookingTransferredIntegrationEventTests
             "passengerId",
             "originalSeatNumber",
             "newSeatNumber",
-            "confirmationStatus");
+            "confirmationStatus",
+            "originalBoardingStatus");
         transfer.GetProperty("originalSeatNumber").ValueKind.Should().Be(JsonValueKind.Null);
+        transfer.GetProperty("originalBoardingStatus").ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     private static RabbitMqEventPublisher CreatePublisher(IRabbitMqConnectionFactory connections)
