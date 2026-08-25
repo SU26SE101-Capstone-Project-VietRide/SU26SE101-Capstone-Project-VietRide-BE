@@ -19,9 +19,16 @@ const ids = {
   booking: uuid(),
   owner: uuid(),
   passengers: Array.from({ length: 5 }, uuid),
+  capacityProbeKey: uuid(),
   substitutionKey: uuid(),
   crossTenantKey: uuid(),
   confirmationKeys: Array.from({ length: 3 }, uuid),
+  lateConfirmationKey: uuid(),
+  missingSeatConfirmationKey: uuid(),
+  paymentLedgerEntry: uuid(),
+  paymentSourceEvent: uuid(),
+  paymentReference: uuid(),
+  replacementCompletedEvent: uuid(),
   confirmedParcel: uuid(),
   escalatedParcel: uuid(),
   parcelConfirmKey: uuid(),
@@ -90,6 +97,7 @@ async function issueToken(subject, role, operatorId) {
   return new SignJWT({
     role,
     operatorId,
+    ...(operatorId ? { operatorStatus: 'APPROVED' } : {}),
     email: `${role.toLowerCase()}@day34.local`,
     hasPhone: 'true',
   })
@@ -105,6 +113,45 @@ async function issueToken(subject, role, operatorId) {
     .sign(privateKey);
 }
 
+async function api(pathname, token, idempotencyKey, body) {
+  const response = await fetch(`http://localhost:3000${pathname}`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'idempotency-key': idempotencyKey,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  return {
+    status: response.status,
+    body: text ? JSON.parse(text) : undefined,
+  };
+}
+
+function publishRabbit(routingKey, messageId, payload) {
+  execFileSync(
+    'docker',
+    [
+      'exec',
+      'vietride_rabbitmq',
+      'rabbitmqadmin',
+      '--username=vietride',
+      '--password=vietride_dev',
+      'publish',
+      'exchange=vietride.events',
+      `routing_key=${routingKey}`,
+      `payload=${JSON.stringify(payload)}`,
+      `properties=${JSON.stringify({
+        content_type: 'application/json',
+        message_id: messageId,
+      })}`,
+    ],
+    { cwd: root, stdio: 'ignore' },
+  );
+}
+
 function resolveNpxCli() {
   const candidates = [
     path.join(process.env.APPDATA || '', 'npm', 'node_modules', 'npm', 'bin', 'npx-cli.js'),
@@ -116,6 +163,15 @@ function resolveNpxCli() {
 }
 
 function seed() {
+  psql(
+    'vietride_identity',
+    `INSERT INTO vietride_identity.users (
+       id, email, display_name, role, status, operator_id, failed_login_attempts)
+     VALUES (
+       '${ids.admin}', 'admin-${ids.admin.slice(0, 8)}@day34.local',
+       'Day 34 Operator Admin', 'OPERATOR_ADMIN', 'ACTIVE', '${ids.operator}', 0);`,
+  );
+
   const seats = ids.passengers
     .map(
       (_, index) =>
@@ -144,7 +200,7 @@ function seed() {
     INSERT INTO vietride_trip.trips (
       id, operator_id, route_id, vehicle_id, driver_user_id,
       departure_date_time, estimated_arrival_time, actual_departure_time,
-      status, source, base_fare,
+      status, source, base_fare, seat_layout_snapshot_json,
       total_loaded_weight_kg, total_loaded_volume_m3, created_at, updated_at)
     VALUES (
       '${ids.oldTrip}', '${ids.operator}',
@@ -152,6 +208,8 @@ function seed() {
       '40000000-0000-4000-8000-000000000402',
       '${ids.driver}', now() - interval '30 minutes', now() + interval '3 hours',
       now() - interval '30 minutes', 'IN_PROGRESS', 'MANUAL', 100000,
+      (SELECT seat_layout_json FROM vietride_trip.vehicles
+       WHERE id = '40000000-0000-4000-8000-000000000402'),
       ${initialCargo.weightKg}, ${initialCargo.volumeM3}, now(), now());
 
     INSERT INTO vietride_trip.trip_cargo_parcels (
@@ -193,6 +251,19 @@ function seed() {
   );
 
   psql(
+    'vietride_payment',
+    `INSERT INTO vietride_payment.operator_ledger_entries (
+       id, operator_id, trip_id, entry_type, amount, reference_type,
+       reference_id, source_event_id, occurred_at, note, actor_type,
+       actor_snapshot_resolved, created_at)
+     VALUES (
+       '${ids.paymentLedgerEntry}', '${ids.operator}', '${ids.oldTrip}',
+       'BOOKING_REVENUE', 500000, 'BOOKING', '${ids.paymentReference}',
+       '${ids.paymentSourceEvent}', now(), 'Day34 substitution E2E revenue',
+       'SYSTEM', true, now());`,
+  );
+
+  psql(
     'vietride_parcel',
     `INSERT INTO vietride_parcel.parcels (
        id, parcel_code, sender_user_id, recipient_name, recipient_phone,
@@ -202,14 +273,64 @@ function seed() {
        estimated_chargeable_weight_kg, deposit_amount, status, loaded_at)
      VALUES
        ('${ids.confirmedParcel}', '${confirmedParcelCode}', '${ids.owner}',
-        'Day 35 Confirm Recipient', '0900003501', '${ids.operator}', '${ids.oldTrip}',
+        'Day 35 Confirm Recipient', '+84900003501', '${ids.operator}', '${ids.oldTrip}',
         'SMALL', 'SMALL', 30.00, 20.00, 5.00,
         2.25, 0.0030, 0.50, 2.25, 0, 'LOADED', now()),
        ('${ids.escalatedParcel}', '${escalatedParcelCode}', '${ids.owner}',
-        'Day 35 Escalate Recipient', '0900003502', '${ids.operator}', '${ids.oldTrip}',
+        'Day 35 Escalate Recipient', '+84900003502', '${ids.operator}', '${ids.oldTrip}',
         'MEDIUM', 'MEDIUM', 40.00, 20.00, 5.00,
         3.25, 0.0040, 0.67, 3.25, 0, 'IN_TRANSIT', now());`,
   );
+}
+
+async function verifyInsufficientSeatGuard() {
+  const token = await issueToken(ids.admin, 'OPERATOR_ADMIN', ids.operator);
+  const recoveryAt = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  const before = psql(
+    'vietride_trip',
+    `SELECT
+       (SELECT count(*) FROM vietride_trip.trips
+        WHERE source = 'VEHICLE_SUBSTITUTION' AND vehicle_id = '${ids.replacementVehicle}')::text || ':' ||
+       (SELECT count(*) FROM vietride_trip.trip_audit_logs WHERE trip_id = '${ids.oldTrip}')::text || ':' ||
+       (SELECT count(*) FROM vietride_trip.outbox_events
+        WHERE payload->>'oldTripId' = '${ids.oldTrip}')::text || ':' ||
+       (SELECT status::text FROM vietride_trip.trips WHERE id = '${ids.oldTrip}');`,
+  );
+  const result = await api(
+    `/v1/operator/trips/${ids.oldTrip}/substitute-vehicle`,
+    token,
+    ids.capacityProbeKey,
+    {
+      replacementVehicleId: ids.replacementVehicle,
+      estimatedRecoveryDepartureAt: recoveryAt,
+      reason: 'Day 34 capacity guard probe',
+      notifyPassengers: false,
+    },
+  );
+  assertEqual(String(result.status), '409', 'insufficient-seat HTTP status');
+  assertEqual(
+    result.body?.error?.code,
+    'REPLACEMENT_VEHICLE_INSUFFICIENT_SEATS',
+    'insufficient-seat error code',
+  );
+  const fields = Object.fromEntries(
+    (result.body?.error?.fields ?? []).map(({ field, message }) => [field, message]),
+  );
+  assertEqual(fields.usableSeats, '4', 'usableSeats field');
+  assertEqual(fields.passengersToTransfer, '5', 'passengersToTransfer field');
+  assertEqual(fields.missingSeats, '1', 'missingSeats field');
+  const after = psql(
+    'vietride_trip',
+    `SELECT
+       (SELECT count(*) FROM vietride_trip.trips
+        WHERE source = 'VEHICLE_SUBSTITUTION' AND vehicle_id = '${ids.replacementVehicle}')::text || ':' ||
+       (SELECT count(*) FROM vietride_trip.trip_audit_logs WHERE trip_id = '${ids.oldTrip}')::text || ':' ||
+       (SELECT count(*) FROM vietride_trip.outbox_events
+        WHERE payload->>'oldTripId' = '${ids.oldTrip}')::text || ':' ||
+       (SELECT status::text FROM vietride_trip.trips WHERE id = '${ids.oldTrip}');`,
+  );
+  assertEqual(after, before, '409 side-effect snapshot');
+  console.log(`PASS | insufficient-seat guard and zero side effects | ${after}`);
 }
 
 async function runNewman(folder, extraVariables = {}) {
@@ -262,7 +383,7 @@ async function runNewman(folder, extraVariables = {}) {
   }
 }
 
-function verifyDay34() {
+async function verifyDay34() {
   substitutionId = psql(
     'vietride_trip',
     `SELECT payload->>'eventId'
@@ -314,13 +435,78 @@ function verifyDay34() {
   );
   assertEqual(
     psql(
-      'vietride_notification',
-      `SELECT count(*) FROM vietride_notification.notifications
-       WHERE data->>'bookingId' = '${ids.booking}'
-         AND type = 'VEHICLE_SUBSTITUTED';`,
+      'vietride_booking',
+      `SELECT count(*) FROM vietride_booking.outbox_events
+       WHERE event_type = 'booking.booking.seat_shortage_detected'
+         AND payload->>'bookingId' = '${ids.booking}'
+         AND payload->>'affectedPassengerCount' = '1';`,
+    ),
+    '1',
+    'one shortage event per Booking',
+  );
+  assertEqual(
+    psql(
+      'vietride_booking',
+      `SELECT count(*) FROM vietride_booking.booking_pending_actions
+       WHERE booking_id = '${ids.booking}';`,
     ),
     '0',
-    'notification suppression',
+    'no pending seat-assignment action',
+  );
+  await poll(
+    'Booking owner is notified despite notifyPassengers=false when a seat is missing',
+    () =>
+      psql(
+        'vietride_notification',
+        `SELECT count(*) FROM vietride_notification.notifications
+         WHERE user_id = '${ids.owner}'
+           AND data->>'bookingId' = '${ids.booking}'
+           AND type = 'VEHICLE_SUBSTITUTED';`,
+      ),
+    (value) => value === '1',
+  );
+  await poll(
+    'Active Operator Admin receives exactly one seat-shortage alert',
+    () =>
+      psql(
+        'vietride_notification',
+        `SELECT count(*) FROM vietride_notification.notifications
+         WHERE user_id = '${ids.admin}'
+           AND data->>'bookingId' = '${ids.booking}'
+           AND type = 'VEHICLE_SUBSTITUTION_SEAT_SHORTAGE';`,
+      ),
+    (value) => value === '1',
+  );
+  assertEqual(
+    psql(
+      'vietride_booking',
+      `SELECT count(*) FILTER (
+                WHERE original_seat_type = 'STANDARD'
+                  AND new_seat_type = 'STANDARD'
+                  AND is_seat_downgrade = false)::text || ':' ||
+              count(*) FILTER (
+                WHERE original_seat_type = 'STANDARD'
+                  AND new_seat_type IS NULL
+                  AND is_seat_downgrade = false)::text
+       FROM vietride_booking.booking_transfers
+       WHERE booking_id = '${ids.booking}';`,
+    ),
+    '4:1',
+    'persisted seat-type and downgrade evidence',
+  );
+  assertEqual(
+    psql(
+      'vietride_trip',
+      `SELECT (metadata->>'acknowledgedInsufficientSeats') || ':' ||
+              (metadata->>'usableSeats') || ':' ||
+              (metadata->>'passengersToTransfer') || ':' ||
+              (metadata->>'missingSeats')
+       FROM vietride_trip.trip_audit_logs
+       WHERE trip_id = '${ids.oldTrip}'
+       ORDER BY occurred_at DESC LIMIT 1;`,
+    ),
+    'true:4:5:1',
+    'acknowledgement audit metadata',
   );
   assertEqual(
     psql(
@@ -344,7 +530,164 @@ function verifyDay34() {
     '0.00:0.0000:0.00:0.0000:0',
     'replacement cargo starts empty',
   );
-  console.log('PASS | persisted 5:3:2:1 flow, Outbox identities, suppression, legacy code');
+  console.log('PASS | persisted 5:3:2:1 flow, downgrade evidence, alerts, audit, Outbox identities');
+}
+
+async function verifyTransferEscalationAndLateConfirmation() {
+  psql(
+    'vietride_booking',
+    `UPDATE vietride_booking.booking_transfers
+     SET transferred_at = now() - interval '2 hours 1 minute'
+     WHERE booking_id = '${ids.booking}'
+       AND new_trip_id = '${newTripId}'
+       AND confirmation_status = 'PENDING_CONFIRM';`,
+  );
+  await poll(
+    'Expired pending transfer group escalates through the recurring job',
+    () =>
+      psql(
+        'vietride_booking',
+        `SELECT count(*) FROM vietride_booking.booking_transfers
+         WHERE booking_id = '${ids.booking}'
+           AND new_trip_id = '${newTripId}'
+           AND confirmation_status = 'ESCALATED';`,
+      ),
+    (value) => value === '2',
+    360_000,
+  );
+  assertEqual(
+    psql(
+      'vietride_booking',
+      `SELECT count(*) FROM vietride_booking.outbox_events
+       WHERE event_type = 'booking.booking.transfer_escalated'
+         AND payload->>'bookingId' = '${ids.booking}'
+         AND payload->>'pendingConfirmationCount' = '2';`,
+    ),
+    '1',
+    'one escalation event per Booking and replacement Trip',
+  );
+  await poll(
+    'Active Operator Admin receives one transfer escalation alert',
+    () =>
+      psql(
+        'vietride_notification',
+        `SELECT count(*) FROM vietride_notification.notifications
+         WHERE user_id = '${ids.admin}'
+           AND data->>'bookingId' = '${ids.booking}'
+           AND type = 'BOOKING_TRANSFER_ESCALATED';`,
+      ),
+    (value) => value === '1',
+  );
+
+  const seatedPassengerId = psql(
+    'vietride_booking',
+    `SELECT passenger_id FROM vietride_booking.booking_transfers
+     WHERE booking_id = '${ids.booking}'
+       AND new_trip_id = '${newTripId}'
+       AND confirmation_status = 'ESCALATED'
+       AND new_seat_number IS NOT NULL
+     ORDER BY passenger_id LIMIT 1;`,
+  );
+  const missingSeatPassengerId = psql(
+    'vietride_booking',
+    `SELECT passenger_id FROM vietride_booking.booking_transfers
+     WHERE booking_id = '${ids.booking}'
+       AND new_trip_id = '${newTripId}'
+       AND confirmation_status = 'ESCALATED'
+       AND new_seat_number IS NULL
+     ORDER BY passenger_id LIMIT 1;`,
+  );
+  const driverToken = await issueToken(ids.driver, 'DRIVER', ids.operator);
+  const lateConfirmation = await api(
+    `/v1/bookings/trips/${newTripId}/transfers/passengers/${seatedPassengerId}/confirm`,
+    driverToken,
+    ids.lateConfirmationKey,
+  );
+  assertEqual(String(lateConfirmation.status), '200', 'late confirmation HTTP status');
+  assertEqual(
+    lateConfirmation.body?.data?.confirmationStatus,
+    'CONFIRMED',
+    'late confirmation status',
+  );
+  const missingSeatConfirmation = await api(
+    `/v1/bookings/trips/${newTripId}/transfers/passengers/${missingSeatPassengerId}/confirm`,
+    driverToken,
+    ids.missingSeatConfirmationKey,
+  );
+  assertEqual(String(missingSeatConfirmation.status), '409', 'missing-seat confirmation HTTP status');
+  assertEqual(
+    missingSeatConfirmation.body?.error?.code,
+    'BOOKING_TRANSFER_SEAT_PENDING',
+    'missing-seat confirmation code',
+  );
+  assertEqual(
+    psql(
+      'vietride_booking',
+      `SELECT count(*) FILTER (WHERE confirmation_status = 'CONFIRMED')::text || ':' ||
+              count(*) FILTER (WHERE confirmation_status = 'ESCALATED')::text
+       FROM vietride_booking.booking_transfers
+       WHERE booking_id = '${ids.booking}' AND new_trip_id = '${newTripId}';`,
+    ),
+    '4:1',
+    'late confirmation and missing-seat state',
+  );
+  console.log('PASS | escalation event/notification, late confirmation, and missing-seat conflict');
+}
+
+async function verifyPaymentSettlementMarkers() {
+  await poll(
+    'Original disrupted Trip retains its revenue settlement',
+    () =>
+      psql(
+        'vietride_payment',
+        `SELECT count(*) FROM vietride_payment.operator_trip_settlements
+         WHERE operator_id = '${ids.operator}'
+           AND trip_id = '${ids.oldTrip}'
+           AND net_amount = 500000
+           AND status = 'PENDING_HOLD';`,
+      ),
+    (value) => value === '1',
+  );
+
+  const completedAt = new Date().toISOString();
+  publishRabbit('trip.trip.completed', ids.replacementCompletedEvent, {
+    eventId: ids.replacementCompletedEvent,
+    occurredAt: completedAt,
+    tripId: newTripId,
+    operatorId: ids.operator,
+    terminalAt: completedAt,
+    hasSubstitution: false,
+    tripCode: 'TRIP-D34-REPLACEMENT',
+    source: 'VEHICLE_SUBSTITUTION',
+  });
+  await poll(
+    'Replacement Trip creates a zero settlement with substitution reason',
+    () =>
+      psql(
+        'vietride_payment',
+        `SELECT count(*) FROM vietride_payment.operator_trip_settlements
+         WHERE operator_id = '${ids.operator}'
+           AND trip_id = '${newTripId}'
+           AND net_amount = 0
+           AND status = 'CANCELLED'
+           AND cancel_reason = 'VEHICLE_SUBSTITUTION_REVENUE_RETAINED_ON_ORIGINAL_TRIP'
+           AND wallet_transaction_id IS NULL;`,
+      ),
+    (value) => value === '1',
+  );
+  assertEqual(
+    psql(
+      'vietride_payment',
+      `SELECT count(*)::text || ':' || coalesce(sum(net_amount), 0)::text || ':' ||
+              count(*) FILTER (WHERE wallet_transaction_id IS NOT NULL)::text
+       FROM vietride_payment.operator_trip_settlements
+       WHERE operator_id = '${ids.operator}'
+         AND trip_id IN ('${ids.oldTrip}', '${newTripId}');`,
+    ),
+    '2:500000:0',
+    'settlement count, total net, and wallet movements',
+  );
+  console.log('PASS | original revenue retained, replacement marker is zero, no wallet movement');
 }
 
 async function verifyDay35() {
@@ -643,6 +986,15 @@ async function cleanup() {
     );
   }
   psql(
+    'vietride_payment',
+    `DELETE FROM vietride_payment.processed_integration_events
+     WHERE event_id IN (${ownedMessageSql || 'NULL'}, '${ids.replacementCompletedEvent}');
+     DELETE FROM vietride_payment.operator_trip_settlements
+     WHERE trip_id IN ('${ids.oldTrip}'${newTripId ? `, '${newTripId}'` : ''});
+     DELETE FROM vietride_payment.operator_ledger_entries
+     WHERE id = '${ids.paymentLedgerEntry}';`,
+  );
+  psql(
     'vietride_parcel',
     `BEGIN;
      SET LOCAL session_replication_role = replica;
@@ -661,6 +1013,7 @@ async function cleanup() {
     `
     DELETE FROM vietride_booking.outbox_events
     WHERE payload->>'bookingId' = '${ids.booking}';
+    DELETE FROM vietride_booking.booking_status_history WHERE booking_id = '${ids.booking}';
     DELETE FROM vietride_booking.booking_transfers WHERE booking_id = '${ids.booking}';
     DELETE FROM vietride_booking.passengers WHERE booking_id = '${ids.booking}';
     DELETE FROM vietride_booking.bookings WHERE id = '${ids.booking}';
@@ -710,8 +1063,11 @@ async function cleanup() {
       'DEL',
       ...[
         ids.substitutionKey,
+        ids.capacityProbeKey,
         ids.crossTenantKey,
         ...ids.confirmationKeys,
+        ids.lateConfirmationKey,
+        ids.missingSeatConfirmationKey,
         ids.parcelConfirmKey,
       ].flatMap((key) => [`trip:idem:${key}`, `idempotency:${key}`]),
     ],
@@ -740,6 +1096,10 @@ async function cleanup() {
     }
   }
   await quiesceOwnedMessagingArtifacts();
+  psql(
+    'vietride_identity',
+    `DELETE FROM vietride_identity.users WHERE id = '${ids.admin}';`,
+  );
   console.log('PASS | Day34 audit fixtures cleaned');
 }
 
@@ -793,6 +1153,22 @@ function verifyCleanup() {
             WHERE message_id IN (${ownedMessageIds.map((id) => `'${id}'`).join(', ') || 'NULL'}))`,
       ),
     ) +
+    Number(
+      psql(
+        'vietride_payment',
+        `SELECT
+           (SELECT count(*) FROM vietride_payment.operator_trip_settlements
+            WHERE trip_id IN (${tripIds})) +
+           (SELECT count(*) FROM vietride_payment.operator_ledger_entries
+            WHERE id = '${ids.paymentLedgerEntry}')`,
+      ),
+    ) +
+    Number(
+      psql(
+        'vietride_identity',
+        `SELECT count(*) FROM vietride_identity.users WHERE id = '${ids.admin}'`,
+      ),
+    ) +
     countOwnedMessagingArtifacts();
   let redisRemaining = 0;
   for (const messageId of ownedMessageIds) {
@@ -826,8 +1202,11 @@ function verifyCleanup() {
 let runError;
 try {
   seed();
+  await verifyInsufficientSeatGuard();
   await runNewman('Day34');
-  verifyDay34();
+  await verifyDay34();
+  await verifyTransferEscalationAndLateConfirmation();
+  await verifyPaymentSettlementMarkers();
   await verifyDay35();
 } catch (error) {
   runError = error;
