@@ -93,25 +93,9 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IShuttleDispatchService, ShuttleDispatchService>();
         services.AddScoped<IResourceAvailabilityService, ResourceAvailabilityService>();
         services.AddScoped<ITripAssignmentAlertStore, TripAssignmentAlertStore>();
-        services.AddHttpClient<IShuttleDistanceClient, GoogleRoutesShuttleDistanceClient>(client =>
-            {
-                var baseUrl = configuration["GOOGLE_ROUTES_BASE_URL"] ?? "https://routes.googleapis.com";
-                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
-            });
-        services.AddHttpClient<ITripEtaPlanner, GoogleRoutesTripEtaPlanner>(client =>
-            {
-                var baseUrl = configuration["GOOGLE_ROUTES_BASE_URL"] ?? "https://routes.googleapis.com";
-                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
-            })
-            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
-            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
-        services.AddHttpClient<IRepositionTravelTimeClient, GoogleRoutesRepositionTravelTimeClient>(client =>
-            {
-                var baseUrl = configuration["GOOGLE_ROUTES_BASE_URL"] ?? "https://routes.googleapis.com";
-                client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
-            })
-            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
-            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+        AddGoongShuttleDistanceClient(services, configuration);
+        AddGoongTripEtaPlannerClient(services, configuration);
+        AddGoongRepositionTravelTimeClient(services, configuration);
         services.AddScoped<ShuttleDispatchSafetyJob>();
         services.AddScoped<AutoBoardingJob>();
         services.AddScoped<AutoStartFallbackJob>();
@@ -203,5 +187,36 @@ public static class InfrastructureServiceCollectionExtensions
 
         return baseUrl;
     }
+
+    private static void ConfigureGoongClient(HttpClient client, IConfiguration configuration)
+    {
+        var baseUrl = configuration["GOONG_BASE_URL"] ?? "https://rsapi.goong.io";
+        client.BaseAddress = new Uri(baseUrl, UriKind.Absolute);
+    }
+
+    internal static IHttpClientBuilder AddGoongShuttleDistanceClient(
+        IServiceCollection services,
+        IConfiguration configuration) =>
+        services.AddHttpClient<IShuttleDistanceClient, GoongDirectionsShuttleDistanceClient>(client =>
+                ConfigureGoongClient(client, configuration))
+            .RemoveAllLoggers();
+
+    internal static IHttpClientBuilder AddGoongTripEtaPlannerClient(
+        IServiceCollection services,
+        IConfiguration configuration) =>
+        services.AddHttpClient<ITripEtaPlanner, GoongDirectionsTripEtaPlanner>(client =>
+                ConfigureGoongClient(client, configuration))
+            .RemoveAllLoggers()
+            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
+
+    internal static IHttpClientBuilder AddGoongRepositionTravelTimeClient(
+        IServiceCollection services,
+        IConfiguration configuration) =>
+        services.AddHttpClient<IRepositionTravelTimeClient, GoongDirectionsRepositionTravelTimeClient>(client =>
+                ConfigureGoongClient(client, configuration))
+            .RemoveAllLoggers()
+            .AddPolicyHandler(HttpResiliencePolicies.GetRetryPolicy())
+            .AddPolicyHandler(HttpResiliencePolicies.GetCircuitBreakerPolicy());
 
 }

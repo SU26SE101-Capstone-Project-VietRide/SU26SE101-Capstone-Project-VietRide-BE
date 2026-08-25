@@ -4,4 +4,5 @@ public enum PlannedEtaSource
 {
     ROUTE_BASELINE,
     GOOGLE_ROUTES,
+    GOONG,
 }

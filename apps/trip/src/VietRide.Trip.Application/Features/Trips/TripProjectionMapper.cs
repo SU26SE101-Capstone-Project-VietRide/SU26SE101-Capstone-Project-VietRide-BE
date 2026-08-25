@@ -129,9 +129,12 @@ internal static class TripProjectionMapper
             AlternativeRouteId = trip.AlternativeRouteId,
             TripCode = trip.TripCode,
             RouteCode = route.Code,
-            PlannedEtaQuality = trip.PlannedEtaSource == PlannedEtaSource.GOOGLE_ROUTES
-                ? "TRAFFIC_AWARE"
-                : "FALLBACK",
+            PlannedEtaQuality = trip.PlannedEtaSource switch
+            {
+                PlannedEtaSource.GOOGLE_ROUTES => "TRAFFIC_AWARE",
+                PlannedEtaSource.GOONG => "ROUTE_BASED",
+                _ => "FALLBACK",
+            },
             SurchargePercent = baseFareAdjustment.SurchargePercent,
             SurchargeAmount = baseFareAdjustment.SurchargeAmount,
             EffectiveFare = baseFareAdjustment.EffectiveFare,

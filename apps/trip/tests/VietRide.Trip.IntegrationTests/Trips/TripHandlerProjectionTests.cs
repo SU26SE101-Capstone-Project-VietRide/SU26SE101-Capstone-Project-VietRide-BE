@@ -705,8 +705,13 @@ public sealed class TripHandlerProjectionTests
         result.Aisles.Should().ContainSingle().Which.AfterCol.Should().Be(2);
     }
 
-    [Fact]
-    public async Task GetDetail_ProjectsPersistedStopAndDestinationArrivalState()
+    [Theory]
+    [InlineData(PlannedEtaSource.GOOGLE_ROUTES, "TRAFFIC_AWARE")]
+    [InlineData(PlannedEtaSource.GOONG, "ROUTE_BASED")]
+    [InlineData(PlannedEtaSource.ROUTE_BASELINE, "FALLBACK")]
+    public async Task GetDetail_ProjectsPersistedStopAndDestinationArrivalState(
+        PlannedEtaSource plannedEtaSource,
+        string expectedQuality)
     {
         var operatorId = Guid.NewGuid();
         var origin = Station.Create("Bến xe Miền Đông", "ben-xe-mien-dong", "Hồ Chí Minh", "Hồ Chí Minh");
@@ -716,7 +721,7 @@ public sealed class TripHandlerProjectionTests
             operatorId,
             route.Id,
             DateTimeOffset.Parse("2026-07-21T01:00:00Z"),
-            PlannedEtaSource.GOOGLE_ROUTES);
+            plannedEtaSource);
         var destinationArrivedAt = DateTimeOffset.Parse("2026-07-21T08:30:00Z");
         trip.MarkDestinationArrived(destinationArrivedAt, Guid.NewGuid());
 
@@ -743,7 +748,7 @@ public sealed class TripHandlerProjectionTests
         var result = await handler.Handle(new GetTripDetailQuery(trip.Id), CancellationToken.None);
 
         result.DestinationArrivedAt.Should().Be(destinationArrivedAt);
-        result.PlannedEtaQuality.Should().Be("TRAFFIC_AWARE");
+        result.PlannedEtaQuality.Should().Be(expectedQuality);
         result.Stops.Select(stop => stop.Status).Should().Equal("PENDING", "ARRIVED", "SKIPPED");
         result.Stops[0].ActualArrivalTime.Should().BeNull();
         result.Stops[1].ActualArrivalTime.Should().Be(stopArrivedAt);
