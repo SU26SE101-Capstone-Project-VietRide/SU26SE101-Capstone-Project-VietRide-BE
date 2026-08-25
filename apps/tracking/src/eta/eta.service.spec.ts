@@ -10,7 +10,7 @@ import { RouteStateGenerationRegistry } from '../route-state/route-state-generat
 import {
   ETA_CACHE_TTL_SECONDS,
   ETA_STATE_TTL_SECONDS,
-  GOOGLE_ETA_PROVIDER,
+  GOONG_ETA_PROVIDER,
   LOCAL_ETA_PROVIDER,
   trackingEtaStateKey,
   TRIP_DATA_PROVIDER,
@@ -37,7 +37,7 @@ describe('EtaService', () => {
   let redisEval: jest.Mock;
   let multiSet: jest.Mock;
   let localProvider: jest.Mocked<EtaProvider>;
-  let googleProvider: jest.Mocked<EtaProvider>;
+  let goongProvider: jest.Mocked<EtaProvider>;
   let tripDataProvider: jest.Mocked<TripDataProvider>;
   let routePeek: jest.Mock;
   let env: Env;
@@ -53,18 +53,18 @@ describe('EtaService', () => {
     const pendingMultiDeletes: string[] = [];
     const multi = {} as RedisMultiMock;
     multi.set = jest.fn((key: string, value: string) => {
-        pendingMultiSets.push([key, value]);
-        return multi;
-      });
+      pendingMultiSets.push([key, value]);
+      return multi;
+    });
     multi.del = jest.fn((key: string) => {
-        pendingMultiDeletes.push(key);
-        return multi;
-      });
+      pendingMultiDeletes.push(key);
+      return multi;
+    });
     multi.exec = jest.fn(async () => {
-        for (const key of pendingMultiDeletes) store.delete(key);
-        for (const [key, value] of pendingMultiSets) store.set(key, value);
-        return [];
-      });
+      for (const key of pendingMultiDeletes) store.delete(key);
+      for (const [key, value] of pendingMultiSets) store.set(key, value);
+      return [];
+    });
     multiSet = multi.set;
     localProvider = {
       calculate: jest.fn(async (gps: GpsUpdateEvent, stop: TripStopSnapshot) => {
@@ -73,7 +73,7 @@ describe('EtaService', () => {
         return { distanceMeters: 7_500, etaMinutes: 12 };
       }),
     };
-    googleProvider = {
+    goongProvider = {
       calculate: jest.fn(async (gps: GpsUpdateEvent, stop: TripStopSnapshot) => {
         void gps;
         void stop;
@@ -89,12 +89,12 @@ describe('EtaService', () => {
       invalidateRouteStops: jest.fn(),
     };
     routePeek = jest.fn(() => ({
-        tripId: TEST_TRIP_ID,
-        points: [
-          { latitude: 10.7, longitude: 106.66 },
-          { latitude: 10.9, longitude: 106.66 },
-        ],
-      }));
+      tripId: TEST_TRIP_ID,
+      points: [
+        { latitude: 10.7, longitude: 106.66 },
+        { latitude: 10.9, longitude: 106.66 },
+      ],
+    }));
     const routeProvider: RouteGeometryProvider = {
       peekCachedRouteGeometry: routePeek,
       getRouteGeometry: async () => null,
@@ -118,7 +118,7 @@ describe('EtaService', () => {
         { provide: TRIP_DATA_PROVIDER, useValue: tripDataProvider },
         { provide: ROUTE_GEOMETRY_PROVIDER, useValue: routeProvider },
         { provide: LOCAL_ETA_PROVIDER, useValue: localProvider },
-        { provide: GOOGLE_ETA_PROVIDER, useValue: googleProvider },
+        { provide: GOONG_ETA_PROVIDER, useValue: goongProvider },
         { provide: ENV_TOKEN, useValue: env },
         RouteStateGenerationRegistry,
       ],
@@ -177,9 +177,7 @@ describe('EtaService', () => {
     const result = await service.handleGpsUpdate(createGps());
 
     expect(result).toEqual(expect.objectContaining({ stopId: TEST_STOP_ID }));
-    const destinationPayload = store.get(
-      trackingEtaKey(TEST_TRIP_ID, TEST_DESTINATION_STATION_ID),
-    );
+    const destinationPayload = store.get(trackingEtaKey(TEST_TRIP_ID, TEST_DESTINATION_STATION_ID));
     if (!destinationPayload) throw new Error('Expected destination ETA to be cached');
     const destinationEta = JSON.parse(destinationPayload) as Record<string, unknown>;
     expect(destinationEta).toMatchObject({
@@ -214,10 +212,12 @@ describe('EtaService', () => {
 
     const result = await service.handleGpsUpdate(createGps());
 
-    expect(result).toEqual(expect.objectContaining({
-      targetKind: 'STATION',
-      stationId: TEST_ORIGIN_STATION_ID,
-    }));
+    expect(result).toEqual(
+      expect.objectContaining({
+        targetKind: 'STATION',
+        stationId: TEST_ORIGIN_STATION_ID,
+      }),
+    );
     expect(localProvider.calculate).not.toHaveBeenCalled();
     const state = parseStoredObject(store.get(trackingEtaStateKey(TEST_TRIP_ID)) ?? '{}');
     expect(state).toMatchObject({
@@ -249,10 +249,12 @@ describe('EtaService', () => {
 
     const result = await service.handleGpsUpdate(createGps());
 
-    expect(result).toEqual(expect.objectContaining({
-      targetKind: 'STATION',
-      stationId: TEST_DESTINATION_STATION_ID,
-    }));
+    expect(result).toEqual(
+      expect.objectContaining({
+        targetKind: 'STATION',
+        stationId: TEST_DESTINATION_STATION_ID,
+      }),
+    );
     expect(result?.etas).toHaveLength(1);
   });
 
@@ -279,23 +281,28 @@ describe('EtaService', () => {
       lastProviderCallAt: new Date(Date.now() - 10_000).toISOString(),
     });
     seedEta(30);
-    store.set(trackingEtaKey(TEST_TRIP_ID, TEST_DESTINATION_STATION_ID), JSON.stringify({
-      tripId: TEST_TRIP_ID,
-      targetKind: 'STATION',
-      stationId: TEST_DESTINATION_STATION_ID,
-      etaMinutes: 60,
-      estimatedArrivalTime: '2026-06-03T11:00:00.000Z',
-      distanceMeters: 100_000,
-      updatedAt: '2026-06-03T10:00:00.000Z',
-      estimateQuality: 'FALLBACK',
-    }));
+    store.set(
+      trackingEtaKey(TEST_TRIP_ID, TEST_DESTINATION_STATION_ID),
+      JSON.stringify({
+        tripId: TEST_TRIP_ID,
+        targetKind: 'STATION',
+        stationId: TEST_DESTINATION_STATION_ID,
+        etaMinutes: 60,
+        estimatedArrivalTime: '2026-06-03T11:00:00.000Z',
+        distanceMeters: 100_000,
+        updatedAt: '2026-06-03T10:00:00.000Z',
+        estimateQuality: 'FALLBACK',
+      }),
+    );
 
     const result = await service.handleGpsUpdate(createGps());
 
-    expect(result).toEqual(expect.objectContaining({
-      targetKind: 'STATION',
-      stationId: TEST_DESTINATION_STATION_ID,
-    }));
+    expect(result).toEqual(
+      expect.objectContaining({
+        targetKind: 'STATION',
+        stationId: TEST_DESTINATION_STATION_ID,
+      }),
+    );
     expect(localProvider.calculate).toHaveBeenCalledWith(
       expect.any(Object),
       expect.objectContaining({ stopId: TEST_DESTINATION_STATION_ID }),
@@ -324,10 +331,12 @@ describe('EtaService', () => {
 
     const result = await service.handleGpsUpdate(createGps());
 
-    expect(result).toEqual(expect.objectContaining({
-      stopId: TEST_STOP_ID,
-      estimateQuality: 'FALLBACK',
-    }));
+    expect(result).toEqual(
+      expect.objectContaining({
+        stopId: TEST_STOP_ID,
+        estimateQuality: 'FALLBACK',
+      }),
+    );
     expect(result?.etas).toHaveLength(2);
     expect(result?.etas?.every((eta) => eta.estimateQuality === 'FALLBACK')).toBe(true);
   });
@@ -336,7 +345,9 @@ describe('EtaService', () => {
     seedState({ latitude: 10.7627, longitude: 106.6602, etaMinutes: 10 });
     seedEta(10);
 
-    await expect(service.handleGpsUpdate(createGps())).resolves.toEqual(expect.objectContaining({ etaMinutes: 12 }));
+    await expect(service.handleGpsUpdate(createGps())).resolves.toEqual(
+      expect.objectContaining({ etaMinutes: 12 }),
+    );
     expect(localProvider.calculate).toHaveBeenCalledTimes(1);
   });
 
@@ -348,46 +359,53 @@ describe('EtaService', () => {
     expect(localProvider.calculate).not.toHaveBeenCalled();
   });
 
-  it('uses Google as primary when enabled', async () => {
-    env.GOOGLE_ROUTES_ENABLED = true;
-    env.GOOGLE_ROUTES_API_KEY = 'fake-key';
+  it('uses Goong as primary and exposes route-based quality when selected', async () => {
+    env.ROUTING_PROVIDER = 'GOONG';
+    env.GOONG_API_KEY = 'fake-key';
 
-    await expect(service.handleGpsUpdate(createGps())).resolves.toEqual(expect.objectContaining({ etaMinutes: 10 }));
+    await expect(service.handleGpsUpdate(createGps())).resolves.toEqual(
+      expect.objectContaining({
+        etaMinutes: 10,
+        estimateQuality: 'ROUTE_BASED',
+      }),
+    );
 
-    expect(googleProvider.calculate).toHaveBeenCalledTimes(1);
+    expect(goongProvider.calculate).toHaveBeenCalledTimes(1);
     expect(localProvider.calculate).not.toHaveBeenCalled();
   });
 
-  it('uses Google when no route polyline is cached', async () => {
+  it('uses Goong when no route polyline is cached', async () => {
     routePeek.mockReturnValue(null);
-    env.GOOGLE_ROUTES_ENABLED = true;
-    env.GOOGLE_ROUTES_API_KEY = 'fake-key';
+    env.ROUTING_PROVIDER = 'GOONG';
+    env.GOONG_API_KEY = 'fake-key';
 
     await expect(service.handleGpsUpdate(createGps())).resolves.toEqual(
       expect.objectContaining({ etaMinutes: 10 }),
     );
 
-    expect(googleProvider.calculate).toHaveBeenCalledTimes(1);
+    expect(goongProvider.calculate).toHaveBeenCalledTimes(1);
     expect(localProvider.calculate).not.toHaveBeenCalled();
   });
 
-  it('falls back locally and opens cooldown after three Google failures', async () => {
-    env.GOOGLE_ROUTES_ENABLED = true;
-    env.GOOGLE_ROUTES_API_KEY = 'fake-key';
-    googleProvider.calculate.mockResolvedValue(null);
+  it('falls back locally and opens cooldown after three Goong failures', async () => {
+    env.ROUTING_PROVIDER = 'GOONG';
+    env.GOONG_API_KEY = 'fake-key';
+    goongProvider.calculate.mockResolvedValue(null);
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      await expect(service.handleGpsUpdate(createGps())).resolves.toEqual(expect.objectContaining({ etaMinutes: 12 }));
+      await expect(service.handleGpsUpdate(createGps())).resolves.toEqual(
+        expect.objectContaining({ etaMinutes: 12 }),
+      );
       ageProviderState();
     }
 
     const cooldownState = parseStoredObject(store.get(trackingEtaStateKey(TEST_TRIP_ID)) ?? '{}');
-    expect(googleProvider.calculate).toHaveBeenCalledTimes(3);
-    expect(cooldownState['googleFailureCount']).toBe(3);
+    expect(goongProvider.calculate).toHaveBeenCalledTimes(3);
+    expect(cooldownState['providerFailureCount']).toBe(3);
     expect(new Date(String(cooldownState['cooldownUntil'])).getTime()).toBeGreaterThan(Date.now());
 
     await service.handleGpsUpdate(createGps());
-    expect(googleProvider.calculate).toHaveBeenCalledTimes(3);
+    expect(goongProvider.calculate).toHaveBeenCalledTimes(3);
     expect(localProvider.calculate).toHaveBeenCalledTimes(4);
   });
 
@@ -396,28 +414,31 @@ describe('EtaService', () => {
 
     await expect(service.handleGpsUpdate(createGps())).resolves.toBeNull();
 
-    expect(googleProvider.calculate).not.toHaveBeenCalled();
+    expect(goongProvider.calculate).not.toHaveBeenCalled();
     expect(localProvider.calculate).not.toHaveBeenCalled();
   });
 
-  it.each(['ARRIVED', 'SKIPPED'])('ignores %s stops and selects the next pending stop', async (status) => {
-    tripDataProvider.getRouteStops.mockResolvedValue([
-      createStop({
-        stopId: '33333333-3333-4333-8333-333333333333',
-        sequence: 1,
-        status,
-      }),
-      createStop({ sequence: 2, status: 'PENDING', latitude: 10.85 }),
-    ]);
+  it.each(['ARRIVED', 'SKIPPED'])(
+    'ignores %s stops and selects the next pending stop',
+    async (status) => {
+      tripDataProvider.getRouteStops.mockResolvedValue([
+        createStop({
+          stopId: '33333333-3333-4333-8333-333333333333',
+          sequence: 1,
+          status,
+        }),
+        createStop({ sequence: 2, status: 'PENDING', latitude: 10.85 }),
+      ]);
 
-    const result = await service.handleGpsUpdate(createGps());
+      const result = await service.handleGpsUpdate(createGps());
 
-    expect(result?.stopId).toBe(TEST_STOP_ID);
-    expect(localProvider.calculate).toHaveBeenCalledWith(
-      expect.any(Object),
-      expect.objectContaining({ status: 'PENDING', sequence: 2 }),
-    );
-  });
+      expect(result?.stopId).toBe(TEST_STOP_ID);
+      expect(localProvider.calculate).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({ status: 'PENDING', sequence: 2 }),
+      );
+    },
+  );
 
   it('continues selecting PENDING stops', async () => {
     tripDataProvider.getRouteStops.mockResolvedValue([createStop({ status: 'PENDING' })]);
@@ -493,7 +514,7 @@ describe('EtaService', () => {
 
     await expect(service.handleGpsUpdate(createGps())).resolves.toBeNull();
 
-    expect(googleProvider.calculate).not.toHaveBeenCalled();
+    expect(goongProvider.calculate).not.toHaveBeenCalled();
     expect(localProvider.calculate).not.toHaveBeenCalled();
   });
 
@@ -519,26 +540,34 @@ describe('EtaService', () => {
   });
 
   function seedState(
-    overrides: Partial<Record<'latitude' | 'longitude' | 'etaMinutes', number>> & { lastProviderCallAt?: string },
+    overrides: Partial<Record<'latitude' | 'longitude' | 'etaMinutes', number>> & {
+      lastProviderCallAt?: string;
+    },
   ): void {
-    store.set(trackingEtaStateKey(TEST_TRIP_ID), JSON.stringify({
-      stopId: TEST_STOP_ID,
-      stopSequence: 1,
-      lastProviderCallAt: new Date(Date.now() - 61_000).toISOString(),
-      googleFailureCount: 0,
-      ...overrides,
-    }));
+    store.set(
+      trackingEtaStateKey(TEST_TRIP_ID),
+      JSON.stringify({
+        stopId: TEST_STOP_ID,
+        stopSequence: 1,
+        lastProviderCallAt: new Date(Date.now() - 61_000).toISOString(),
+        googleFailureCount: 0,
+        ...overrides,
+      }),
+    );
   }
 
   function seedEta(etaMinutes: number): void {
-    store.set(trackingEtaKey(TEST_TRIP_ID, TEST_STOP_ID), JSON.stringify({
-      tripId: TEST_TRIP_ID,
-      stopId: TEST_STOP_ID,
-      etaMinutes,
-      estimatedArrivalTime: '2026-06-03T10:30:00.000Z',
-      distanceMeters: 10_000,
-      updatedAt: '2026-06-03T10:00:00.000Z',
-    }));
+    store.set(
+      trackingEtaKey(TEST_TRIP_ID, TEST_STOP_ID),
+      JSON.stringify({
+        tripId: TEST_TRIP_ID,
+        stopId: TEST_STOP_ID,
+        etaMinutes,
+        estimatedArrivalTime: '2026-06-03T10:30:00.000Z',
+        distanceMeters: 10_000,
+        updatedAt: '2026-06-03T10:00:00.000Z',
+      }),
+    );
   }
 
   function ageProviderState(): void {
@@ -573,14 +602,14 @@ function createStop(overrides: Partial<TripStopSnapshot> = {}): TripStopSnapshot
 function parseStoredObject(payload: string): Record<string, unknown> {
   const parsed = JSON.parse(payload) as unknown;
   return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-    ? parsed as Record<string, unknown>
+    ? (parsed as Record<string, unknown>)
     : {};
 }
 
 function createEnv(): Env {
   return {
-    GOOGLE_ROUTES_ENABLED: false,
-    GOOGLE_ROUTES_API_KEY: '',
+    ROUTING_PROVIDER: 'LOCAL',
+    GOONG_API_KEY: '',
     TRACKING_ETA_MIN_INTERVAL_SECONDS: 60,
     TRACKING_ETA_CACHE_TTL_SECONDS: 60,
     TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: 300,

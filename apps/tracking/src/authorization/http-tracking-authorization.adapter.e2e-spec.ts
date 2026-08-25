@@ -34,7 +34,10 @@ describe('HttpTrackingAuthorizationAdapter (e2e)', () => {
   });
 
   it('allows passenger booking owner to view trip tracking', async () => {
-    const result = await adapter.authorizeTripTracking({ userId: OWNER_USER_ID, role: 'PASSENGER' }, TEST_TRIP_ID);
+    const result = await adapter.authorizeTripTracking(
+      { userId: OWNER_USER_ID, role: 'PASSENGER' },
+      TEST_TRIP_ID,
+    );
 
     expect(result).toEqual({ allowed: true, scope: 'BOOKING_OWNER' });
   });
@@ -58,16 +61,26 @@ describe('HttpTrackingAuthorizationAdapter (e2e)', () => {
   });
 
   it('allows driver assigned to the trip for gps:update authorization', async () => {
-    const result = await adapter.authorizeTripTracking({ userId: DRIVER_USER_ID, role: 'DRIVER' }, TEST_TRIP_ID);
+    const result = await adapter.authorizeTripTracking(
+      { userId: DRIVER_USER_ID, role: 'DRIVER' },
+      TEST_TRIP_ID,
+    );
 
     expect(result).toEqual({ allowed: true, scope: 'DRIVER' });
   });
 
-  it('maps downstream timeout to TRACKING_AUTH_UNAVAILABLE', async () => {
-    const result = await adapter.authorizeTripTracking({ userId: DRIVER_USER_ID, role: 'DRIVER' }, timeoutTripId());
+  it(
+    'maps downstream timeout to TRACKING_AUTH_UNAVAILABLE',
+    async () => {
+      const result = await adapter.authorizeTripTracking(
+        { userId: DRIVER_USER_ID, role: 'DRIVER' },
+        timeoutTripId(),
+      );
 
-    expect(result).toEqual({ allowed: false, error: 'TRACKING_AUTH_UNAVAILABLE' });
-  }, TIMEOUT_TEST_TIMEOUT_MS);
+      expect(result).toEqual({ allowed: false, error: 'TRACKING_AUTH_UNAVAILABLE' });
+    },
+    TIMEOUT_TEST_TIMEOUT_MS,
+  );
 
   async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', baseUrl);
@@ -94,7 +107,8 @@ describe('HttpTrackingAuthorizationAdapter (e2e)', () => {
       writeJson(response, {
         allowed: url.searchParams.get('userId') === PARCEL_RECIPIENT_USER_ID,
         scope: 'PARCEL_RECIPIENT',
-        error: url.searchParams.get('userId') === PARCEL_RECIPIENT_USER_ID ? undefined : 'ACCESS_DENIED',
+        error:
+          url.searchParams.get('userId') === PARCEL_RECIPIENT_USER_ID ? undefined : 'ACCESS_DENIED',
       });
       return;
     }
@@ -177,10 +191,11 @@ function createTestEnv(baseUrl: string): Env {
     TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN: 60,
     TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN: 20,
     TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS: 60,
-    GOOGLE_ROUTES_ENABLED: false,
-    GOOGLE_ROUTES_API_KEY: '',
-    GOOGLE_ROUTES_BASE_URL: 'https://routes.googleapis.com',
-    TRACKING_GOOGLE_ROUTES_TIMEOUT_MS: 1_500,
+    ROUTING_PROVIDER: 'LOCAL',
+    GOONG_API_KEY: '',
+    GOONG_BASE_URL: 'https://rsapi.goong.io',
+    GOONG_MAX_DESTINATIONS_PER_REQUEST: 10,
+    TRACKING_ROUTING_TIMEOUT_MS: 1_500,
     TRACKING_ETA_MIN_INTERVAL_SECONDS: 60,
     TRACKING_ETA_CACHE_TTL_SECONDS: 60,
     TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: 300,

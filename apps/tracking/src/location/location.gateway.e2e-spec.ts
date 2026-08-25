@@ -255,7 +255,9 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   });
 
   it('does not accept a share token as authentication on the default namespace', async () => {
-    await expect(connectWithAuth({ shareToken: 'v1.share.signature' })).rejects.toThrow('UNAUTHORIZED');
+    await expect(connectWithAuth({ shareToken: 'v1.share.signature' })).rejects.toThrow(
+      'UNAUTHORIZED',
+    );
   });
 
   it('allows a valid passenger token to join trip tracking', async () => {
@@ -283,15 +285,17 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       includeRouteSnapshot: true,
     });
 
-    expect(ack).toEqual(expect.objectContaining({
-      success: true,
-      tripId: TEST_TRIP_ID,
-      routeVersion: '"route-version-1"',
-      routeContext: expect.objectContaining({
+    expect(ack).toEqual(
+      expect.objectContaining({
+        success: true,
         tripId: TEST_TRIP_ID,
-        tripStatus: 'IN_PROGRESS',
+        routeVersion: '"route-version-1"',
+        routeContext: expect.objectContaining({
+          tripId: TEST_TRIP_ID,
+          tripStatus: 'IN_PROGRESS',
+        }) as unknown,
       }),
-    }));
+    );
     expect(routeContextGet).toHaveBeenCalledWith(TEST_TRIP_ID);
     socket.disconnect();
   });
@@ -334,11 +338,13 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       boardedAt: '2026-08-08T01:00:00.000Z',
     });
 
-    await expect(crewEvent).resolves.toEqual(expect.objectContaining({
-      tripId: TEST_TRIP_ID,
-      reason: 'PASSENGER_BOARDED',
-      seatNumbers: ['A01'],
-    }));
+    await expect(crewEvent).resolves.toEqual(
+      expect.objectContaining({
+        tripId: TEST_TRIP_ID,
+        reason: 'PASSENGER_BOARDED',
+        seatNumbers: ['A01'],
+      }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(passengerListener).not.toHaveBeenCalled();
     driver.disconnect();
@@ -387,14 +393,16 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       expect.objectContaining({ tripId: TEST_TRIP_ID }),
     );
     expect(sharedPublishGps).toHaveBeenCalledTimes(1);
-    expect(sharedPublishGps).toHaveBeenCalledWith(expect.objectContaining({
-      tripId: TEST_TRIP_ID,
-      latitude: payload.latitude,
-      longitude: payload.longitude,
-      speedKmh: payload.speedKmh,
-      headingDeg: payload.headingDeg,
-      recordedAt: payload.recordedAt,
-    }));
+    expect(sharedPublishGps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tripId: TEST_TRIP_ID,
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        speedKmh: payload.speedKmh,
+        headingDeg: payload.headingDeg,
+        recordedAt: payload.recordedAt,
+      }),
+    );
     expect(approachingHandleEtaUpdate).not.toHaveBeenCalled();
     socket.disconnect();
   });
@@ -408,11 +416,7 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       await signIdentityToken('OPERATOR_ADMIN', OTHER_OPERATOR_ID),
     );
     const driver = await connectSocket(await signIdentityToken('DRIVER', TEST_OPERATOR_ID));
-    const operatorAck = await emitWithAck<JoinTripTrackingAck>(
-      operator,
-      'joinOperatorFleet',
-      {},
-    );
+    const operatorAck = await emitWithAck<JoinTripTrackingAck>(operator, 'joinOperatorFleet', {});
     const otherOperatorAck = await emitWithAck<JoinTripTrackingAck>(
       otherOperator,
       'joinOperatorFleet',
@@ -450,13 +454,9 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
   it.each(['DEVIATED', 'ROUTE_RESTORED'] as const)(
     'broadcasts trip:routeDeviation %s only to Trip crew and the matching operator fleet',
     async (status) => {
-      const assistant = await connectSocket(
-        await signIdentityToken('ASSISTANT', TEST_OPERATOR_ID),
-      );
+      const assistant = await connectSocket(await signIdentityToken('ASSISTANT', TEST_OPERATOR_ID));
       const passenger = await connectSocket(await signIdentityToken('PASSENGER'));
-      const otherCrew = await connectSocket(
-        await signIdentityToken('ASSISTANT', TEST_OPERATOR_ID),
-      );
+      const otherCrew = await connectSocket(await signIdentityToken('ASSISTANT', TEST_OPERATOR_ID));
       const operator = await connectSocket(
         await signIdentityToken('OPERATOR_ADMIN', TEST_OPERATOR_ID),
       );
@@ -493,8 +493,9 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       otherCrew.on('trip:routeDeviation', otherCrewListener);
       otherOperator.on('trip:routeDeviation', otherOperatorListener);
 
-      await expect(emitWithAck<GpsUpdateAck>(driver, 'gps:update', createGpsPayload()))
-        .resolves.toEqual({ success: true });
+      await expect(
+        emitWithAck<GpsUpdateAck>(driver, 'gps:update', createGpsPayload()),
+      ).resolves.toEqual({ success: true });
       const expectedDeviation = transformFrontendTimestamps(deviation);
       await expect(crewEvent).resolves.toEqual(expectedDeviation);
       await expect(operatorEvent).resolves.toEqual(expectedDeviation);
@@ -596,14 +597,16 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       driverUserId: TEST_USER_ID,
       allowed: true,
       scope: 'DRIVER',
-      stops: [{
-        pickupOrder: 1,
-        bookingId: null,
-        latitude: 10.8,
-        longitude: 106.7,
-        status: 'PENDING',
-        isStation: true,
-      }],
+      stops: [
+        {
+          pickupOrder: 1,
+          bookingId: null,
+          latitude: 10.8,
+          longitude: 106.7,
+          status: 'PENDING',
+          isStation: true,
+        },
+      ],
     };
     const payload = {
       shuttleTripId: TEST_SHUTTLE_ID,
@@ -624,9 +627,10 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     shuttleGetContext.mockResolvedValue(context);
     shuttleRecordLocation.mockResolvedValue({ gps: payload, duplicate: false });
     shuttleEtaHandleGpsUpdate.mockImplementationOnce(
-      () => new Promise<ShuttleEtaEvent>((resolve) => {
-        releaseEta = () => resolve(eta);
-      }),
+      () =>
+        new Promise<ShuttleEtaEvent>((resolve) => {
+          releaseEta = () => resolve(eta);
+        }),
     );
 
     await emitWithAck<JoinTripTrackingAck>(socket, 'joinShuttleTracking', {
@@ -785,12 +789,14 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const receivedEta = await etaPromise;
 
     expect(ack).toEqual({ success: true });
-    expect(receivedEta).toEqual(transformFrontendTimestamps({
-      ...etaUpdate,
-      delayed: false,
-      delayStatus: 'UNKNOWN',
-      delayMinutes: null,
-    }));
+    expect(receivedEta).toEqual(
+      transformFrontendTimestamps({
+        ...etaUpdate,
+        delayed: false,
+        delayStatus: 'UNKNOWN',
+        delayMinutes: null,
+      }),
+    );
     expect(approachingHandleEtaUpdate).toHaveBeenCalledWith({
       ...etaUpdate,
       delayed: false,
@@ -820,17 +826,19 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
       estimatedArrivalTime: '2026-06-03T10:08:00.000Z',
       distanceMeters: 4_000,
       updatedAt: '2026-06-03T10:00:01.000Z',
-      etas: [{
-        tripId: TEST_TRIP_ID,
-        stationId,
-        targetKind: 'STATION',
-        stopName: 'Origin station',
-        etaMinutes: 8,
-        estimatedArrivalTime: '2026-06-03T10:08:00.000Z',
-        distanceMeters: 4_000,
-        updatedAt: '2026-06-03T10:00:01.000Z',
-        estimateQuality: 'FALLBACK',
-      }],
+      etas: [
+        {
+          tripId: TEST_TRIP_ID,
+          stationId,
+          targetKind: 'STATION',
+          stopName: 'Origin station',
+          etaMinutes: 8,
+          estimatedArrivalTime: '2026-06-03T10:08:00.000Z',
+          distanceMeters: 4_000,
+          updatedAt: '2026-06-03T10:00:01.000Z',
+          estimateQuality: 'FALLBACK',
+        },
+      ],
     };
     etaHandleGpsUpdate.mockResolvedValue(stationEta);
     await emitWithAck<JoinTripTrackingAck>(socket, 'joinTripTracking', {
@@ -841,12 +849,14 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     socket.on('eta:update', legacyListener);
 
     await emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload());
-    await expect(batchPromise).resolves.toEqual(expect.objectContaining({
-      tripId: TEST_TRIP_ID,
-      etas: expect.arrayContaining([
-        expect.objectContaining({ targetKind: 'STATION', stationId }),
-      ]),
-    }));
+    await expect(batchPromise).resolves.toEqual(
+      expect.objectContaining({
+        tripId: TEST_TRIP_ID,
+        etas: expect.arrayContaining([
+          expect.objectContaining({ targetKind: 'STATION', stationId }),
+        ]) as unknown,
+      }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(legacyListener).not.toHaveBeenCalled();
@@ -886,24 +896,28 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     const receivedStatus = await statusPromise;
 
     expect(ack).toEqual({ success: true });
-    expect(receivedEta).toEqual(transformFrontendTimestamps({
-      tripId: delayedEtaUpdate.tripId,
-      stopId: delayedEtaUpdate.stopId,
-      etaMinutes: delayedEtaUpdate.etaMinutes,
-      estimatedArrivalTime: delayedEtaUpdate.estimatedArrivalTime,
-      distanceMeters: delayedEtaUpdate.distanceMeters,
-      updatedAt: delayedEtaUpdate.updatedAt,
-      delayed: delayedEtaUpdate.delayed,
-      delayStatus: delayedEtaUpdate.delayStatus,
-      delayMinutes: delayedEtaUpdate.delayMinutes,
-    }));
-    expect(receivedStatus).toEqual(transformFrontendTimestamps({
-      tripId: TEST_TRIP_ID,
-      stopId: etaUpdate.stopId,
-      status: 'DELAYED',
-      delayMinutes: 35,
-      updatedAt: etaUpdate.updatedAt,
-    }));
+    expect(receivedEta).toEqual(
+      transformFrontendTimestamps({
+        tripId: delayedEtaUpdate.tripId,
+        stopId: delayedEtaUpdate.stopId,
+        etaMinutes: delayedEtaUpdate.etaMinutes,
+        estimatedArrivalTime: delayedEtaUpdate.estimatedArrivalTime,
+        distanceMeters: delayedEtaUpdate.distanceMeters,
+        updatedAt: delayedEtaUpdate.updatedAt,
+        delayed: delayedEtaUpdate.delayed,
+        delayStatus: delayedEtaUpdate.delayStatus,
+        delayMinutes: delayedEtaUpdate.delayMinutes,
+      }),
+    );
+    expect(receivedStatus).toEqual(
+      transformFrontendTimestamps({
+        tripId: TEST_TRIP_ID,
+        stopId: etaUpdate.stopId,
+        status: 'DELAYED',
+        delayMinutes: 35,
+        updatedAt: etaUpdate.updatedAt,
+      }),
+    );
     expect(approachingHandleEtaUpdate).toHaveBeenCalledWith(delayedEtaUpdate);
     expect(sharedPublishEta).toHaveBeenCalledWith({
       tripId: delayedEtaUpdate.tripId,
@@ -951,29 +965,34 @@ describe('LocationGateway identity-backed realtime (e2e)', () => {
     });
     const etaPromise = waitForEvent<TripDelayEtaUpdate>(socket, 'eta:update');
     const statusPromise = waitForEvent<Record<string, unknown>>(socket, 'trip:statusChanged');
-    await expect(emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload()))
-      .resolves.toEqual({ success: true });
+    await expect(
+      emitWithAck<GpsUpdateAck>(socket, 'gps:update', createGpsPayload()),
+    ).resolves.toEqual({ success: true });
     const receivedEta = await etaPromise;
     const receivedStatus = await statusPromise;
 
-    expect(receivedEta).toEqual(transformFrontendTimestamps({
-      tripId: clearedEtaUpdate.tripId,
-      stopId: clearedEtaUpdate.stopId,
-      etaMinutes: clearedEtaUpdate.etaMinutes,
-      estimatedArrivalTime: clearedEtaUpdate.estimatedArrivalTime,
-      distanceMeters: clearedEtaUpdate.distanceMeters,
-      updatedAt: clearedEtaUpdate.updatedAt,
-      delayed: clearedEtaUpdate.delayed,
-      delayStatus: clearedEtaUpdate.delayStatus,
-      delayMinutes: clearedEtaUpdate.delayMinutes,
-    }));
-    expect(receivedStatus).toEqual(transformFrontendTimestamps({
-      tripId: TEST_TRIP_ID,
-      stopId: etaUpdate.stopId,
-      status: 'DELAY_CLEARED',
-      delayMinutes: 30,
-      updatedAt: etaUpdate.updatedAt,
-    }));
+    expect(receivedEta).toEqual(
+      transformFrontendTimestamps({
+        tripId: clearedEtaUpdate.tripId,
+        stopId: clearedEtaUpdate.stopId,
+        etaMinutes: clearedEtaUpdate.etaMinutes,
+        estimatedArrivalTime: clearedEtaUpdate.estimatedArrivalTime,
+        distanceMeters: clearedEtaUpdate.distanceMeters,
+        updatedAt: clearedEtaUpdate.updatedAt,
+        delayed: clearedEtaUpdate.delayed,
+        delayStatus: clearedEtaUpdate.delayStatus,
+        delayMinutes: clearedEtaUpdate.delayMinutes,
+      }),
+    );
+    expect(receivedStatus).toEqual(
+      transformFrontendTimestamps({
+        tripId: TEST_TRIP_ID,
+        stopId: etaUpdate.stopId,
+        status: 'DELAY_CLEARED',
+        delayMinutes: 30,
+        updatedAt: etaUpdate.updatedAt,
+      }),
+    );
     expect(sharedPublishStatus).toHaveBeenCalledWith({
       tripId: TEST_TRIP_ID,
       status: 'DELAY_CLEARED',
@@ -1142,10 +1161,11 @@ function createTestEnv(publicKeyPem: string): Env {
     TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN: 60,
     TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN: 20,
     TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS: 60,
-    GOOGLE_ROUTES_ENABLED: false,
-    GOOGLE_ROUTES_API_KEY: '',
-    GOOGLE_ROUTES_BASE_URL: 'https://routes.googleapis.com',
-    TRACKING_GOOGLE_ROUTES_TIMEOUT_MS: 1_500,
+    ROUTING_PROVIDER: 'LOCAL',
+    GOONG_API_KEY: '',
+    GOONG_BASE_URL: 'https://rsapi.goong.io',
+    GOONG_MAX_DESTINATIONS_PER_REQUEST: 10,
+    TRACKING_ROUTING_TIMEOUT_MS: 1_500,
     TRACKING_ETA_MIN_INTERVAL_SECONDS: 60,
     TRACKING_ETA_CACHE_TTL_SECONDS: 60,
     TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: 300,

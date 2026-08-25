@@ -42,6 +42,7 @@ export default [
   {
     files: [
       'apps/gateway/**/*.ts',
+      'apps/tracking/**/*.ts',
       'apps/notification/**/*.ts',
       'libs/shared/contracts/**/*.ts'
     ],
@@ -50,6 +51,8 @@ export default [
         project: [
           './apps/gateway/tsconfig.app.json',
           './apps/gateway/tsconfig.spec.json',
+          './apps/tracking/tsconfig.app.json',
+          './apps/tracking/tsconfig.spec.json',
           './apps/notification/tsconfig.app.json',
           './apps/notification/tsconfig.spec.json',
           './libs/shared/contracts/tsconfig.lib.json',

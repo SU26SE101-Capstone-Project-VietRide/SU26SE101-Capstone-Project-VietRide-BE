@@ -68,7 +68,7 @@ public sealed class GetShuttleRoadDistanceHandler
         {
             ShuttleDistanceOutcome.Success success => new ShuttleRoadDistanceDto(success.DistanceMeters),
             ShuttleDistanceOutcome.Unavailable unavailable => throw new ShuttleDistanceUnavailableException(unavailable.Message),
-            _ => throw new ShuttleDistanceUnavailableException("Google Routes returned an unknown response."),
+            _ => throw new ShuttleDistanceUnavailableException("Routing provider returned an unknown response."),
         };
     }
 }

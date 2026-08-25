@@ -2266,9 +2266,11 @@ When it is non-null, `destinationStation`, `estimatedArrivalTime`, and the pendi
 `stops` describe that effective AlternativeRoute. Already-`ARRIVED` stop snapshots remain at the
 front of `stops` as immutable operational history. `destinationArrivedAt` is `null` until the
 assigned Driver/Assistant records physical arrival at the effective destination terminal.
-Trip detail also includes `plannedEtaQuality=TRAFFIC_AWARE|FALLBACK`. This is a public quality
+Trip detail also includes `plannedEtaQuality=TRAFFIC_AWARE|ROUTE_BASED|FALLBACK`. This is a public quality
 classification only; the internal route provider/source is not exposed. `Trip.estimatedArrivalTime`
 and every stop `estimatedArrivalTime` are planned timestamps calculated by the backend.
+Persisted historical source `GOOGLE_ROUTES` maps to `TRAFFIC_AWARE`, current `GOONG` maps to
+`ROUTE_BASED`, and `ROUTE_BASELINE` maps to `FALLBACK`.
 
 Each stop includes `stopId`, `name`, `address`, `latitude`, `longitude`, `isActive`,
 `orderIndex`, `allowPickup`, `allowDropoff`, `status` (`PENDING|ARRIVED|SKIPPED`),
@@ -3268,9 +3270,10 @@ Booking projection contains any `PENDING_PAYMENT|CONFIRMED` Booking. Otherwise T
 rebuilds Trip stops, per-stop fares, and the static planned ETA baseline from the new Route, with
 local HELD/BOOKED seat races revalidated under lock. An approved pre-departure Route edit or a
 DriverSchedule `ALL_PENDING` cascade may recompute this baseline; GPS/Tracking dynamic ETA never
-updates it. Planned recomputation uses ordered Google Routes traffic-aware legs at Trip departure,
-adds the configured stop dwell (default 20 minutes), and falls back to cumulative Route metrics
-without failing the mutation.
+updates it. Planned recomputation uses ordered Goong Directions legs (`vehicle=car`), adds the
+configured stop dwell (default 20 minutes), and falls back to cumulative Route metrics without
+failing the mutation. Goong does not accept departure-time/traffic-duration inputs, so new Goong
+plans have `plannedEtaQuality=ROUTE_BASED`, never `TRAFFIC_AWARE`.
 
 Vehicle compatibility is keyed by normalized `seatNumber` and uses this comparison only:
 `STANDARD < SLEEPER_UPPER < SLEEPER_LOWER < VIP`. The rank never affects pricing.
@@ -5358,17 +5361,28 @@ Tracking Phase 10 invariants (legacy fields remain compatible; delay fields belo
 - ETA uses cumulative route distance and monotonic stop sequence/progress guards. For
   `SCHEDULED|BOARDING`, one calculation targets the origin `STATION`; for `IN_PROGRESS`, it covers
   all remaining `PENDING` stops plus the destination `STATION`. Express Trips and Trips past their
-  last intermediate stop therefore still target the destination. Google Routes is primary only
-  when `GOOGLE_ROUTES_ENABLED=true`; Local Route ETA/direct route projection is the fallback.
+  last intermediate stop therefore still target the destination. Goong Directions is primary only
+  when `ROUTING_PROVIDER=GOONG`; `ROUTING_PROVIDER=LOCAL` and provider failures use Local Route
+  ETA/direct route projection as the fallback.
   Provider calls are throttled to 60 seconds, require the next stop to change, more than 500 m
   movement, or a next-stop ETA under 15 minutes, and use one per-Trip Redis lock, atomic 60-second
   caches and a three-failure/300-second cooldown.
   A newly selected stop with no cache is calculated immediately even when the previous stop was
   calculated less than 60 seconds ago. `STOPS_ONLY` geometry is refreshed after 30 seconds;
   Route polyline geometry uses the configured longer cache TTL.
-- Default E2E uses a fake Google Routes HTTP server. Real Google E2E is opt-in with
-  `RUN_REAL_GOOGLE_E2E=true`. Public responses expose only
-  `estimateQuality=TRAFFIC_AWARE|FALLBACK`; provider names, snap metadata and traffic metadata
+- A Goong request is `GET {GOONG_BASE_URL}/Direction` with ordered `origin=lat,lng`, semicolon-
+  separated ordered `destination` targets, `vehicle=car`, `alternatives=false` and query secret
+  `api_key=GOONG_API_KEY`. `GOONG_MAX_DESTINATIONS_PER_REQUEST` defaults to 10. Longer chains are
+  chunked without reordering and leg distance/duration are accumulated across chunks. Empty or
+  malformed routes, negative/non-finite metrics, wrong leg count or changed waypoint order reject
+  the whole batch. Full request URIs/query strings must never be logged.
+- `401`, `403`, `429`, `5xx`, timeout, malformed JSON or strict-validation failures count toward the
+  existing three-failure/300-second cooldown and use one consistent Local batch; partial provider
+  output is never mixed with Local output. Default E2E uses a fake Goong HTTP server. Real Goong
+  E2E is opt-in and must receive its key from the environment. Public responses expose only
+  `estimateQuality=TRAFFIC_AWARE|ROUTE_BASED|FALLBACK`; `TRAFFIC_AWARE` is historical
+  `GOOGLE_ROUTES`, `ROUTE_BASED` is Goong, and `FALLBACK` is Local. Provider names, snap metadata
+  and traffic metadata
   remain internal.
 
 `eta:update` remains a STOP-only legacy event, keeps the legacy boolean `delayed`, and adds the
@@ -5382,7 +5396,7 @@ following fields. Station targets are emitted only through `eta:batch:update`:
   "estimatedArrivalTime": "2026-08-05T17:12:00.000+07:00",
   "distanceMeters": 8500,
   "updatedAt": "2026-08-05T17:00:01.000+07:00",
-  "estimateQuality": "TRAFFIC_AWARE",
+  "estimateQuality": "ROUTE_BASED",
   "delayed": false,
   "delayStatus": "ON_TIME",
   "delayMinutes": 0
@@ -5405,7 +5419,7 @@ targets. `targetKind=STOP` uses `stopId`; origin/destination targets use `target
       "estimatedArrivalTime": "2026-08-05T17:12:00.000+07:00",
       "distanceMeters": 8500,
       "updatedAt": "2026-08-05T17:00:01.000+07:00",
-      "estimateQuality": "TRAFFIC_AWARE"
+      "estimateQuality": "ROUTE_BASED"
     },
     {
       "targetKind": "STATION",
@@ -5414,7 +5428,7 @@ targets. `targetKind=STOP` uses `stopId`; origin/destination targets use `target
       "estimatedArrivalTime": "2026-08-05T18:35:00.000+07:00",
       "distanceMeters": 112000,
       "updatedAt": "2026-08-05T17:00:01.000+07:00",
-      "estimateQuality": "TRAFFIC_AWARE"
+      "estimateQuality": "ROUTE_BASED"
     }
   ],
   "updatedAt": "2026-08-05T17:00:01.000+07:00"
@@ -5462,7 +5476,7 @@ fields and adds:
     "estimatedArrivalTime": "2026-08-05T17:12:00.000+07:00",
     "distanceMeters": 8500,
     "updatedAt": "2026-08-05T17:00:01.000+07:00",
-    "estimateQuality": "TRAFFIC_AWARE",
+    "estimateQuality": "ROUTE_BASED",
     "delayed": null,
     "delayStatus": "UNKNOWN",
     "delayMinutes": null
@@ -5541,14 +5555,14 @@ REST fallback endpoints are:
 
 Shuttle ETA follows `pickupOrder`, skips terminal groups (`PICKED_UP`, `DELIVERED`, `NO_SHOW`,
 `CANCELLED`), never regresses below the last published pickup order and uses the Station stop as the
-final destination. Google Routes is primary when `GOOGLE_ROUTES_ENABLED=true`; direct-distance/speed ETA
+final destination. Goong Directions is primary when `ROUTING_PROVIDER=GOONG`; direct-distance/speed ETA
 is the local fallback because Shuttle has no fixed route geometry. Provider calls use a minimum
 60-second interval, the existing 500 m movement or ETA-under-15-minute conditions, a per-Shuttle
-pickup Redis lock, a 60-second cache and a three-failure/300-second Google cooldown. GPS persistence,
-broadcast and acknowledgement never wait for Google HTTP. Shuttle state remains under
+pickup Redis lock, a 60-second cache and a three-failure/300-second Goong cooldown. GPS persistence,
+broadcast and acknowledgement never wait for Goong HTTP. Shuttle state remains under
 `tracking:shuttle:*` and does not enter main Trip `GpsTrail`, active-trip, off-route or delay chains.
-No `etaSource` or provider metadata is added to the public payload. Default E2E uses a fake Google
-server; real Google is opt-in with `RUN_REAL_GOOGLE_E2E=true`.
+No `etaSource` or provider metadata is added to the public payload. Default E2E uses a fake Goong
+server; real Goong is opt-in and reads `GOONG_API_KEY` only from the environment.
 
 ### GET `/v1/tracking/trips/{tripId}/route-geometry`
 
@@ -7118,13 +7132,13 @@ Auth: Internal JWT. Idempotency-Key: required. Caller: Trip service after its lo
 Auth: valid Internal JWT only. Booking calls this endpoint before creating each shuttle intent.
 Query `direction=INBOUND_TO_STATION|OUTBOUND_FROM_STATION`, `latitude`, and `longitude` are
 required. Inbound measures to the route origin Station; outbound measures to the destination
-Station. Trip uses Google Routes `travelMode=DRIVE` and returns raw `{ "distanceMeters": 5000 }`.
+Station. Trip uses Goong Directions `vehicle=car` and returns raw `{ "distanceMeters": 5000 }`.
 Errors are `422 VALIDATION_ERROR`/`422 SHUTTLE_STATION_NOT_SUPPORTED` or
 `503 SHUTTLE_DISTANCE_UNAVAILABLE`; there is no Haversine fallback.
 
 ### GET `/v1/operator/shuttle-requests`
 
-Shuttle được nhóm theo `mainTripId + direction`, trong đó `direction` là `INBOUND_TO_STATION` hoặc `OUTBOUND_FROM_STATION`. Khoảng cách hiển thị là `roadDistanceMeters` snapshot từ Google Routes; không dùng Haversine cho điều kiện đủ điều kiện. Giới hạn toàn nền tảng là 10.000 mét, bao gồm cả điểm đúng 10.000 mét.
+Shuttle được nhóm theo `mainTripId + direction`, trong đó `direction` là `INBOUND_TO_STATION` hoặc `OUTBOUND_FROM_STATION`. Khoảng cách hiển thị là `roadDistanceMeters` snapshot từ Goong Directions; không dùng Haversine cho điều kiện đủ điều kiện. Giới hạn toàn nền tảng là 10.000 mét, bao gồm cả điểm đúng 10.000 mét.
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant lấy từ JWT. Query phân trang theo main Trip.
 
@@ -7205,7 +7219,7 @@ SHUTTLE_REQUEST_CUTOFF_PASSED`; `422 SHUTTLE_DISTANCE_EXCEEDED`; `422 VALIDATION
 
 Shuttle dispatch also uses the shared Driver/Vehicle interval + turnaround + reposition engine.
 Conflicts retain `SHUTTLE_DRIVER_CONFLICT`/`SHUTTLE_VEHICLE_CONFLICT` and carry the canonical
-`conflictReason` field. Google/missing-coordinate failure returns
+`conflictReason` field. Goong/missing-coordinate failure returns
 `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE` and writes no ShuttleTrip or partial reservation.
 
 ### PATCH `/v1/operator/shuttle-trips/{shuttleTripId}/assignment`
@@ -7348,11 +7362,13 @@ Delivered/no-show/start/complete/cancel transitions that do not match the state 
 
 ### Shuttle fields trong Booking
 
-Booking hỗ trợ đồng thời `shuttlePickup` cho inbound và `shuttleDropoff` cho outbound, bao gồm từng leg round-trip. Mỗi booking có tối đa một intent active cho mỗi direction. Trip gọi Google Routes với `travelMode=DRIVE`: `distanceMeters <= 10000` được phép, lớn hơn 10000 trả `422 SHUTTLE_DISTANCE_EXCEEDED`, còn lỗi upstream/timeout/thiếu key/response sai trả `503 SHUTTLE_DISTANCE_UNAVAILABLE`. Event mới dùng `shuttleRequests[]`; consumer vẫn đọc `shuttlePickup` cũ như inbound.
+Booking hỗ trợ đồng thời `shuttlePickup` cho inbound và `shuttleDropoff` cho outbound, bao gồm từng leg round-trip. Mỗi booking có tối đa một intent active cho mỗi direction. Trip gọi Goong Directions với `vehicle=car`: `distanceMeters <= 10000` được phép, lớn hơn 10000 trả `422 SHUTTLE_DISTANCE_EXCEEDED`, còn lỗi upstream/timeout/thiếu key/response sai trả `503 SHUTTLE_DISTANCE_UNAVAILABLE`. Event mới dùng `shuttleRequests[]`; consumer vẫn đọc `shuttlePickup` cũ như inbound.
 
-Trip configuration is `SHUTTLE_MAX_DISTANCE_KM=10`, `GOOGLE_ROUTES_ENABLED=true`,
-`GOOGLE_ROUTES_API_KEY`, `GOOGLE_ROUTES_BASE_URL=https://routes.googleapis.com`, and
-`TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS=1500`. Missing configuration fails closed.
+Trip configuration is `SHUTTLE_MAX_DISTANCE_KM=10`, `ROUTING_PROVIDER=GOONG|LOCAL`,
+`GOONG_API_KEY`, `GOONG_BASE_URL=https://rsapi.goong.io`,
+`GOONG_MAX_DESTINATIONS_PER_REQUEST=10`, and `TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS=1500`.
+`ROUTING_PROVIDER=LOCAL`, missing Goong configuration, `401`/`403`/`429`/`5xx`, timeout,
+malformed response or strict leg validation fails closed for this endpoint.
 
 `POST /v1/bookings` và mỗi leg của round-trip nhận optional `shuttlePickup: { address, latitude, longitude }` cho inbound và `shuttleDropoff: { address, latitude, longitude }` cho outbound. Chỉ origin/destination Station tương ứng, active, có `supportsShuttle=true` và đủ tọa độ được nhận; Stop dọc tuyến không được dùng làm điểm shuttle. Booking dùng `TripSnapshot.departureDateTime` để từ chối request tại/sau T-30 với `409 SHUTTLE_REQUEST_CUTOFF_PASSED`. Khi intent còn active, `edit-pickup`/`edit-dropoff` bị khóa theo direction.
 
@@ -8609,8 +8625,8 @@ Validation:
 - An active schedule conflicts when the same `driverUserId` has any intersecting `dayOfWeek`, the same `departureTime` interpreted in `Asia/Ho_Chi_Minh`, and an overlapping `[validFrom, validUntil]` window. Return `409 TRIP_DRIVER_CONFLICT`.
 - Canonical availability supersedes the exact-departure sentence above: Driver, Assistant, and
   Vehicle must satisfy `next.start >= previous.end + 30 minutes + repositionTravelTime` against
-  both adjacent assignments across main Trip and ShuttleTrip. Reposition uses Google Routes
-  `DRIVE`; unavailable travel-time input returns `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`. Conflict
+  both adjacent assignments across main Trip and ShuttleTrip. Reposition uses Goong Directions
+  `vehicle=car`; unavailable travel-time input returns `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`. Conflict
   responses retain `TRIP_DRIVER_CONFLICT`/`TRIP_VEHICLE_CONFLICT` and add
   `error.fields.conflictReason=TIME_OVERLAP|TURNAROUND_REQUIRED|REPOSITION_REQUIRED|RESOURCE_ACTIVE`.
 

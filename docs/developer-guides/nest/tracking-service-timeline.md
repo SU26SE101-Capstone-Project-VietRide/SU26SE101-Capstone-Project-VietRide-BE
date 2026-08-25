@@ -38,7 +38,7 @@ Mỗi phase phải test được bằng e2e/unit theo hướng production. Nếu
 - [x] Phase 8 — Outbox Publisher
 - [x] Phase 9 — Trip/Booking/Parcel Authorization Providers
 - [x] Phase 10 — Hardening Và Final Acceptance
-- [x] Phase 11 — Shuttle GPS Và Google Routes ETA
+- [x] Phase 11 — Shuttle GPS Và ETA
 - [x] Phase 12 — Public Tracking Map Context
 - [x] Phase 13 — Chia Sẻ Hành Trình Cho Người Thân
 
@@ -407,7 +407,7 @@ npx nx run tracking:build
 
 **Thời lượng:** 1 ngày
 **Mục tiêu:** Ổn định đường GPS realtime và hoàn tất chấp nhận production cho route snap, ETA,
-Redis state, Google Routes và delay recovery, vẫn giữ toàn bộ field cũ và chỉ bổ sung field delay.
+Redis state, provider định tuyến và delay recovery, vẫn giữ toàn bộ field cũ và chỉ bổ sung field delay.
 
 ### Scope
 
@@ -417,14 +417,16 @@ Redis state, Google Routes và delay recovery, vẫn giữ toàn bộ field cũ 
   dedupe request đang bay; không chờ Trip HTTP trên live GPS path.
 - ETA: dùng một `RouteGeometryProvider` cho snap, off-route và Local ETA. Local ETA chiếu vehicle
   và stop lên polyline, tính khoảng cách tích lũy, giữ sequence/progress không lùi; không dùng
-  Haversine làm ETA chính. Google Routes là primary khi `GOOGLE_ROUTES_ENABLED=true`, Local là
-  fallback; lỗi Google liên tiếp ba lần mở cooldown 300 giây.
+  Haversine làm ETA chính. Goong Directions là primary khi `ROUTING_PROVIDER=GOONG`, Local là
+  fallback; lỗi Goong liên tiếp ba lần mở cooldown 300 giây.
 - Redis ETA: cache `tracking:eta:{tripId}:{stopId}` 60 giây; geometry fallback `STOPS_ONLY` được
   refresh sau 30 giây. ETA state 24 giờ, delay state 24 giờ, lock từng trip/stop và delay-state lock,
   khoảng cách di chuyển 500 m hoặc ETA dưới 15 phút, và tối thiểu 60 giây giữa hai lần gọi provider.
-- Cấu hình: `GOOGLE_ROUTES_API_KEY` bắt buộc khi bật flag; E2E mặc định dùng fake Google HTTP server.
-  Real Google E2E chỉ chạy khi `RUN_REAL_GOOGLE_E2E=true`.
-- Khi Google/Trip/Redis không đánh giá được delay, Tracking trả `UNKNOWN`, giữ trạng thái tốt gần
+- Cấu hình: `ROUTING_PROVIDER=GOONG|LOCAL`, `GOONG_API_KEY`,
+  `GOONG_BASE_URL=https://rsapi.goong.io`, `GOONG_MAX_DESTINATIONS_PER_REQUEST=10` và
+  `TRACKING_ROUTING_TIMEOUT_MS`. E2E mặc định dùng fake Goong HTTP server; kiểm thử Goong thật chỉ
+  đọc API key từ môi trường.
+- Khi Goong/Trip/Redis không đánh giá được delay, Tracking trả `UNKNOWN`, giữ trạng thái tốt gần
   nhất và không phát `DELAY_CLEARED` giả. Client reconnect dùng REST `/eta` để khôi phục trạng thái.
 - Tương thích Trip: chấp nhận và chuẩn hóa `null` cho `alertRecipientUserIds`, `estimatedArrivalTime`
   và các field tùy chọn liên quan; unit test phải dùng JSON envelope thực tế của Trip.
@@ -471,14 +473,15 @@ Redis state, Google Routes và delay recovery, vẫn giữ toàn bộ field cũ 
   với `Idempotency-Key` để Trip chuyển nguyên tử cả nhóm `PENDING` sang `PICKED_UP`.
 - ETA đi theo `pickup_order`, bỏ nhóm terminal (`PICKED_UP`, `DELIVERED`, `NO_SHOW`, `CANCELLED`),
   không lùi xuống dưới thứ tự ETA đã ghi và dùng origin Station làm điểm cuối.
-- Google Routes dùng `DRIVE` và `TRAFFIC_AWARE` làm provider chính khi `GOOGLE_ROUTES_ENABLED=true`;
-  Haversine và tốc độ GPS là fallback cục bộ vì Shuttle không có route geometry cố định.
+- Goong Directions dùng `vehicle=car` làm provider chính khi `ROUTING_PROVIDER=GOONG`; kết quả có
+  quality `ROUTE_BASED`. Haversine và tốc độ GPS là fallback cục bộ vì Shuttle không có route
+  geometry cố định.
 - Recalculate sau tối thiểu 60 giây khi di chuyển trên 500 m, ETA dưới 15 phút hoặc chuyển sang
-  `pickup_order` mới. Ba lỗi Google liên tiếp mở cooldown 300 giây.
+  `pickup_order` mới. Ba lỗi Goong liên tiếp mở cooldown 300 giây.
 - Redis riêng: `tracking:shuttle:latest:{id}` TTL 300 giây, `tracking:shuttle:gps_buffer:{id}` tối đa
   1000/TTL 24 giờ, `tracking:shuttle:eta:{id}:{order}` TTL 60 giây,
   `tracking:shuttle:eta_state:{id}` và lock `tracking:shuttle:eta_lock:{id}:{order}`.
-- GPS được ghi, broadcast và ack trước; Google HTTP chạy bất đồng bộ và chỉ phát
+- GPS được ghi, broadcast và ack trước; Goong HTTP chạy bất đồng bộ và chỉ phát
   `shuttle:eta:update` khi hoàn tất. Public Socket/REST payload không thêm `etaSource`.
 - Shuttle không được ghi `tracking:active_trips`, main `GpsTrail`, hoặc kích hoạt off-route/delay chain của main Trip.
 - Bổ sung REST latest/ETA fallback và test authorization, TTL, cancellation, tenant isolation.
@@ -494,7 +497,11 @@ node scripts/test-tracking-phase11-shuttle-google.js
 git diff --check
 ```
 
-Real Google E2E chỉ chạy khi `RUN_REAL_GOOGLE_E2E=true`; E2E mặc định dùng fake Google HTTP server.
+Tên file script trên là legacy để giữ tương thích trong lúc migration; Task 51.4 chuyển behavior,
+fake provider và cấu hình bên trong script sang Goong, không rename file trong Task 51.0.
+
+Kiểm thử Goong thật chỉ chạy khi được bật rõ ràng và có `GOONG_API_KEY`; E2E mặc định dùng fake
+Goong HTTP server.
 
 ## Phase 12 — Public Tracking Map Context
 
@@ -510,7 +517,27 @@ contract realtime hiện hành.
   own pickups và station, không phát booking/tọa độ passenger khác.
 - Cho Passenger tiếp tục REST/socket tracking khi own Shuttle manifest là `PICKED_UP`; deny terminal-only.
 - Nhận additive TripStop `status`, bỏ `ARRIVED/SKIPPED` khỏi next ETA và giảm route-stop cache còn 60 giây.
-- Giữ nguyên `latest`, `trail`, `eta`, Socket.IO payload, Gateway family và Google configuration.
+- Giữ nguyên `latest`, `trail`, `eta`, Socket.IO payload và Gateway family; cấu hình runtime định
+  tuyến chuyển sang Goong theo quyết định Day 51.
+
+## Day 51 — Migration runtime định tuyến sang Goong
+
+- Runtime chỉ có `ROUTING_PROVIDER=GOONG|LOCAL`; không duy trì dual runtime Google/Goong. Google
+  OAuth, Google Maps SDK/deep link hiển thị và Google encoded polyline nằm ngoài scope, không đổi.
+- Gọi `GET {GOONG_BASE_URL}/Direction` với `origin=lat,lng`, `destination` gồm các target đúng thứ
+  tự phân cách bằng `;`, `vehicle=car`, `alternatives=false` và query `api_key=GOONG_API_KEY`.
+  Không log full URI/query vì API key là secret nằm trong query string.
+- `GOONG_MAX_DESTINATIONS_PER_REQUEST` mặc định 10. Chuỗi dài hơn phải chia chunk không đổi thứ tự,
+  cộng dồn `routes[0].legs[].distance.value` và `duration.value`, rồi chỉ ghi cache khi toàn bộ
+  chuỗi hợp lệ. Route rỗng/malformed, distance/duration âm hoặc không hữu hạn, wrong leg count hay
+  waypoint order bị đổi đều làm hỏng toàn batch.
+- `401`, `403`, `429`, `5xx`, timeout, malformed JSON và strict-validation failure đều dùng Local
+  fallback nhất quán, tăng failure counter và mở cooldown 300 giây sau ba lỗi; không trộn một phần
+  Goong với Local. GPS persistence/broadcast/ack không chờ provider.
+- Goong không hỗ trợ `departure_time`, `traffic_model` hoặc `duration_in_traffic`, nên kết quả mới
+  là `ROUTE_BASED`, không bao giờ `TRAFFIC_AWARE`. Public quality là
+  `TRAFFIC_AWARE|ROUTE_BASED|FALLBACK`: persisted historical `GOOGLE_ROUTES → TRAFFIC_AWARE`,
+  `GOONG → ROUTE_BASED`, `ROUTE_BASELINE`/Local → `FALLBACK`.
 
 ### Verify
 

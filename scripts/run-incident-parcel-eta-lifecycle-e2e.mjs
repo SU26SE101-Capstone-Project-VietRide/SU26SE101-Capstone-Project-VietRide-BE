@@ -104,9 +104,10 @@ function projectEtaEvidence(eta, recordedAt) {
     targetKind: eta.targetKind,
     targetId: eta.stopId ?? eta.stationId ?? null,
     estimatedArrivalTime: eta.estimatedArrivalTime,
-    etaMinutesFromGps: Number.isFinite(estimatedArrivalMs) && Number.isFinite(recordedAtMs)
-      ? Math.round(((estimatedArrivalMs - recordedAtMs) / 60_000) * 100) / 100
-      : null,
+    etaMinutesFromGps:
+      Number.isFinite(estimatedArrivalMs) && Number.isFinite(recordedAtMs)
+        ? Math.round(((estimatedArrivalMs - recordedAtMs) / 60_000) * 100) / 100
+        : null,
     distanceMeters: eta.distanceMeters,
     delayMinutes: eta.delayMinutes,
     estimateQuality: eta.estimateQuality,
@@ -148,7 +149,9 @@ async function poll(label, probe, predicate, timeoutMs = 90_000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
-  throw new Error(`${label} timed out; last=${last instanceof Error ? last.message : JSON.stringify(last)}`);
+  throw new Error(
+    `${label} timed out; last=${last instanceof Error ? last.message : JSON.stringify(last)}`,
+  );
 }
 
 async function api(method, pathname, { token, body, key } = {}) {
@@ -466,11 +469,14 @@ async function exerciseImmediateDriverScheduleGeneration(tokens) {
     30_000,
   );
   generatedTripIds.push(generated.tripId);
-  assert(generated.source === 'AUTO_FROM_SCHEDULE', `Generated source drifted: ${generated.source}`);
-  if (process.env.EXPECT_GOOGLE_ROUTES === 'true') {
+  assert(
+    generated.source === 'AUTO_FROM_SCHEDULE',
+    `Generated source drifted: ${generated.source}`,
+  );
+  if (process.env.EXPECT_GOONG === 'true') {
     audit(
-      generated.plannedEtaSource === 'GOOGLE_ROUTES',
-      'Hangfire-generated Trip planned ETA uses real Google Routes',
+      generated.plannedEtaSource === 'GOONG',
+      'Hangfire-generated Trip planned ETA uses real Goong Directions',
       `plannedEtaSource=${generated.plannedEtaSource}`,
     );
   }
@@ -490,7 +496,8 @@ async function exerciseImmediateDriverScheduleGeneration(tokens) {
     `Generated Trip snapshot is incomplete: ${JSON.stringify(etaSnapshot)}`,
   );
   assert(
-    tripSql(`SELECT count(*) FROM resource_reservations WHERE trip_id='${generated.tripId}'`) === '3',
+    tripSql(`SELECT count(*) FROM resource_reservations WHERE trip_id='${generated.tripId}'`) ===
+      '3',
     'Generated Trip did not reserve driver, assistant and vehicle',
   );
   const generatedTiming = tripSql(`
@@ -544,7 +551,10 @@ function parcelBody(quote, overrides = {}) {
 
 function resignQuoteToken(token, mutatePayload) {
   const secret = process.env.PARCEL_QUOTE_TOKEN_SECRET;
-  assert(secret?.length >= 32, 'PARCEL_QUOTE_TOKEN_SECRET is required to exercise signed quote edge cases');
+  assert(
+    secret?.length >= 32,
+    'PARCEL_QUOTE_TOKEN_SECRET is required to exercise signed quote edge cases',
+  );
   const [encodedPayload] = token.split('.');
   const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
   mutatePayload(payload);
@@ -625,9 +635,18 @@ async function exerciseLocation(fixture) {
     200,
   );
   assert(root.length === 3, `Root hierarchy expected 3 stations, got ${root.length}`);
-  assert(root.some((station) => station.id === ids.legacyRootStation), 'Root station missing');
-  assert(root.some((station) => station.id === ids.originStation), 'Origin leaf station missing');
-  assert(root.some((station) => station.id === ids.destinationStation), 'Destination leaf station missing');
+  assert(
+    root.some((station) => station.id === ids.legacyRootStation),
+    'Root station missing',
+  );
+  assert(
+    root.some((station) => station.id === ids.originStation),
+    'Origin leaf station missing',
+  );
+  assert(
+    root.some((station) => station.id === ids.destinationStation),
+    'Destination leaf station missing',
+  );
   const leaf = data(
     await api('GET', `/v1/stations/search?locationScopeCode=${fixture.originCode}&q=${query}`),
     200,
@@ -737,10 +756,10 @@ async function exerciseParcel(tokens, fixture) {
     'PARCEL_QUOTE_MISMATCH',
   );
   const mismatchResponse = await api('POST', '/v1/parcels', {
-      token: tokens.sender,
-      key: nextKey(),
-      body: parcelBody(quote, { sizeCategory: 'MEDIUM' }),
-    });
+    token: tokens.sender,
+    key: nextKey(),
+    body: parcelBody(quote, { sizeCategory: 'MEDIUM' }),
+  });
   if (mismatchResponse.status === 201) {
     const unexpectedParcel = data(mismatchResponse, 201);
     createdParcelIds.push(unexpectedParcel.parcelId);
@@ -798,7 +817,8 @@ async function exerciseParcel(tokens, fixture) {
   assert(created.estimatedGrossPriceVnd === 3200, 'Create/search gross drifted');
   assert(created.depositRequiredVnd === 640, 'Create/search deposit drifted');
   assert(
-    parcelSql(`SELECT recipient_user_id::text FROM parcels WHERE id='${parcelId}'`) === ids.recipient,
+    parcelSql(`SELECT recipient_user_id::text FROM parcels WHERE id='${parcelId}'`) ===
+      ids.recipient,
     'Normalized recipient email was not linked to recipient_user_id',
   );
   const received = data(
@@ -874,7 +894,9 @@ async function exerciseParcel(tokens, fixture) {
 async function exerciseTrackingIncidentAndLifecycle(tokens) {
   tripSql(`UPDATE trips SET status='BOARDING',updated_at=now() WHERE id='${ids.trip}';`);
   pass('fixture advanced SCHEDULED -> BOARDING before driver start API');
-  const cold = await trackingApi(`/v1/tracking/trips/${ids.trip}/eta`, tokens.sender);
+  const trackingReaderToken =
+    process.env.TRACKING_SMOKE_ONLY === 'true' ? tokens.driver : tokens.sender;
+  const cold = await trackingApi(`/v1/tracking/trips/${ids.trip}/eta`, trackingReaderToken);
   assert(cold.status === 200 && cold.json?.data?.eta === null, 'Cold ETA must be null');
 
   const routeBefore = await trackingApi(
@@ -882,7 +904,10 @@ async function exerciseTrackingIncidentAndLifecycle(tokens) {
     tokens.driver,
   );
   assert(routeBefore.status === 200, `Route context failed: ${JSON.stringify(routeBefore.json)}`);
-  assert(routeBefore.json?.data?.tripStatus === 'BOARDING', 'Pre-start route status is not BOARDING');
+  assert(
+    routeBefore.json?.data?.tripStatus === 'BOARDING',
+    'Pre-start route status is not BOARDING',
+  );
   assert(routeBefore.etag, 'REST route context ETag missing');
 
   let socket = await connectSocket(tokens.driver);
@@ -898,8 +923,8 @@ async function exerciseTrackingIncidentAndLifecycle(tokens) {
   const preOriginRecordedAt = new Date().toISOString();
   const preOriginAck = await emitAck(socket, 'gps:update', {
     tripId: ids.trip,
-    latitude: 10.750,
-    longitude: 106.650,
+    latitude: 10.75,
+    longitude: 106.65,
     speedKmh: 35,
     headingDeg: 45,
     recordedAt: preOriginRecordedAt,
@@ -911,22 +936,26 @@ async function exerciseTrackingIncidentAndLifecycle(tokens) {
       preOriginBatch.etas[0].stationId === ids.originStation,
     `Pre-origin ETA did not target origin: ${JSON.stringify(preOriginBatch)}`,
   );
-  if (process.env.EXPECT_GOOGLE_ROUTES === 'true') {
+  if (process.env.EXPECT_GOONG === 'true') {
     audit(
-      preOriginBatch.etas?.[0]?.estimateQuality === 'TRAFFIC_AWARE',
-      'Integrated Tracking ETA uses the real Google Routes provider',
+      preOriginBatch.etas?.[0]?.estimateQuality === 'ROUTE_BASED',
+      'Integrated Tracking ETA uses the real Goong Directions provider',
       JSON.stringify(preOriginBatch.etas?.[0] ?? null),
     );
   }
-  const originEta = await trackingApi(`/v1/tracking/trips/${ids.trip}/eta`, tokens.sender);
+  const originEta = await trackingApi(`/v1/tracking/trips/${ids.trip}/eta`, trackingReaderToken);
   assert(originEta.json?.data?.eta?.targetKind === 'STATION', 'GET /eta did not return origin ETA');
   evidence.dynamicEta = {
     preOrigin: {
-      gps: { latitude: 10.750, longitude: 106.650, speedKmh: 35, recordedAt: preOriginRecordedAt },
-      targets: (preOriginBatch.etas ?? []).map((eta) => projectEtaEvidence(eta, preOriginRecordedAt)),
+      gps: { latitude: 10.75, longitude: 106.65, speedKmh: 35, recordedAt: preOriginRecordedAt },
+      targets: (preOriginBatch.etas ?? []).map((eta) =>
+        projectEtaEvidence(eta, preOriginRecordedAt),
+      ),
     },
   };
   pass('ETA cold cache and real pre-origin GPS -> origin station');
+
+  if (process.env.TRACKING_SMOKE_ONLY === 'true') return;
 
   data(
     await api('POST', `/v1/driver/trips/${ids.trip}/start`, {
@@ -983,7 +1012,10 @@ async function exerciseTrackingIncidentAndLifecycle(tokens) {
   });
   assert(reconnect.success === true, `Reconnect join failed: ${JSON.stringify(reconnect)}`);
   assert(reconnect.routeContext?.tripStatus === 'IN_PROGRESS', 'Reconnect snapshot is not current');
-  assert(reconnect.routeVersion !== join.routeVersion, 'Route ETag did not change with trip status');
+  assert(
+    reconnect.routeVersion !== join.routeVersion,
+    'Route ETag did not change with trip status',
+  );
 
   const cachedInProgressEtas = await trackingApi(
     `/v1/tracking/trips/${ids.trip}/etas`,
@@ -1005,12 +1037,19 @@ async function exerciseTrackingIncidentAndLifecycle(tokens) {
   evidence.dynamicEta.inProgress = {
     gps: { latitude: 10.762, longitude: 106.662, speedKmh: 35, recordedAt: afterStartRecordedAt },
     targets: inProgressTargets.map((eta) => projectEtaEvidence(eta, afterStartRecordedAt)),
-    stopToDestinationMinutes: stopTarget && destinationTarget
-      ? Math.round(((Date.parse(destinationTarget.estimatedArrivalTime) -
-        Date.parse(stopTarget.estimatedArrivalTime)) / 60_000) * 100) / 100
-      : null,
+    stopToDestinationMinutes:
+      stopTarget && destinationTarget
+        ? Math.round(
+            ((Date.parse(destinationTarget.estimatedArrivalTime) -
+              Date.parse(stopTarget.estimatedArrivalTime)) /
+              60_000) *
+              100,
+          ) / 100
+        : null,
   };
-  pass('Socket reconnect receives current snapshot/version and cached stop -> destination ETA chain');
+  pass(
+    'Socket reconnect receives current snapshot/version and cached stop -> destination ETA chain',
+  );
 
   const incident = data(
     await api('POST', `/v1/driver/trips/${ids.trip}/incident`, {
@@ -1101,14 +1140,16 @@ async function exerciseTrackingIncidentAndLifecycle(tokens) {
   const destinationBatchPromise = optionalEvent(socket, 'eta:batch:update');
   const afterStopRecordedAt = new Date(Date.now() + 3_000).toISOString();
   assert(
-    (await emitAck(socket, 'gps:update', {
-      tripId: ids.trip,
-      latitude: 10.770,
-      longitude: 106.670,
-      speedKmh: 35,
-      headingDeg: 45,
-      recordedAt: afterStopRecordedAt,
-    })).success === true,
+    (
+      await emitAck(socket, 'gps:update', {
+        tripId: ids.trip,
+        latitude: 10.77,
+        longitude: 106.67,
+        speedKmh: 35,
+        headingDeg: 45,
+        recordedAt: afterStopRecordedAt,
+      })
+    ).success === true,
     'After-stop GPS was rejected',
   );
   const destinationBatch = await destinationBatchPromise;
@@ -1120,9 +1161,10 @@ async function exerciseTrackingIncidentAndLifecycle(tokens) {
   );
   const allEtas = await trackingApi(`/v1/tracking/trips/${ids.trip}/etas`, tokens.recipient);
   assert(
-    allEtas.status === 200 && allEtas.json?.data?.etas?.some(
-      (eta) => eta.targetKind === 'STATION' && eta.stationId === ids.destinationStation,
-    ),
+    allEtas.status === 200 &&
+      allEtas.json?.data?.etas?.some(
+        (eta) => eta.targetKind === 'STATION' && eta.stationId === ids.destinationStation,
+      ),
     'GET /etas omitted cached destination ETA',
   );
   const afterStopTargets = allEtas.json?.data?.etas ?? [];
@@ -1133,7 +1175,7 @@ async function exerciseTrackingIncidentAndLifecycle(tokens) {
     `GET /etas retained a completed stop: ${JSON.stringify(afterStopTargets)}`,
   );
   evidence.dynamicEta.afterLastStop = {
-    gps: { latitude: 10.770, longitude: 106.670, speedKmh: 35, recordedAt: afterStopRecordedAt },
+    gps: { latitude: 10.77, longitude: 106.67, speedKmh: 35, recordedAt: afterStopRecordedAt },
     targets: afterStopTargets.map((eta) => projectEtaEvidence(eta, afterStopRecordedAt)),
   };
 
@@ -1204,7 +1246,9 @@ async function exerciseTrackingIncidentAndLifecycle(tokens) {
 }
 
 function cleanupRedis() {
-  const needles = [ids.trip, ...generatedTripIds, ...createdParcelIds, ...idempotencyKeys].filter(Boolean);
+  const needles = [ids.trip, ...generatedTripIds, ...createdParcelIds, ...idempotencyKeys].filter(
+    Boolean,
+  );
   for (const needle of needles) {
     const keys = run('docker', [
       'exec',
@@ -1213,7 +1257,9 @@ function cleanupRedis() {
       '--scan',
       '--pattern',
       `*${needle}*`,
-    ]).split(/\r?\n/u).filter(Boolean);
+    ])
+      .split(/\r?\n/u)
+      .filter(Boolean);
     if (keys.length > 0) run('docker', ['exec', redisContainer, 'redis-cli', 'DEL', ...keys]);
   }
 }
@@ -1351,14 +1397,18 @@ try {
   };
   await exerciseImmediateDriverScheduleGeneration(tokens);
   await exerciseLocation(fixture);
-  await exerciseParcel(tokens, fixture);
+  if (process.env.TRACKING_SMOKE_ONLY !== 'true') {
+    await exerciseParcel(tokens, fixture);
+  }
   await exerciseTrackingIncidentAndLifecycle(tokens);
   if (auditFailures.length > 0) {
     throw new Error(`Audit failures: ${auditFailures.join(' | ')}`);
   }
 } catch (error) {
   failure = error;
-  console.error(`FAILURE | ${error instanceof Error ? error.stack || error.message : String(error)}`);
+  console.error(
+    `FAILURE | ${error instanceof Error ? error.stack || error.message : String(error)}`,
+  );
   for (const service of ['vietride_trip', 'vietride_parcel', 'vietride_tracking']) {
     try {
       const logs = run('docker', ['logs', '--tail', '100', service]);
@@ -1381,13 +1431,19 @@ try {
   }
 }
 
-console.log(JSON.stringify({
-  suite: 'incident-parcel-eta-lifecycle-e2e',
-  runTag,
-  assertions,
-  auditFailures,
-  evidence,
-  passed: !failure,
-  failure: failure instanceof Error ? failure.message : failure ? String(failure) : null,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      suite: 'incident-parcel-eta-lifecycle-e2e',
+      runTag,
+      assertions,
+      auditFailures,
+      evidence,
+      passed: !failure,
+      failure: failure instanceof Error ? failure.message : failure ? String(failure) : null,
+    },
+    null,
+    2,
+  ),
+);
 process.exitCode = failure ? 1 : 0;

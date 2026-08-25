@@ -17,6 +17,11 @@ import { TripRouteChangedStateInvalidationConsumer } from './trip-route-changed-
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const TRIP_ID = '22222222-2222-4222-8222-222222222222';
 
+interface InMemoryRedisTransaction {
+  set(key: string, value: string): InMemoryRedisTransaction;
+  exec(): Promise<[]>;
+}
+
 describe('TripRouteChangedStateInvalidationConsumer (in-process e2e)', () => {
   let module: TestingModule;
   let subscriptions: Map<string, (payload: unknown, raw: ConsumeMessage) => Promise<void>>;
@@ -44,13 +49,15 @@ describe('TripRouteChangedStateInvalidationConsumer (in-process e2e)', () => {
         {
           provide: RabbitMqConsumer,
           useValue: {
-            subscribe: jest.fn(async (
-              _queue: string,
-              routingKey: string,
-              handler: (payload: unknown, raw: ConsumeMessage) => Promise<void>,
-            ) => {
-              subscriptions.set(routingKey, handler);
-            }),
+            subscribe: jest.fn(
+              async (
+                _queue: string,
+                routingKey: string,
+                handler: (payload: unknown, raw: ConsumeMessage) => Promise<void>,
+              ) => {
+                subscriptions.set(routingKey, handler);
+              },
+            ),
           },
         },
         { provide: RedisService, useValue: { getClient: () => redis } },
@@ -82,10 +89,7 @@ describe('TripRouteChangedStateInvalidationConsumer (in-process e2e)', () => {
     redis.values.set(`tracking:eta:${TRIP_ID}:stop-1`, 'eta-1');
     redis.values.set(`tracking:eta:${TRIP_ID}:stop-2`, 'eta-2');
     redis.values.set(trackingTripDelayStateKey(TRIP_ID), 'old-delay-pointer');
-    redis.values.set(
-      trackingTripDelayStateKey(TRIP_ID, 'old-stop'),
-      'old-delay-stop-state',
-    );
+    redis.values.set(trackingTripDelayStateKey(TRIP_ID, 'old-stop'), 'old-delay-stop-state');
     redis.values.set('tracking:eta:another-trip:stop-1', 'keep');
     redis.values.set(trackingTripDelayStateKey('another-trip'), 'keep-delay');
 
@@ -115,7 +119,9 @@ describe('TripRouteChangedStateInvalidationConsumer (in-process e2e)', () => {
   });
 
   it('fences an ETA calculation that finishes after route-change invalidation', async () => {
-    let resolveProvider: ((value: { distanceMeters: number; etaMinutes: number }) => void) | undefined;
+    let resolveProvider:
+      | ((value: { distanceMeters: number; etaMinutes: number }) => void)
+      | undefined;
     let providerStarted!: () => void;
     const started = new Promise<void>((resolve) => {
       providerStarted = resolve;
@@ -129,12 +135,14 @@ describe('TripRouteChangedStateInvalidationConsumer (in-process e2e)', () => {
       }),
     };
     const noGoogleProvider: EtaProvider = { calculate: jest.fn(async () => null) };
-    tripData.getRouteStops.mockResolvedValue([{
-      stopId: '66666666-6666-4666-8666-666666666666',
-      latitude: 10.82,
-      longitude: 106.66,
-      sequence: 1,
-    }]);
+    tripData.getRouteStops.mockResolvedValue([
+      {
+        stopId: '66666666-6666-4666-8666-666666666666',
+        latitude: 10.82,
+        longitude: 106.66,
+        sequence: 1,
+      },
+    ]);
     routeGeometry.peekCachedRouteGeometry.mockReturnValue({
       tripId: TRIP_ID,
       points: [
@@ -149,8 +157,8 @@ describe('TripRouteChangedStateInvalidationConsumer (in-process e2e)', () => {
       noGoogleProvider,
       localProvider,
       {
-        GOOGLE_ROUTES_ENABLED: false,
-        GOOGLE_ROUTES_API_KEY: '',
+        ROUTING_PROVIDER: 'LOCAL',
+        GOONG_API_KEY: '',
         TRACKING_ETA_MIN_INTERVAL_SECONDS: 60,
         TRACKING_ETA_CACHE_TTL_SECONDS: 60,
       } as Env,
@@ -176,9 +184,9 @@ describe('TripRouteChangedStateInvalidationConsumer (in-process e2e)', () => {
 
     await expect(etaPromise).resolves.toBeNull();
     expect(redis.values.has(`tracking:eta_state:${TRIP_ID}`)).toBe(false);
-    expect(
-      [...redis.values.keys()].some((key) => key.startsWith(`tracking:eta:${TRIP_ID}:`)),
-    ).toBe(false);
+    expect([...redis.values.keys()].some((key) => key.startsWith(`tracking:eta:${TRIP_ID}:`))).toBe(
+      false,
+    );
   });
 });
 
@@ -233,14 +241,14 @@ class InMemoryRedis {
     return 1;
   }
 
-  multi() {
+  multi(): InMemoryRedisTransaction {
     const writes: Array<[string, string]> = [];
-    const transaction = {
+    const transaction: InMemoryRedisTransaction = {
       set: (key: string, value: string) => {
         writes.push([key, value]);
         return transaction;
       },
-      exec: async () => {
+      exec: async (): Promise<[]> => {
         for (const [key, value] of writes) this.values.set(key, value);
         return [];
       },
@@ -249,7 +257,7 @@ class InMemoryRedis {
   }
 }
 
-function validPayload() {
+function validPayload(): Record<string, unknown> {
   return {
     eventId: EVENT_ID,
     occurredAt: '2026-08-10T01:00:00Z',
