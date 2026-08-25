@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.78.0
+> **Phiên bản:** 1.79.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-22
+> **Cập nhật lần cuối:** 2026-08-25
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -415,13 +415,15 @@ apps/<service>/                                    (Nx project root)
 │   │   │   ├── Services/                          ⭐ Per-aggregate application service interfaces
 │   │   │   │   ├── IBookingService.cs             Orchestration + business logic reusable cross-handler
 │   │   │   │   ├── IBookingPricingService.cs      Tách theo concern nếu IBookingService vượt ~10 method
-│   │   │   │   └── IVoucherService.cs
+│   │   │   │   ├── IVoucherService.cs
+│   │   │   │   └── ITripEtaPlanner.cs             (Trip only)
 │   │   │   ├── ExternalClients/                   External integration interfaces (impl ở Infrastructure)
 │   │   │   │   ├── IVnPayClient.cs                (Payment service only)
 │   │   │   │   ├── ISendGridEmailClient.cs        (Notification only)
 │   │   │   │   ├── IFcmPushClient.cs              (Notification only)
 │   │   │   │   ├── IFirebaseStorageClient.cs
-│   │   │   │   └── IGoogleDirectionsClient.cs     (Tracking only)
+│   │   │   │   ├── IShuttleDistanceClient.cs      (Trip only)
+│   │   │   │   └── IRepositionTravelTimeClient.cs (Trip only)
 │   │   │   └── ServiceClients/                    Inter-service HTTP client interfaces
 │   │   │       ├── ITripServiceClient.cs
 │   │   │       ├── IIdentityServiceClient.cs
@@ -473,7 +475,7 @@ apps/<service>/                                    (Nx project root)
 │       │   ├── SendGridEmailClient.cs             : ISendGridEmailClient
 │       │   ├── FcmPushClient.cs                   : IFcmPushClient
 │       │   ├── FirebaseStorageClient.cs           : IFirebaseStorageClient
-│       │   └── GoogleDirectionsClient.cs          : IGoogleDirectionsClient
+│       │   └── Routing clients/planners           : Trip routing abstractions above
 │       ├── Http/                                  Inter-service typed HttpClient impl
 │       │   ├── TripServiceClient.cs               : ITripServiceClient — uses Polly + InternalJwtPropagationHandler
 │       │   ├── IdentityServiceClient.cs
@@ -685,7 +687,7 @@ public class BookingService : IBookingService
 |---|---|---|
 | Per-aggregate Repository (`IBookingRepository`) | ✅ **Bắt buộc** | DIP — Application không depend EF Core directly. Test mock được. |
 | Per-aggregate Application Service (`IBookingService`) | ✅ **Bắt buộc khi có shared logic ≥2 handler** | Test mock service trong handler test |
-| External SaaS (VNPay, SendGrid, Firebase, Google Maps) | ✅ Bắt buộc | Mock cho test, swap provider |
+| External SaaS (VNPay, SendGrid, Firebase, Google Maps display, Goong Directions) | ✅ Bắt buộc | Mock cho test, swap provider |
 | Inter-service HTTP client | ✅ Bắt buộc | Mock test, Polly wrap |
 | `IClock` cho `DateTime.UtcNow` | ✅ Có | Freeze time trong test |
 | `IEventPublisher` (Outbox wrapper) | ✅ Có | Mock cho unit test handler không cần real RabbitMQ |
@@ -997,7 +999,7 @@ EF Core / Prisma auto-map PascalCase property ↔ snake_case column qua naming s
 |---|---|---|
 | **Domain** | Shared kernel primitives: `Money`, `PhoneNumber`, `Result<T>`, `Error`, `BaseEntity`, `IAuditable`, `ISoftDeletable`, `IActivatable` markers, `IClock`, `DomainException` base | **Mọi domain entity nghiệp vụ:** `Booking`, `Trip`, `Parcel`, `Station`, `Stop`, `Route`, `Voucher`, `User`, `Operator`. Domain-specific VO (`BookingCode`, `ParcelCode`). Domain event (`BookingConfirmed`). Domain-specific enum (`BookingStatus`, `TripStatus`, `ParcelStatus`). Domain method (`booking.Confirm()`, `trip.StartBoarding()`). |
 | **Application** | Generic contracts: `IRepository<T,TId>`, `IReadRepository<T>`, `IUnitOfWork`, `IApplicationService` marker. MediatR behaviors generic (`ValidationBehavior`, `LoggingBehavior`, `TransactionBehavior`). Common exception types (`ValidationException`, `NotFoundException`, …). `PagedResult<T>`. `IEventPublisher` interface. | Per-aggregate `IBookingRepository`, `IBookingService` (interface + impl). Specific Command/Query/Handler/Validator. Event consume handler. DTO. Mapping logic. External client interface (`IVnPayClient`, `ITripServiceClient`) — vì impl service-specific. |
-| **Infrastructure** | EF Core generic helpers: `EfRepository<T,TId>`, `EfUnitOfWork`, interceptors (`AuditingInterceptor`, `SoftDeleteInterceptor`, `OutboxInterceptor`), `SnakeCaseNamingConvention`, `OutboxEvent` base entity. RabbitMQ wrapper: `RabbitMqConnectionFactory`, `OutboxEventPublisher`, `OutboxPublisherHostedService` base, `RoutingKeys` constants. HTTP helpers: `PollyPolicyBuilder`, `InternalJwtPropagationHandler` (DelegatingHandler), optional `BaseHttpClient`. | **`ApplicationDbContext` concrete** (DbSet per entity). Per-entity `IEntityTypeConfiguration<T>`. **EF migrations**. Per-aggregate repository impl (`BookingRepository : EfRepository<Booking,Guid>, IBookingRepository`). Concrete external client impl: `VnPayClient`, `SendGridEmailClient`, `FcmPushClient`, `FirebaseStorageClient`, `GoogleDirectionsClient`. Concrete inter-service HTTP client: `TripServiceClient`, `IdentityServiceClient`, `PaymentServiceClient`. Concrete RabbitMQ consumer dispatcher. |
+| **Infrastructure** | EF Core generic helpers: `EfRepository<T,TId>`, `EfUnitOfWork`, interceptors (`AuditingInterceptor`, `SoftDeleteInterceptor`, `OutboxInterceptor`), `SnakeCaseNamingConvention`, `OutboxEvent` base entity. RabbitMQ wrapper: `RabbitMqConnectionFactory`, `OutboxEventPublisher`, `OutboxPublisherHostedService` base, `RoutingKeys` constants. HTTP helpers: `PollyPolicyBuilder`, `InternalJwtPropagationHandler` (DelegatingHandler), optional `BaseHttpClient`. | **`ApplicationDbContext` concrete** (DbSet per entity). Per-entity `IEntityTypeConfiguration<T>`. **EF migrations**. Per-aggregate repository impl (`BookingRepository : EfRepository<Booking,Guid>, IBookingRepository`). Concrete external client impl: `VnPayClient`, `SendGridEmailClient`, `FcmPushClient`, `FirebaseStorageClient`, plus Trip implementations of `ITripEtaPlanner`, `IShuttleDistanceClient` and `IRepositionTravelTimeClient`. Concrete inter-service HTTP client: `TripServiceClient`, `IdentityServiceClient`, `PaymentServiceClient`. Concrete RabbitMQ consumer dispatcher. |
 | **Api / Web** | ASP.NET Core helpers: `InternalJwtAuthenticationHandler`, `JwksAuthenticationExtensions`, `ApiResponseExceptionFilter` (global exception → ApiResponse error envelope), `ApiResponseResultFilter` (success-wrap), `RequestLoggingMiddleware`, `IdempotencyMiddleware`, `HealthCheckBuilderExtensions`, Swagger setup defaults | Controllers, custom service-specific Guard/Filter, `Program.cs` composition root, appsettings, route registration. |
 | **NestJS Common** | `JwtAuthGuard`, `InternalJwtGuard`, `RolesGuard`, `ProblemJsonExceptionFilter`, `RequestContextMiddleware`, `ZodValidationPipe`, `@CurrentUser()`, `@Roles()` decorators | Custom guard service-specific (vd `OperatorTenantGuard`), feature module (`BookingModule`, `TrackingModule`), service class, Prisma entity, controller. |
 | **NestJS Infrastructure** | `nest-rabbitmq` (connection factory + producer/consumer base + Outbox base), `nest-persistence` (naming strategy + base entity + soft-delete subscriber), `nest-redis` (IoRedis module factory), `nest-config` (Zod env schema base + ConfigModule factory) | Prisma config service-specific, migration files, BullMQ queue worker logic, business handler. |
@@ -1142,7 +1144,7 @@ Tham chiếu `db-schema/_global/cross-service-references.md` cho danh sách đ�
   Driver, Assistant and Vehicle across main Trip and ShuttleTrip. Each row points to exactly one
   source, snapshots the planned half-open interval plus both endpoint locations, and is
   `RESERVED|ACTIVE|RELEASED|CANCELLED`. Every consecutive assignment must satisfy
-  `next.start >= previous.end + 30 minutes + Google Routes DRIVE repositionTravelTime`; the same
+  `next.start >= previous.end + 30 minutes + Goong Directions repositionTravelTime`; the same
   canonical Station has zero reposition time. Missing coordinates or unavailable routing fails
   closed with `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`; there is no override. Mutations take sorted
   PostgreSQL advisory locks in the shared resource namespace, and a GiST exclusion constraint on
@@ -1505,16 +1507,36 @@ Changing `departureTime`/`dayOfWeek` through `ALL_PENDING` is the only Day-22 pa
 `departureDateTime`; that field is absent from the Trip PATCH body and changed-field registry.
 `trip_stops.estimated_arrival_time` is a static planned baseline: an approved pre-departure Route
 edit or DriverSchedule `ALL_PENDING` cascade may recompute it, while GPS/Tracking dynamic ETA never
-updates the column. Trip Service plans ordered origin → RouteStops → destination with Google Routes
-`DRIVE`/`TRAFFIC_AWARE` at `departureTime`, adding `TRIP_STOP_DWELL_MINUTES` (default 20) after
-each intermediate stop. Missing coordinates, timeout/quota, malformed legs, or an open circuit use
+updates the column. Trip Service plans ordered origin → RouteStops → destination with Goong
+Directions `vehicle=car`, adding `TRIP_STOP_DWELL_MINUTES` (default 20) after each intermediate
+stop. Goong has no departure-time or traffic-duration input. Missing coordinates, timeout/quota,
+malformed legs, or an open circuit use
 cumulative Route metrics without failing Trip creation. `trips.planned_eta_source` stores
-`GOOGLE_ROUTES|ROUTE_BASELINE`; public projections expose only
-`plannedEtaQuality=TRAFFIC_AWARE|FALLBACK`.
+`GOONG|ROUTE_BASELINE`; persisted `GOOGLE_ROUTES` remains readable only as a historical source.
+Public projections map `GOOGLE_ROUTES → TRAFFIC_AWARE`, `GOONG → ROUTE_BASED`, and
+`ROUTE_BASELINE → FALLBACK`, so expose only
+`plannedEtaQuality=TRAFFIC_AWARE|ROUTE_BASED|FALLBACK`.
 Origin planned ETA is exactly `Trip.departureDateTime`, intermediate targets use
 `TripStop.estimatedArrivalTime`, and destination uses `Trip.estimatedArrivalTime`. Generation,
 editable schedule changes and approved effective-route assignment rebuild these timestamps against
 the ordered assigned snapshot.
+
+Canonical routing runtime is `ROUTING_PROVIDER=GOONG|LOCAL`; there is no dual Google/Goong runtime.
+Goong calls `GET {GOONG_BASE_URL}/Direction` with `origin=lat,lng`, semicolon-separated ordered
+`destination` targets, `vehicle=car`, `alternatives=false`, and the query secret
+`api_key=GOONG_API_KEY`. `GOONG_MAX_DESTINATIONS_PER_REQUEST` defaults to 10. Longer chains are
+chunked without reordering, and `routes[0].legs[].distance.value`/`duration.value` are accumulated
+across every leg and chunk. Empty/malformed routes, negative or non-finite metrics, wrong leg count,
+or changed waypoint order reject the whole batch. Never log the full request URI/query.
+
+Tracking maps `401`, `403`, `429`, `5xx`, timeout, malformed JSON and strict-validation failure to
+one consistent Local fallback batch and retains the three-failure/300-second cooldown; it never
+mixes partial Goong output with Local output. Trip planned ETA alone may fall back to cumulative
+Route metrics. Shuttle road distance and resource reposition remain fail closed with their existing
+503 errors, so no partial business write occurs. Goong exposes no departure-time or traffic-duration
+input and must never produce `TRAFFIC_AWARE`. `GOOGLE_ROUTES` remains a persisted historical source;
+Google OAuth, Google Maps display SDK/deep links and Google encoded polylines are outside this
+migration.
 
 ### 5.7 Pagination — `PagedResult<T>` + `QueryOptions` (ADR 0004)
 
@@ -1636,7 +1658,7 @@ phát integration event.
 | | `SHUTTLE_REQUEST_SET_CHANGED` | 409 | Booking subset đã đổi trạng thái trong lúc operator dispatch |
 | | `SHUTTLE_CAPACITY_EXCEEDED` | 409 | Tổng ticket của subset vượt sức chứa vehicle |
 | | `SHUTTLE_DISTANCE_EXCEEDED` | 422 | Road distance snapshot lớn hơn 10.000 mét; đúng 10.000 mét vẫn hợp lệ |
-| | `SHUTTLE_DISTANCE_UNAVAILABLE` | 503 | Google Routes thiếu key, timeout, upstream error hoặc response không hợp lệ |
+| | `SHUTTLE_DISTANCE_UNAVAILABLE` | 503 | Goong Directions thiếu key, `401`/`403`/`429`/`5xx`, timeout hoặc response không hợp lệ |
 | | `SHUTTLE_REQUEST_NOT_CANCELLABLE` | 409 | Request đã assign hoặc không còn ở trạng thái chưa assign |
 | | `SHUTTLE_TRIP_INVALID_STATE` | 409 | ShuttleTrip không cho phép lifecycle transition được yêu cầu |
 | | `SHUTTLE_PASSENGER_INVALID_STATE` | 409 | ShuttlePassenger không cho phép lifecycle transition được yêu cầu |
@@ -1693,7 +1715,7 @@ phát integration event.
 | | `TRIP_ALREADY_TERMINAL` | 409 | Manual complete/fallback/disruption race already produced a terminal state |
 | | `TRIP_VEHICLE_CONFLICT` | 409 | Vehicle vi phạm interval, turnaround, reposition hoặc còn ACTIVE trên main Trip/ShuttleTrip khác |
 | | `TRIP_DRIVER_CONFLICT` | 409 | Driver/Assistant vi phạm interval, turnaround, reposition hoặc còn ACTIVE trên main Trip/ShuttleTrip khác |
-| | `RESOURCE_TRAVEL_TIME_UNAVAILABLE` | 503 | Thiếu tọa độ hoặc Google Routes không trả được reposition travel time; fail closed, không ghi reservation một phần |
+| | `RESOURCE_TRAVEL_TIME_UNAVAILABLE` | 503 | Thiếu tọa độ hoặc Goong Directions không trả được reposition travel time; fail closed, không ghi reservation một phần |
 | | `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST` | 409 | Route edit has an active `PENDING_PAYMENT\|CONFIRMED` Booking impact |
 | | `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT` | 409 | Vehicle swap would remove/disable/downgrade an HELD seat |
 | | `TRIP_VEHICLE_SWAP_TOO_LATE` | 409 | Vehicle swap has incompatible BOOKED/BOARDING seats after the strict reassignment window |
@@ -2284,7 +2306,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 |---|---|---|
 | `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves ordinary Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`, then applies the matching active operator holiday surcharge by the Trip departure Asia/Ho_Chi_Minh date. Omitted preserves persisted legacy snapshot semantics and applies no new surcharge. No event/projection is added. |
 | `GET /internal/v1/trips/{tripId}/operational-location` | Parcel | Raw `{ tripId,vehicleId,tripStatus,currentStopId?,currentStopStatus?,actualArrivalAt?,actualDepartureAt?,destinationArrivedAt? }`. `currentStopId` is only an `ARRIVED` TripStop with null departure; Parcel unload uses this proof to reject a former stop after departure. |
-| `GET /internal/v1/trips/{tripId}/shuttle-road-distance?direction=&latitude=&longitude=` | Booking | Internal-JWT-only road distance to origin Station (`INBOUND_TO_STATION`) or destination Station (`OUTBOUND_FROM_STATION`). Trip validates Station active/supportsShuttle/coordinates and calls Google Routes `travelMode=DRIVE`; raw success is `{ distanceMeters }`. Google/configuration/timeout/invalid response maps to `503 SHUTTLE_DISTANCE_UNAVAILABLE`; direction/coordinates/station eligibility maps to `422`. |
+| `GET /internal/v1/trips/{tripId}/shuttle-road-distance?direction=&latitude=&longitude=` | Booking | Internal-JWT-only road distance to origin Station (`INBOUND_TO_STATION`) or destination Station (`OUTBOUND_FROM_STATION`). Trip validates Station active/supportsShuttle/coordinates and calls Goong Directions `vehicle=car`; raw success is `{ distanceMeters }`. Goong/configuration/timeout/invalid response maps to `503 SHUTTLE_DISTANCE_UNAVAILABLE`; direction/coordinates/station eligibility maps to `422`. |
 | `POST /internal/v1/trips/summaries/batch` | Booking, Parcel | Read-only `{ tripIds }`, 1..100 distinct UUIDs; one Trip query joins Vehicle Type and returns route/station/vehicle/crew/timing summaries; missing IDs are omitted. Vehicle includes `vehicleType { code, displayName }` for both system-defined and custom types. Booking uses one distinct-ID batch per non-empty passenger-history page to project the current `vehicle { licensePlate, vehicleType }`; enrichment is fail-open per item. |
 | `POST /internal/v1/trips/parcel-availability/search` | Parcel | `[SkipIdempotency]` read-only replacement for fare-aware paging. Body keeps current station/date/capacity/category/page filters and adds `eligibleRouteIds`; Trip filters before count/page and orders `departureDateTime,tripId`. Empty eligible list returns a valid empty page. Legacy GET remains during rollout. |
 | `POST /internal/v1/operators/vehicle-counts/batch` | Payment | Read-only `{ operatorIds }`, 1..100 distinct UUIDs; raw current vehicle counts by operator |
@@ -3953,8 +3975,10 @@ TRIP_PORT=5002
 DB_CONNECTION=...vietride_trip...
 SEAT_LOCK_TTL_MINUTES=10        # Trip-owned source for SeatLock:TtlMinutes / lock-seats ttlSeconds default 600s.
 GOOGLE_MAPS_API_KEY=...
-GOOGLE_ROUTES_ENABLED=false
-GOOGLE_ROUTES_API_KEY=...
+ROUTING_PROVIDER=GOONG                # GOONG|LOCAL; LOCAL makes fail-closed Trip routing seams unavailable.
+GOONG_API_KEY=...                     # Secret; never log the full Direction URI/query.
+GOONG_BASE_URL=https://rsapi.goong.io
+GOONG_MAX_DESTINATIONS_PER_REQUEST=10
 TRIP_PLANNED_ETA_TIMEOUT_MS=3000
 RESOURCE_TRAVEL_TIME_TIMEOUT_MS=3000
 TRIP_STOP_DWELL_MINUTES=20
@@ -4018,8 +4042,11 @@ GPS_BATCH_INTERVAL_MINUTES=5
 ETA_RECALC_DISTANCE_THRESHOLD_METERS=500
 ETA_RECALC_HIGH_FREQ_THRESHOLD_MINUTES=15
 TRIP_STOP_DWELL_MINUTES=20
-GOOGLE_ROUTES_ENABLED=false
-GOOGLE_ROUTES_API_KEY=...
+ROUTING_PROVIDER=GOONG                # GOONG|LOCAL
+GOONG_API_KEY=...                     # Secret; never log the full Direction URI/query.
+GOONG_BASE_URL=https://rsapi.goong.io
+GOONG_MAX_DESTINATIONS_PER_REQUEST=10
+TRACKING_ROUTING_TIMEOUT_MS=3000
 BOOKING_BASE_URL=http://booking:5003
 TRIP_BASE_URL=http://trip:5002
 PARCEL_BASE_URL=http://parcel:5005
@@ -4255,7 +4282,7 @@ Mock qua interface đã định nghĩa ở `Application/Abstractions/`:
 | VNPay | `IVnPayClient` | NSubstitute mock; integration dùng WireMock.NET stub HTTP |
 | Firebase FCM | `IFcmPushClient` (Notification) | NSubstitute mock |
 | SendGrid | `ISendGridEmailClient` (Notification) | NSubstitute mock |
-| Google Maps Directions | `IGoogleDirectionsClient` (Tracking) | NSubstitute mock |
+| Goong Directions | Tracking Goong ETA provider; Trip `ITripEtaPlanner`, `IShuttleDistanceClient`, `IRepositionTravelTimeClient` | Tracking dùng Jest/fake HTTP; Trip dùng NSubstitute/fake HTTP. Cover `401`, `403`, `429`, `5xx`, timeout, malformed JSON, wrong leg count, cooldown/Local fallback và fail-closed |
 | ShopAIKey chat / embedding | `ChatCompletionProvider`, `EmbeddingProvider` (RAG) | Jest mock `fetch` hoặc provider test double; assert OpenAI-compatible payload, model ID, numeric vector và đúng 3.072 dimensions |
 | RabbitMQ broker | `IEventPublisher` (Outbox-aware) | Unit: mock; Integration: Testcontainers real broker |
 | Inter-service HTTP | `ITripServiceClient`, `IIdentityServiceClient`, ... | NSubstitute mock; integration WireMock.NET hoặc real service |
@@ -4297,6 +4324,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.79.0** | 2026-08-25 | Codex | **MINOR** — Freeze migration of Vietnam routing runtime from Google Routes to Goong Directions plus Local fallback. Require ordered target chains, configurable chunks defaulting to 10, cumulative leg metrics, strict whole-batch validation and secret-safe logging. Tracking retains fallback/cooldown; Trip planned ETA retains Route-baseline fallback while Shuttle distance and reposition remain fail closed. Add public `ROUTE_BASED`, preserve persisted historical `GOOGLE_ROUTES → TRAFFIC_AWARE`, and map `GOONG → ROUTE_BASED`, `ROUTE_BASELINE`/Local → `FALLBACK`. No endpoint, event, error code, Gateway family or dependency is added; Google OAuth and Google Maps display SDK remain unchanged. |
 | **1.78.0** | 2026-08-22 | Codex | **MINOR** — Close Operator Shuttle notification gaps: add transactional `trip.shuttle.started` and `trip.shuttle.reassigned` facts, notify Passenger/old-new Driver/active Operator Admin and Staff as appropriate, notify the assigned Driver on full-trip cancellation, and preserve booking/pickup context in `OPEN_SHUTTLE_TRACKING`. Adds two Notification enum values and one deployable Prisma migration; no dashboard, FE implementation or new dependency. |
 | **1.77.0** | 2026-08-21 | Codex | **MINOR** — Add screen-ready Parcel Reliability read contracts for Passenger, Assistant and Operator FE: batched operator/Trip/stop/custody/incident/claim enrichment, one-call tracking and Driver manifest/action state, detailed reconciliation, paged incident/claim/unidentified queues, cursor detail timelines, supervisor match candidates, operator policy defaults, and Trip-owned forwarding compatibility/capacity search. Gateway gates staff read vs admin decision explicitly; no state machine, schema, dependency or cross-database join is added. |
 | **1.76.0** | 2026-08-21 | Codex | **MINOR** — Implement Parcel Reliability v2 across Parcel, Trip, Payment, Gateway and Notification. Add immutable declaration/operator compensation-policy snapshots (default 50%, cap 30m, fallback 4x freight), append-only multi-leg chain of custody with current-location projection, explicit QR/manual/unidentified-package handling, operational-location-fenced unload/reconciliation, incident/search/forwarding/lost-confirmation workflows, sender-owned claims/evidence/appeal audit, and idempotent operator-funded payout with `FUNDING_PENDING` future-settlement retry. Register one Internal Trip endpoint, nine reliability/payment routing keys including the every-stop `trip.stop.departed` reconciliation fact, the Parcel consumer for `trip.destination.arrived`, two recurring jobs, reliability error codes, ADR 0006, and reversible Parcel/Payment migrations. `ParcelStatus` deliberately gains no `LOST`; personal luggage and insurance remain out of scope; no dependency is added. |

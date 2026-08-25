@@ -557,6 +557,16 @@
 - Write handover doc for any v2 work
 - **DoD**: demo done; retro doc committed; capstone v1 closed
 
+### Day 51 — Tue 2026-08-25 — Migration Google Routes sang Goong cho định tuyến Việt Nam
+- Tracking và Trip chuyển runtime định tuyến sang `GOONG|LOCAL`; không duy trì dual runtime Google/Goong và không hardcode hoặc log API key trong query string.
+- Goong Directions dùng thứ tự waypoint xác định, chunk tối đa cấu hình được (mặc định 10), kiểm tra chặt route/leg/distance/duration trước khi chấp nhận kết quả.
+- Tracking giữ Local ETA fallback, cooldown và trạng thái tương thích một chu kỳ; Shuttle giữ nguyên public payload. Trip giữ các fail-closed contract cho khoảng cách Shuttle và thời gian reposition.
+- Thêm `PlannedEtaSource.GOONG`, giữ `GOOGLE_ROUTES` để đọc dữ liệu lịch sử; public quality ánh xạ `GOOGLE_ROUTES → TRAFFIC_AWARE`, `GOONG → ROUTE_BASED`, `ROUTE_BASELINE/Local → FALLBACK`.
+- EF migration Trip reversible, snapshot và canonical DDL đồng bộ; `Down()` chuyển dữ liệu `GOONG` về `ROUTE_BASELINE` trước khi khôi phục enum cũ.
+- Đồng bộ env/Compose, contract/Swagger, test fake-provider, script kiểm thử Goong thật và handoff FE/Mobile cho giá trị additive `ROUTE_BASED`.
+- **DoD**: Tracking + Trip dùng Goong đúng thứ tự/chunk/cộng dồn; mọi response lỗi hoặc malformed đều fallback/fail-closed đúng contract; migration Up/Down/reapply và pending-model check xanh; không còn Google API key cần thiết trên runtime path.
+- **Review**: fake tests cover 401/403/429/5xx, timeout, malformed payload, wrong leg count/order, cooldown và cancellation; live gate chạy ít nhất 50 tuyến Việt Nam, trong đó ít nhất 5 tuyến có 11–30 điểm, parse hợp lệ 100%, thứ tự waypoint đúng và p95 dưới timeout; production-like Docker health matrix + business E2E qua Gateway xanh.
+
 ---
 
 ## Cross-cutting standing items (every day)

@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-12 (Passenger ticket history vehicle-type enrichment)
+> **Cập nhật:** 2026-08-25 (Migration runtime định tuyến Google Routes sang Goong)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -186,7 +186,7 @@ Validate business rules trong pipeline, tách khỏi controller. Ví dụ: giờ
 Scheduled & background jobs. Ví dụ: tự động đóng boarding sau giờ khởi hành, gửi reminder trước chuyến, xử lý timeout booking chưa thanh toán sau 10 phút.
 
 **Polly:**
-Circuit breaker + retry khi gọi Google Maps API (tính ETA) hoặc VNPay. Tránh cascade failure khi external service chậm.
+Circuit breaker + retry khi gọi Goong Directions (tính ETA/định tuyến) hoặc VNPay. Tránh cascade failure khi external service chậm.
 
 **C# type system:**
 `Money` là struct riêng (không dùng float), `TripStatus` là enum, `BookingCode` là value object — không bao giờ lẫn type lúc runtime.
@@ -295,7 +295,7 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 | 1 | **API Gateway** | NestJS | Routing, JWT validate, sinh Internal JWT, rate limit | Guard/Interceptor native, custom auth logic dễ viết, chia sẻ NestJS stack với 3 service khác |
 | 2 | **Identity & User** | .NET Core | Auth, RBAC, refresh token, user profile, passenger/driver/assistant info, operator profile | ASP.NET Identity mature, gộp auth + profile giảm cross-service call cho hầu hết request |
 | 3 | **Booking** | .NET Core | Booking lifecycle, seat locking, voucher apply, cancellation, multi-passenger per booking | Transaction phức tạp, MediatR CQRS, Hangfire timeout |
-| 4 | **Trip-Route-Vehicle** | .NET Core | Route, Station, Stop, AlternativeRoute, Trip scheduling, TripStopFare, Vehicle CRUD + status, DriverSchedule, search endpoints | Domain logic nặng nhất, Hangfire auto-generate Trip từ DriverSchedule, Polly cho Maps API |
+| 4 | **Trip-Route-Vehicle** | .NET Core | Route, Station, Stop, AlternativeRoute, Trip scheduling, TripStopFare, Vehicle CRUD + status, DriverSchedule, search endpoints | Domain logic nặng nhất, Hangfire auto-generate Trip từ DriverSchedule, Polly cho Goong Directions |
 | 5 | **Payment & Wallet** | .NET Core | VNPay integration, Wallet, WalletTransaction, refund, idempotency | Financial transaction, strong typing, Polly cho VNPay |
 | 6 | **Parcel** | .NET Core | Parcel workflow, delivery link confirmation, email link, cargo weight aggregation | Structured workflow, status machine, email link signing |
 | 7 | **Tracking** | NestJS | Socket.IO GPS streaming, ETA calculation, off-route detection | Socket.IO native, real-time broadcast |
@@ -419,7 +419,7 @@ Streaming LLM response qua SSE, gọi vector DB, tích hợp nhiều external AP
 |---|---|---|
 | **Google OAuth 2.0** | Đăng nhập hành khách | Google Identity Services |
 | **Google Maps SDK** | Hiển thị bản đồ trong mobile và web | Passenger tracking, operator dashboard |
-| **Google Maps Directions API** | Tính ETA từ vị trí xe đến điểm dừng | **KHÔNG gọi mỗi GPS packet** — xem ETA strategy bên dưới |
+| **Goong Directions API** | Tính ETA, khoảng cách đường bộ và thời gian reposition tại Việt Nam | Runtime provider duy nhất ngoài Local; **KHÔNG gọi mỗi GPS packet** — xem ETA strategy bên dưới |
 | **VNPay** | Cổng thanh toán, nạp ví | Redirect-based, HMAC-SHA512 signature verify |
 | **Firebase FCM** | Push notification mobile | Firebase Admin SDK |
 | **Firebase Storage** | Client upload ảnh vehicle/logo/parcel/incident/avatar | 5GB free; RAG và invoice vẫn server-owned |
@@ -442,8 +442,8 @@ server-side qua Cloudinary; Invoice PDF tiếp tục backend-owned storage. User
 suspend phát Outbox revoke request để Identity gọi Firebase `RevokeRefreshTokensAsync`; ID token
 đã phát có residual window tối đa khoảng một giờ.
 
-> **⚠️ Google Maps ETA — gọi có điều kiện, không gọi mỗi GPS packet:**
-> GPS update mỗi 3–5 giây × N active trips đồng thời → nếu gọi Maps API mỗi packet sẽ rất tốn kém (ví dụ 10 trips đang chạy = ~2 call/giây = >100k call/ngày, vượt free tier ngay ngày đầu).
+> **⚠️ Goong ETA — gọi có điều kiện, không gọi mỗi GPS packet:**
+> GPS update mỗi 3–5 giây × N active trips đồng thời → nếu gọi Goong mỗi packet sẽ tạo tải và chi phí không cần thiết (ví dụ 10 trips đang chạy = khoảng 2 call/giây = hơn 100k call/ngày).
 >
 > **Strategy bắt buộc implement:**
 > ```
@@ -457,6 +457,23 @@ suspend phát Outbox revoke request để Identity gọi Firebase `RevokeRefresh
 >   TTL: 60 giây (sau TTL, lần GPS update tiếp theo sẽ recalculate nếu đủ điều kiện)
 > ```
 > Tracking Service lưu `lastEtaCalculatedAt` và `lastEtaCalculatedLat/Lng` trong Redis per trip để check distance threshold.
+>
+> **Contract định tuyến Goong (khóa ngày 2026-08-25):** runtime chỉ nhận
+> `ROUTING_PROVIDER=GOONG|LOCAL`; không duy trì dual runtime Google/Goong. Goong gọi
+> `GET {GOONG_BASE_URL}/Direction` với `origin=lat,lng`, `destination` là chuỗi target theo đúng
+> thứ tự phân cách bằng `;`, `vehicle=car`, `alternatives=false` và `api_key=GOONG_API_KEY`.
+> `GOONG_MAX_DESTINATIONS_PER_REQUEST` mặc định 10; chuỗi dài hơn phải chunk theo thứ tự rồi cộng
+> dồn `routes[0].legs[].distance.value` và `duration.value` qua mọi leg/chunk. Reject toàn bộ batch
+> nếu route rỗng/malformed, distance/duration âm hoặc không hữu hạn, wrong leg count hay waypoint
+> order bị đổi. Không log full URI/query vì API key nằm trong query string.
+>
+> Tracking gặp `401`, `403`, `429`, `5xx`, timeout, malformed response hoặc validation failure thì
+> bỏ toàn bộ Goong batch, dùng Local fallback nhất quán và giữ circuit-breaker ba lỗi/cooldown 300
+> giây. Goong không có `departure_time`, `traffic_model` hoặc `duration_in_traffic`, nên kết quả mới
+> mang quality `ROUTE_BASED`, không bao giờ `TRAFFIC_AWARE`. `GOOGLE_ROUTES` chỉ còn là persisted
+> historical source: đọc lịch sử ánh xạ `GOOGLE_ROUTES → TRAFFIC_AWARE`; `GOONG → ROUTE_BASED`;
+> `ROUTE_BASELINE`/Local → `FALLBACK`. Google OAuth và Google Maps SDK/deep link hiển thị bản đồ
+> không thuộc migration này.
 
 ---
 
@@ -4014,7 +4031,7 @@ UI hỏi: "Bạn có muốn tạo lịch chiều về (HN→SG) cho tài xế A?
 
 `TripStop` là snapshot các điểm dừng của một chuyến cụ thể. Khác với `TripStopFare` (chỉ tồn tại khi operator muốn override `Route.baseFare` cho stop cụ thể), `TripStop` tồn tại cho **mọi chuyến có RouteStop entries** để Driver App hiển thị danh sách stop còn lại và Tracking Service tính ETA per stop.
 
-Fields cần có: tripId + stopId composite key, `orderIndex` (1-indexed, thứ tự dừng trên chuyến), `estimatedArrivalTime` (static planned baseline do Trip Service tính; Google Routes traffic-aware là primary, Route metrics là fallback, cộng dwell 20 phút), `actualArrivalTime` nullable (khi xe thực sự đến — xem note bên dưới về cơ chế set), `actualDepartureTime` nullable (durable Day-24 stop-departure anchor), `status` enum (PENDING | ARRIVED | SKIPPED — SKIPPED khi stop bị disable lúc generate Trip), **`allowPickup` boolean + `allowDropoff` boolean**, **`distanceFromOriginKm` decimal nullable** (snapshot từ RouteStop dùng cho DISRUPTED refund). Baseline được recompute khi generate, approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING`; GPS/Tracking không update field này.
+Fields cần có: tripId + stopId composite key, `orderIndex` (1-indexed, thứ tự dừng trên chuyến), `estimatedArrivalTime` (static planned baseline do Trip Service tính; Goong ordered route là primary với quality `ROUTE_BASED`, Route metrics là fallback, cộng dwell 20 phút), `actualArrivalTime` nullable (khi xe thực sự đến — xem note bên dưới về cơ chế set), `actualDepartureTime` nullable (durable Day-24 stop-departure anchor), `status` enum (PENDING | ARRIVED | SKIPPED — SKIPPED khi stop bị disable lúc generate Trip), **`allowPickup` boolean + `allowDropoff` boolean**, **`distanceFromOriginKm` decimal nullable** (snapshot từ RouteStop dùng cho DISRUPTED refund). Baseline được recompute khi generate, approved pre-departure Route edit hoặc DriverSchedule `ALL_PENDING`; GPS/Tracking không update field này.
 
 > **Cơ chế set `TripStop.actualArrivalTime` — Assistant explicit confirm:**
 > Assistant bấm nút "Đã đến [tên stop]" trong Driver App khi xe dừng tại điểm dừng đó → API call `POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive` → Trip-Route-Vehicle Service set `TripStop.actualArrivalTime = now`, `TripStop.status = ARRIVED`. Nút này chỉ enable khi Trip.status = IN_PROGRESS.
@@ -4056,10 +4073,11 @@ Layer 1 — Static ETA (trong DB):
   Origin Station ETA = Trip.departureDateTime
   TripStop.estimatedArrivalTime = planned cumulative drive time + 20 phút dwell tại mỗi stop trước đó
   Trip.estimatedArrivalTime = planned cumulative drive time + 20 phút cho mọi stop trung gian
-  → Google Routes ordered waypoints + TRAFFIC_AWARE tại departureTime là primary
+  → Goong Directions ordered targets + ROUTE_BASED là primary; Goong không nhận traffic/departure-time
   → RouteStop/Route cumulative metrics là fallback; không làm thất bại việc tạo Trip
   → Recompute khi generate Trip, approved pre-departure Route change hoặc DriverSchedule ALL_PENDING
-  → Trip.planned_eta_source lưu GOOGLE_ROUTES|ROUTE_BASELINE; API chỉ public TRAFFIC_AWARE|FALLBACK
+  → Trip.planned_eta_source lưu GOONG|ROUTE_BASELINE; GOOGLE_ROUTES chỉ đọc lịch sử
+  → API public TRAFFIC_AWARE|ROUTE_BASED|FALLBACK theo mapping source đã khóa
   → Dùng làm baseline đo deviation (xe trễ bao nhiêu so với kế hoạch)
   → Passenger App hiển thị trước khi chuyến bắt đầu (không có GPS)
 
@@ -4070,7 +4088,7 @@ Layer 2 — Dynamic ETA (trong Redis, Tracking Service maintain):
   → Express/no remaining stop/after-last-stop vẫn target destination, không trả null
   → Update khi next stop đổi, xe di chuyển >500m hoặc ETA next stop < 15 phút
   → Một lock per Trip; toàn bộ target cache được ghi atomic
-  → Google lỗi/partial batch thì bỏ cả batch và fallback nhất quán bằng route projection/current speed;
+  → Goong lỗi/partial batch thì bỏ cả batch và fallback nhất quán bằng route projection/current speed;
     pre-origin dùng direct distance đến origin
   → Tracking Service KHÔNG ghi đè TripStop.estimatedArrivalTime trong DB
   → eta:batch:update phát STOP/STATION; legacy eta:update chỉ phát khi primary target là STOP
@@ -4184,9 +4202,9 @@ Edge case — đổi vehicleId trên DriverSchedule sau khi đã có Trip genera
 > and Vehicle are protected across DriverSchedule, main Trip, and ShuttleTrip by one shared
 > availability engine. For two consecutive assignments,
 > `next.start >= previous.end + 30 minutes + repositionTravelTime`. The engine uses endpoint
-> Station/manifest coordinate snapshots and Google Routes `DRIVE`; the same canonical Station has
-> zero reposition time but still requires the 30-minute turnaround. Missing coordinates, disabled
-> Google Routes, timeout, or an unusable response fail closed with
+> Station/manifest coordinate snapshots and Goong Directions `vehicle=car`; the same canonical Station has
+> zero reposition time but still requires the 30-minute turnaround. Missing coordinates, Local-only
+> routing, `401`/`403`/`429`/`5xx`, timeout, malformed or otherwise unusable responses fail closed with
 > `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`. There is no admin override. Recurring schedules are
 > compared over their complete weekly validity (including overnight occurrences and open-ended
 > validity), while every concrete Trip is rechecked and reserved atomically in the rolling 30-day
@@ -4768,7 +4786,7 @@ ShuttlePassenger (manifest entry — link passenger booking with shuttle) {
 3. **Create ShuttleTrip (fully manual):**
 
    Resource validation is shared with main Trip and DriverSchedule. Both Driver and Vehicle must
-   satisfy the full interval + 30-minute turnaround + Google Routes reposition rule against the
+   satisfy the full interval + 30-minute turnaround + Goong Directions reposition rule against the
    immediately preceding and following main/shuttle assignments. Creation takes the same ordered
    advisory locks and persists `resource_reservations` in the Shuttle transaction, preventing
    main-shuttle and shuttle-shuttle races.
@@ -5116,7 +5134,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | **Trip pickup/dropoff control** | KHÔNG có flag `allowAlongRoutePickup` / `allowAlongRouteDropoff` ở Trip. KHÔNG có `defaultAllowAlongRoute*` ở Route. `RouteStop` entries là single source of truth, với **2 flag per entry: `allowPickup` + `allowDropoff` (default cả 2 = true, DB CHECK ít nhất 1 = true)** — phân loại pickup-only / dropoff-only / both. TripStop snapshot 2 flag khi Hangfire generate Trip (immutable). Validation booking + parcel: pickupStopId cần `allowPickup=true`; dropoffStopId cần `allowDropoff=true`. Edge case operational stop defer v2 qua `RouteStop.isPublicVisible`. |
 | **Trip fare** | `Trip.baseFare` = giá vé theo chặng/tuyến (áp dụng từ đầu tuyến hoặc bất kỳ along-route stop nào). Booking capture/reuse một handler-start `pricingAt` và dùng `fareFromThisStop` đã được Trip resolve trong snapshot cho pickup stop; explicit precedence là persisted `TripStopFare` có `source=MANUAL_OVERRIDE` → active `RouteStopFareTemplate` half-open tại `pricingAt` → `Trip.baseFare`. Legacy `TEMPLATE_SNAPSHOT` vẫn readable, non-authoritative khi có `pricingAt`, và chỉ tham gia resolution cho legacy compatibility khi omitted `pricingAt`; Day 22 không tạo snapshot row mới. Dropoff miễn phí tại mọi stop, không ảnh hưởng giá. |
 | **Seat lock along-route** | Ghế lock từ đầu chuyến, không phân theo segment. Chi phí operator chấp nhận. |
-| **DriverSchedule** | `dayOfWeek` JSON array + `departureTime TIME` + `baseFare BIGINT nullable`. Hangfire generate Trip theo cửa sổ lăn 30 ngày, bao gồm `today + 30`, qua 2 trigger: (1) immediate on-create/activate, (2) weekly job CN 23:00. Trip mới snapshot `DriverSchedule.baseFare ?? Route.baseFare`; đổi schedule fare chỉ dùng `FUTURE_ONLY`, không sửa Trip đã generate. Driver, Assistant và Vehicle dùng canonical interval + 30 phút turnaround + Google Routes reposition rule trên toàn validity; Trip concrete luôn recheck/reserve nguyên tử. |
+| **DriverSchedule** | `dayOfWeek` JSON array + `departureTime TIME` + `baseFare BIGINT nullable`. Hangfire generate Trip theo cửa sổ lăn 30 ngày, bao gồm `today + 30`, qua 2 trigger: (1) immediate on-create/activate, (2) weekly job CN 23:00. Trip mới snapshot `DriverSchedule.baseFare ?? Route.baseFare`; đổi schedule fare chỉ dùng `FUTURE_ONLY`, không sửa Trip đã generate. Driver, Assistant và Vehicle dùng canonical interval + 30 phút turnaround + Goong Directions reposition rule trên toàn validity; Trip concrete luôn recheck/reserve nguyên tử. |
 | **Alternative Route** | Không có hard-cap toàn cục theo Route chính. Stop sequence riêng hoàn toàn — không reuse `RouteStop`. Quan hệ: `Route → AlternativeRoute → AlternativeRouteStop → Stop`; CUSTOM proposal chỉ tạo AlternativeRoute chính thức khi được approve. |
 | **RouteChangeProposal** | Snapshot đề xuất đổi tuyến của Driver/Assistant được phân công. Type `EXISTING|CUSTOM`; status `PENDING|APPROVED|REJECTED|SUPERSEDED|EXPIRED`; có thể liên kết optional Incident cùng Trip. Nhiều pending cùng Trip được phép, approve một proposal supersede các pending khác. |
 | **Stop độc lập** | Một Stop có thể thuộc nhiều Route. Canonical disable là bodyless `DELETE /v1/operator/stops/{stopId}?replacedByStopId=` cho `OPERATOR_ADMIN`, required UUID-v4 `Idempotency-Key`; set `isActive=false`, giữ `deletedAt`, không xóa RouteStop, và publish `trip.stop.disabled`. `replacedByStopId` nullable self-FK phải active/cùng operator/non-self/cycle-free. Retained PATCH là details-update-only, không đổi `isActive`/`deletedAt` và không emit disable event. Async `booking.stop_disabled.affected` là sole impact source; không có synchronous count/warning seam. Auto-suggest geo proximity defer v2. |
