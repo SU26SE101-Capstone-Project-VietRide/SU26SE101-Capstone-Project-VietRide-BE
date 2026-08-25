@@ -179,7 +179,7 @@ full regression cùng production-like Docker health/business matrix.
 | 51.0 | ✅ done | APPROVE | 2026-08-25 | 3 patch rounds; no scope expansion; DOCS gate green. |
 | 51.1 | ✅ done | APPROVE | 2026-08-25 | Command corrections + 1 reviewer patch; Tracking fixtures and typed-ESLint config expanded in-scope; 40 unit and 109 E2E tests green. |
 | 51.2 | ✅ done | APPROVE | 2026-08-25 | 1 reviewer patch round; 3 in-envelope support files; 48/48 client + 32/32 projection tests green. |
-| 51.3 | ⬜ todo | — | — | — |
+| 51.3 | ✅ done | APPROVE | 2026-08-25 | Generated once; 2 auto-authorized migration files; 3/3 focused tests and apply/Down/reapply/pending-model lifecycle green. |
 | 51.4 | ⬜ todo | — | — | — |
 
 Legend: ⬜ todo · 🔄 in progress · ✅ done (reviewer APPROVED + targeted verification green) · ⚠️ done-with-carryover · ❌ blocked
