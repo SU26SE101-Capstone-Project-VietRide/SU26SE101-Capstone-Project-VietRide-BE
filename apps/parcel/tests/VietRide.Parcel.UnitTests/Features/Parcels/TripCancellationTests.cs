@@ -349,6 +349,30 @@ public sealed class TripCancellationTests
     }
 
     [Fact]
+    public void TripDisruptedContract_AcceptsOptionalTripCode()
+    {
+        const string payload = """
+            {
+              "eventId": "11111111-1111-4111-8111-111111111111",
+              "occurredAt": "2026-07-30T10:00:00Z",
+              "tripId": "22222222-2222-4222-8222-222222222222",
+              "operatorId": "33333333-3333-4333-8333-333333333333",
+              "terminalAt": "2026-07-30T10:00:00Z",
+              "hasSubstitution": true,
+              "reason": "Vehicle breakdown",
+              "tripCode": "VR-20260825-001"
+            }
+            """;
+
+        var integrationEvent = JsonSerializer.Deserialize<TripDisruptedIntegrationEvent>(
+            payload,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        integrationEvent.Should().NotBeNull();
+        integrationEvent!.TripCode.Should().Be("VR-20260825-001");
+    }
+
+    [Fact]
     public void OperationIds_AreStableDistinctUuidV4()
     {
         var sourceId = Guid.NewGuid();

@@ -309,6 +309,7 @@ public sealed class HandleTripDisruptedCommandHandlerTests
             terminalAt = TerminalAt,
             hasSubstitution = false,
             reason = "Road closure",
+            tripCode = "VR-20260825-001",
         }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         var integrationEvent = JsonSerializer.Deserialize<TripDisruptedIntegrationEvent>(
@@ -322,6 +323,7 @@ public sealed class HandleTripDisruptedCommandHandlerTests
         integrationEvent.TerminalAt.Should().Be(TerminalAt);
         integrationEvent.HasSubstitution.Should().BeFalse();
         integrationEvent.Reason.Should().Be("Road closure");
+        integrationEvent.TripCode.Should().Be("VR-20260825-001");
     }
 
     [Fact]
