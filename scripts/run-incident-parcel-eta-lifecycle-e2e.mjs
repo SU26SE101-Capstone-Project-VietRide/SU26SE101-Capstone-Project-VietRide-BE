@@ -894,7 +894,9 @@ async function exerciseParcel(tokens, fixture) {
 async function exerciseTrackingIncidentAndLifecycle(tokens) {
   tripSql(`UPDATE trips SET status='BOARDING',updated_at=now() WHERE id='${ids.trip}';`);
   pass('fixture advanced SCHEDULED -> BOARDING before driver start API');
-  const cold = await trackingApi(`/v1/tracking/trips/${ids.trip}/eta`, tokens.sender);
+  const trackingReaderToken =
+    process.env.TRACKING_SMOKE_ONLY === 'true' ? tokens.driver : tokens.sender;
+  const cold = await trackingApi(`/v1/tracking/trips/${ids.trip}/eta`, trackingReaderToken);
   assert(cold.status === 200 && cold.json?.data?.eta === null, 'Cold ETA must be null');
 
   const routeBefore = await trackingApi(
@@ -941,7 +943,7 @@ async function exerciseTrackingIncidentAndLifecycle(tokens) {
       JSON.stringify(preOriginBatch.etas?.[0] ?? null),
     );
   }
-  const originEta = await trackingApi(`/v1/tracking/trips/${ids.trip}/eta`, tokens.sender);
+  const originEta = await trackingApi(`/v1/tracking/trips/${ids.trip}/eta`, trackingReaderToken);
   assert(originEta.json?.data?.eta?.targetKind === 'STATION', 'GET /eta did not return origin ETA');
   evidence.dynamicEta = {
     preOrigin: {
@@ -952,6 +954,8 @@ async function exerciseTrackingIncidentAndLifecycle(tokens) {
     },
   };
   pass('ETA cold cache and real pre-origin GPS -> origin station');
+
+  if (process.env.TRACKING_SMOKE_ONLY === 'true') return;
 
   data(
     await api('POST', `/v1/driver/trips/${ids.trip}/start`, {
@@ -1393,7 +1397,9 @@ try {
   };
   await exerciseImmediateDriverScheduleGeneration(tokens);
   await exerciseLocation(fixture);
-  await exerciseParcel(tokens, fixture);
+  if (process.env.TRACKING_SMOKE_ONLY !== 'true') {
+    await exerciseParcel(tokens, fixture);
+  }
   await exerciseTrackingIncidentAndLifecycle(tokens);
   if (auditFailures.length > 0) {
     throw new Error(`Audit failures: ${auditFailures.join(' | ')}`);
