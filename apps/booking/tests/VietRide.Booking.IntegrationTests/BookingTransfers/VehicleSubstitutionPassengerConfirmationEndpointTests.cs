@@ -551,6 +551,7 @@ public sealed class VehicleSubstitutionPassengerConfirmationEndpointTests
                 "LOCK-01",
                 booking.Id,
                 ticket.Id);
+            transfer.Escalate().Should().BeTrue();
 
             setup.Bookings.Add(booking);
             setup.BookingTransfers.Add(transfer);
@@ -780,6 +781,7 @@ public sealed class VehicleSubstitutionPassengerConfirmationEndpointTests
                                     == operatorId
                                 && transfer.ConfirmationStatus
                                     is BookingTransferConfirmationStatus.PENDING_CONFIRM
+                                        or BookingTransferConfirmationStatus.ESCALATED
                                         or BookingTransferConfirmationStatus.CONFIRMED)
                             .OrderByDescending(transfer => transfer.TransferredAt)
                             .FirstOrDefault();
