@@ -4,6 +4,12 @@ export const TripVehicleSubstitutedBoardingStatusSchema = z.enum(['BOARDED', 'PE
 export type TripVehicleSubstitutedBoardingStatus = z.infer<
   typeof TripVehicleSubstitutedBoardingStatusSchema
 >;
+export const TripVehicleSubstitutedSeatTypeSchema = z.enum([
+  'STANDARD',
+  'SLEEPER_UPPER',
+  'SLEEPER_LOWER',
+  'VIP',
+]);
 
 export const TripVehicleSubstitutedMappingSchema = z
   .object({
@@ -12,6 +18,9 @@ export const TripVehicleSubstitutedMappingSchema = z
     originalSeatNumber: z.string().nullable(),
     newSeatNumber: z.string().nullable(),
     originalBoardingStatus: TripVehicleSubstitutedBoardingStatusSchema,
+    originalSeatType: TripVehicleSubstitutedSeatTypeSchema.nullable().optional(),
+    newSeatType: TripVehicleSubstitutedSeatTypeSchema.nullable().optional(),
+    isSeatDowngrade: z.boolean().optional(),
   })
   .strict();
 export type TripVehicleSubstitutedMapping = z.infer<

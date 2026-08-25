@@ -16,4 +16,9 @@ public interface IBookingTransferRepository : IRepository<BookingTransfer, Guid>
         Guid originalTripId,
         Guid newTripId,
         CancellationToken ct = default);
+
+    Task<IReadOnlyList<BookingTransfer>> AcquirePendingEscalationBatchAsync(
+        DateTimeOffset cutoff,
+        int maxGroups,
+        CancellationToken ct = default);
 }

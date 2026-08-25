@@ -25,6 +25,57 @@ public sealed class TripTerminalSettlementInboxAtomicityTests
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-08-02T02:00:00Z");
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    [Fact]
+    public async Task VehicleSubstitutionKeepsOriginalRevenueAndCreatesReadableZeroMarker()
+    {
+        await WithDatabaseAsync(async connectionString =>
+        {
+            var oldTrip = CreateEvent(disrupted: true);
+            var replacementTripId = Guid.NewGuid();
+            await using var provider = CreateProvider(connectionString);
+            await MigrateAndSeedLedgerAsync(provider, oldTrip.OperatorId, oldTrip.TripId);
+
+            (await DeliverAsync(provider, oldTrip, disrupted: true))
+                .Should().Be(IntegrationEventInboxResult.Processed);
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                var service = scope.ServiceProvider.GetRequiredService<TripTerminalSettlementService>();
+                var handler = new TripCompletedSettlementEventHandler(service);
+                await handler.HandleAsync(
+                    new TripCompletedConsumerEvent(
+                        Guid.NewGuid(),
+                        Now,
+                        replacementTripId,
+                        oldTrip.OperatorId,
+                        Now,
+                        false,
+                        "TRIP-REPLACEMENT",
+                        "VEHICLE_SUBSTITUTION"),
+                    CancellationToken.None);
+            }
+
+            await using var assertionScope = provider.CreateAsyncScope();
+            var db = assertionScope.ServiceProvider.GetRequiredService<PaymentDbContext>();
+            var settlements = await db.OperatorTripSettlements.AsNoTracking()
+                .OrderBy(settlement => settlement.TripId)
+                .ToArrayAsync();
+            settlements.Should().HaveCount(2);
+            settlements.Single(settlement => settlement.TripId == oldTrip.TripId)
+                .Should().Match<OperatorTripSettlement>(settlement =>
+                    settlement.NetAmount == 500_000
+                    && settlement.Status == OperatorTripSettlementStatus.PENDING_HOLD);
+            settlements.Single(settlement => settlement.TripId == replacementTripId)
+                .Should().Match<OperatorTripSettlement>(settlement =>
+                    settlement.NetAmount == 0
+                    && settlement.Status == OperatorTripSettlementStatus.CANCELLED
+                    && settlement.CancelReason
+                        == "VEHICLE_SUBSTITUTION_REVENUE_RETAINED_ON_ORIGINAL_TRIP"
+                    && settlement.WalletTransactionId == null);
+            settlements.Sum(settlement => settlement.NetAmount).Should().Be(500_000);
+            (await db.OperatorWalletTransactions.CountAsync()).Should().Be(0);
+        });
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

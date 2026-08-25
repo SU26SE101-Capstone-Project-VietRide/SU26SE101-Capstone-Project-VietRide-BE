@@ -549,6 +549,7 @@ CREATE TABLE operator_trip_settlements (
     settled_by_email VARCHAR(320) NULL,
     settled_by_role VARCHAR(50) NULL,
     wallet_transaction_id UUID NULL REFERENCES operator_wallet_transactions (id) ON DELETE SET NULL,
+    cancel_reason VARCHAR(100) NULL,
     settlement_failure_count INT NOT NULL DEFAULT 0,
     last_settlement_failure_at TIMESTAMPTZ NULL,
     active_failure_code VARCHAR(100) NULL,
@@ -602,6 +603,8 @@ COMMENT ON COLUMN operator_trip_settlements.net_amount IS
     'Recomputed at settle time = SUM(operator_ledger_entries.amount WHERE operator_id=X AND trip_id=Y AND entry_type IN revenue/refund/voucher_vietride_funded_credit). VOUCHER_OPERATOR_FUNDED_AUDIT has amount=0, no impact.';
 COMMENT ON COLUMN operator_trip_settlements.eligible_at IS
     'trip_terminal_at + interval 7 days. Admin manual settle can bypass this for early settle.';
+COMMENT ON COLUMN operator_trip_settlements.cancel_reason IS
+    'Machine-readable reason for a CANCELLED marker; replacement Trip zero-net markers retain revenue on the original Trip.';
 COMMENT ON COLUMN operator_trip_settlements.row_version IS
     'Optimistic lock for status transition. Pattern: UPDATE ... WHERE id=:id AND status=:expected AND row_version=:original.';
 

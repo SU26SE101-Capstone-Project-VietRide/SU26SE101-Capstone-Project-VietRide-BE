@@ -41,6 +41,7 @@ internal sealed class OperatorTripSettlementConfiguration : IEntityTypeConfigura
         builder.Property(x => x.SettledByEmail).HasColumnName("settled_by_email").HasMaxLength(320);
         builder.Property(x => x.SettledByRole).HasColumnName("settled_by_role").HasMaxLength(50);
         builder.Property(x => x.WalletTransactionId).HasColumnName("wallet_transaction_id").HasColumnType("uuid");
+        builder.Property(x => x.CancelReason).HasColumnName("cancel_reason").HasMaxLength(100);
         builder.Property(x => x.SettlementFailureCount).HasColumnName("settlement_failure_count").HasDefaultValue(0).IsRequired();
         builder.Property(x => x.LastSettlementFailureAt).HasColumnName("last_settlement_failure_at");
         builder.Property(x => x.ActiveFailureCode).HasColumnName("active_failure_code").HasMaxLength(100);

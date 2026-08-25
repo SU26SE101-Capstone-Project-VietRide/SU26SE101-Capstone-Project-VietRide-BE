@@ -30,6 +30,7 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>, IBusinessCodeEnti
     public string? SettledByEmail { get; private set; }
     public string? SettledByRole { get; private set; }
     public Guid? WalletTransactionId { get; private set; }
+    public string? CancelReason { get; private set; }
     public int SettlementFailureCount { get; private set; }
     public DateTimeOffset? LastSettlementFailureAt { get; private set; }
     public string? ActiveFailureCode { get; private set; }
@@ -81,7 +82,10 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>, IBusinessCodeEnti
     void IBusinessCodeEntity.RegenerateBusinessCode()
         => SettlementCode = BusinessCodeGenerator.Generate("STL", TripTerminalAt);
 
-    public void RefreshEligibility(long netAmount, DateTimeOffset now)
+    public void RefreshEligibility(
+        long netAmount,
+        DateTimeOffset now,
+        string? cancelReason = null)
     {
         if (Status is OperatorTripSettlementStatus.SETTLED or OperatorTripSettlementStatus.CANCELLED)
             return;
@@ -89,7 +93,12 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>, IBusinessCodeEnti
         NetAmount = netAmount;
         if (netAmount <= 0)
         {
-            MarkCancelled(netAmount, OperatorTripSettlementMethod.AUTO_WEEKLY, now, null);
+            MarkCancelled(
+                netAmount,
+                OperatorTripSettlementMethod.AUTO_WEEKLY,
+                now,
+                null,
+                cancelReason);
             return;
         }
 
@@ -166,7 +175,8 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>, IBusinessCodeEnti
         long netAmount,
         OperatorTripSettlementMethod method,
         DateTimeOffset settledAt,
-        FinancialActorSnapshot? settledBy)
+        FinancialActorSnapshot? settledBy,
+        string? cancelReason = null)
     {
         if (Status is not (OperatorTripSettlementStatus.PENDING_HOLD or OperatorTripSettlementStatus.ELIGIBLE))
             throw new InvalidOperationException("Only pending settlements can be cancelled.");
@@ -177,6 +187,8 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>, IBusinessCodeEnti
         Status = OperatorTripSettlementStatus.CANCELLED;
         SettlementMethod = method;
         SettledAt = settledAt;
+        CancelReason = NormalizeCancelReason(cancelReason)
+            ?? "NON_POSITIVE_NET_ENTITLEMENT";
         SettledBySnapshotResolved = true;
         if (settledBy is not null)
         {
@@ -232,5 +244,25 @@ public sealed class OperatorTripSettlement : BaseEntity<Guid>, IBusinessCodeEnti
         SettledByEmail = null;
         SettledByRole = null;
         SettledBySnapshotResolved = true;
+    }
+
+    public void SetCancelReason(string cancelReason)
+    {
+        if (Status != OperatorTripSettlementStatus.CANCELLED)
+            throw new InvalidOperationException("Only a cancelled settlement can have a cancel reason.");
+
+        CancelReason = NormalizeCancelReason(cancelReason)
+            ?? throw new ArgumentException("Cancel reason is required.", nameof(cancelReason));
+    }
+
+    private static string? NormalizeCancelReason(string? cancelReason)
+    {
+        if (string.IsNullOrWhiteSpace(cancelReason))
+            return null;
+
+        var normalized = cancelReason.Trim().ToUpperInvariant();
+        if (normalized.Length > 100)
+            throw new ArgumentException("Cancel reason must not exceed 100 characters.", nameof(cancelReason));
+        return normalized;
     }
 }

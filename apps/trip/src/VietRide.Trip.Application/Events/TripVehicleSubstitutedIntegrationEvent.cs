@@ -26,5 +26,8 @@ public sealed record TripVehicleSubstitutedIntegrationEvent(
         Guid PassengerId,
         string? OriginalSeatNumber,
         string? NewSeatNumber,
-        string OriginalBoardingStatus);
+        string OriginalBoardingStatus,
+        string? OriginalSeatType = null,
+        string? NewSeatType = null,
+        bool IsSeatDowngrade = false);
 }

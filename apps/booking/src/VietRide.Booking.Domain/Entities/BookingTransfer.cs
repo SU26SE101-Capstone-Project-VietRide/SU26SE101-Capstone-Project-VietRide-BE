@@ -16,6 +16,9 @@ public sealed class BookingTransfer
     public Guid NewTripId { get; private set; }
     public string? OriginalSeatNumber { get; private set; }
     public string? NewSeatNumber { get; private set; }
+    public string? OriginalSeatType { get; private set; }
+    public string? NewSeatType { get; private set; }
+    public bool IsSeatDowngrade { get; private set; }
     public BookingTransferConfirmationStatus ConfirmationStatus { get; private set; }
     public DateTimeOffset? ConfirmedAt { get; private set; }
     public Guid? ConfirmedByUserId { get; private set; }
@@ -37,7 +40,10 @@ public sealed class BookingTransfer
         BookingTransferConfirmationStatus confirmationStatus,
         DateTimeOffset transferredAt,
         Guid transferredByUserId,
-        string? note = null)
+        string? note = null,
+        string? originalSeatType = null,
+        string? newSeatType = null,
+        bool isSeatDowngrade = false)
     {
         if (bookingId == Guid.Empty)
             throw new ArgumentException("Booking id is required.", nameof(bookingId));
@@ -51,8 +57,13 @@ public sealed class BookingTransfer
             throw new ArgumentException("New Trip id is required.", nameof(newTripId));
         if (transferredByUserId == Guid.Empty)
             throw new ArgumentException("Transferred-by user id is required.", nameof(transferredByUserId));
-        if (confirmationStatus == BookingTransferConfirmationStatus.CONFIRMED)
-            throw new ArgumentException("A transfer must be confirmed through Confirm().", nameof(confirmationStatus));
+        if (confirmationStatus is BookingTransferConfirmationStatus.CONFIRMED
+            or BookingTransferConfirmationStatus.ESCALATED)
+        {
+            throw new ArgumentException(
+                "A transfer must start in a pending or not-required state.",
+                nameof(confirmationStatus));
+        }
 
         return new BookingTransfer
         {
@@ -64,6 +75,9 @@ public sealed class BookingTransfer
             NewTripId = newTripId,
             OriginalSeatNumber = NormalizeSeat(originalSeatNumber),
             NewSeatNumber = NormalizeSeat(newSeatNumber),
+            OriginalSeatType = NormalizeSeatType(originalSeatType),
+            NewSeatType = NormalizeSeatType(newSeatType),
+            IsSeatDowngrade = isSeatDowngrade,
             ConfirmationStatus = confirmationStatus,
             TransferredAt = transferredAt,
             TransferredByUserId = transferredByUserId,
@@ -79,8 +93,12 @@ public sealed class BookingTransfer
             return;
         }
 
-        if (ConfirmationStatus != BookingTransferConfirmationStatus.PENDING_CONFIRM)
-            throw new InvalidOperationException("Only a pending transfer may be confirmed.");
+        if (ConfirmationStatus is not (
+            BookingTransferConfirmationStatus.PENDING_CONFIRM
+            or BookingTransferConfirmationStatus.ESCALATED))
+        {
+            throw new InvalidOperationException("Only a pending or escalated transfer may be confirmed.");
+        }
         if (NewSeatNumber is null)
             throw new InvalidOperationException("A transfer without a replacement seat cannot be confirmed.");
         if (confirmedByUserId == Guid.Empty)
@@ -93,6 +111,18 @@ public sealed class BookingTransfer
         ConfirmedByUserId = confirmedByUserId;
     }
 
+    public bool Escalate()
+    {
+        if (ConfirmationStatus != BookingTransferConfirmationStatus.PENDING_CONFIRM)
+            return false;
+
+        ConfirmationStatus = BookingTransferConfirmationStatus.ESCALATED;
+        return true;
+    }
+
     private static string? NormalizeSeat(string? seatNumber)
         => string.IsNullOrWhiteSpace(seatNumber) ? null : seatNumber.Trim();
+
+    private static string? NormalizeSeatType(string? seatType)
+        => string.IsNullOrWhiteSpace(seatType) ? null : seatType.Trim().ToUpperInvariant();
 }

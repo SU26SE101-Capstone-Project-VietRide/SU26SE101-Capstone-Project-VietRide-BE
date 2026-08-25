@@ -47,6 +47,7 @@ public static class HangfireServiceCollectionExtensions
         services.AddScoped<IPendingActionRealertScheduler, HangfirePendingActionRealertScheduler>();
         services.AddScoped<PlatformBookingStatsBackfillJob>();
         services.AddScoped<BuyerSnapshotBackfillJob>();
+        services.AddScoped<BookingTransferEscalationJob>();
         services.AddScoped<IScheduleChangeAutoAcceptScheduler, HangfireScheduleChangeAutoAcceptScheduler>();
         services.AddScoped<IRouteChangeExpiryScheduler, HangfireRouteChangeExpiryScheduler>();
         services.AddSingleton<IStopDisabledAutoFallbackScheduler, HangfireStopDisabledAutoFallbackScheduler>();

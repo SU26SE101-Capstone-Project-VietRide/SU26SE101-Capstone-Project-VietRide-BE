@@ -977,7 +977,8 @@ public sealed class TripLifecycleEndpointTests
                 "operatorId",
                 "terminalAt",
                 "completedAt",
-                "hasSubstitution"
+                "hasSubstitution",
+                "source"
             ]);
         root.GetProperty("eventId").GetGuid().Should().NotBeEmpty();
         root.GetProperty("occurredAt").GetDateTime().Should().NotBe(default);
@@ -988,6 +989,7 @@ public sealed class TripLifecycleEndpointTests
         root.GetProperty("terminalAt").GetDateTimeOffset().Should().Be(now);
         root.GetProperty("completedAt").GetDateTimeOffset().Should().Be(now);
         root.GetProperty("hasSubstitution").GetBoolean().Should().BeFalse();
+        root.GetProperty("source").GetString().Should().Be("MANUAL");
     }
 
     private static void AssertManualAudit(

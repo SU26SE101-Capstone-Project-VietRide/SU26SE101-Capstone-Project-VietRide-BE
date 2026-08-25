@@ -99,6 +99,12 @@ if (registerMessaging)
             job.RunAsync(CancellationToken.None)),
         "*/5 * * * *",
         new RecurringJobOptions { QueueName = hangfireQueueName, TimeZone = TimeZoneInfo.Utc });
+    recurringJobs.AddOrUpdate(
+        BookingTransferEscalationJob.RecurringJobId,
+        Job.FromExpression<BookingTransferEscalationJob>(job =>
+            job.RunAsync(CancellationToken.None)),
+        "*/5 * * * *",
+        new RecurringJobOptions { QueueName = hangfireQueueName, TimeZone = TimeZoneInfo.Utc });
 #pragma warning restore CS0618
 }
 

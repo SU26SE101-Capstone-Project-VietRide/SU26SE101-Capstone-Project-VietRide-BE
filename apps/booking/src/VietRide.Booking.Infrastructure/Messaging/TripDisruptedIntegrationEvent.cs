@@ -28,6 +28,8 @@ public sealed record TripDisruptedIntegrationEvent : IIntegrationEvent
 
     public string? Reason { get; init; }
 
+    public string? TripCode { get; init; }
+
     [JsonIgnore]
     string IIntegrationEvent.EventType => EventTypeValue;
 }

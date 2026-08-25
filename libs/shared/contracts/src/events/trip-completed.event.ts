@@ -7,6 +7,8 @@ export const TripCompletedEventSchema = z.object({
   operatorId: z.string().uuid(),
   terminalAt: z.string().datetime({ offset: true }),
   hasSubstitution: z.boolean(),
+  tripCode: z.string().trim().min(1).optional().nullable(),
+  source: z.enum(['MANUAL', 'AUTO_FROM_SCHEDULE', 'VEHICLE_SUBSTITUTION']).optional().nullable(),
 });
 
 export type TripCompletedEvent = z.infer<typeof TripCompletedEventSchema>;

@@ -5,6 +5,8 @@ import {
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
   BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY,
+  BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY,
+  BOOKING_TRANSFER_ESCALATED_ROUTING_KEY,
   BOOKING_TRANSFERRED_ROUTING_KEY,
   type BookingTransferredEvent,
 } from '@vietride/contracts';
@@ -25,6 +27,7 @@ import { MessageIdempotencyService } from './message-idempotency.service';
 import type { NotificationsRealtimeGateway } from './notifications-realtime.gateway';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsService } from './notifications.service';
+import type { OperatorRecipientProvider } from './operator-recipient.provider';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const BOOKING_ID = '22222222-2222-4222-8222-222222222222';
@@ -42,6 +45,7 @@ describe('BookingTripChangeEventsConsumer binds the Booking-owned passenger fact
   let rabbitConsumer: jest.Mocked<RabbitMqConsumer>;
   let idempotency: jest.Mocked<MessageIdempotencyService>;
   let notificationsService: jest.Mocked<NotificationsService>;
+  let operatorRecipients: jest.Mocked<OperatorRecipientProvider>;
   let consumer: BookingTripChangeEventsConsumer;
 
   beforeEach(() => {
@@ -54,10 +58,14 @@ describe('BookingTripChangeEventsConsumer binds the Booking-owned passenger fact
     notificationsService = {
       createNotification: jest.fn(),
     } as unknown as jest.Mocked<NotificationsService>;
+    operatorRecipients = {
+      resolveOperatorRecipientUserIds: jest.fn().mockResolvedValue([]),
+    };
     consumer = new BookingTripChangeEventsConsumer(
       rabbitConsumer,
       idempotency,
       notificationsService,
+      operatorRecipients,
     );
   });
 
@@ -72,8 +80,10 @@ describe('BookingTripChangeEventsConsumer binds the Booking-owned passenger fact
       BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
       BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY,
       BOOKING_TRANSFERRED_ROUTING_KEY,
+      BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY,
+      BOOKING_TRANSFER_ESCALATED_ROUTING_KEY,
     ]);
-    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(7);
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(9);
     for (const binding of BOOKING_TRIP_CHANGE_QUEUE_BINDINGS) {
       expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
         binding.queue,
@@ -245,7 +255,7 @@ describe('BookingTripChangeEventsConsumer binds the Booking-owned passenger fact
       queue: 'notification:booking-transferred',
       routingKey: BOOKING_TRANSFERRED_ROUTING_KEY,
     });
-    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(7);
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledTimes(9);
 
     idempotency.begin.mockResolvedValue('acquired');
     await consumer.handle(
@@ -299,6 +309,60 @@ describe('BookingTripChangeEventsConsumer binds the Booking-owned passenger fact
     expect(idempotency.markProcessed).toHaveBeenCalledWith(
       BOOKING_TRANSFERRED_ROUTING_KEY,
       EVENT_ID,
+    );
+  });
+
+  it.each([
+    ['PENDING passenger', { originalBoardingStatus: 'PENDING' as const }],
+    [
+      'legacy PENDING passenger without originalBoardingStatus',
+      { originalBoardingStatus: undefined, confirmationStatus: 'NOT_REQUIRED' as const },
+    ],
+    ['missing replacement seat', { newSeatNumber: null }],
+  ])('notifyPassengers false still notifies for %s', async (_case, transferOverride) => {
+    idempotency.begin.mockResolvedValue('acquired');
+    const payload = createTransferredPayload();
+    payload.notifyPassengers = false;
+    const transfer = payload.transfers[0];
+    if (!transfer) throw new Error('TEST_TRANSFER_REQUIRED');
+    payload.transfers = [{ ...transfer, ...transferOverride }];
+
+    await consumer.handle(
+      BOOKING_TRANSFERRED_ROUTING_KEY,
+      payload,
+      createMessage(EVENT_ID),
+    );
+
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('fans out seat-shortage alerts to active operator recipients with per-recipient dedupe', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipients.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+
+    await consumer.handle(
+      BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY,
+      {
+        eventId: EVENT_ID,
+        occurredAt: '2026-07-26T01:00:00+00:00',
+        sourceSubstitutionEventId: SUBSTITUTION_EVENT_ID,
+        bookingId: BOOKING_ID,
+        bookingCode: 'BKG-20260726-ABC123',
+        operatorId: OPERATOR_ID,
+        oldTripId: TRIP_ID,
+        newTripId: NEW_TRIP_ID,
+        affectedPassengerCount: 1,
+        originalSeatNumbers: ['A01'],
+      },
+      createMessage(EVENT_ID),
+    );
+
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: NotificationType.VEHICLE_SUBSTITUTION_SEAT_SHORTAGE,
+        dedupeKey: `${BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY}:${EVENT_ID}:${USER_ID}:${NotificationType.VEHICLE_SUBSTITUTION_SEAT_SHORTAGE}`,
+      }),
     );
   });
 
@@ -432,9 +496,10 @@ function createTransferredPayload(): BookingTransferredEvent {
     transfers: [
       {
         passengerId: PASSENGER_ID,
-        originalSeatNumber: null,
-        newSeatNumber: null,
+        originalSeatNumber: 'A01',
+        newSeatNumber: 'B01',
         confirmationStatus: 'PENDING_CONFIRM',
+        originalBoardingStatus: 'BOARDED',
       },
     ],
   };

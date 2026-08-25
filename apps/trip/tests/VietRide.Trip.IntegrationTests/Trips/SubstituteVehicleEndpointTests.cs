@@ -39,6 +39,58 @@ namespace VietRide.Trip.IntegrationTests.Trips;
 public sealed class SubstituteVehicleEndpointTests
 {
     [Fact]
+    public async Task InsufficientSeatsRequireExplicitAcknowledgementBeforeAnyWrite()
+    {
+        await using var harness = await SubstitutionHarness.CreateAsync(insufficientSeats: true);
+        var unchanged = await harness.CaptureSnapshotAsync();
+
+        using var rejected = await harness.SendAsync();
+
+        rejected.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        using (var payload = JsonDocument.Parse(await rejected.Content.ReadAsStringAsync()))
+        {
+            var error = payload.RootElement.GetProperty("error");
+            error.GetProperty("code").GetString()
+                .Should().Be("REPLACEMENT_VEHICLE_INSUFFICIENT_SEATS");
+            var fields = error.GetProperty("fields").EnumerateArray()
+                .ToDictionary(
+                    item => item.GetProperty("field").GetString()!,
+                    item => item.GetProperty("message").GetString());
+            fields.Should().Contain(new Dictionary<string, string?>
+            {
+                ["usableSeats"] = "3",
+                ["passengersToTransfer"] = "4",
+                ["missingSeats"] = "1",
+            });
+        }
+        await harness.AssertUnchangedAsync(unchanged);
+
+        using var accepted = await harness.SendAsync(
+            acknowledgeInsufficientSeats: true,
+            idempotencyKey: Guid.NewGuid().ToString("D"));
+
+        accepted.StatusCode.Should().Be(HttpStatusCode.OK);
+        await using var db = harness.OpenDb();
+        var acceptedBody = await accepted.Content
+            .ReadFromJsonAsync<ApiResponse<SubstituteVehicleResponse>>();
+        acceptedBody!.Data!.PendingSeatAssignmentCount.Should().Be(1);
+        var audit = await db.TripAuditLogs.AsNoTracking().SingleAsync();
+        var metadata = audit.Metadata!.Value;
+        metadata.GetProperty("acknowledgedInsufficientSeats").GetBoolean()
+            .Should().BeTrue();
+        metadata.GetProperty("usableSeats").GetInt32().Should().Be(3);
+        metadata.GetProperty("passengersToTransfer").GetInt32().Should().Be(4);
+        metadata.GetProperty("missingSeats").GetInt32().Should().Be(1);
+        var outbox = await db.OutboxEvents.AsNoTracking()
+            .SingleAsync(row => row.EventType == "trip.trip.vehicle_substituted");
+        using var eventPayload = JsonDocument.Parse(outbox.Payload);
+        var unseated = eventPayload.RootElement.GetProperty("mappings").EnumerateArray()
+            .Single(mapping => mapping.GetProperty("newSeatNumber").ValueKind == JsonValueKind.Null);
+        unseated.GetProperty("newSeatType").ValueKind.Should().Be(JsonValueKind.Null);
+        unseated.GetProperty("isSeatDowngrade").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
     public async Task SuccessCreatesBoardingReplacementFromVehicleLayoutAndRecoveryTimeline()
     {
         await using var harness = await SubstitutionHarness.CreateAsync();
@@ -396,14 +448,17 @@ public sealed class SubstituteVehicleEndpointTests
 
         public static async Task<SubstitutionHarness> CreateAsync(
             bool inProgress = true,
-            bool nullOriginalSeat = false)
+            bool nullOriginalSeat = false,
+            bool insufficientSeats = false,
+            bool downgradeVipSeat = false,
+            bool upgradeStandardSeat = false)
         {
             var databaseName =
                 $"{Day29CargoNearFullOutboxIntegrationTests.ScratchDatabasePrefix}{Guid.NewGuid():N}";
             var db = Day29CargoNearFullOutboxIntegrationTests.CreateDbContext(databaseName);
             await db.Database.MigrateAsync();
-            var seed = await SeedAsync(db, inProgress);
-            var impact = new ImpactClient(seed, nullOriginalSeat);
+            var seed = await SeedAsync(db, inProgress, downgradeVipSeat, upgradeStandardSeat);
+            var impact = new ImpactClient(seed, nullOriginalSeat, insufficientSeats);
             var identity = new IdentityClient(seed);
             var factory = new SubstitutionFactory(
                 databaseName,
@@ -424,7 +479,8 @@ public sealed class SubstituteVehicleEndpointTests
             Guid? actorId = null,
             bool authenticated = true,
             Guid? replacementVehicleId = null,
-            Guid? replacementDriverId = null) =>
+            Guid? replacementDriverId = null,
+            bool acknowledgeInsufficientSeats = false) =>
             SendRawAsync(
                 $$"""
                 {
@@ -432,6 +488,7 @@ public sealed class SubstituteVehicleEndpointTests
                   "estimatedRecoveryDepartureAt":"{{(recoveryDeparture ?? RecoveryDeparture):O}}",
                   "reason":{{JsonSerializer.Serialize(reason)}},
                   "notifyPassengers":true,
+                  "acknowledgeInsufficientSeats":{{acknowledgeInsufficientSeats.ToString().ToLowerInvariant()}},
                   "replacementCrew":{{(replacementDriverId.HasValue
                       ? $$"""{"driverId":"{{replacementDriverId.Value:D}}","assistantId":null}"""
                       : "null")}}
@@ -546,6 +603,13 @@ public sealed class SubstituteVehicleEndpointTests
                     .ThenBy(fare => fare.StopId)
                     .Select(fare => new ChildSnapshot(fare.StopId, fare.TripId, fare.Source.ToString()))
                     .ToArrayAsync(),
+                await db.ResourceReservations.AsNoTracking()
+                    .OrderBy(reservation => reservation.Id)
+                    .Select(reservation => new ChildSnapshot(
+                        reservation.Id,
+                        reservation.TripId ?? Guid.Empty,
+                        reservation.Status.ToString()))
+                    .ToArrayAsync(),
                 await db.TripAuditLogs.AsNoTracking().CountAsync(),
                 await db.OutboxEvents.AsNoTracking().CountAsync());
         }
@@ -598,7 +662,11 @@ public sealed class SubstituteVehicleEndpointTests
             await ownerDb.DisposeAsync();
         }
 
-        private static async Task<Seed> SeedAsync(TripDbContext db, bool inProgress)
+        private static async Task<Seed> SeedAsync(
+            TripDbContext db,
+            bool inProgress,
+            bool downgradeVipSeat,
+            bool upgradeStandardSeat)
         {
             var operatorId = Guid.NewGuid();
             var actorId = Guid.NewGuid();
@@ -637,7 +705,9 @@ public sealed class SubstituteVehicleEndpointTests
                 operatorId,
                 vehicleType.Id,
                 $"OLD-{Guid.NewGuid():N}"[..20],
-                CreateLayout(("A01", "VIP"), ("A02", "STANDARD")),
+                upgradeStandardSeat
+                    ? CreateLayout(("A01", "STANDARD"), ("A02", "VIP"))
+                    : CreateLayout(("A01", "VIP"), ("A02", "STANDARD")),
                 2,
                 100m,
                 10m);
@@ -645,7 +715,11 @@ public sealed class SubstituteVehicleEndpointTests
                 operatorId,
                 vehicleType.Id,
                 $"NEW-{Guid.NewGuid():N}"[..20],
-                CreateLayout(("A01", "STANDARD"), ("B01", "VIP"), ("C01", "STANDARD")),
+                downgradeVipSeat
+                    ? CreateLayout(("A01", "STANDARD"), ("B01", "STANDARD"), ("C01", "STANDARD"))
+                    : upgradeStandardSeat
+                        ? CreateLayout(("A01", "VIP"), ("B01", "VIP"), ("C01", "VIP"))
+                    : CreateLayout(("A01", "STANDARD"), ("B01", "VIP"), ("C01", "STANDARD")),
                 3,
                 120m,
                 12m);
@@ -672,10 +746,16 @@ public sealed class SubstituteVehicleEndpointTests
                 trip.Start(departure);
             }
 
-            var vipSeat = TripSeat.Create(trip.Id, "A01", TripSeatType.VIP);
-            vipSeat.MarkHeld();
-            vipSeat.MarkBooked(Guid.NewGuid());
-            var standardSeat = TripSeat.Create(trip.Id, "A02", TripSeatType.STANDARD);
+            var bookedSeat = TripSeat.Create(
+                trip.Id,
+                "A01",
+                upgradeStandardSeat ? TripSeatType.STANDARD : TripSeatType.VIP);
+            bookedSeat.MarkHeld();
+            bookedSeat.MarkBooked(Guid.NewGuid());
+            var otherSeat = TripSeat.Create(
+                trip.Id,
+                "A02",
+                upgradeStandardSeat ? TripSeatType.VIP : TripSeatType.STANDARD);
             var pendingStopEta = Now.AddHours(1);
             var pending = TripStop.Create(
                 trip.Id,
@@ -710,8 +790,8 @@ public sealed class SubstituteVehicleEndpointTests
                 oldVehicle,
                 replacement,
                 trip,
-                vipSeat,
-                standardSeat,
+                bookedSeat,
+                otherSeat,
                 pending,
                 finalized,
                 fare);
@@ -822,7 +902,10 @@ public sealed class SubstituteVehicleEndpointTests
             }
         }
 
-        private sealed class ImpactClient(Seed seed, bool nullOriginalSeat) : IBookingImpactClient
+        private sealed class ImpactClient(
+            Seed seed,
+            bool nullOriginalSeat,
+            bool insufficientSeats) : IBookingImpactClient
         {
             public Task<TripBookingImpactProjection> GetTripEditImpactAsync(
                 Guid tripId,
@@ -838,7 +921,21 @@ public sealed class SubstituteVehicleEndpointTests
                 tripId.Should().Be(seed.OldTripId);
                 operatorId.Should().Be(seed.OperatorId);
                 IReadOnlyList<VehicleSubstitutionImpactProjection.Passenger> passengers =
-                    nullOriginalSeat
+                    insufficientSeats
+                    ?
+                    [
+                        new VehicleSubstitutionImpactProjection.Passenger(seed.FirstPassengerId, "BOARDED", "A01"),
+                        new VehicleSubstitutionImpactProjection.Passenger(seed.SecondPassengerId, "PENDING", null),
+                        new VehicleSubstitutionImpactProjection.Passenger(
+                            Guid.Parse("11111111-1111-4111-8111-111111111111"),
+                            "PENDING",
+                            null),
+                        new VehicleSubstitutionImpactProjection.Passenger(
+                            Guid.Parse("22222222-2222-4222-8222-222222222222"),
+                            "PENDING",
+                            null),
+                    ]
+                    : nullOriginalSeat
                     ?
                     [
                         new VehicleSubstitutionImpactProjection.Passenger(
@@ -914,6 +1011,7 @@ public sealed class SubstituteVehicleEndpointTests
             IReadOnlyList<ChildSnapshot> Seats,
             IReadOnlyList<ChildSnapshot> Stops,
             IReadOnlyList<ChildSnapshot> Fares,
+            IReadOnlyList<ChildSnapshot> ResourceReservations,
             int AuditCount,
             int OutboxCount);
 

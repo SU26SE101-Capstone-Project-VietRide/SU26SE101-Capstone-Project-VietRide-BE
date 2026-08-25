@@ -10,4 +10,7 @@ public sealed record TripVehicleSubstitutedMapping
     [JsonRequired] public string? OriginalSeatNumber { get; init; }
     [JsonRequired] public string? NewSeatNumber { get; init; }
     [JsonRequired] public string OriginalBoardingStatus { get; init; } = string.Empty;
+    public string? OriginalSeatType { get; init; }
+    public string? NewSeatType { get; init; }
+    public bool? IsSeatDowngrade { get; init; }
 }

@@ -45,6 +45,18 @@ internal sealed class BookingTransferConfiguration : IEntityTypeConfiguration<Bo
             .HasColumnName("new_seat_number")
             .HasMaxLength(20)
             .IsRequired(false);
+        builder.Property(transfer => transfer.OriginalSeatType)
+            .HasColumnName("original_seat_type")
+            .HasMaxLength(30)
+            .IsRequired(false);
+        builder.Property(transfer => transfer.NewSeatType)
+            .HasColumnName("new_seat_type")
+            .HasMaxLength(30)
+            .IsRequired(false);
+        builder.Property(transfer => transfer.IsSeatDowngrade)
+            .HasColumnName("is_seat_downgrade")
+            .HasDefaultValue(false)
+            .IsRequired();
         builder.Property(transfer => transfer.ConfirmationStatus)
             .HasColumnName("confirmation_status")
             .HasColumnType("vietride_booking.booking_transfer_confirmation_status")
@@ -83,6 +95,9 @@ internal sealed class BookingTransferConfiguration : IEntityTypeConfiguration<Bo
             .HasDatabaseName("idx_booking_transfers_original_trip_id");
         builder.HasIndex(transfer => transfer.NewTripId)
             .HasDatabaseName("idx_booking_transfers_new_trip_id");
+        builder.HasIndex(transfer => transfer.TransferredAt)
+            .HasDatabaseName("idx_booking_transfers_pending_confirm_transferred_at")
+            .HasFilter("confirmation_status = 'PENDING_CONFIRM'");
         builder.HasIndex(transfer => new
         {
             transfer.PassengerId,
