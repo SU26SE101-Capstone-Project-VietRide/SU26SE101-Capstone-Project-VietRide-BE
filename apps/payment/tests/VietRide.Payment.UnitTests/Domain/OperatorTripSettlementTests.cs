@@ -68,6 +68,27 @@ public sealed class OperatorTripSettlementTests
         settlement.Status.Should().Be(OperatorTripSettlementStatus.CANCELLED);
         settlement.NetAmount.Should().Be(0);
         settlement.WalletTransactionId.Should().BeNull();
+        settlement.CancelReason.Should().Be("NON_POSITIVE_NET_ENTITLEMENT");
+    }
+
+    [Fact]
+    public void RefreshEligibility_SubstitutionMarker_PreservesExplicitCancelReason()
+    {
+        var terminalAt = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
+        var settlement = OperatorTripSettlement.CreatePending(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            terminalAt);
+
+        settlement.RefreshEligibility(
+            0,
+            terminalAt,
+            "VEHICLE_SUBSTITUTION_REVENUE_RETAINED_ON_ORIGINAL_TRIP");
+
+        settlement.Status.Should().Be(OperatorTripSettlementStatus.CANCELLED);
+        settlement.CancelReason.Should()
+            .Be("VEHICLE_SUBSTITUTION_REVENUE_RETAINED_ON_ORIGINAL_TRIP");
+        settlement.WalletTransactionId.Should().BeNull();
     }
 
     [Fact]

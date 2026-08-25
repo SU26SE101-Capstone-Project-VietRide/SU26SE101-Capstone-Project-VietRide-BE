@@ -8,7 +8,8 @@ public sealed class TripCompletedIntegrationEvent(
     Guid operatorId,
     DateTimeOffset terminalAt,
     bool hasSubstitution,
-    string? tripCode = null) : IntegrationEventBase
+    string? tripCode = null,
+    string? source = null) : IntegrationEventBase
 {
     public override string EventType => "trip.trip.completed";
 
@@ -18,6 +19,7 @@ public sealed class TripCompletedIntegrationEvent(
     public DateTimeOffset CompletedAt => TerminalAt;
     public bool HasSubstitution { get; } = hasSubstitution;
     public string? TripCode { get; } = tripCode;
+    public string? Source { get; } = source;
 }
 
 public sealed class TripDisruptedIntegrationEvent(

@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const BookingTransferConfirmationStatusSchema = z.enum([
   'PENDING_CONFIRM',
+  'ESCALATED',
   'CONFIRMED',
   'NOT_REQUIRED',
 ]);
@@ -15,6 +16,7 @@ export const BookingTransferredItemSchema = z
     originalSeatNumber: z.string().nullable(),
     newSeatNumber: z.string().nullable(),
     confirmationStatus: BookingTransferConfirmationStatusSchema,
+    originalBoardingStatus: z.enum(['BOARDED', 'PENDING']).optional(),
   })
   .strict();
 export type BookingTransferredItem = z.infer<typeof BookingTransferredItemSchema>;

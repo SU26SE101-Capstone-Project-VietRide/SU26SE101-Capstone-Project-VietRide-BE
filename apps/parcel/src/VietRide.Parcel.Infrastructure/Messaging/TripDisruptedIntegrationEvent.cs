@@ -21,6 +21,7 @@ public sealed record TripDisruptedIntegrationEvent : IIntegrationEvent
     [JsonRequired]
     public bool HasSubstitution { get; init; }
     public string? Reason { get; init; }
+    public string? TripCode { get; init; }
 
     [JsonIgnore]
     string IIntegrationEvent.EventType => EventType;

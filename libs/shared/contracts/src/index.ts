@@ -8,6 +8,8 @@ export * from './events/payment-succeeded.event';
 export * from './events/trip-vehicle-swapped.event';
 export * from './events/trip-vehicle-substituted.event';
 export * from './events/booking-transferred.event';
+export * from './events/booking-seat-shortage-detected.event';
+export * from './events/booking-transfer-escalated.event';
 export * from './events/passenger-boarded.event';
 export * from './events/trip-schedule-changed.event';
 export * from './events/trip-route-changed.event';

@@ -40,7 +40,7 @@ internal sealed class BookingTransferRepository(BookingDbContext db) : IBookingT
                     AND booking.trip_id = {newTripId}
                     AND booking.operator_id = {operatorId}
                     AND booking_transfer.confirmation_status
-                        IN ('PENDING_CONFIRM', 'CONFIRMED')
+                        IN ('PENDING_CONFIRM', 'ESCALATED', 'CONFIRMED')
                 ORDER BY booking_transfer.transferred_at DESC, booking_transfer.id DESC
                 LIMIT 1
                 FOR UPDATE OF booking, booking_transfer
@@ -59,5 +59,38 @@ internal sealed class BookingTransferRepository(BookingDbContext db) : IBookingT
             .Where(transfer => passengerIds.Contains(transfer.PassengerId)
                 && transfer.OriginalTripId == originalTripId
                 && transfer.NewTripId == newTripId)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<BookingTransfer>> AcquirePendingEscalationBatchAsync(
+        DateTimeOffset cutoff,
+        int maxGroups,
+        CancellationToken ct = default)
+        => await db.BookingTransfers
+            .FromSqlInterpolated($"""
+                WITH candidate_groups AS (
+                    SELECT booking_id, new_trip_id
+                    FROM vietride_booking.booking_transfers
+                    WHERE confirmation_status = 'PENDING_CONFIRM'
+                        AND transferred_at < {cutoff}
+                    GROUP BY booking_id, new_trip_id
+                    ORDER BY min(transferred_at), booking_id, new_trip_id
+                    LIMIT {maxGroups}
+                ), locked_transfers AS (
+                    SELECT booking_transfer.id
+                    FROM vietride_booking.booking_transfers AS booking_transfer
+                    INNER JOIN candidate_groups AS candidate
+                        ON candidate.booking_id = booking_transfer.booking_id
+                        AND candidate.new_trip_id = booking_transfer.new_trip_id
+                    WHERE booking_transfer.confirmation_status = 'PENDING_CONFIRM'
+                        AND booking_transfer.transferred_at < {cutoff}
+                    ORDER BY booking_transfer.transferred_at, booking_transfer.id
+                    FOR UPDATE OF booking_transfer SKIP LOCKED
+                )
+                SELECT booking_transfer.*
+                FROM vietride_booking.booking_transfers AS booking_transfer
+                INNER JOIN locked_transfers AS locked
+                    ON locked.id = booking_transfer.id
+                ORDER BY booking_transfer.transferred_at, booking_transfer.id
+                """)
             .ToListAsync(ct);
 }

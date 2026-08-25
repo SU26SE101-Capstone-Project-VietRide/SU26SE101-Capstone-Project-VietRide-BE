@@ -1,5 +1,9 @@
 import {
   BOOKING_TRANSFERRED_ROUTING_KEY,
+  BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY,
+  BOOKING_TRANSFER_ESCALATED_ROUTING_KEY,
+  BookingSeatShortageDetectedEventSchema,
+  BookingTransferEscalatedEventSchema,
   BookingTransferredEventSchema,
   TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
   TripVehicleSubstitutedEventSchema,
@@ -41,6 +45,9 @@ const substitutedEvent = {
       originalSeatNumber: null,
       newSeatNumber: null,
       originalBoardingStatus: 'BOARDED' as const,
+      originalSeatType: 'VIP' as const,
+      newSeatType: 'STANDARD' as const,
+      isSeatDowngrade: true,
     },
   ],
 };
@@ -64,6 +71,7 @@ const transferredEvent = {
       originalSeatNumber: null,
       newSeatNumber: null,
       confirmationStatus: 'PENDING_CONFIRM' as const,
+      originalBoardingStatus: 'BOARDED' as const,
     },
   ],
 };
@@ -76,11 +84,66 @@ describe('Day 34 vehicle substitution event contracts', () => {
     expect(BookingTransferredEventSchema.parse(transferredEvent)).toEqual(transferredEvent);
   });
 
+  it('accepts legacy payloads without additive seat evidence or boarding status', () => {
+    const legacySubstitution = structuredClone(substitutedEvent);
+    delete (legacySubstitution.mappings[0] as Partial<typeof substitutedEvent.mappings[0]>).originalSeatType;
+    delete (legacySubstitution.mappings[0] as Partial<typeof substitutedEvent.mappings[0]>).newSeatType;
+    delete (legacySubstitution.mappings[0] as Partial<typeof substitutedEvent.mappings[0]>).isSeatDowngrade;
+    const legacyTransfer = structuredClone(transferredEvent);
+    delete (legacyTransfer.transfers[0] as Partial<typeof transferredEvent.transfers[0]>).originalBoardingStatus;
+
+    expect(TripVehicleSubstitutedEventSchema.safeParse(legacySubstitution).success).toBe(true);
+    expect(BookingTransferredEventSchema.safeParse(legacyTransfer).success).toBe(true);
+  });
+
+  it('registers strict operator shortage and escalation facts', () => {
+    expect(BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY).toBe(
+      'booking.booking.seat_shortage_detected',
+    );
+    expect(BOOKING_TRANSFER_ESCALATED_ROUTING_KEY).toBe(
+      'booking.booking.transfer_escalated',
+    );
+    expect(
+      BookingSeatShortageDetectedEventSchema.safeParse({
+        eventId,
+        occurredAt,
+        sourceSubstitutionEventId: eventId,
+        bookingId,
+        bookingCode: 'BKG-20260725-ABC123',
+        operatorId,
+        oldTripId,
+        newTripId,
+        affectedPassengerCount: 1,
+        originalSeatNumbers: ['A01'],
+      }).success,
+    ).toBe(true);
+    expect(
+      BookingTransferEscalatedEventSchema.safeParse({
+        eventId,
+        occurredAt,
+        bookingId,
+        bookingCode: 'BKG-20260725-ABC123',
+        operatorId,
+        oldTripId,
+        newTripId,
+        transferIds: [passengerId],
+        pendingConfirmationCount: 1,
+        oldestTransferredAt: occurredAt,
+      }).success,
+    ).toBe(true);
+  });
+
   it('enforces substitution identity, timestamps, status literals, UUIDs, and nullable seat fields', () => {
     expect(
       TripVehicleSubstitutedEventSchema.safeParse({
         ...substitutedEvent,
         substitutionId: actorUserId,
+      }).success,
+    ).toBe(false);
+    expect(
+      TripVehicleSubstitutedEventSchema.safeParse({
+        ...substitutedEvent,
+        mappings: [{ ...substitutedEvent.mappings[0], newSeatType: 'DELUXE' }],
       }).success,
     ).toBe(false);
     expect(

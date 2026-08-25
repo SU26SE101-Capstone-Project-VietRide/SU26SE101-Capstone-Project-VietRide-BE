@@ -74,7 +74,8 @@ public sealed class CompleteTripCommandHandler
             trip.OperatorId,
             now,
             trip.HasSubstitution,
-            trip.TripCode);
+            trip.TripCode,
+            trip.Source.ToString());
         await _outbox.EnqueueAsync(
             evt.EventType,
             JsonSerializer.Serialize(evt, JsonOptions),

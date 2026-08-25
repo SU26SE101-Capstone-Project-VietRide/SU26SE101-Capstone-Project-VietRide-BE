@@ -50,6 +50,15 @@ public sealed class TripVehicleSubstitutedConsumerTests
                 booking,
                 (booking.Passengers[0], "B01", "BOARDED"),
                 (booking.Passengers[1], "B02", "PENDING"));
+            evt = evt with
+            {
+                Mappings = evt.Mappings.Select((mapping, index) => mapping with
+                {
+                    OriginalSeatType = index == 0 ? "VIP" : "STANDARD",
+                    NewSeatType = "STANDARD",
+                    IsSeatDowngrade = index == 0,
+                }).ToArray(),
+            };
             await ConsumeAsync(dataSource, evt);
 
             await using var verify = Day22EventDatabase.CreateDbContext(dataSource, OccurredAt);
@@ -86,6 +95,11 @@ public sealed class TripVehicleSubstitutedConsumerTests
                 .ConfirmationStatus.Should().Be(BookingTransferConfirmationStatus.PENDING_CONFIRM);
             transfers.Single(row => row.PassengerId == booking.Passengers[1].Id)
                 .ConfirmationStatus.Should().Be(BookingTransferConfirmationStatus.NOT_REQUIRED);
+            transfers.Single(row => row.PassengerId == booking.Passengers[0].Id)
+                .Should().Match<BookingTransfer>(row =>
+                    row.OriginalSeatType == "VIP"
+                    && row.NewSeatType == "STANDARD"
+                    && row.IsSeatDowngrade);
             transfers.Should().OnlyContain(row =>
                 row.OriginalTripId == oldTripId
                 && row.NewTripId == evt.NewTripId
@@ -148,8 +162,16 @@ public sealed class TripVehicleSubstitutedConsumerTests
             transfer.PassengerId.Should().Be(eligible.Passengers[0].Id);
             transfer.OriginalSeatNumber.Should().Be("A01");
             transfer.NewSeatNumber.Should().BeNull();
+            (await verify.BookingPendingActions.CountAsync()).Should().Be(0);
             (await verify.OutboxEvents.CountAsync(row =>
                 row.EventType == "booking.booking.transferred")).Should().Be(1);
+            var shortage = await verify.OutboxEvents.AsNoTracking().SingleAsync(row =>
+                row.EventType == "booking.booking.seat_shortage_detected");
+            using var shortagePayload = JsonDocument.Parse(shortage.Payload);
+            shortagePayload.RootElement.GetProperty("affectedPassengerCount").GetInt32()
+                .Should().Be(1);
+            shortagePayload.RootElement.GetProperty("bookingId").GetGuid()
+                .Should().Be(eligible.Id);
         });
     }
 
@@ -411,6 +433,9 @@ public sealed class TripVehicleSubstitutedConsumerTests
                     : originalSeats[index],
                 NewSeatNumber = mapping.NewSeat,
                 OriginalBoardingStatus = mapping.BoardingStatus,
+                OriginalSeatType = null,
+                NewSeatType = null,
+                IsSeatDowngrade = false,
             }).Concat(additionalMappings ?? []).ToArray(),
         };
     }

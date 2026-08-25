@@ -19,6 +19,36 @@ namespace VietRide.Trip.IntegrationTests.Events;
 
 public sealed class TripVehicleSubstitutedIntegrationEventTests
 {
+    [Theory]
+    [InlineData(false, false, "VIP", "VIP", false)]
+    [InlineData(true, false, "VIP", "STANDARD", true)]
+    [InlineData(false, true, "STANDARD", "VIP", false)]
+    public async Task MappingCarriesAuthoritativeSeatTypesAndDowngradeFlag(
+        bool downgradeVipSeat,
+        bool upgradeStandardSeat,
+        string expectedOriginalType,
+        string expectedNewType,
+        bool expectedDowngrade)
+    {
+        await using var harness =
+            await SubstituteVehicleEndpointTests.SubstitutionHarness.CreateAsync(
+                downgradeVipSeat: downgradeVipSeat,
+                upgradeStandardSeat: upgradeStandardSeat);
+
+        using var response = await harness.SendAsync();
+        response.EnsureSuccessStatusCode();
+
+        await using var db = harness.OpenDb();
+        var row = await db.OutboxEvents.AsNoTracking()
+            .SingleAsync(item => item.EventType == TripVehicleSubstitutedIntegrationEvent.EventType);
+        using var payload = JsonDocument.Parse(row.Payload);
+        var boarded = payload.RootElement.GetProperty("mappings").EnumerateArray()
+            .Single(mapping => mapping.GetProperty("originalBoardingStatus").GetString() == "BOARDED");
+        boarded.GetProperty("originalSeatType").GetString().Should().Be(expectedOriginalType);
+        boarded.GetProperty("newSeatType").GetString().Should().Be(expectedNewType);
+        boarded.GetProperty("isSeatDowngrade").GetBoolean().Should().Be(expectedDowngrade);
+    }
+
     [Fact]
     public async Task BothFactsAndBusinessMutationAreAtomicWithDistinctCanonicalIdentities()
     {
@@ -145,8 +175,13 @@ public sealed class TripVehicleSubstitutedIntegrationEventTests
                 "passengerId",
                 "originalSeatNumber",
                 "newSeatNumber",
-                "originalBoardingStatus");
+                "originalBoardingStatus",
+                "originalSeatType",
+                "newSeatType",
+                "isSeatDowngrade");
         mapping.GetProperty("originalSeatNumber").ValueKind.Should().Be(JsonValueKind.Null);
+        mapping.GetProperty("originalSeatType").ValueKind.Should().Be(JsonValueKind.Null);
+        mapping.GetProperty("isSeatDowngrade").GetBoolean().Should().BeFalse();
     }
 
     private static async Task AssertRestartAsync(string eventType)

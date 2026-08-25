@@ -55,5 +55,6 @@ public sealed class BookingTransferredIntegrationEvent : IntegrationEventBase
         Guid PassengerId,
         string? OriginalSeatNumber,
         string? NewSeatNumber,
-        string ConfirmationStatus);
+        string ConfirmationStatus,
+        string? OriginalBoardingStatus = null);
 }

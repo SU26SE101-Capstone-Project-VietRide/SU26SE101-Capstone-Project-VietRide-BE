@@ -157,7 +157,8 @@ public sealed class OperatorTripsController : ControllerBase
                 request.NotifyPassengers,
                 request.ReplacementCrew?.DriverId,
                 request.ReplacementCrew?.AssistantId,
-                request.ReplacementCrew is not null),
+                request.ReplacementCrew is not null,
+                request.AcknowledgeInsufficientSeats),
             cancellationToken));
     }
 

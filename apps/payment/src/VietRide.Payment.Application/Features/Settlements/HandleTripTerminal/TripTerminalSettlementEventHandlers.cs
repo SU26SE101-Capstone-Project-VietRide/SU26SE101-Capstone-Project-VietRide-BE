@@ -1,6 +1,7 @@
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Events;
 using VietRide.Payment.Domain.Entities;
+using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Messaging.Abstractions;
@@ -10,6 +11,9 @@ namespace VietRide.Payment.Application.Features.Settlements.HandleTripTerminal;
 public sealed class TripTerminalSettlementService
 {
     private const string ConsumerName = "payment.trip-terminal-settlement";
+    private const string VehicleSubstitutionSource = "VEHICLE_SUBSTITUTION";
+    private const string VehicleSubstitutionCancelReason =
+        "VEHICLE_SUBSTITUTION_REVENUE_RETAINED_ON_ORIGINAL_TRIP";
     private readonly IOperatorTripSettlementRepository _settlements;
     private readonly IOperatorLedgerEntryRepository _ledger;
     private readonly IProcessedIntegrationEventRepository _processed;
@@ -36,7 +40,8 @@ public sealed class TripTerminalSettlementService
         Guid tripId,
         DateTimeOffset terminalAt,
         CancellationToken cancellationToken,
-        string? tripCode = null)
+        string? tripCode = null,
+        string? source = null)
     {
         await _unitOfWork.ExecuteInTransactionAsync(async () =>
         {
@@ -54,12 +59,25 @@ public sealed class TripTerminalSettlementService
                     operatorId,
                     tripId,
                     cancellationToken);
-                settlement.RefreshEligibility(netAmount, _clock.UtcNow);
+                settlement.RefreshEligibility(
+                    netAmount,
+                    _clock.UtcNow,
+                    netAmount == 0
+                        && string.Equals(source, VehicleSubstitutionSource, StringComparison.Ordinal)
+                        ? VehicleSubstitutionCancelReason
+                        : null);
                 await _settlements.AddAsync(settlement, cancellationToken);
             }
             else if (tripCode is not null)
             {
                 settlement.SetTripCode(tripCode);
+            }
+
+            if (settlement.Status == OperatorTripSettlementStatus.CANCELLED
+                && settlement.NetAmount == 0
+                && string.Equals(source, VehicleSubstitutionSource, StringComparison.Ordinal))
+            {
+                settlement.SetCancelReason(VehicleSubstitutionCancelReason);
             }
 
             await _processed.AddAsync(
@@ -83,7 +101,8 @@ public sealed class TripCompletedSettlementEventHandler
             integrationEvent.TripId,
             integrationEvent.TerminalAt,
             cancellationToken,
-            integrationEvent.TripCode);
+            integrationEvent.TripCode,
+            integrationEvent.Source);
 }
 
 public sealed class TripDisruptedSettlementEventHandler

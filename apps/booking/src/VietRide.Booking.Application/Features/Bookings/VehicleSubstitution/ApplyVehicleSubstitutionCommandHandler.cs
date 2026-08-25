@@ -78,14 +78,18 @@ public sealed class ApplyVehicleSubstitutionCommandHandler(
                     mapping.NewSeatNumber,
                     confirmationStatus,
                     occurredAt,
-                    request.ActorUserId);
+                    request.ActorUserId,
+                    originalSeatType: mapping.OriginalSeatType,
+                    newSeatType: mapping.NewSeatType,
+                    isSeatDowngrade: mapping.IsSeatDowngrade);
                 await transfers.AddAsync(transfer, cancellationToken);
                 existingPassengerIds.Add(passenger.Id);
                 eventTransfers.Add(new BookingTransferredIntegrationEvent.Transfer(
                     passenger.Id,
                     transfer.OriginalSeatNumber,
                     transfer.NewSeatNumber,
-                    transfer.ConfirmationStatus.ToString()));
+                    transfer.ConfirmationStatus.ToString(),
+                    mapping.OriginalBoardingStatus));
             }
 
             if (eventTransfers.Count == 0)
@@ -111,6 +115,35 @@ public sealed class ApplyVehicleSubstitutionCommandHandler(
                 BookingTransferredIntegrationEvent.EventTypeValue,
                 JsonSerializer.Serialize(integrationEvent, JsonOptions),
                 cancellationToken);
+
+            var unseatedTransfers = eventTransfers
+                .Where(transfer => transfer.NewSeatNumber is null)
+                .ToArray();
+            if (unseatedTransfers.Length > 0)
+            {
+                var shortageEvent = new BookingSeatShortageDetectedIntegrationEvent(
+                    Guid.NewGuid(),
+                    occurredAt,
+                    request.SourceEventId,
+                    booking.Id,
+                    booking.BookingCode.Value,
+                    request.OperatorId,
+                    request.OldTripId,
+                    request.NewTripId,
+                    unseatedTransfers.Length,
+                    unseatedTransfers
+                        .Select(transfer => transfer.OriginalSeatNumber)
+                        .Where(seat => seat is not null)
+                        .Select(seat => seat!)
+                        .Distinct(StringComparer.Ordinal)
+                        .OrderBy(seat => seat, StringComparer.Ordinal)
+                        .ToArray());
+                await outbox.EnqueueAsync(
+                    shortageEvent.EventId,
+                    BookingSeatShortageDetectedIntegrationEvent.EventTypeValue,
+                    JsonSerializer.Serialize(shortageEvent, JsonOptions),
+                    cancellationToken);
+            }
             changedBookings++;
         }
 

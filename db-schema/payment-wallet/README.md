@@ -117,6 +117,7 @@ Service xử lý **mọi giao dịch tiền**: payment VNPay/Wallet cho Booking/
 - **CHECK constraint** `chk_operator_trip_settlements_settled_consistency`: enforce `(status PENDING_HOLD/ELIGIBLE ↔ settled_at NULL)` và `(status SETTLED/CANCELLED ↔ settled_at + settlement_method NOT NULL)`.
 - **`row_version` optimistic lock** trên status transition — chống race: Monday auto-job + admin manual cùng lúc settle 1 record. Pattern: `UPDATE ... WHERE id=:id AND status=:expected AND row_version=:original`.
 - **`net_amount`** recompute tại settle time (SUM ledger entries for trip) thay vì freeze tại create — pickup late refunds trong 7-day hold window.
+- **Vehicle Substitution settlement:** doanh thu tiếp tục thuộc Trip gốc. Replacement Trip vẫn có zero-net marker `CANCELLED`, với `cancel_reason=VEHICLE_SUBSTITUTION_REVENUE_RETAINED_ON_ORIGINAL_TRIP`; marker này không tạo wallet movement hoặc settlement event.
 - Cron lưu UTC: eligibility `0 19 * * *`, weekly `0 2 * * 1`. Mỗi row settle trong transaction riêng để failure isolation.
 - PlatformWallet thiếu balance: rollback, giữ ELIGIBLE, tăng failure count/timestamp/active code và retry tuần sau vô hạn. Alert HIGH khi count ≥3 **hoặc** stuck >21 ngày, Redis throttle 24h. Recovery giữ history, clear active code và set `failure_resolved_at`.
 - Settlement thành công/cancelled không còn trong stuck filter. `hasSubstitution` chỉ là audit metadata đối với công thức Payment settlement.

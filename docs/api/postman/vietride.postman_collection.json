@@ -10229,7 +10229,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"replacementVehicleId\":\"{{day34ReplacementVehicleId}}\",\"estimatedRecoveryDepartureAt\":\"{{day34RecoveryDepartureAt}}\",\"reason\":\"Day 34 safety substitution\",\"notifyPassengers\":{{day34NotifyPassengers}}}"
+              "raw": "{\"replacementVehicleId\":\"{{day34ReplacementVehicleId}}\",\"estimatedRecoveryDepartureAt\":\"{{day34RecoveryDepartureAt}}\",\"reason\":\"Day 34 safety substitution\",\"notifyPassengers\":{{day34NotifyPassengers}},\"acknowledgeInsufficientSeats\":true}"
             },
             "url": {
               "raw": "{{baseUrl}}/v1/operator/trips/{{day34OldTripId}}/substitute-vehicle",
@@ -10274,7 +10274,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"replacementVehicleId\":\"{{day34ReplacementVehicleId}}\",\"estimatedRecoveryDepartureAt\":\"{{day34RecoveryDepartureAt}}\",\"reason\":\"Day 34 safety substitution\",\"notifyPassengers\":{{day34NotifyPassengers}}}"
+              "raw": "{\"replacementVehicleId\":\"{{day34ReplacementVehicleId}}\",\"estimatedRecoveryDepartureAt\":\"{{day34RecoveryDepartureAt}}\",\"reason\":\"Day 34 safety substitution\",\"notifyPassengers\":{{day34NotifyPassengers}},\"acknowledgeInsufficientSeats\":true}"
             },
             "url": {
               "raw": "{{baseUrl}}/v1/operator/trips/{{day34OldTripId}}/substitute-vehicle",

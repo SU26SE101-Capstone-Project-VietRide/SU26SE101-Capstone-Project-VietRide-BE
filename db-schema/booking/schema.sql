@@ -32,7 +32,7 @@ CREATE TYPE trip_direction AS ENUM ('OUTBOUND', 'RETURN');
 CREATE TYPE passenger_boarding_status AS ENUM ('PENDING', 'BOARDED', 'NO_SHOW');
 
 CREATE TYPE booking_transfer_confirmation_status AS ENUM (
-    'PENDING_CONFIRM', 'CONFIRMED', 'NOT_REQUIRED'
+    'PENDING_CONFIRM', 'ESCALATED', 'CONFIRMED', 'NOT_REQUIRED'
 );
 
 CREATE TYPE ticket_status AS ENUM (
@@ -289,6 +289,9 @@ CREATE TABLE booking_transfers (
     new_trip_id UUID NOT NULL,
     original_seat_number VARCHAR(20) NULL,
     new_seat_number VARCHAR(20) NULL,
+    original_seat_type VARCHAR(30) NULL,
+    new_seat_type VARCHAR(30) NULL,
+    is_seat_downgrade BOOLEAN NOT NULL DEFAULT FALSE,
     confirmation_status booking_transfer_confirmation_status NOT NULL,
     confirmed_at TIMESTAMPTZ NULL,
     confirmed_by_user_id UUID NULL, -- logical FK -> identity.users.id
@@ -303,6 +306,9 @@ CREATE INDEX idx_booking_transfers_passenger_id ON booking_transfers (passenger_
 CREATE INDEX idx_booking_transfers_ticket_id ON booking_transfers (ticket_id);
 CREATE INDEX idx_booking_transfers_original_trip_id ON booking_transfers (original_trip_id);
 CREATE INDEX idx_booking_transfers_new_trip_id ON booking_transfers (new_trip_id);
+CREATE INDEX idx_booking_transfers_pending_confirm_transferred_at
+    ON booking_transfers (transferred_at)
+    WHERE confirmation_status = 'PENDING_CONFIRM';
 CREATE UNIQUE INDEX uq_booking_transfers_passenger_trip_pair
     ON booking_transfers (passenger_id, original_trip_id, new_trip_id);
 

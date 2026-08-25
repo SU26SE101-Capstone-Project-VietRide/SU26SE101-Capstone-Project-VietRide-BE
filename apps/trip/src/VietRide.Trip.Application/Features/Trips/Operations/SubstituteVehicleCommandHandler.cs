@@ -131,6 +131,26 @@ public sealed class SubstituteVehicleCommandHandler
                     "Replacement vehicle was not found.");
             EnsureVehicleActive(replacementVehicle);
 
+            var passengerLayout = ParsePassengerLayout(replacementVehicle);
+            var passengersToTransfer = impact.Bookings
+                .SelectMany(booking => booking.Passengers)
+                .Select(passenger => passenger.PassengerId)
+                .Distinct()
+                .Count();
+            var usableSeats = passengerLayout.Count;
+            var missingSeats = Math.Max(0, passengersToTransfer - usableSeats);
+            if (missingSeats > 0 && !request.AcknowledgeInsufficientSeats)
+            {
+                throw new CodedConflictException(
+                    "REPLACEMENT_VEHICLE_INSUFFICIENT_SEATS",
+                    "Replacement vehicle does not have enough usable seats.",
+                    [
+                        new ValidationError("usableSeats", usableSeats.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                        new ValidationError("passengersToTransfer", passengersToTransfer.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                        new ValidationError("missingSeats", missingSeats.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                    ]);
+            }
+
             await EnsureNoConflictsAsync(
                 request,
                 driverId,
@@ -178,7 +198,7 @@ public sealed class SubstituteVehicleCommandHandler
 
             var mappings = await CreateSeatsAndMappingsAsync(
                 newTrip.Id,
-                replacementVehicle,
+                passengerLayout,
                 oldSeats,
                 impact,
                 cancellationToken);
@@ -203,6 +223,10 @@ public sealed class SubstituteVehicleCommandHandler
                         replacementTripId = newTrip.Id,
                         replacementVehicleId = replacementVehicle.Id,
                         reason = request.Reason.Trim(),
+                        acknowledgedInsufficientSeats = request.AcknowledgeInsufficientSeats,
+                        usableSeats,
+                        passengersToTransfer,
+                        missingSeats,
                     }, JsonOptions),
                     disruptedAt),
                 cancellationToken);
@@ -271,12 +295,11 @@ public sealed class SubstituteVehicleCommandHandler
 
     private async Task<IReadOnlyList<TripVehicleSubstitutedIntegrationEvent.Mapping>> CreateSeatsAndMappingsAsync(
         Guid newTripId,
-        Vehicle replacementVehicle,
+        IReadOnlyList<LayoutSeat> layout,
         IReadOnlyCollection<TripSeat> oldSeats,
         VehicleSubstitutionImpactProjection impact,
         CancellationToken cancellationToken)
     {
-        var layout = ParsePassengerLayout(replacementVehicle);
         var newSeats = layout
             .Select(seat => TripSeat.Create(newTripId, seat.SeatNumber, seat.SeatType))
             .ToDictionary(seat => seat.SeatNumber, StringComparer.Ordinal);
@@ -313,7 +336,10 @@ public sealed class SubstituteVehicleCommandHandler
                     passenger.PassengerId,
                     originalSeatNumber,
                     selected?.SeatNumber,
-                    passenger.BoardingStatus));
+                    passenger.BoardingStatus,
+                    preferredType?.ToString(),
+                    selected?.SeatType.ToString(),
+                    IsSeatDowngrade(preferredType, selected?.SeatType)));
             }
         }
 
@@ -470,6 +496,21 @@ public sealed class SubstituteVehicleCommandHandler
         => string.IsNullOrWhiteSpace(seatNumber)
             ? null
             : seatNumber.Trim().ToUpperInvariant();
+
+    private static bool IsSeatDowngrade(TripSeatType? originalType, TripSeatType? newType)
+        => originalType.HasValue
+            && newType.HasValue
+            && SeatRank(newType.Value) < SeatRank(originalType.Value);
+
+    private static int SeatRank(TripSeatType type)
+        => type switch
+        {
+            TripSeatType.STANDARD => 0,
+            TripSeatType.SLEEPER_UPPER => 1,
+            TripSeatType.SLEEPER_LOWER => 2,
+            TripSeatType.VIP => 3,
+            _ => -1,
+        };
 
     private sealed record LayoutSeat(string SeatNumber, TripSeatType SeatType);
 }

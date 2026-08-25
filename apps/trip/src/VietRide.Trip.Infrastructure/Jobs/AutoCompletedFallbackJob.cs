@@ -74,7 +74,8 @@ public sealed class AutoCompletedFallbackJob
             trip.OperatorId,
             now,
             trip.HasSubstitution,
-            trip.TripCode);
+            trip.TripCode,
+            trip.Source.ToString());
         await outbox.EnqueueAsync(
             EventType,
             JsonSerializer.Serialize(integrationEvent, JsonOptions),

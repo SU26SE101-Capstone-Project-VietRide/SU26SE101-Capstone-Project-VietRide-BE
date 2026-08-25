@@ -14,4 +14,5 @@ public sealed record SubstituteVehicleCommand(
     bool NotifyPassengers,
     Guid? ReplacementDriverId,
     Guid? ReplacementAssistantId,
-    bool ReplacementCrewSpecified) : IRequest<SubstituteVehicleResponse>;
+    bool ReplacementCrewSpecified,
+    bool AcknowledgeInsufficientSeats = false) : IRequest<SubstituteVehicleResponse>;

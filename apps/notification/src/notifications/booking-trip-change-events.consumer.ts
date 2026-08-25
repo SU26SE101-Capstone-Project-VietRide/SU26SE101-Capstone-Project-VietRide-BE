@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import {
   BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY,
   BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY,
@@ -6,7 +6,11 @@ import {
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
   BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY,
+  BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY,
+  BOOKING_TRANSFER_ESCALATED_ROUTING_KEY,
   BOOKING_TRANSFERRED_ROUTING_KEY,
+  BookingSeatShortageDetectedEventSchema,
+  BookingTransferEscalatedEventSchema,
   BookingTransferredEventSchema,
 } from '@vietride/contracts';
 import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
@@ -20,6 +24,8 @@ import {
 import { RABBITMQ_PREFETCH_ONE } from './core-events.constants';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
+import type { OperatorRecipientProvider } from './operator-recipient.provider';
+import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 
 export const BOOKING_TRIP_CHANGE_QUEUE_BINDINGS = [
   {
@@ -50,6 +56,14 @@ export const BOOKING_TRIP_CHANGE_QUEUE_BINDINGS = [
     queue: 'notification:booking-transferred',
     routingKey: BOOKING_TRANSFERRED_ROUTING_KEY,
   },
+  {
+    queue: 'notification:booking-seat-shortage-detected',
+    routingKey: BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY,
+  },
+  {
+    queue: 'notification:booking-transfer-escalated',
+    routingKey: BOOKING_TRANSFER_ESCALATED_ROUTING_KEY,
+  },
 ] as const;
 
 @Injectable()
@@ -60,6 +74,10 @@ export class BookingTripChangeEventsConsumer implements OnModuleInit {
     private readonly consumer: RabbitMqConsumer,
     private readonly idempotency: MessageIdempotencyService,
     private readonly notificationsService: NotificationsService,
+    @Inject(OPERATOR_RECIPIENT_PROVIDER)
+    private readonly operatorRecipientProvider: OperatorRecipientProvider = {
+      resolveOperatorRecipientUserIds: async () => [],
+    },
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -105,20 +123,42 @@ export class BookingTripChangeEventsConsumer implements OnModuleInit {
     try {
       if (routingKey === BOOKING_TRANSFERRED_ROUTING_KEY) {
         const transferred = BookingTransferredEventSchema.parse(payload);
-        if (!transferred.notifyPassengers) {
+        const requiresNotification = transferred.notifyPassengers
+          || transferred.transfers.some(
+            (transfer) =>
+              transfer.newSeatNumber === null
+              || transfer.originalBoardingStatus === 'PENDING'
+              || (transfer.originalBoardingStatus === undefined
+                && transfer.confirmationStatus === 'NOT_REQUIRED'),
+          );
+        if (!requiresNotification) {
           await this.idempotency.markProcessed(routingKey, messageId);
           return;
         }
       }
 
-      const notification = mapBookingTripChangeToNotification(routingKey, payload);
-      await this.notificationsService.createNotification({
-        ...notification,
-        dedupeKey: `${routingKey}:${messageId}:${notification.userId}:${notification.type}`,
-      });
+      const operatorPayload = routingKey === BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY
+        ? BookingSeatShortageDetectedEventSchema.parse(payload)
+        : routingKey === BOOKING_TRANSFER_ESCALATED_ROUTING_KEY
+          ? BookingTransferEscalatedEventSchema.parse(payload)
+          : undefined;
+      const operatorRecipients = operatorPayload
+        ? await this.operatorRecipientProvider.resolveOperatorRecipientUserIds(
+          operatorPayload.operatorId,
+        )
+        : [];
+      const notifications = operatorPayload
+        ? [...new Set(operatorRecipients)].map((userId) =>
+          mapBookingTripChangeToNotification(routingKey, operatorPayload, userId))
+        : [mapBookingTripChangeToNotification(routingKey, payload)];
+      await Promise.all(notifications.map((notification) =>
+        this.notificationsService.createNotification({
+          ...notification,
+          dedupeKey: `${routingKey}:${messageId}:${notification.userId}:${notification.type}`,
+        })));
       await this.idempotency.markProcessed(routingKey, messageId);
       this.logger.info(
-        { routingKey, messageId, userId: notification.userId },
+        { routingKey, messageId, recipientCount: notifications.length },
         'Processed Booking trip-change notification event',
       );
     } catch (error) {
