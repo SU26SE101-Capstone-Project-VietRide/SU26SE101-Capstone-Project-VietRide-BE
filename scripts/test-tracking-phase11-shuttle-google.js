@@ -10,7 +10,7 @@ const failures = [];
 
 (async () => {
   if (liveValues === 0) {
-    process.stdout.write('No live Shuttle credentials supplied; running fake-Google Shuttle E2E.\n');
+    process.stdout.write('No live Shuttle credentials supplied; running fake-Goong Shuttle E2E.\n');
     const result = spawnSync(
       'npx',
       [
@@ -18,7 +18,7 @@ const failures = [];
         '--config',
         'apps/tracking/jest.e2e.config.cts',
         '--runInBand',
-        'apps/tracking/src/shuttle/shuttle-google-routes.e2e-spec.ts',
+        'apps/tracking/src/shuttle/shuttle-goong-directions.e2e-spec.ts',
       ],
       {
         cwd: process.cwd(),
@@ -31,7 +31,9 @@ const failures = [];
   }
 
   if (liveValues !== 3) {
-    throw new Error('Live smoke requires DRIVER_TOKEN, PASSENGER_TOKEN and SHUTTLE_TRIP_ID together');
+    throw new Error(
+      'Live smoke requires DRIVER_TOKEN, PASSENGER_TOKEN and SHUTTLE_TRIP_ID together',
+    );
   }
 
   await runCase('auth failure returns an ADR 0004 envelope', async () => {
@@ -84,15 +86,18 @@ const failures = [];
       const response = await request(`/v1/tracking/shuttle-trips/${shuttleTripId}/${suffix}`);
       const body = await response.json();
       assert(response.status === 200, `${suffix} returned ${response.status}`);
-      assert(body.success === true && Object.prototype.hasOwnProperty.call(body, 'data'), `${suffix} missing success envelope`);
+      assert(
+        body.success === true && Object.prototype.hasOwnProperty.call(body, 'data'),
+        `${suffix} missing success envelope`,
+      );
     }
   });
 
   if (failures.length > 0) {
-    process.stderr.write(`${failures.length} Shuttle Google smoke checks failed.\n`);
+    process.stderr.write(`${failures.length} Shuttle Goong smoke checks failed.\n`);
     process.exitCode = 1;
   } else {
-    process.stdout.write('Tracking Phase 11 Shuttle Google smoke verification passed.\n');
+    process.stdout.write('Tracking Phase 11 Shuttle Goong smoke verification passed.\n');
   }
 })();
 
