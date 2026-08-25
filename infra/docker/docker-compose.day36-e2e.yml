@@ -1,9 +1,9 @@
 name: day36-e2e
 
 services:
-  google-routes-mock:
+  goong-directions-mock:
     image: node:20-alpine
-    container_name: day36-e2e-google-routes-mock
+    container_name: day36-e2e-goong-directions-mock
     profiles: ['app']
     command:
       - node
@@ -16,24 +16,32 @@ services:
           res.end(JSON.stringify(body));
         };
         http.createServer((req, res) => {
-          if (req.method === 'GET' && req.url === '/health') return send(res, 200, { ok: true });
-          if (req.method !== 'POST' || req.url !== '/directions/v2:computeRoutes') {
+          const url = new URL(req.url, 'http://goong-directions-mock');
+          if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true });
+          if (req.method !== 'GET' || url.pathname !== '/Direction') {
             return send(res, 404, { error: 'not-found' });
           }
-          let raw = '';
-          req.setEncoding('utf8');
-          req.on('data', (chunk) => { raw += chunk; });
-          req.on('end', () => {
-            try {
-              const body = JSON.parse(raw);
-              const latitude = Number(body?.destination?.location?.latLng?.latitude);
-              const bucket = Number.isFinite(latitude) ? Math.round((latitude - 10.70) * 100) : 0;
-              const distanceMeters = Math.max(0, 4500 - Math.max(0, Math.min(40, bucket)) * 100);
-              send(res, 200, { routes: [{ distanceMeters, duration: '600s' }] });
-            } catch {
-              send(res, 400, { error: 'invalid-json' });
-            }
+          const parsePoint = (value) => {
+            const [lat, lng] = String(value || '').split(',').map(Number);
+            return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+          };
+          const origin = parsePoint(url.searchParams.get('origin'));
+          const targets = String(url.searchParams.get('destination') || '')
+            .split(';').filter(Boolean).map(parsePoint);
+          if (!origin || targets.length === 0 || targets.some((point) => !point)) {
+            return send(res, 400, { error: 'invalid-points' });
+          }
+          const legs = targets.map((target, index) => {
+            const latitude = target.lat;
+            const bucket = Math.round((latitude - 10.70) * 100);
+            return {
+              distance: { value: Math.max(0, 4500 - Math.max(0, Math.min(40, bucket)) * 100) },
+              duration: { value: 600 },
+              start_location: index === 0 ? origin : targets[index - 1],
+              end_location: target,
+            };
           });
+          send(res, 200, { routes: [{ legs }] });
         }).listen(8080, '0.0.0.0');
     healthcheck:
       test:
@@ -62,12 +70,14 @@ services:
     container_name: day36-e2e-trip
     environment:
       Shuttle__ScanIntervalMinutes: '1'
-      GOOGLE_ROUTES_ENABLED: 'true'
-      GOOGLE_ROUTES_API_KEY: fake-day36-google-routes-key
-      GOOGLE_ROUTES_BASE_URL: http://google-routes-mock:8080/
+      ROUTING_PROVIDER: GOONG
+      GOONG_API_KEY: fake-day36-goong-key
+      GOONG_BASE_URL: http://goong-directions-mock:8080/
+      GOONG_MAX_DESTINATIONS_PER_REQUEST: 10
+      TRACKING_ROUTING_TIMEOUT_MS: 5000
       TRIP_SHUTTLE_DISTANCE_TIMEOUT_MS: '5000'
     depends_on:
-      google-routes-mock:
+      goong-directions-mock:
         condition: service_healthy
     ports: ['56002:5002']
   booking:
@@ -84,12 +94,13 @@ services:
       TRACKING_GPS_FLUSH_ENABLED: 'false'
       TRACKING_TRIP_DELAY_ENABLED: 'false'
       TRACKING_SHARE_TOKEN_SECRET: day36-tracking-share-token-secret-1234567890
-      GOOGLE_ROUTES_ENABLED: 'true'
-      GOOGLE_ROUTES_API_KEY: fake-day36-google-routes-key
-      GOOGLE_ROUTES_BASE_URL: http://google-routes-mock:8080/
-      TRACKING_GOOGLE_ROUTES_TIMEOUT_MS: '5000'
+      ROUTING_PROVIDER: GOONG
+      GOONG_API_KEY: fake-day36-goong-key
+      GOONG_BASE_URL: http://goong-directions-mock:8080/
+      GOONG_MAX_DESTINATIONS_PER_REQUEST: 10
+      TRACKING_ROUTING_TIMEOUT_MS: 5000
     depends_on:
-      google-routes-mock:
+      goong-directions-mock:
         condition: service_healthy
     ports: ['56011:3001']
   notification:
