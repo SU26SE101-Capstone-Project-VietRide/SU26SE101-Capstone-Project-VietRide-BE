@@ -768,7 +768,7 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                 ? null
                 : TripSettlementSchedule.GetNextAutoSettlementAfter(now),
             CancelReason: item.Status == OperatorTripSettlementStatus.CANCELLED
-                ? "NON_POSITIVE_NET_ENTITLEMENT"
+                ? item.CancelReason ?? "NON_POSITIVE_NET_ENTITLEMENT"
                 : null,
             Trip: trip is null
                 ? null

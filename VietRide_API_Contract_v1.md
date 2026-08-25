@@ -3083,6 +3083,7 @@ Request is exactly:
   "estimatedRecoveryDepartureAt": "2026-07-25T08:30:00Z",
   "reason": "Vehicle breakdown",
   "notifyPassengers": true,
+  "acknowledgeInsufficientSeats": false,
   "replacementCrew": {
     "driverId": "uuid",
     "assistantId": null
@@ -3092,6 +3093,7 @@ Request is exactly:
 
 `replacementVehicleId` is a required UUID. `estimatedRecoveryDepartureAt` is a required absolute UTC timestamp.
 `reason` is required, trimmed, and at most 500 characters. `notifyPassengers` is optional and defaults to `true`.
+`acknowledgeInsufficientSeats` is optional and defaults to `false`.
 `replacementCrew` is optional and nullable; when absent or null it
 copies the old driver and assistant. When present it is exactly `{driverId,assistantId}`:
 `driverId` is a required UUID and `assistantId` is a nullable UUID. Both crew values are validated
@@ -3106,6 +3108,32 @@ earlier value returns `422 VALIDATION_ERROR` with
 `fields.estimatedRecoveryDepartureAt = ["must be later than disruptedAt"]`; no Trip child, audit,
 or Outbox row is written. The old Trip must be `IN_PROGRESS`, otherwise this substitution-only
 endpoint returns `409 TRIP_NOT_SUBSTITUTABLE`.
+
+After locking and revalidating the old Trip and replacement Vehicle, the service compares the
+replacement layout's usable seats with the distinct eligible passengers in the Booking impact
+snapshot. When seats are insufficient and `acknowledgeInsufficientSeats=false`, it returns
+`409 REPLACEMENT_VEHICLE_INSUFFICIENT_SEATS` before creating a Trip, changing resources, writing
+audit, or enqueueing Outbox rows. The ADR 0004 error uses `error.fields` (not `error.details`):
+
+```json
+{
+  "success": false,
+  "statusCode": 409,
+  "error": {
+    "code": "REPLACEMENT_VEHICLE_INSUFFICIENT_SEATS",
+    "message": "Replacement vehicle does not have enough usable seats.",
+    "fields": [
+      { "field": "usableSeats", "message": "3" },
+      { "field": "passengersToTransfer", "message": "5" },
+      { "field": "missingSeats", "message": "2" }
+    ]
+  },
+  "meta": { "traceId": "req-abc123", "timestamp": "2026-07-25T15:00:00+07:00" }
+}
+```
+
+The Operator may retry with `acknowledgeInsufficientSeats=true`; because the request body changes,
+that retry MUST use a new UUID-v4 `Idempotency-Key`.
 
 On success the old Trip is `DISRUPTED` with `hasSubstitution=true`. The dedicated replacement Trip
 is `BOARDING`, has `source=VEHICLE_SUBSTITUTION`, and
@@ -3146,6 +3174,7 @@ Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
 - `404 TRIP_NOT_FOUND`
 - `409 TRIP_NOT_SUBSTITUTABLE`
 - `409 TRIP_VEHICLE_CONFLICT`
+- `409 REPLACEMENT_VEHICLE_INSUFFICIENT_SEATS`
 - `422 VEHICLE_NOT_ACTIVE`
 - `422 VALIDATION_ERROR`
 
@@ -10014,8 +10043,8 @@ require `Idempotency-Key`. Internal successes are raw DTOs and require Internal 
 
 - `GET /v1/admin/operators` is unchanged; no `BE-ADM-02` projection is added.
 - Admin Station endpoints and frontend changes are outside this scope.
-- `POST /v1/operator/trips/{tripId}/substitute-vehicle` and all existing single-size Parcel fare
-  endpoints are unchanged.
+- Existing single-size Parcel fare endpoints are unchanged. The substitution endpoint follows its
+  later additive `acknowledgeInsufficientSeats` contract above.
 - Release A introduces nullable `tripCode` and Route `code` additively; fare-history versioning is
   still outside scope.
 - Additive objects do not remove, rename or retype existing response fields.

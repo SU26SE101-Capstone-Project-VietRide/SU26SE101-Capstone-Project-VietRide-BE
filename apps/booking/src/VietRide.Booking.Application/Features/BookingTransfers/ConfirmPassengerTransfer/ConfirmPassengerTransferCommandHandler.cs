@@ -56,7 +56,8 @@ public sealed class ConfirmPassengerTransferCommandHandler(
                     "The replacement seat has not been assigned.");
             }
 
-            if (transfer.ConfirmationStatus == BookingTransferConfirmationStatus.PENDING_CONFIRM)
+            if (transfer.ConfirmationStatus is BookingTransferConfirmationStatus.PENDING_CONFIRM
+                or BookingTransferConfirmationStatus.ESCALATED)
             {
                 transfer.Confirm(request.CallerUserId, clock.UtcNow.ToUniversalTime());
                 transfers.Update(transfer);

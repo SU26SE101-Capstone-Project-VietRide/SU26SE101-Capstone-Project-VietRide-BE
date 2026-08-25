@@ -47,6 +47,27 @@ public sealed class VehicleSubstitutionPassengerConfirmationEndpointTests
     }
 
     [Fact]
+    public async Task EscalatedTransferCanStillBeConfirmedByAssignedCrew()
+    {
+        _factory.Reset();
+        var operatorId = Guid.NewGuid();
+        var tripId = Guid.NewGuid();
+        var driverId = Guid.NewGuid();
+        var transfer = CreateTransfer(Guid.NewGuid(), tripId, "E09");
+        transfer.Escalate().Should().BeTrue();
+        _factory.AddActiveTransfer(transfer, tripId, operatorId);
+        _factory.TripClient.GetTripSnapshotAsync(tripId, Arg.Any<CancellationToken>())
+            .Returns(CreateTripSnapshot(tripId, operatorId, driverId));
+
+        using var response = await _factory.CreateAuthenticatedClient(driverId, "DRIVER")
+            .SendAsync(BuildRequest(tripId, transfer.PassengerId, Guid.NewGuid().ToString("D")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        transfer.ConfirmationStatus.Should().Be(BookingTransferConfirmationStatus.CONFIRMED);
+        transfer.ConfirmedByUserId.Should().Be(driverId);
+    }
+
+    [Fact]
     public async Task AssignedCrewConfirmsExactlyThreeOfFiveWithoutChangingTwoSiblings()
     {
         _factory.Reset();

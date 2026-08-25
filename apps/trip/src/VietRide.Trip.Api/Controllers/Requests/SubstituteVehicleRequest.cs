@@ -8,4 +8,5 @@ public sealed record SubstituteVehicleRequest(
     DateTimeOffset EstimatedRecoveryDepartureAt,
     string Reason,
     bool NotifyPassengers = true,
-    ReplacementCrewRequest? ReplacementCrew = null);
+    ReplacementCrewRequest? ReplacementCrew = null,
+    bool AcknowledgeInsufficientSeats = false);

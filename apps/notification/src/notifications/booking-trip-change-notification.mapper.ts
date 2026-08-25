@@ -5,6 +5,8 @@ import {
   BOOKING_SCHEDULE_CHANGE_INFORMATIONAL_ROUTING_KEY,
   BOOKING_SCHEDULE_CHANGE_REQUIRED_ROUTING_KEY,
   BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY,
+  BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY,
+  BOOKING_TRANSFER_ESCALATED_ROUTING_KEY,
   BOOKING_TRANSFERRED_ROUTING_KEY,
   BookingPendingActionAutoResolvedEventSchema,
   BookingPendingActionRealertedEventSchema,
@@ -12,6 +14,8 @@ import {
   BookingScheduleChangeInformationalEventSchema,
   BookingScheduleChangeRequiredEventSchema,
   BookingSeatReassignmentRequiredEventSchema,
+  BookingSeatShortageDetectedEventSchema,
+  BookingTransferEscalatedEventSchema,
   BookingTransferredEventSchema,
   type BookingPendingActionAutoResolvedEvent,
   type BookingPendingActionRealertedEvent,
@@ -19,6 +23,8 @@ import {
   type BookingScheduleChangeInformationalEvent,
   type BookingScheduleChangeRequiredEvent,
   type BookingSeatReassignmentRequiredEvent,
+  type BookingSeatShortageDetectedEvent,
+  type BookingTransferEscalatedEvent,
   type BookingTransferredEvent,
 } from '@vietride/contracts';
 import { NotificationType } from '../generated/notification-prisma-client';
@@ -32,11 +38,14 @@ export type BookingTripChangeRoutingKey =
   | typeof BOOKING_PENDING_ACTION_REALERTED_ROUTING_KEY
   | typeof BOOKING_PENDING_ACTION_AUTO_RESOLVED_ROUTING_KEY
   | typeof BOOKING_ROUTE_CHANGE_AUTO_FALLBACK_APPLIED_ROUTING_KEY
+  | typeof BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY
+  | typeof BOOKING_TRANSFER_ESCALATED_ROUTING_KEY
   | typeof BOOKING_TRANSFERRED_ROUTING_KEY;
 
 export function mapBookingTripChangeToNotification(
   routingKey: BookingTripChangeRoutingKey,
   payload: unknown,
+  operatorRecipientUserId?: string,
 ): CreateNotificationDto {
   switch (routingKey) {
     case BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY:
@@ -61,7 +70,43 @@ export function mapBookingTripChangeToNotification(
       const transferred = BookingTransferredEventSchema.parse(payload);
       return mapBookingTransferred(transferred);
     }
+    case BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY:
+      return mapSeatShortageDetected(
+        requireOperatorRecipient(operatorRecipientUserId),
+        BookingSeatShortageDetectedEventSchema.parse(payload),
+      );
+    case BOOKING_TRANSFER_ESCALATED_ROUTING_KEY:
+      return mapTransferEscalated(
+        requireOperatorRecipient(operatorRecipientUserId),
+        BookingTransferEscalatedEventSchema.parse(payload),
+      );
   }
+}
+
+function mapSeatShortageDetected(
+  userId: string,
+  payload: BookingSeatShortageDetectedEvent,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.VEHICLE_SUBSTITUTION_SEAT_SHORTAGE,
+    title: 'Xe thay thế không đủ ghế',
+    body: `Booking ${payload.bookingCode} có ${payload.affectedPassengerCount} hành khách chưa được xếp ghế trên chuyến thay thế.`,
+    data: operatorBookingEventData(payload),
+  };
+}
+
+function mapTransferEscalated(
+  userId: string,
+  payload: BookingTransferEscalatedEvent,
+): CreateNotificationDto {
+  return {
+    userId,
+    type: NotificationType.BOOKING_TRANSFER_ESCALATED,
+    title: 'Xác nhận chuyển khách quá hạn',
+    body: `Booking ${payload.bookingCode} có ${payload.pendingConfirmationCount} lượt chuyển khách chưa được tổ lái xác nhận.`,
+    data: operatorBookingEventData(payload),
+  };
 }
 
 function mapBookingTransferred(payload: BookingTransferredEvent): CreateNotificationDto {
@@ -176,4 +221,15 @@ function bookingTransferredData(
   void recipientUserId;
   void notifyPassengers;
   return data;
+}
+
+function operatorBookingEventData<T extends { operatorId: string }>(
+  payload: T,
+): T {
+  return payload;
+}
+
+function requireOperatorRecipient(userId: string | undefined): string {
+  if (!userId) throw new Error('OPERATOR_RECIPIENT_REQUIRED');
+  return userId;
 }

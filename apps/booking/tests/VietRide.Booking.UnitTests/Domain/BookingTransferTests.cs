@@ -36,6 +36,37 @@ public sealed class BookingTransferTests
         transfer.NewSeatNumber.Should().Be("B02");
     }
 
+    [Fact]
+    public void EscalatedTransferCanStillBeConfirmedAndKeepsSeatTypeEvidence()
+    {
+        var transferredAt = new DateTimeOffset(2026, 8, 25, 1, 0, 0, TimeSpan.Zero);
+        var transfer = BookingTransfer.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            null,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "A01",
+            "B01",
+            BookingTransferConfirmationStatus.PENDING_CONFIRM,
+            transferredAt,
+            Guid.NewGuid(),
+            originalSeatType: " VIP ",
+            newSeatType: "standard",
+            isSeatDowngrade: true);
+
+        transfer.Escalate().Should().BeTrue();
+        transfer.Escalate().Should().BeFalse();
+        transfer.ConfirmationStatus.Should().Be(BookingTransferConfirmationStatus.ESCALATED);
+        transfer.OriginalSeatType.Should().Be("VIP");
+        transfer.NewSeatType.Should().Be("STANDARD");
+        transfer.IsSeatDowngrade.Should().BeTrue();
+
+        transfer.Confirm(Guid.NewGuid(), transferredAt.AddHours(3));
+
+        transfer.ConfirmationStatus.Should().Be(BookingTransferConfirmationStatus.CONFIRMED);
+    }
+
     [Theory]
     [InlineData(BookingTransferConfirmationStatus.PENDING_CONFIRM, null)]
     [InlineData(BookingTransferConfirmationStatus.NOT_REQUIRED, "B02")]

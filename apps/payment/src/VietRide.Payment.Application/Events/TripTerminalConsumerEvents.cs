@@ -10,7 +10,8 @@ public sealed record TripCompletedConsumerEvent(
     [property: JsonPropertyName("operatorId")] Guid OperatorId,
     [property: JsonPropertyName("terminalAt")] DateTimeOffset TerminalAt,
     [property: JsonPropertyName("hasSubstitution")] bool HasSubstitution,
-    [property: JsonPropertyName("tripCode")] string? TripCode = null) : IIntegrationEvent
+    [property: JsonPropertyName("tripCode")] string? TripCode = null,
+    [property: JsonPropertyName("source")] string? Source = null) : IIntegrationEvent
 {
     public const string EventTypeValue = "trip.trip.completed";
     [JsonIgnore]

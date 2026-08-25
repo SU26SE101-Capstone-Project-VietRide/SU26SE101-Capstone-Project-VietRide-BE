@@ -28,7 +28,10 @@ internal sealed class TripVehicleSubstitutedIntegrationEventHandler(IMediator me
                 mapping.PassengerId,
                 mapping.OriginalSeatNumber,
                 mapping.NewSeatNumber,
-                mapping.OriginalBoardingStatus)).ToArray()), cancellationToken);
+                mapping.OriginalBoardingStatus,
+                mapping.OriginalSeatType,
+                mapping.NewSeatType,
+                mapping.IsSeatDowngrade ?? false)).ToArray()), cancellationToken);
     }
 
     private static void Validate(TripVehicleSubstitutedIntegrationEvent integrationEvent)
@@ -72,6 +75,8 @@ internal sealed class TripVehicleSubstitutedIntegrationEventHandler(IMediator me
                 throw new ArgumentException("Trip vehicle-substituted mapping contains an invalid boarding status.");
             ValidateSeat(mapping.OriginalSeatNumber);
             ValidateSeat(mapping.NewSeatNumber);
+            ValidateSeatType(mapping.OriginalSeatType);
+            ValidateSeatType(mapping.NewSeatType);
         }
     }
 
@@ -89,5 +94,14 @@ internal sealed class TripVehicleSubstitutedIntegrationEventHandler(IMediator me
     {
         if (seatNumber is not null)
             ValidateText(seatNumber, 20, "seat number");
+    }
+
+    private static void ValidateSeatType(string? seatType)
+    {
+        if (seatType is not null
+            && seatType is not "STANDARD" and not "SLEEPER_UPPER" and not "SLEEPER_LOWER" and not "VIP")
+        {
+            throw new ArgumentException("Trip vehicle-substituted mapping contains an invalid seat type.");
+        }
     }
 }

@@ -35,6 +35,9 @@ public sealed class BookingTransferModelTests
                 "new_trip_id",
                 "original_seat_number",
                 "new_seat_number",
+                "original_seat_type",
+                "new_seat_type",
+                "is_seat_downgrade",
                 "confirmation_status",
                 "confirmed_at",
                 "confirmed_by_user_id",
@@ -44,6 +47,9 @@ public sealed class BookingTransferModelTests
                 "created_at");
         transfer.FindProperty(nameof(BookingTransfer.OriginalSeatNumber))!.IsNullable.Should().BeTrue();
         transfer.FindProperty(nameof(BookingTransfer.NewSeatNumber))!.IsNullable.Should().BeTrue();
+        transfer.FindProperty(nameof(BookingTransfer.OriginalSeatType))!.IsNullable.Should().BeTrue();
+        transfer.FindProperty(nameof(BookingTransfer.NewSeatType))!.IsNullable.Should().BeTrue();
+        transfer.FindProperty(nameof(BookingTransfer.IsSeatDowngrade))!.IsNullable.Should().BeFalse();
         transfer.FindProperty(nameof(BookingTransfer.ConfirmationStatus))!
             .GetColumnType()
             .Should()
@@ -86,6 +92,7 @@ public sealed class BookingTransferModelTests
 
         Enum.GetNames<BookingTransferConfirmationStatus>().Should().Equal(
             "PENDING_CONFIRM",
+            "ESCALATED",
             "CONFIRMED",
             "NOT_REQUIRED");
     }
