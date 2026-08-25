@@ -2,17 +2,10 @@ import { INestApplication, NotFoundException, ServiceUnavailableException } from
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Test } from '@nestjs/testing';
-import {
-  ApiResponseExceptionFilter,
-  ApiResponseInterceptor,
-} from '@vietride/nest-common';
+import { ApiResponseExceptionFilter, ApiResponseInterceptor } from '@vietride/nest-common';
 import { RedisService } from '@vietride/nest-redis';
 import { exportSPKI, generateKeyPair, SignJWT, type KeyLike } from 'jose';
-import {
-  ENV_TOKEN,
-  TRACKING_AUTHORIZATION_ADAPTER,
-  TRACKING_JWT_VERIFIER,
-} from '../app/tokens';
+import { ENV_TOKEN, TRACKING_AUTHORIZATION_ADAPTER, TRACKING_JWT_VERIFIER } from '../app/tokens';
 import type { TrackingUser } from '../auth/tracking-user.types';
 import { JoseUserJwtVerifier } from '../auth/user-jwt.verifier';
 import type {
@@ -128,7 +121,10 @@ describe('TrackingDataController REST fallback (e2e)', () => {
           tripId: TEST_TRIP_ID,
           geometry: {
             source: 'ROUTE_POLYLINE' as const,
-            points: [{ latitude: 10, longitude: 106 }, { latitude: 10.1, longitude: 106.1 }],
+            points: [
+              { latitude: 10, longitude: 106 },
+              { latitude: 10.1, longitude: 106.1 },
+            ],
           },
           originStation: null,
           intermediateStops: [],
@@ -164,7 +160,7 @@ describe('TrackingDataController REST fallback (e2e)', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
-        await app.listen(0);
+    await app.listen(0);
     port = readListeningPort(app);
   });
 
@@ -173,7 +169,9 @@ describe('TrackingDataController REST fallback (e2e)', () => {
   });
 
   it('returns 401 envelope when auth is missing', async () => {
-    const response = await getJson<ApiEnvelope<unknown>>(`/v1/tracking/trips/${TEST_TRIP_ID}/latest`);
+    const response = await getJson<ApiEnvelope<unknown>>(
+      `/v1/tracking/trips/${TEST_TRIP_ID}/latest`,
+    );
 
     expect(response.status).toBe(401);
     expect(response.body.success).toBe(false);
@@ -232,9 +230,12 @@ describe('TrackingDataController REST fallback (e2e)', () => {
 
   it('returns authorized route context with private cache headers and strong ETag', async () => {
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
-    const response = await fetch(`http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await fetch(
+      `http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
     const body = (await response.json()) as ApiEnvelope<{
       geometry: { source: string; points: unknown[] };
     }>;
@@ -249,24 +250,30 @@ describe('TrackingDataController REST fallback (e2e)', () => {
 
   it('runs authorization before returning an empty 304 route response', async () => {
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
-    const response = await fetch(`http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'If-None-Match': '"route-context-etag"',
+    const response = await fetch(
+      `http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'If-None-Match': '"route-context-etag"',
+        },
       },
-    });
+    );
 
     expect(response.status).toBe(304);
     expect(await response.text()).toBe('');
     expect(response.headers.get('etag')).toBe('"route-context-etag"');
 
     const deniedToken = await signIdentityToken('PASSENGER', UNAUTHORIZED_USER_ID);
-    const denied = await fetch(`http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`, {
-      headers: {
-        Authorization: `Bearer ${deniedToken}`,
-        'If-None-Match': '"route-context-etag"',
+    const denied = await fetch(
+      `http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`,
+      {
+        headers: {
+          Authorization: `Bearer ${deniedToken}`,
+          'If-None-Match': '"route-context-etag"',
+        },
       },
-    });
+    );
     expect(denied.status).toBe(403);
   });
 
@@ -287,9 +294,12 @@ describe('TrackingDataController REST fallback (e2e)', () => {
       },
     });
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
-    const response = await fetch(`http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await fetch(
+      `http://127.0.0.1:${port}/v1/tracking/trips/${TEST_TRIP_ID}/route-geometry`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
     const body = (await response.json()) as ApiEnvelope<{
       geometry: null;
       originStation: { stationId: string };
@@ -302,11 +312,19 @@ describe('TrackingDataController REST fallback (e2e)', () => {
   });
 
   it.each([
-    [new NotFoundException({ errorCode: 'TRIP_NOT_FOUND', detail: 'Trip not found' }), 404, 'TRIP_NOT_FOUND'],
-    [new ServiceUnavailableException({
-      errorCode: 'TRACKING_ROUTE_CONTEXT_UNAVAILABLE',
-      detail: 'Route provider unavailable',
-    }), 503, 'TRACKING_ROUTE_CONTEXT_UNAVAILABLE'],
+    [
+      new NotFoundException({ errorCode: 'TRIP_NOT_FOUND', detail: 'Trip not found' }),
+      404,
+      'TRIP_NOT_FOUND',
+    ],
+    [
+      new ServiceUnavailableException({
+        errorCode: 'TRACKING_ROUTE_CONTEXT_UNAVAILABLE',
+        detail: 'Route provider unavailable',
+      }),
+      503,
+      'TRACKING_ROUTE_CONTEXT_UNAVAILABLE',
+    ],
   ])('returns the route context error envelope', async (error, status, errorCode) => {
     routeContextGet.mockRejectedValueOnce(error);
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
@@ -364,15 +382,17 @@ describe('TrackingDataController REST fallback (e2e)', () => {
 
   it('returns trail points with pagination metadata', async () => {
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
-    const response = await getJson<ApiEnvelope<{
-      items: Array<{ recordedAt: string }>;
-      page: number;
-      pageSize: number;
-      totalItems: number;
-      totalPages: number;
-      hasNextPage: boolean;
-      hasPreviousPage: boolean;
-    }>>(
+    const response = await getJson<
+      ApiEnvelope<{
+        items: Array<{ recordedAt: string }>;
+        page: number;
+        pageSize: number;
+        totalItems: number;
+        totalPages: number;
+        hasNextPage: boolean;
+        hasPreviousPage: boolean;
+      }>
+    >(
       `/v1/tracking/trips/${TEST_TRIP_ID}/trail?from=2026-06-03T09:00:00.000Z&to=2026-06-03T11:00:00.000Z&page=1&pageSize=20`,
       token,
     );
@@ -402,14 +422,16 @@ describe('TrackingDataController REST fallback (e2e)', () => {
       token,
     );
     expect(accepted.status).toBe(200);
-    expect(prismaFindMany).toHaveBeenLastCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        recordedAt: {
-          gte: new Date('2026-06-03T09:00:00.000Z'),
-          lte: new Date('2026-06-03T11:00:00.000Z'),
-        },
+    expect(prismaFindMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          recordedAt: {
+            gte: new Date('2026-06-03T09:00:00.000Z'),
+            lte: new Date('2026-06-03T11:00:00.000Z'),
+          },
+        }) as unknown,
       }),
-    }));
+    );
 
     const rejected = await getJson<ApiEnvelope<unknown>>(
       `/v1/tracking/trips/${TEST_TRIP_ID}/trail?from=2026-06-03T16:00:00&to=2026-06-03T18:00:00`,
@@ -446,19 +468,20 @@ describe('TrackingDataController REST fallback (e2e)', () => {
       evaluatedAt: '2026-06-03T10:00:00.000Z',
     });
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
-    const response = await getJson<ApiEnvelope<{
-      eta: { delayed: boolean | null; delayStatus: string; delayMinutes: number | null };
-    }>>(
-      `/v1/tracking/trips/${TEST_TRIP_ID}/eta?stopId=${TEST_STOP_ID}`,
-      token,
-    );
+    const response = await getJson<
+      ApiEnvelope<{
+        eta: { delayed: boolean | null; delayStatus: string; delayMinutes: number | null };
+      }>
+    >(`/v1/tracking/trips/${TEST_TRIP_ID}/eta?stopId=${TEST_STOP_ID}`, token);
 
     expect(response.status).toBe(200);
-    expect(response.body.data?.eta).toEqual(expect.objectContaining({
-      delayed: null,
-      delayStatus: 'UNKNOWN',
-      delayMinutes: null,
-    }));
+    expect(response.body.data?.eta).toEqual(
+      expect.objectContaining({
+        delayed: null,
+        delayStatus: 'UNKNOWN',
+        delayMinutes: null,
+      }),
+    );
     delayStatePayload = null;
   });
 
@@ -498,19 +521,20 @@ describe('TrackingDataController REST fallback (e2e)', () => {
       evaluatedAt: '2026-06-03T10:00:00.000Z',
     });
     const token = await signIdentityToken('PASSENGER', TEST_USER_ID);
-    const response = await getJson<ApiEnvelope<{
-      eta: { delayed: boolean | null; delayStatus: string; delayMinutes: number | null };
-    }>>(
-      `/v1/tracking/trips/${TEST_TRIP_ID}/eta?stopId=${TEST_STOP_ID}`,
-      token,
-    );
+    const response = await getJson<
+      ApiEnvelope<{
+        eta: { delayed: boolean | null; delayStatus: string; delayMinutes: number | null };
+      }>
+    >(`/v1/tracking/trips/${TEST_TRIP_ID}/eta?stopId=${TEST_STOP_ID}`, token);
 
     expect(response.status).toBe(200);
-    expect(response.body.data?.eta).toEqual(expect.objectContaining({
-      delayed: null,
-      delayStatus: 'UNKNOWN',
-      delayMinutes: null,
-    }));
+    expect(response.body.data?.eta).toEqual(
+      expect.objectContaining({
+        delayed: null,
+        delayStatus: 'UNKNOWN',
+        delayMinutes: null,
+      }),
+    );
     delayStatePayload = null;
   });
 
@@ -613,10 +637,11 @@ function createTestEnv(publicKeyPem: string): Env {
     TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN: 60,
     TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN: 20,
     TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS: 60,
-    GOOGLE_ROUTES_ENABLED: false,
-    GOOGLE_ROUTES_API_KEY: '',
-    GOOGLE_ROUTES_BASE_URL: 'https://routes.googleapis.com',
-    TRACKING_GOOGLE_ROUTES_TIMEOUT_MS: 1_500,
+    ROUTING_PROVIDER: 'LOCAL',
+    GOONG_API_KEY: '',
+    GOONG_BASE_URL: 'https://rsapi.goong.io',
+    GOONG_MAX_DESTINATIONS_PER_REQUEST: 10,
+    TRACKING_ROUTING_TIMEOUT_MS: 1_500,
     TRACKING_ETA_MIN_INTERVAL_SECONDS: 60,
     TRACKING_ETA_CACHE_TTL_SECONDS: 60,
     TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: 300,

@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
-export const EtaBaseResponseSchema = z.object({
+const etaBaseResponseSchema = z.object({
   tripId: z.string().uuid(),
   targetKind: z.enum(['STOP', 'STATION']).default('STOP'),
   stopId: z.string().uuid().optional(),
@@ -12,16 +12,17 @@ export const EtaBaseResponseSchema = z.object({
   distanceMeters: z.number().int().nonnegative(),
   updatedAt: z.string().datetime(),
   sequence: z.number().int().positive().optional(),
-  estimateQuality: z.enum(['TRAFFIC_AWARE', 'FALLBACK']).default('FALLBACK'),
+  estimateQuality: z.enum(['TRAFFIC_AWARE', 'ROUTE_BASED', 'FALLBACK']).default('FALLBACK'),
 });
 
-export const EtaResponseSchema = EtaBaseResponseSchema.extend({
+const etaResponseSchema = etaBaseResponseSchema.extend({
   delayed: z.boolean().nullable().default(null),
   delayStatus: z.enum(['DELAYED', 'ON_TIME', 'UNKNOWN']),
   delayMinutes: z.number().int().nonnegative().nullable(),
 });
 
-export type EtaResponseDto = z.infer<typeof EtaResponseSchema>;
+export { etaBaseResponseSchema as EtaBaseResponseSchema, etaResponseSchema as EtaResponseSchema };
+export type EtaResponseDto = z.infer<typeof etaResponseSchema>;
 
 export class EtaResponseDataDto {
   @ApiProperty({ example: '11111111-1111-4111-8111-111111111111' })
@@ -54,8 +55,8 @@ export class EtaResponseDataDto {
   @ApiProperty({ required: false, example: 1 })
   sequence?: number;
 
-  @ApiProperty({ enum: ['TRAFFIC_AWARE', 'FALLBACK'], example: 'TRAFFIC_AWARE' })
-  estimateQuality!: 'TRAFFIC_AWARE' | 'FALLBACK';
+  @ApiProperty({ enum: ['TRAFFIC_AWARE', 'ROUTE_BASED', 'FALLBACK'], example: 'ROUTE_BASED' })
+  estimateQuality!: 'TRAFFIC_AWARE' | 'ROUTE_BASED' | 'FALLBACK';
 
   @ApiProperty({ nullable: true, example: true })
   delayed!: boolean | null;

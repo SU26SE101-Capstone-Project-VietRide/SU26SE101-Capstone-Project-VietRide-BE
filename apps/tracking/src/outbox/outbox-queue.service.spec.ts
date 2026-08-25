@@ -11,7 +11,9 @@ import { OutboxQueueService } from './outbox-queue.service';
 
 describe('OutboxQueueService', () => {
   it('does not create queue infrastructure when disabled', async () => {
-    const service = new TestOutboxQueueService(createEnv({ TRACKING_OUTBOX_PUBLISH_ENABLED: false }));
+    const service = new TestOutboxQueueService(
+      createEnv({ TRACKING_OUTBOX_PUBLISH_ENABLED: false }),
+    );
 
     await service.onModuleInit();
 
@@ -93,7 +95,8 @@ class TestOutboxQueueService extends OutboxQueueService {
     expect(connection).toBe(this.mockConnection);
     this.workerName = OUTBOX_QUEUE_NAME;
     this.workerConcurrency = OUTBOX_WORKER_CONCURRENCY;
-    this.processor = () => this.mockPublisherService.publishPendingOnce(this.env.TRACKING_OUTBOX_PUBLISH_BATCH_SIZE);
+    this.processor = () =>
+      this.mockPublisherService.publishPendingOnce(this.env.TRACKING_OUTBOX_PUBLISH_BATCH_SIZE);
     return this.mockWorker as never;
   }
 }
@@ -134,10 +137,11 @@ function createEnv(overrides: Partial<Env>): Env {
     TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN: 60,
     TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN: 20,
     TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS: 60,
-    GOOGLE_ROUTES_ENABLED: false,
-    GOOGLE_ROUTES_API_KEY: '',
-    GOOGLE_ROUTES_BASE_URL: 'https://routes.googleapis.com',
-    TRACKING_GOOGLE_ROUTES_TIMEOUT_MS: 1_500,
+    ROUTING_PROVIDER: 'LOCAL',
+    GOONG_API_KEY: '',
+    GOONG_BASE_URL: 'https://rsapi.goong.io',
+    GOONG_MAX_DESTINATIONS_PER_REQUEST: 10,
+    TRACKING_ROUTING_TIMEOUT_MS: 1_500,
     TRACKING_ETA_MIN_INTERVAL_SECONDS: 60,
     TRACKING_ETA_CACHE_TTL_SECONDS: 60,
     TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: 300,

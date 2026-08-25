@@ -1,13 +1,10 @@
 import { RedisService } from '@vietride/nest-redis';
 import type { Env } from '../config/env.schema';
-import { GoogleRoutesEtaProvider } from '../eta/google-routes-eta.provider';
+import type { ShuttleGpsUpdateDto } from './shuttle.dto';
+import { GoongDirectionsEtaProvider } from '../eta/goong-directions-eta.provider';
 import { ShuttleEtaService } from './shuttle-eta.service';
 import type { ShuttleTrackingContext } from './shuttle.service';
-import {
-  shuttleEtaKey,
-  shuttleEtaLockKey,
-  shuttleEtaStateKey,
-} from './shuttle.constants';
+import { shuttleEtaKey, shuttleEtaLockKey, shuttleEtaStateKey } from './shuttle.constants';
 
 const SHUTTLE_ID = '36000000-0000-4000-8000-000000000001';
 
@@ -15,7 +12,7 @@ describe('ShuttleEtaService', () => {
   let store: Map<string, string>;
   let redisSet: jest.Mock;
   let redisEval: jest.Mock;
-  let google: jest.Mocked<Pick<GoogleRoutesEtaProvider, 'calculateCoordinates'>>;
+  let goong: jest.Mocked<Pick<GoongDirectionsEtaProvider, 'calculateCoordinates'>>;
   let env: Env;
   let service: ShuttleEtaService;
 
@@ -26,7 +23,7 @@ describe('ShuttleEtaService', () => {
       return 'OK';
     });
     redisEval = jest.fn(async () => 1);
-    google = {
+    goong = {
       calculateCoordinates: jest.fn(async (_origin, _destination) => {
         void _origin;
         void _destination;
@@ -34,8 +31,8 @@ describe('ShuttleEtaService', () => {
       }),
     };
     env = {
-      GOOGLE_ROUTES_ENABLED: true,
-      GOOGLE_ROUTES_API_KEY: 'fake-key',
+      ROUTING_PROVIDER: 'GOONG',
+      GOONG_API_KEY: 'fake-key',
       TRACKING_ETA_MIN_INTERVAL_SECONDS: 60,
       TRACKING_ETA_CACHE_TTL_SECONDS: 60,
       TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: 300,
@@ -50,15 +47,15 @@ describe('ShuttleEtaService', () => {
           multi: () => multi,
         }),
       } as unknown as RedisService,
-      google as unknown as GoogleRoutesEtaProvider,
+      goong as unknown as GoongDirectionsEtaProvider,
       env,
     );
   });
 
-  it('uses Google Routes for the next non-cancelled pickup and keeps the public ETA shape', async () => {
+  it('uses Goong Directions for the next non-cancelled pickup and keeps the public ETA shape', async () => {
     const event = await service.handleGpsUpdate(createGps(), createContext());
 
-    expect(google.calculateCoordinates).toHaveBeenCalledWith(
+    expect(goong.calculateCoordinates).toHaveBeenCalledWith(
       { latitude: 10.7, longitude: 106.65 },
       { latitude: 10.72, longitude: 106.67 },
     );
@@ -68,13 +65,13 @@ describe('ShuttleEtaService', () => {
       etaMinutes: 10,
       estimatedArrivalTime: '2026-08-01T01:10:00.000Z',
       distanceMeters: 6_200,
-      updatedAt: expect.any(String),
+      updatedAt: expect.any(String) as unknown,
     });
     expect(store.has(shuttleEtaKey(SHUTTLE_ID, 2))).toBe(true);
   });
 
-  it('uses the local fallback and opens a cooldown after three Google failures', async () => {
-    google.calculateCoordinates.mockResolvedValue(null);
+  it('uses the local fallback and opens a cooldown after three Goong failures', async () => {
+    goong.calculateCoordinates.mockResolvedValue(null);
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const event = await service.handleGpsUpdate(createGps(), createContext());
@@ -82,60 +79,75 @@ describe('ShuttleEtaService', () => {
       ageState();
     }
 
-    const state = JSON.parse(store.get(shuttleEtaStateKey(SHUTTLE_ID)) ?? '{}');
-    expect(state.googleFailureCount).toBe(3);
+    const state = JSON.parse(store.get(shuttleEtaStateKey(SHUTTLE_ID)) ?? '{}') as {
+      providerFailureCount: number;
+      cooldownUntil: string;
+    };
+    expect(state.providerFailureCount).toBe(3);
     expect(new Date(state.cooldownUntil).getTime()).toBeGreaterThan(Date.now());
 
     ageState();
     await service.handleGpsUpdate(createGps(), createContext());
-    expect(google.calculateCoordinates).toHaveBeenCalledTimes(3);
+    expect(goong.calculateCoordinates).toHaveBeenCalledTimes(3);
   });
 
-  it('uses the local fallback without calling Google when the shared flag is disabled', async () => {
-    env.GOOGLE_ROUTES_ENABLED = false;
+  it('uses the local fallback without calling Goong when Local routing is selected', async () => {
+    env.ROUTING_PROVIDER = 'LOCAL';
 
     const event = await service.handleGpsUpdate(createGps(), createContext());
 
     expect(event?.etaMinutes).toBeGreaterThan(0);
-    expect(google.calculateCoordinates).not.toHaveBeenCalled();
+    expect(goong.calculateCoordinates).not.toHaveBeenCalled();
   });
 
   it('does not call a provider before the 60-second minimum interval', async () => {
-    store.set(shuttleEtaStateKey(SHUTTLE_ID), JSON.stringify({
-      order: 2,
-      latitude: 10.7,
-      longitude: 106.65,
-      etaMinutes: 10,
-      lastProviderCallAt: new Date().toISOString(),
-      googleFailureCount: 0,
-    }));
-    store.set(shuttleEtaKey(SHUTTLE_ID, 2), JSON.stringify({
-      shuttleTripId: SHUTTLE_ID,
-      nextPickupOrder: 2,
-      etaMinutes: 10,
-    }));
+    store.set(
+      shuttleEtaStateKey(SHUTTLE_ID),
+      JSON.stringify({
+        order: 2,
+        latitude: 10.7,
+        longitude: 106.65,
+        etaMinutes: 10,
+        lastProviderCallAt: new Date().toISOString(),
+        providerFailureCount: 0,
+      }),
+    );
+    store.set(
+      shuttleEtaKey(SHUTTLE_ID, 2),
+      JSON.stringify({
+        shuttleTripId: SHUTTLE_ID,
+        nextPickupOrder: 2,
+        etaMinutes: 10,
+      }),
+    );
 
     await expect(service.handleGpsUpdate(createGps(), createContext())).resolves.toBeUndefined();
-    expect(google.calculateCoordinates).not.toHaveBeenCalled();
+    expect(goong.calculateCoordinates).not.toHaveBeenCalled();
   });
 
   it('does not recalculate after the minimum interval when movement is below 500 m and ETA is not soon', async () => {
-    store.set(shuttleEtaStateKey(SHUTTLE_ID), JSON.stringify({
-      order: 2,
-      latitude: 10.7001,
-      longitude: 106.6501,
-      etaMinutes: 30,
-      lastProviderCallAt: new Date(Date.now() - 61_000).toISOString(),
-      googleFailureCount: 0,
-    }));
-    store.set(shuttleEtaKey(SHUTTLE_ID, 2), JSON.stringify({
-      shuttleTripId: SHUTTLE_ID,
-      nextPickupOrder: 2,
-      etaMinutes: 30,
-    }));
+    store.set(
+      shuttleEtaStateKey(SHUTTLE_ID),
+      JSON.stringify({
+        order: 2,
+        latitude: 10.7001,
+        longitude: 106.6501,
+        etaMinutes: 30,
+        lastProviderCallAt: new Date(Date.now() - 61_000).toISOString(),
+        providerFailureCount: 0,
+      }),
+    );
+    store.set(
+      shuttleEtaKey(SHUTTLE_ID, 2),
+      JSON.stringify({
+        shuttleTripId: SHUTTLE_ID,
+        nextPickupOrder: 2,
+        etaMinutes: 30,
+      }),
+    );
 
     await expect(service.handleGpsUpdate(createGps(), createContext())).resolves.toBeUndefined();
-    expect(google.calculateCoordinates).not.toHaveBeenCalled();
+    expect(goong.calculateCoordinates).not.toHaveBeenCalled();
   });
 
   it('does not call a provider while the per-shuttle pickup lock is held', async () => {
@@ -150,7 +162,7 @@ describe('ShuttleEtaService', () => {
       expect.any(Number),
       'NX',
     );
-    expect(google.calculateCoordinates).not.toHaveBeenCalled();
+    expect(goong.calculateCoordinates).not.toHaveBeenCalled();
   });
 
   it('skips terminal pickup groups and targets the final Station', async () => {
@@ -175,7 +187,7 @@ describe('ShuttleEtaService', () => {
     const event = await service.handleGpsUpdate(createGps(), context);
 
     expect(event?.nextPickupOrder).toBe(5);
-    expect(google.calculateCoordinates).toHaveBeenCalledWith(
+    expect(goong.calculateCoordinates).toHaveBeenCalledWith(
       { latitude: 10.7, longitude: 106.65 },
       { latitude: 10.7769, longitude: 106.7009 },
     );
@@ -205,7 +217,7 @@ describe('ShuttleEtaService', () => {
 
     await service.handleGpsUpdate(createGps(), context);
 
-    expect(google.calculateCoordinates).toHaveBeenCalledWith(
+    expect(goong.calculateCoordinates).toHaveBeenCalledWith(
       { latitude: 10.7, longitude: 106.65 },
       { latitude: 10.8, longitude: 106.8 },
     );
@@ -236,7 +248,7 @@ describe('ShuttleEtaService', () => {
 
     await service.handleGpsUpdate(createGps(), context);
 
-    expect(google.calculateCoordinates).toHaveBeenCalledWith(
+    expect(goong.calculateCoordinates).toHaveBeenCalledWith(
       { latitude: 10.7, longitude: 106.65 },
       { latitude: 10.9, longitude: 106.9 },
     );
@@ -249,14 +261,17 @@ describe('ShuttleEtaService', () => {
       pickupOrder: index + 2,
       status: 'PENDING',
     }));
-    store.set(shuttleEtaStateKey(SHUTTLE_ID), JSON.stringify({
-      order: 3,
-      latitude: 10.6,
-      longitude: 106.5,
-      etaMinutes: 30,
-      lastProviderCallAt: new Date(Date.now() - 61_000).toISOString(),
-      googleFailureCount: 0,
-    }));
+    store.set(
+      shuttleEtaStateKey(SHUTTLE_ID),
+      JSON.stringify({
+        order: 3,
+        latitude: 10.6,
+        longitude: 106.5,
+        etaMinutes: 30,
+        lastProviderCallAt: new Date(Date.now() - 61_000).toISOString(),
+        providerFailureCount: 0,
+      }),
+    );
 
     const event = await service.handleGpsUpdate(createGps(), context);
 
@@ -265,13 +280,13 @@ describe('ShuttleEtaService', () => {
 
   function ageState(): void {
     const key = shuttleEtaStateKey(SHUTTLE_ID);
-    const state = JSON.parse(store.get(key) ?? '{}');
+    const state = JSON.parse(store.get(key) ?? '{}') as { lastProviderCallAt?: string };
     state.lastProviderCallAt = new Date(Date.now() - 61_000).toISOString();
     store.set(key, JSON.stringify(state));
   }
 });
 
-function createGps() {
+function createGps(): ShuttleGpsUpdateDto {
   return {
     shuttleTripId: SHUTTLE_ID,
     latitude: 10.7,
@@ -319,9 +334,9 @@ function createMulti(store: Map<string, string>): MultiMock {
   const pending: Array<[string, string]> = [];
   const multi = {} as MultiMock;
   multi.set = jest.fn((key: string, value: string): MultiMock => {
-      pending.push([key, value]);
-      return multi;
-    });
+    pending.push([key, value]);
+    return multi;
+  });
   multi.exec = jest.fn(async () => {
     for (const [key, value] of pending.splice(0)) store.set(key, value);
     return [];

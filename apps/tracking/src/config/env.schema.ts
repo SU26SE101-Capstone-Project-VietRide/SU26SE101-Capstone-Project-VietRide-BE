@@ -20,12 +20,20 @@ export const envSchema = baseEnvSchema.merge(
     TRIP_SERVICE_BASE_URL: z.string().url().default('http://trip:5002'),
     BOOKING_SERVICE_BASE_URL: z.string().url().default('http://booking:5003'),
     PARCEL_SERVICE_BASE_URL: z.string().url().default('http://parcel:5005'),
-    TRIP_TRACKING_AUTH_PATH: z.string().default('/internal/v1/trips/:tripId/tracking-authorization'),
-    BOOKING_TRACKING_AUTH_PATH: z.string().default('/internal/v1/trips/:tripId/tracking-authorization/bookings'),
-    PARCEL_TRACKING_AUTH_PATH: z.string().default('/internal/v1/trips/:tripId/tracking-authorization/parcels'),
+    TRIP_TRACKING_AUTH_PATH: z
+      .string()
+      .default('/internal/v1/trips/:tripId/tracking-authorization'),
+    BOOKING_TRACKING_AUTH_PATH: z
+      .string()
+      .default('/internal/v1/trips/:tripId/tracking-authorization/bookings'),
+    PARCEL_TRACKING_AUTH_PATH: z
+      .string()
+      .default('/internal/v1/trips/:tripId/tracking-authorization/parcels'),
     TRIP_ROUTE_STOPS_PATH: z.string().default('/internal/v1/trips/:tripId/route-stops'),
     TRIP_ROUTE_GEOMETRY_PATH: z.string().default('/internal/v1/trips/:tripId/route-geometry'),
-    BOOKING_PICKUP_BOOKINGS_PATH: z.string().default('/internal/v1/trips/:tripId/stops/:stopId/pickup-bookings'),
+    BOOKING_PICKUP_BOOKINGS_PATH: z
+      .string()
+      .default('/internal/v1/trips/:tripId/stops/:stopId/pickup-bookings'),
     TRACKING_AUTH_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(2_000),
     TRACKING_DATA_PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(2_000),
     TRACKING_ROUTE_STOPS_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(60),
@@ -38,10 +46,11 @@ export const envSchema = baseEnvSchema.merge(
     TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(60),
     TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(20),
     TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS: z.coerce.number().int().positive().default(60),
-    GOOGLE_ROUTES_ENABLED: booleanEnvSchema.default(false),
-    GOOGLE_ROUTES_API_KEY: z.string().trim().default(''),
-    GOOGLE_ROUTES_BASE_URL: z.string().url().default('https://routes.googleapis.com'),
-    TRACKING_GOOGLE_ROUTES_TIMEOUT_MS: z.coerce.number().int().positive().default(1_500),
+    ROUTING_PROVIDER: z.enum(['GOONG', 'LOCAL']).default('LOCAL'),
+    GOONG_API_KEY: z.string().trim().default(''),
+    GOONG_BASE_URL: z.string().url().default('https://rsapi.goong.io'),
+    GOONG_MAX_DESTINATIONS_PER_REQUEST: z.coerce.number().int().positive().default(10),
+    TRACKING_ROUTING_TIMEOUT_MS: z.coerce.number().int().positive().default(1_500),
     TRACKING_ETA_MIN_INTERVAL_SECONDS: z.coerce.number().int().min(60).default(60),
     TRACKING_ETA_CACHE_TTL_SECONDS: z.coerce.number().int().min(60).default(60),
     TRACKING_ETA_FAILURE_COOLDOWN_SECONDS: z.coerce.number().int().min(300).default(300),
@@ -110,8 +119,8 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
     REDIS_URL: raw.REDIS_URL ?? `redis://${redisHost}:${redisPort}`,
     RABBITMQ_URL: rabbitMqUrl,
   });
-  if (parsed.GOOGLE_ROUTES_ENABLED && parsed.GOOGLE_ROUTES_API_KEY.length === 0) {
-    throw new Error('GOOGLE_ROUTES_API_KEY is required when GOOGLE_ROUTES_ENABLED=true');
+  if (parsed.ROUTING_PROVIDER === 'GOONG' && parsed.GOONG_API_KEY.length === 0) {
+    throw new Error('GOONG_API_KEY is required when ROUTING_PROVIDER=GOONG');
   }
   return parsed;
 }

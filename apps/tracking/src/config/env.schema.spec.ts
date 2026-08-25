@@ -10,14 +10,31 @@ const BASE_ENV = {
 };
 
 describe('Tracking Phase 10 environment', () => {
-  it('boots with Google Routes disabled and an empty key', () => {
-    expect(loadEnv({ ...BASE_ENV, GOOGLE_ROUTES_ENABLED: 'false', GOOGLE_ROUTES_API_KEY: '' }))
-      .toEqual(expect.objectContaining({ GOOGLE_ROUTES_ENABLED: false, GOOGLE_ROUTES_API_KEY: '' }));
+  it('boots with Local routing and an empty Goong key', () => {
+    expect(loadEnv({ ...BASE_ENV, ROUTING_PROVIDER: 'LOCAL', GOONG_API_KEY: '' })).toEqual(
+      expect.objectContaining({ ROUTING_PROVIDER: 'LOCAL', GOONG_API_KEY: '' }),
+    );
   });
 
-  it('fails startup when Google Routes is enabled without a key', () => {
-    expect(() => loadEnv({ ...BASE_ENV, GOOGLE_ROUTES_ENABLED: 'true', GOOGLE_ROUTES_API_KEY: '' }))
-      .toThrow('GOOGLE_ROUTES_API_KEY is required');
+  it('fails startup when Goong routing is selected without a key', () => {
+    expect(() => loadEnv({ ...BASE_ENV, ROUTING_PROVIDER: 'GOONG', GOONG_API_KEY: '  ' })).toThrow(
+      'GOONG_API_KEY is required',
+    );
+  });
+
+  it('accepts Goong routing with a nonblank key and applies routing defaults', () => {
+    expect(loadEnv({ ...BASE_ENV, ROUTING_PROVIDER: 'GOONG', GOONG_API_KEY: 'fake-key' })).toEqual(
+      expect.objectContaining({
+        ROUTING_PROVIDER: 'GOONG',
+        GOONG_BASE_URL: 'https://rsapi.goong.io',
+        GOONG_MAX_DESTINATIONS_PER_REQUEST: 10,
+        TRACKING_ROUTING_TIMEOUT_MS: 1_500,
+      }),
+    );
+  });
+
+  it('rejects an unsupported routing provider', () => {
+    expect(() => loadEnv({ ...BASE_ENV, ROUTING_PROVIDER: 'UNSUPPORTED' })).toThrow();
   });
 
   it('rejects ETA intervals below the 60 second minimum', () => {
@@ -29,7 +46,8 @@ describe('Tracking Phase 10 environment', () => {
   });
 
   it('requires a share-token secret with at least 32 characters', () => {
-    const { TRACKING_SHARE_TOKEN_SECRET: _secret, ...withoutSecret } = BASE_ENV;
+    const { TRACKING_SHARE_TOKEN_SECRET: shareTokenSecret, ...withoutSecret } = BASE_ENV;
+    void shareTokenSecret;
 
     expect(() => loadEnv(withoutSecret)).toThrow();
     expect(() => loadEnv({ ...BASE_ENV, TRACKING_SHARE_TOKEN_SECRET: 'too-short' })).toThrow(
@@ -42,11 +60,13 @@ describe('Tracking Phase 10 environment', () => {
   });
 
   it('applies the Phase 13 sharing defaults', () => {
-    expect(loadEnv(BASE_ENV)).toEqual(expect.objectContaining({
-      TRACKING_SHARE_TOKEN_TTL_SECONDS: 86_400,
-      TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN: 60,
-      TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN: 20,
-      TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS: 60,
-    }));
+    expect(loadEnv(BASE_ENV)).toEqual(
+      expect.objectContaining({
+        TRACKING_SHARE_TOKEN_TTL_SECONDS: 86_400,
+        TRACKING_SHARE_CONTEXT_RATE_LIMIT_PER_MIN: 60,
+        TRACKING_SHARE_SOCKET_RATE_LIMIT_PER_MIN: 20,
+        TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS: 60,
+      }),
+    );
   });
 });

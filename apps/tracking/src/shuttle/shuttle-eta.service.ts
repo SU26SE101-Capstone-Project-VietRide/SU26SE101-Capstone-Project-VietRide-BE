@@ -5,14 +5,14 @@ import { randomUUID } from 'node:crypto';
 import { ENV_TOKEN } from '../app/tokens';
 import type { Env } from '../config/env.schema';
 import {
-  ETA_GOOGLE_FAILURE_THRESHOLD,
+  ETA_PROVIDER_FAILURE_THRESHOLD,
   ETA_RECALCULATE_DISTANCE_THRESHOLD_METERS,
   ETA_RECALCULATE_SOON_THRESHOLD_MINUTES,
   METERS_PER_KILOMETER,
   MILLISECONDS_PER_SECOND,
   SECONDS_PER_MINUTE,
 } from '../eta/eta.constants';
-import { GoogleRoutesEtaProvider } from '../eta/google-routes-eta.provider';
+import { GoongDirectionsEtaProvider } from '../eta/goong-directions-eta.provider';
 import type { EtaProviderResult } from '../eta/eta-provider';
 import { calculateDistanceMeters } from '../eta/eta.service';
 import {
@@ -45,22 +45,19 @@ interface ShuttleEtaState {
   longitude?: number;
   etaMinutes?: number;
   lastProviderCallAt?: string;
-  googleFailureCount: number;
+  providerFailureCount: number;
+  // Read-only rollout compatibility for Redis state written by the previous provider.
+  googleFailureCount?: number;
   cooldownUntil?: string;
 }
 
 interface ProviderCalculation {
   result: EtaProviderResult;
-  googleFailureCount: number;
+  providerFailureCount: number;
   cooldownUntil?: string;
 }
 
-const TERMINAL_PICKUP_STATUSES = new Set([
-  'PICKED_UP',
-  'DELIVERED',
-  'NO_SHOW',
-  'CANCELLED',
-]);
+const TERMINAL_PICKUP_STATUSES = new Set(['PICKED_UP', 'DELIVERED', 'NO_SHOW', 'CANCELLED']);
 
 const SHUTTLE_DEFAULT_SPEED_KMH = 30;
 const SHUTTLE_MIN_REPORTED_SPEED_KMH = 3;
@@ -73,7 +70,7 @@ export class ShuttleEtaService {
 
   constructor(
     private readonly redis: RedisService,
-    private readonly googleProvider: GoogleRoutesEtaProvider,
+    private readonly goongProvider: GoongDirectionsEtaProvider,
     @Inject(ENV_TOKEN) private readonly env: Env,
   ) {}
 
@@ -129,7 +126,7 @@ export class ShuttleEtaService {
         longitude: gps.longitude,
         etaMinutes: event.etaMinutes,
         lastProviderCallAt: updatedAt,
-        googleFailureCount: calculation.googleFailureCount,
+        providerFailureCount: calculation.providerFailureCount,
         ...(calculation.cooldownUntil ? { cooldownUntil: calculation.cooldownUntil } : {}),
       };
       await this.redis
@@ -166,34 +163,32 @@ export class ShuttleEtaService {
     stop: ShuttleTrackingStop,
     state: ShuttleEtaState | null,
   ): Promise<ProviderCalculation> {
-    const googleEnabled =
-      this.env.GOOGLE_ROUTES_ENABLED === true && Boolean(this.env.GOOGLE_ROUTES_API_KEY);
+    const goongEnabled = this.env.ROUTING_PROVIDER === 'GOONG' && Boolean(this.env.GOONG_API_KEY);
     const cooldownActive = Boolean(
       state?.cooldownUntil && new Date(state.cooldownUntil).getTime() > Date.now(),
     );
-    let googleFailureCount = state?.googleFailureCount ?? 0;
+    let providerFailureCount = state?.providerFailureCount ?? 0;
     let cooldownUntil = state?.cooldownUntil;
 
-    if (googleEnabled && !cooldownActive) {
-      const googleResult = await this.googleProvider.calculateCoordinates(
+    if (goongEnabled && !cooldownActive) {
+      const goongResult = await this.goongProvider.calculateCoordinates(
         { latitude: gps.latitude, longitude: gps.longitude },
         { latitude: stop.latitude, longitude: stop.longitude },
       );
-      if (googleResult) return { result: googleResult, googleFailureCount: 0 };
+      if (goongResult) return { result: goongResult, providerFailureCount: 0 };
 
-      googleFailureCount += 1;
-      if (googleFailureCount >= ETA_GOOGLE_FAILURE_THRESHOLD) {
+      providerFailureCount += 1;
+      if (providerFailureCount >= ETA_PROVIDER_FAILURE_THRESHOLD) {
         cooldownUntil = new Date(
           Date.now() +
-            (this.env.TRACKING_ETA_FAILURE_COOLDOWN_SECONDS ?? 300) *
-              MILLISECONDS_PER_SECOND,
+            (this.env.TRACKING_ETA_FAILURE_COOLDOWN_SECONDS ?? 300) * MILLISECONDS_PER_SECOND,
         ).toISOString();
       }
     }
 
     return {
       result: this.calculateLocalEta(gps, stop),
-      googleFailureCount,
+      providerFailureCount,
       ...(cooldownUntil ? { cooldownUntil } : {}),
     };
   }
@@ -213,9 +208,7 @@ export class ShuttleEtaService {
       distanceMeters,
       etaMinutes: Math.max(
         1,
-        Math.ceil(
-          (distanceMeters / METERS_PER_KILOMETER / speedKmh) * SECONDS_PER_MINUTE,
-        ),
+        Math.ceil((distanceMeters / METERS_PER_KILOMETER / speedKmh) * SECONDS_PER_MINUTE),
       ),
     };
   }
@@ -247,8 +240,12 @@ export class ShuttleEtaService {
       const state = JSON.parse(payload) as Partial<ShuttleEtaState>;
       return {
         ...state,
-        googleFailureCount:
-          typeof state.googleFailureCount === 'number' ? state.googleFailureCount : 0,
+        providerFailureCount:
+          typeof state.providerFailureCount === 'number'
+            ? state.providerFailureCount
+            : typeof state.googleFailureCount === 'number'
+              ? state.googleFailureCount
+              : 0,
       };
     } catch {
       return null;
