@@ -18,7 +18,7 @@ services:
         http.createServer((req, res) => {
           const url = new URL(req.url, 'http://goong-directions-mock');
           if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true });
-          if (req.method !== 'GET' || url.pathname !== '/Direction') {
+          if (req.method !== 'GET' || url.pathname !== '/v2/direction') {
             return send(res, 404, { error: 'not-found' });
           }
           const parsePoint = (value) => {

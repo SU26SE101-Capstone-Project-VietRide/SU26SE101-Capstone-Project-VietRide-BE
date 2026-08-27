@@ -28,7 +28,7 @@ describe('Goong Directions ETA adapter (fake HTTP E2E)', () => {
     server = createServer((request, response) => {
       const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`);
       receivedRequests.push(requestUrl);
-      if (request.method !== 'GET' || requestUrl.pathname !== '/Direction') {
+      if (request.method !== 'GET' || requestUrl.pathname !== '/v2/direction') {
         response.statusCode = 404;
         response.end();
         return;

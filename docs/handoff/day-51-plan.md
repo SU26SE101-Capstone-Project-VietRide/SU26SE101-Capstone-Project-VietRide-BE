@@ -53,7 +53,8 @@ full regression cùng production-like Docker health/business matrix.
   `GOONG_BASE_URL=https://rsapi.goong.io`, `GOONG_MAX_DESTINATIONS_PER_REQUEST=10` và
   `TRACKING_ROUTING_TIMEOUT_MS`; API key chỉ lấy từ environment và nằm trong query string gửi Goong,
   nên tuyệt đối không log full URI.
-- Goong Direction request dùng `GET /Direction` với ordered `origin=lat,lng`,
+- Goong Directions v2 là contract hiện hành với dữ liệu địa giới hành chính mới sau sáp nhập; request dùng
+  `GET /v2/direction` với ordered `origin=lat,lng`,
   `destination=lat,lng;...`, `vehicle=car`, `alternatives=false`, `api_key=<runtime secret>`; response
   chỉ được nhận khi `routes[0].legs` khớp toàn bộ chain yêu cầu. Goong không cung cấp contract
   traffic-aware của Google nên kết quả Goong không bao giờ map thành `TRAFFIC_AWARE`.

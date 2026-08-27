@@ -460,7 +460,8 @@ suspend phát Outbox revoke request để Identity gọi Firebase `RevokeRefresh
 >
 > **Contract định tuyến Goong (khóa ngày 2026-08-25):** runtime chỉ nhận
 > `ROUTING_PROVIDER=GOONG|LOCAL`; không duy trì dual runtime Google/Goong. Goong gọi
-> `GET {GOONG_BASE_URL}/Direction` với `origin=lat,lng`, `destination` là chuỗi target theo đúng
+> Directions v2 là contract hiện hành, sử dụng dữ liệu địa giới hành chính mới sau sáp nhập. Runtime gọi
+> `GET {GOONG_BASE_URL}/v2/direction` với `origin=lat,lng`, `destination` là chuỗi target theo đúng
 > thứ tự phân cách bằng `;`, `vehicle=car`, `alternatives=false` và `api_key=GOONG_API_KEY`.
 > `GOONG_MAX_DESTINATIONS_PER_REQUEST` mặc định 10; chuỗi dài hơn phải chunk theo thứ tự rồi cộng
 > dồn `routes[0].legs[].distance.value` và `duration.value` qua mọi leg/chunk. Reject toàn bộ batch

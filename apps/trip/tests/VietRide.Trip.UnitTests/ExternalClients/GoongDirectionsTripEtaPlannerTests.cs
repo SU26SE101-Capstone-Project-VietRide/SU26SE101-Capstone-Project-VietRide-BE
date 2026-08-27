@@ -37,7 +37,7 @@ public sealed class GoongDirectionsTripEtaPlannerTests
         result.DestinationArrivalTime.Should().Be(fixture.Departure.AddMinutes(85));
         handler.RequestCount.Should().Be(1);
         handler.Requests[0].Method.Should().Be(HttpMethod.Get);
-        handler.Requests[0].Path.Should().Be("/Direction");
+        handler.Requests[0].Path.Should().Be("/v2/direction");
         handler.Requests[0].Vehicle.Should().Be("car");
         handler.Requests[0].Alternatives.Should().Be("false");
         handler.Requests[0].ApiKey.Should().Be("fake-key");

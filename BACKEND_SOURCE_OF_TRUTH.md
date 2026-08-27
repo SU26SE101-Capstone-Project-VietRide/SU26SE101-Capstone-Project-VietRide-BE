@@ -1522,7 +1522,8 @@ editable schedule changes and approved effective-route assignment rebuild these 
 the ordered assigned snapshot.
 
 Canonical routing runtime is `ROUTING_PROVIDER=GOONG|LOCAL`; there is no dual Google/Goong runtime.
-Goong calls `GET {GOONG_BASE_URL}/Direction` with `origin=lat,lng`, semicolon-separated ordered
+Goong Directions v2 is the current routing contract with post-merger administrative-boundary data. It calls
+`GET {GOONG_BASE_URL}/v2/direction` with `origin=lat,lng`, semicolon-separated ordered
 `destination` targets, `vehicle=car`, `alternatives=false`, and the query secret
 `api_key=GOONG_API_KEY`. `GOONG_MAX_DESTINATIONS_PER_REQUEST` defaults to 10. Longer chains are
 chunked without reordering, and `routes[0].legs[].distance.value`/`duration.value` are accumulated

@@ -48,7 +48,7 @@ internal sealed class GoongDirectionsClient
 
         var originValue = FormatCoordinate(origin);
         var destinationValue = string.Join(';', destinations.Select(FormatCoordinate));
-        var requestTarget = $"Direction?origin={Uri.EscapeDataString(originValue)}"
+        var requestTarget = $"v2/direction?origin={Uri.EscapeDataString(originValue)}"
             + $"&destination={Uri.EscapeDataString(destinationValue)}"
             + "&vehicle=car&alternatives=false"
             + $"&api_key={Uri.EscapeDataString(apiKey)}";
