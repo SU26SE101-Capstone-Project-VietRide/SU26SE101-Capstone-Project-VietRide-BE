@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.80.0
+> **Phiên bản:** 1.81.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-25
+> **Cập nhật lần cuối:** 2026-08-28
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1760,6 +1760,9 @@ phát integration event.
 | | `PARCEL_INCIDENT_NOT_FOUND` | 404 | Parcel incident không tồn tại hoặc bị tenant-mask |
 | | `PARCEL_INCIDENT_ALREADY_OPEN` | 409 | Parcel đã có incident active cùng phạm vi điều tra |
 | | `PARCEL_INCIDENT_INVALID_STATUS` | 409 | Incident state không cho phép found/forward/resolve/close transition được yêu cầu |
+| | `PARCEL_CUSTODY_EXCEPTION_REQUEST_NOT_FOUND` | 404 | Custody exception approval request không tồn tại hoặc bị tenant-mask |
+| | `PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED` | 409 | Báo cáo custody exception chưa được Driver/Operator có quyền phê duyệt |
+| | `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED` | 409 | Custody exception request đã được duyệt/từ chối trước đó |
 | | `PARCEL_SEARCH_TASK_NOT_FOUND` | 404 | Search task không tồn tại hoặc bị tenant-mask |
 | | `PARCEL_SEARCH_TASK_MISMATCH` | 409 | Search task không thuộc incident được chỉ định |
 | | `PARCEL_SEARCH_SLA_NOT_EXPIRED` | 409 | Operator declare-lost trước search deadline |
@@ -2502,7 +2505,7 @@ Parcel custody reconciliation; a positive exact Booking pending-count result add
 | `parcel.parcel.transfer_initiated` | Parcel | Notification | `{ parcelId, originalTripId, newTripId }` |
 | `parcel.refund.initiated` | Parcel | Payment | Exact `{ eventId, occurredAt, parcelId, senderUserId, amount, referenceType:"PARCEL_REFUND", referenceId, reason, idempotencyKey }`; sole authoritative Day-32 refund trigger. `referenceId=parcelId`. Allowed `reason` is `TRIP_CANCELLED_PRE_LOAD`, `MANUAL_CANCEL_FULL`, `MANUAL_CANCEL_POLICY`, `OPERATOR_RETURN`, or `TRIP_DISRUPTED_PRE_LOAD`. `idempotencyKey` is the stable UUID-v4 derived once per Parcel + source event/request + refund phase and is reused on retry. Payment dedupes the one-release legacy terminal refund and this canonical fact by `(referenceType,referenceId,idempotencyKey)`, so a partial and later final refund remain distinct while the same phase can create at most one wallet credit/ledger entry. |
 | `parcel.custody.event_recorded` | Parcel | None in v1 (registered audit/extension fact) | `{ eventId,occurredAt,custodyEventId,parcelId,tripId,operatorId,eventType,actualLocationType?,actualLocationId? }`; emitted for every accepted lifecycle/manual scan from the same transaction; no evidence URL, token, reason or actor PII. |
-| `parcel.incident.opened` | Parcel | Notification | Required common `{ incidentId,parcelId,operatorId,type,searchDeadline }` plus source-specific Trip/stop/reporter/last-location fields; opens sender/recipient/operator search communication without exposing internal notes. |
+| `parcel.incident.opened` | Parcel | Notification | Required common `{ incidentId,parcelId,operatorId,type,searchDeadline }` plus source-specific Trip/stop/reporter/last-location fields; opens sender/recipient/operator search communication without exposing internal notes. For assistant custody exceptions it is emitted only after the assigned Driver or same-tenant Operator Staff/Admin approves; the pending report emits no passenger search notification. |
 | `parcel.incident.updated` | Parcel | Notification | Required common `{ incidentId,parcelId,status }` plus transition-specific operator/location/forwarding/resolution fields; statuses include `FOUND|FORWARDING|RESOLVED|LOST_CONFIRMED`. |
 | `parcel.claim.submitted` | Parcel | Notification | `{ claimId,parcelId,incidentId,operatorId,beneficiaryUserId,policyVersion }`; sender is always beneficiary. |
 | `parcel.claim.decided` | Parcel | Payment (only `APPROVED`), Notification | `{ claimId,parcelId,tripId?,operatorId,status:APPROVED\|REJECTED,totalAwardVnd,beneficiaryUserId }`; Payment requires non-null Trip and positive award only for `APPROVED`, and unique payout is keyed by claimId. |
@@ -3300,6 +3303,17 @@ leg. Default search/decision/payout SLA is 72 hours / 7 business days / 3 busine
 `LOST_CONFIRMED` marks the remaining active/planned leg `LOST`. A verified `FOUND` cancels remaining
 `OPEN|IN_PROGRESS` search tasks, while `LOST_CONFIRMED` fails them; completed task evidence is never
 overwritten.
+
+Assistant manual custody exceptions use a two-step approval aggregate. The assigned Assistant
+submits the observed location/evidence and the system opens an approval-pending incident and
+quarantines the Parcel in `PENDING_OPERATOR_ACTION/CUSTODY_EXCEPTION`; it does not append
+`MANUAL_CUSTODY_EXCEPTION`, start the search SLA, create search tasks, or permit
+found/forward/lost/claim actions yet. The assigned Driver or a same-tenant
+`OPERATOR_STAFF|OPERATOR_ADMIN` approves or rejects using the reviewer identity from that
+reviewer's own JWT. Approval appends the custody fact, starts the search SLA/tasks, and freezes
+reviewer audit; rejection
+resolves the report as `SUPERVISOR_REJECTED`, restores the frozen Parcel resume status, and never
+creates a custody fact. Public request bodies must never accept a reviewer/supervisor user UUID.
 
 ### 8.3.2 Parcel Reliability FE read-model rule
 
@@ -4333,6 +4347,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.81.0** | 2026-08-28 | Codex | **MINOR** — Replace the unsafe assistant-supplied `supervisorApprovalUserId` custody exception contract with a two-step, JWT-attributed approval aggregate. Assistant submission quarantines the Parcel in approval-pending state without a custody fact, search SLA/tasks, passenger search notification, or lost/claim eligibility; the assigned Driver or same-tenant Operator Staff/Admin can inspect and approve/reject. Approval appends `MANUAL_CUSTODY_EXCEPTION`, starts search/tasks and publishes `parcel.incident.opened`; rejection restores the frozen Parcel state. A transactional row lock plus concurrency token prevents double decisions. Adds two mutations, one Driver read, one reversible Parcel migration, and three error codes; no dependency or Gateway family is added. |
 | **1.80.0** | 2026-08-25 | Codex | **MINOR** — Freeze migration of Vietnam routing runtime from Google Routes to Goong Directions plus Local fallback. Require ordered target chains, configurable chunks defaulting to 10, cumulative leg metrics, strict whole-batch validation and secret-safe logging. Tracking retains fallback/cooldown; Trip planned ETA retains Route-baseline fallback while Shuttle distance and reposition remain fail closed. Add public `ROUTE_BASED`, preserve persisted historical `GOOGLE_ROUTES → TRAFFIC_AWARE`, and map `GOONG → ROUTE_BASED`, `ROUTE_BASELINE`/Local → `FALLBACK`. No endpoint, event, error code, Gateway family or dependency is added; Google OAuth and Google Maps display SDK remain unchanged. |
 | **1.79.0** | 2026-08-25 | Codex | **MINOR** — Complete Vehicle Substitution B1–B7: add explicit insufficient-seat acknowledgement with ADR 0004 fields; persist optional seat-type downgrade evidence; replace stale pending-seat actions with owner/operator shortage alerts; add two-hour BookingTransfer escalation with late confirmation; make notification overrides compatible with `PENDING` and no-seat transfers; and distinguish replacement Trip zero-net settlement markers using optional `trip.completed.source` plus persisted `cancel_reason`. No automatic downgrade refund or delay compensation, no new read API, and no dependency. |
 | **1.78.0** | 2026-08-22 | Codex | **MINOR** — Close Operator Shuttle notification gaps: add transactional `trip.shuttle.started` and `trip.shuttle.reassigned` facts, notify Passenger/old-new Driver/active Operator Admin and Staff as appropriate, notify the assigned Driver on full-trip cancellation, and preserve booking/pickup context in `OPEN_SHUTTLE_TRACKING`. Adds two Notification enum values and one deployable Prisma migration; no dashboard, FE implementation or new dependency. |

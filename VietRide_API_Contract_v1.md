@@ -4715,14 +4715,42 @@ Body:
   "description": "Kiện dỡ ngoài luồng scan",
   "observedWeightKg": 12.5,
   "evidenceUrls": ["https://..."],
-  "reason": "Physical unload already occurred",
-  "supervisorApprovalUserId": "uuid"
+  "reason": "Physical unload already occurred"
 }
 ```
 
-Creates append-only `MANUAL_CUSTODY_EXCEPTION`, opens an incident, and moves the Parcel to
-`PENDING_OPERATOR_ACTION/CUSTODY_EXCEPTION` with its resume status. It does not falsify a normal
-unload event.
+Requires the assigned Assistant's JWT and `Idempotency-Key`. Returns `202` with
+`{requestId,parcelId,incidentId,incidentType,incidentStatus,status,actualLocationType,
+actualLocationId,locationSnapshot,temporaryExceptionTag,description,observedWeightKg,
+evidenceReferences,reason,reportedByUserId,reportedByRole,reportedAt,reviewedAt,reviewedByRole,
+reviewedByUserId,reviewNote,approvedCustodyEventId,searchDeadline,availableActions}` where
+`searchDeadline=null` while approval is pending. Submission opens the
+approval-pending incident and moves the Parcel to `PENDING_OPERATOR_ACTION/CUSTODY_EXCEPTION`, but
+does not append `MANUAL_CUSTODY_EXCEPTION`, start the search SLA/tasks, or allow recovery, lost or
+claim actions until approval.
+
+#### GET `/v1/crew/parcels/{parcelId}/custody-exception`
+
+Assigned Driver only. Returns the latest report with physical location, reason/evidence, review
+audit and `availableActions=[APPROVE,REJECT]` while pending. This lets Driver Mobile render the
+review screen without trusting any assistant-supplied reviewer identity.
+
+#### POST `/v1/crew/parcels/{parcelId}/custody-exception-decision`
+
+Assigned Driver only. Body `{ "decision": "APPROVE|REJECT", "note": "optional" }`. Reviewer
+identity is taken from the Driver JWT; no reviewer UUID is accepted. Approval appends the reported
+`MANUAL_CUSTODY_EXCEPTION` and starts the search SLA/tasks. Rejection records `SUPERVISOR_REJECTED`, closes the false report, and
+restores the Parcel resume status. Returns the updated approval request.
+
+#### POST `/v1/operator/parcel-incidents/{incidentId}/custody-exception-decision`
+
+Same behavior for same-tenant `OPERATOR_STAFF|OPERATOR_ADMIN`. The reviewer identity and role are
+taken from the caller JWT. Both decision endpoints require `Idempotency-Key`; a second decision
+returns `409 PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED`.
+
+`GET /v1/operator/parcel-incidents/{incidentId}` includes nullable `custodyExceptionApproval`
+with the same report/evidence/review shape, so Operator Web can review and decide from one detail
+request.
 
 #### POST `/v1/assistant/trips/{tripId}/stops/{stopId}/reconcile`
 
@@ -4843,7 +4871,9 @@ never exposed through Gateway.
 `PARCEL_CUSTODY_EVENT_DUPLICATE`, `PARCEL_CUSTODY_EVENT_NOT_FOUND`,
 `SCAN_IDENTITY_MISMATCH`, `PACKAGE_IDENTITY_MISMATCH`,
 `UNIDENTIFIED_PACKAGE_NOT_FOUND`, `PARCEL_INCIDENT_NOT_FOUND`, `PARCEL_INCIDENT_ALREADY_OPEN`,
-`PARCEL_INCIDENT_INVALID_STATUS`, `PARCEL_SEARCH_TASK_NOT_FOUND`, `PARCEL_SEARCH_TASK_MISMATCH`,
+`PARCEL_INCIDENT_INVALID_STATUS`, `PARCEL_CUSTODY_EXCEPTION_REQUEST_NOT_FOUND`,
+`PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED`,
+`PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED`, `PARCEL_SEARCH_TASK_NOT_FOUND`, `PARCEL_SEARCH_TASK_MISMATCH`,
 `PARCEL_SEARCH_SLA_NOT_EXPIRED`, `PARCEL_CLAIM_NOT_FOUND`, `PARCEL_CLAIM_WINDOW_NOT_OPEN`,
 `PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED`, `PARCEL_CLAIM_ALREADY_EXISTS`,
 `PARCEL_CLAIM_EVIDENCE_REQUIRED`, `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY`,

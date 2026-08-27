@@ -6,6 +6,7 @@ using VietRide.Parcel.Api.Filters;
 using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Application.Features.Parcels.ResendDeliveryEmail;
+using VietRide.Parcel.Application.Features.Reliability.CustodyException;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 
@@ -21,6 +22,57 @@ public sealed class CrewParcelsController : ControllerBase
     public CrewParcelsController(IMediator mediator)
     {
         _mediator = mediator;
+    }
+
+    [HttpGet("{parcelId:guid}/custody-exception")]
+    [Authorize(Roles = "DRIVER")]
+    [ProducesResponseType(typeof(ApiResponse<ReportCustodyExceptionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ReportCustodyExceptionResponse>> GetCustodyExceptionAsync(
+        Guid parcelId,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new GetCustodyExceptionRequestQuery(
+                parcelId,
+                CurrentUserClaims.GetUserId(User),
+                operatorId,
+                CurrentUserClaims.GetRole(User)),
+            cancellationToken));
+    }
+
+    [HttpPost("{parcelId:guid}/custody-exception-decision")]
+    [Authorize(Roles = "DRIVER")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<ReportCustodyExceptionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ReportCustodyExceptionResponse>> DecideCustodyExceptionAsync(
+        Guid parcelId,
+        [FromBody] DecideCustodyExceptionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        var result = await _mediator.Send(
+            new DecideCustodyExceptionCommand(
+                parcelId,
+                "PARCEL",
+                CurrentUserClaims.GetUserId(User),
+                operatorId,
+                CurrentUserClaims.GetRole(User),
+                request.Decision?.Trim().ToUpperInvariant() ?? string.Empty,
+                request.Note,
+                Guid.Parse(Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString())),
+            cancellationToken);
+        return Ok(result);
     }
 
     [HttpPost("{parcelId:guid}/confirm-transfer")]

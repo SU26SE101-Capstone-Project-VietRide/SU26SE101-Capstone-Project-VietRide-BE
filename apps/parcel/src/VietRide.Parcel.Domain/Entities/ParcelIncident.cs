@@ -66,11 +66,13 @@ public sealed class ParcelIncident : BaseEntity<Guid>
         };
     }
 
-    public void StartSearch()
+    public void StartSearch(DateTimeOffset? searchDeadline = null)
     {
         if (Status != ParcelIncidentStatus.OPEN)
             throw new InvalidOperationException("Only open incidents can enter search.");
         Status = ParcelIncidentStatus.SEARCHING;
+        if (searchDeadline.HasValue)
+            SearchDeadline = searchDeadline.Value;
     }
 
     public void MarkFound(string? note)
@@ -99,6 +101,23 @@ public sealed class ParcelIncident : BaseEntity<Guid>
         ResolutionCode = Normalize(resolutionCode) ?? throw new ArgumentException("Resolution code is required.");
         ResolutionNote = Normalize(note);
         ResolvedAt = resolvedAt;
+    }
+
+    public void RejectReport(string? note, DateTimeOffset resolvedAt)
+    {
+        if (Status is not (ParcelIncidentStatus.OPEN or ParcelIncidentStatus.SEARCHING))
+            throw new InvalidOperationException("Only an open or searching report can be rejected.");
+        Status = ParcelIncidentStatus.RESOLVED;
+        ResolutionCode = "SUPERVISOR_REJECTED";
+        ResolutionNote = Normalize(note);
+        ResolvedAt = resolvedAt;
+    }
+
+    public void MarkOperatorProcessBreach()
+    {
+        if (Status is ParcelIncidentStatus.CLOSED or ParcelIncidentStatus.RESOLVED)
+            throw new InvalidOperationException("A closed incident cannot be marked as a process breach.");
+        OperatorProcessBreach = true;
     }
 
     public void Escalate(DateTimeOffset at)

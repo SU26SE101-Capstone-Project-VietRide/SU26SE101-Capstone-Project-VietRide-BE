@@ -249,15 +249,24 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
         query = slaState?.ToUpperInvariant() switch
         {
             "BREACHED" => query.Where(incident => incident.SearchDeadline < now
+                && !_db.ParcelCustodyExceptionRequests.Any(request =>
+                    request.IncidentId == incident.Id
+                    && request.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL)
                 && incident.Status != ParcelIncidentStatus.CLOSED
                 && incident.Status != ParcelIncidentStatus.RESOLVED
                 && incident.Status != ParcelIncidentStatus.LOST_CONFIRMED),
             "DUE_SOON" => query.Where(incident => incident.SearchDeadline >= now
                 && incident.SearchDeadline <= now.AddHours(2)
+                && !_db.ParcelCustodyExceptionRequests.Any(request =>
+                    request.IncidentId == incident.Id
+                    && request.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL)
                 && incident.Status != ParcelIncidentStatus.CLOSED
                 && incident.Status != ParcelIncidentStatus.RESOLVED
                 && incident.Status != ParcelIncidentStatus.LOST_CONFIRMED),
             "ON_TRACK" => query.Where(incident => incident.SearchDeadline > now.AddHours(2)
+                && !_db.ParcelCustodyExceptionRequests.Any(request =>
+                    request.IncidentId == incident.Id
+                    && request.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL)
                 && incident.Status != ParcelIncidentStatus.CLOSED
                 && incident.Status != ParcelIncidentStatus.RESOLVED
                 && incident.Status != ParcelIncidentStatus.LOST_CONFIRMED),
@@ -327,8 +336,7 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
         CancellationToken ct = default)
         => await _db.ParcelIncidents
             .Where(x => x.SearchDeadline <= now
-                && (x.Status == ParcelIncidentStatus.OPEN
-                    || x.Status == ParcelIncidentStatus.SEARCHING
+                && (x.Status == ParcelIncidentStatus.SEARCHING
                     || x.Status == ParcelIncidentStatus.ESCALATED
                     || x.Status == ParcelIncidentStatus.SEARCH_EXPIRED))
             .OrderBy(x => x.SearchDeadline)
