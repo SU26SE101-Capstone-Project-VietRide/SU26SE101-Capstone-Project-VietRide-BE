@@ -7204,6 +7204,46 @@ History items also expose nullable dispatch audit data: `notes`, `createdAt`, `c
 Rows created before audit capture may return null actor IDs. Cancellation writes dedicated audit
 fields and does not append or parse cancellation text in `notes`.
 
+Assignment audit is exposed separately and is immutable. The additive `latestAssignment` field is
+nullable; it is the most recent assignment action and must not be inferred from `createdBy`:
+
+```json
+"latestAssignment": {
+  "action": "REASSIGNED",
+  "assignedAt": "2026-08-27T15:30:00+07:00",
+  "assignedBy": {
+    "userId": "uuid",
+    "displayName": "Trần Minh Bình",
+    "role": "OPERATOR_ADMIN"
+  },
+  "reason": "Xe cũ gặp sự cố"
+}
+```
+
+`latestAssignment` is `null` for ShuttleTrip rows created before assignment-audit capture. The
+legacy `createdBy` field remains in the response for compatibility, but it only identifies the
+actor who created the ShuttleTrip and is never the fallback for the current assigner.
+
+### GET `/v1/operator/shuttle-trips/{shuttleTripId}/assignment-history`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant is taken from the JWT. A missing ShuttleTrip or
+a ShuttleTrip owned by another tenant is masked as `404 SHUTTLE_TRIP_NOT_FOUND`.
+
+Query: `page` (default `1`) and `pageSize` (default `20`, maximum `100`). Response `200` is
+`PagedResult<ShuttleAssignmentHistoryItemDto>`, sorted by `assignedAt DESC` (newest first). Each
+item contains `id`, `action` (`INITIAL_ASSIGNED` or `REASSIGNED`), `assignedAt`, `assignedBy`
+(`userId`, display name, role), nullable `reason`, `previousDriver`, `currentDriver`,
+`previousVehicle`, and `currentVehicle`. Driver snapshots contain `id` and nullable
+`displayName`; vehicle snapshots contain `id` and `licensePlate`.
+
+The initial create writes exactly one `INITIAL_ASSIGNED` record. Reassignment writes a
+`REASSIGNED` record only when the driver or vehicle actually changes; a same-assignment replay
+does not create another audit record or `trip.shuttle.reassigned` event. Audit, assignment,
+reservations and Outbox are committed atomically. Identity transport failures return
+`503 UPSTREAM_UNAVAILABLE`; a missing/inactive actor or actor from another operator returns
+`403 FORBIDDEN`. The existing create/reassign response shapes and `trip.shuttle.reassigned`
+payload are unchanged.
+
 ### GET `/v1/operator/shuttle-trips/{shuttleTripId}/passengers`
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`, scoped to the operator tenant from JWT. Response groups
@@ -10244,6 +10284,45 @@ Auth: `OPERATOR_ADMIN|OPERATOR_STAFF`; tenant comes only from the JWT. Query acc
 Internal Trip Route search and applies returned route IDs before count/paging. It does not persist
 or denormalize Route/Station names. No route match returns a normal empty page; Trip lookup failure
 returns `503 UPSTREAM_UNAVAILABLE`.
+
+The list is grouped and paged by distinct `routeId`; one route occupies one item and `totalItems`
+counts routes rather than physical fare rows. Each item is `{routeId,fares}` where `fares` contains
+only persisted rows, ordered `SMALL|MEDIUM|LARGE|EXTRA_LARGE`, and each fare is
+`{sizeCategory,priceVnd,effectiveFrom,effectiveUntil}`. Route, size, search and effective-window
+filters select qualifying routes; after route paging, every persisted fare for each selected route
+is returned so clients can render one batch-edit form. Missing categories are omitted rather than
+synthesized.
+
+```json
+{
+  "items": [
+    {
+      "routeId": "11111111-1111-1111-1111-111111111111",
+      "fares": [
+        {
+          "sizeCategory": "SMALL",
+          "priceVnd": 10000,
+          "effectiveFrom": "2026-08-27T16:30:00Z",
+          "effectiveUntil": null
+        }
+      ]
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "totalItems": 1,
+  "totalPages": 1,
+  "hasNextPage": false,
+  "hasPreviousPage": false
+}
+```
+
+`sortBy=priceVnd|effectiveFrom` remains route-level: ascending uses the minimum value among fare
+rows that satisfy the filters, descending uses the maximum, and `routeId` in the same direction is
+the deterministic tie-break. The default remains `effectiveFrom desc`. Clients compare the
+returned `(effectiveFrom,effectiveUntil)` pairs: a mixed route must require an explicit common
+window and confirmation before calling the batch endpoint, because that write normalizes every
+submitted category to the request-level window.
 
 ### PUT `/v1/operator/parcel-route-fares/{routeId}/batch`
 

@@ -32,6 +32,13 @@ public interface IShuttleDispatchService
         Guid shuttleTripId,
         CancellationToken cancellationToken);
 
+    Task<PagedResult<ShuttleAssignmentHistoryItemDto>> GetAssignmentHistoryAsync(
+        Guid operatorId,
+        Guid shuttleTripId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<OperatorTrackingShuttleTripDto>> GetTrackingProjectionAsync(
         Guid operatorId,
         CancellationToken cancellationToken);
@@ -127,6 +134,7 @@ public sealed record CreateShuttleTripResult(
 
 public sealed record ReassignShuttleTripInput(
     Guid OperatorId,
+    Guid ActorUserId,
     Guid ShuttleTripId,
     Guid? DriverUserId,
     Guid? VehicleId,
@@ -191,7 +199,42 @@ public sealed record OperatorShuttleTripListItemDto(
     Guid? CreatedBy,
     DateTimeOffset? CancelledAt,
     string? CancelReason,
-    Guid? CancelledBy);
+    Guid? CancelledBy,
+    ShuttleLatestAssignmentDto? LatestAssignment);
+
+public sealed record ShuttleAssignmentActorDto(
+    Guid UserId,
+    string DisplayName,
+    string Role);
+
+public sealed record ShuttleAssignmentDriverDto(Guid Id, string? DisplayName);
+
+public sealed record ShuttleAssignmentVehicleDto(Guid Id, string LicensePlate);
+
+public sealed record ShuttleLatestAssignmentDto(
+    string Action,
+    DateTimeOffset AssignedAt,
+    ShuttleAssignmentActorDto AssignedBy,
+    string? Reason);
+
+public sealed record ShuttleAssignmentHistoryItemDto(
+    Guid Id,
+    string Action,
+    DateTimeOffset AssignedAt,
+    ShuttleAssignmentActorDto AssignedBy,
+    string? Reason,
+    ShuttleAssignmentDriverDto? PreviousDriver,
+    ShuttleAssignmentDriverDto CurrentDriver,
+    ShuttleAssignmentVehicleDto? PreviousVehicle,
+    ShuttleAssignmentVehicleDto CurrentVehicle);
+
+public sealed record ShuttleAssignmentAuditMetadata(
+    ShuttleAssignmentActorDto AssignedBy,
+    string? Reason,
+    ShuttleAssignmentDriverDto? PreviousDriver,
+    ShuttleAssignmentDriverDto CurrentDriver,
+    ShuttleAssignmentVehicleDto? PreviousVehicle,
+    ShuttleAssignmentVehicleDto CurrentVehicle);
 
 public sealed record OperatorShuttleMainTripDto(
     Guid TripId,

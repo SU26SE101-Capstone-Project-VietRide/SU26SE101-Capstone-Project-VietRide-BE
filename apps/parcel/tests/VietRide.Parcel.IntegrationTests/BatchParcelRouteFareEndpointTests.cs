@@ -401,13 +401,80 @@ public sealed class BatchParcelRouteFareEndpointTests
         using var json = JsonDocument.Parse(await list.Content.ReadAsStringAsync());
         var items = json.RootElement.GetProperty("data").GetProperty("items").EnumerateArray().ToArray();
         items.Should().ContainSingle();
-        items.Single().GetProperty("priceVnd").GetInt64().Should().Be(95_000);
+        var fares = items.Single().GetProperty("fares").EnumerateArray().ToArray();
+        fares.Should().ContainSingle();
+        fares.Single().GetProperty("priceVnd").GetInt64().Should().Be(95_000);
+    }
+
+    [Fact]
+    public async Task ListParcelRouteFares_GroupsPagesAndPriceSortsRoutesWhileReturningAllFares()
+    {
+        await factory.InitializeDatabaseAsync();
+        var operatorId = Guid.NewGuid();
+        var cheaperRouteId = Guid.NewGuid();
+        var expensiveRouteId = Guid.NewGuid();
+        var effectiveFrom = new DateTimeOffset(2026, 8, 27, 16, 30, 0, TimeSpan.Zero);
+        await factory.SeedFareAsync(
+            operatorId,
+            cheaperRouteId,
+            ParcelSizeCategory.SMALL,
+            10_000,
+            effectiveFrom,
+            effectiveFrom.AddMonths(1));
+        await factory.SeedFareAsync(
+            operatorId,
+            cheaperRouteId,
+            ParcelSizeCategory.MEDIUM,
+            20_000,
+            effectiveFrom.AddDays(1));
+        await factory.SeedFareAsync(
+            operatorId,
+            cheaperRouteId,
+            ParcelSizeCategory.LARGE,
+            30_000,
+            effectiveFrom.AddDays(2));
+        await factory.SeedFareAsync(
+            operatorId,
+            cheaperRouteId,
+            ParcelSizeCategory.EXTRA_LARGE,
+            40_000,
+            effectiveFrom.AddDays(3));
+        await factory.SeedFareAsync(
+            operatorId,
+            expensiveRouteId,
+            ParcelSizeCategory.SMALL,
+            50_000,
+            effectiveFrom);
+        await factory.SeedFareAsync(
+            operatorId,
+            expensiveRouteId,
+            ParcelSizeCategory.MEDIUM,
+            60_000,
+            effectiveFrom);
+
+        using var client = factory.CreateAuthenticatedClient("OPERATOR_ADMIN", operatorId);
+        var response = await client.GetAsync(
+            "/v1/operator/parcel-route-fares?sizeCategory=SMALL&sortBy=priceVnd&sortDir=asc&page=1&pageSize=1");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = json.RootElement.GetProperty("data");
+        data.GetProperty("totalItems").GetInt64().Should().Be(2);
+        data.GetProperty("totalPages").GetInt32().Should().Be(2);
+        var groups = data.GetProperty("items").EnumerateArray().ToArray();
+        groups.Should().ContainSingle();
+        groups.Single().GetProperty("routeId").GetGuid().Should().Be(cheaperRouteId);
+        var fares = groups.Single().GetProperty("fares").EnumerateArray().ToArray();
+        fares.Select(fare => fare.GetProperty("sizeCategory").GetString())
+            .Should().Equal("SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE");
+        fares.Single(fare => fare.GetProperty("sizeCategory").GetString() == "SMALL")
+            .GetProperty("effectiveUntil")
+            .ValueKind.Should().Be(JsonValueKind.String);
     }
 
     [Fact]
     public async Task BatchParcelRouteFare_SwaggerDocumentsOperationResponsesAndIdempotencyHeader()
     {
-        await factory.InitializeDatabaseAsync();
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync("/swagger/v1/swagger.json");
@@ -429,6 +496,18 @@ public sealed class BatchParcelRouteFareEndpointTests
         responses.TryGetProperty("409", out _).Should().BeTrue();
         responses.TryGetProperty("422", out _).Should().BeTrue();
         responses.TryGetProperty("503", out _).Should().BeTrue();
+
+        var schemas = json.RootElement
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .EnumerateObject();
+        var groupedListSchema = schemas.Single(schema =>
+            schema.Name.Contains("ParcelRouteFareGroupResponse", StringComparison.Ordinal)
+            && schema.Value.TryGetProperty("properties", out var schemaProperties)
+            && schemaProperties.TryGetProperty("fares", out _));
+        var properties = groupedListSchema.Value.GetProperty("properties");
+        properties.TryGetProperty("routeId", out _).Should().BeTrue();
+        properties.TryGetProperty("fares", out _).Should().BeTrue();
     }
 
     private static string BatchPath(Guid routeId)
@@ -535,7 +614,9 @@ public sealed class BatchParcelRouteFareWebApplicationFactory : WebApplicationFa
         Guid operatorId,
         Guid routeId,
         ParcelSizeCategory sizeCategory,
-        long priceVnd)
+        long priceVnd,
+        DateTimeOffset? effectiveFrom = null,
+        DateTimeOffset? effectiveUntil = null)
     {
         await using var scope = Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<ParcelDbContext>();
@@ -544,7 +625,8 @@ public sealed class BatchParcelRouteFareWebApplicationFactory : WebApplicationFa
             sizeCategory,
             operatorId,
             Money.FromRaw(priceVnd),
-            new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero)));
+            effectiveFrom ?? new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero),
+            effectiveUntil));
         await db.SaveChangesAsync();
     }
 

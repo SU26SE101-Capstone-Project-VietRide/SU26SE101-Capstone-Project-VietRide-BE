@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
-using VietRide.Parcel.Application.Features.ParcelRouteFares.Create;
+using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
@@ -12,7 +12,8 @@ using VietRide.Shared.Kernel.Time;
 
 namespace VietRide.Parcel.Application.Features.ParcelRouteFares.List;
 
-public sealed class ListParcelRouteFaresQueryHandler : IRequestHandler<ListParcelRouteFaresQuery, PagedResult<ParcelRouteFareResponse>>
+public sealed class ListParcelRouteFaresQueryHandler
+    : IRequestHandler<ListParcelRouteFaresQuery, PagedResult<ParcelRouteFareGroupResponse>>
 {
     private readonly IParcelRouteFareRepository _repository;
     private readonly ITripServiceClient? _tripClient;
@@ -28,7 +29,9 @@ public sealed class ListParcelRouteFaresQueryHandler : IRequestHandler<ListParce
         _clock = clock ?? new SystemClock();
     }
 
-    public async Task<PagedResult<ParcelRouteFareResponse>> Handle(ListParcelRouteFaresQuery query, CancellationToken cancellationToken)
+    public async Task<PagedResult<ParcelRouteFareGroupResponse>> Handle(
+        ListParcelRouteFaresQuery query,
+        CancellationToken cancellationToken)
     {
         if (query.Page < 1)
             throw new CodedValidationException("VALIDATION_ERROR", "Page must be >= 1.");
@@ -82,7 +85,8 @@ public sealed class ListParcelRouteFaresQueryHandler : IRequestHandler<ListParce
                     "UPSTREAM_UNAVAILABLE",
                     routeSearch.Message ?? "Trip route search is unavailable.");
             if (routeSearch.RouteIds.Count == 0)
-                return PagedResult<ParcelRouteFareResponse>.Create([], query.Page, query.PageSize, 0);
+                return PagedResult<ParcelRouteFareGroupResponse>.Create(
+                    [], query.Page, query.PageSize, 0);
             q = q.Where(fare => routeSearch.RouteIds.Contains(fare.RouteId));
         }
 
@@ -103,29 +107,71 @@ public sealed class ListParcelRouteFaresQueryHandler : IRequestHandler<ListParce
             };
         }
 
-        var totalItems = await q.LongCountAsync(cancellationToken);
-
+        var totalItems = await q
+            .Select(fare => fare.RouteId)
+            .Distinct()
+            .LongCountAsync(cancellationToken);
         var descending = sortDir.Equals("desc", StringComparison.OrdinalIgnoreCase);
-        var ordered = sortBy.Equals("priceVnd", StringComparison.OrdinalIgnoreCase)
-            ? descending ? q.OrderByDescending(f => f.PriceVnd) : q.OrderBy(f => f.PriceVnd)
-            : descending ? q.OrderByDescending(f => f.EffectiveFrom) : q.OrderBy(f => f.EffectiveFrom);
-        ordered = descending
-            ? ordered.ThenByDescending(f => f.RouteId).ThenByDescending(f => f.SizeCategory)
-            : ordered.ThenBy(f => f.RouteId).ThenBy(f => f.SizeCategory);
-        var items = await ordered
+        var grouped = q.GroupBy(fare => fare.RouteId);
+        IOrderedQueryable<IGrouping<Guid, ParcelRouteFare>> orderedGroups;
+        if (sortBy.Equals("priceVnd", StringComparison.OrdinalIgnoreCase))
+        {
+            orderedGroups = descending
+                ? grouped.OrderByDescending(group => group.Max(fare => fare.PriceVnd))
+                    .ThenByDescending(group => group.Key)
+                : grouped.OrderBy(group => group.Min(fare => fare.PriceVnd))
+                    .ThenBy(group => group.Key);
+        }
+        else
+        {
+            orderedGroups = descending
+                ? grouped.OrderByDescending(group => group.Max(fare => fare.EffectiveFrom))
+                    .ThenByDescending(group => group.Key)
+                : grouped.OrderBy(group => group.Min(fare => fare.EffectiveFrom))
+                    .ThenBy(group => group.Key);
+        }
+
+        var pageRouteIds = await orderedGroups
             .Skip((query.Page - 1) * query.PageSize)
             .Take(query.PageSize)
-            .Select(f => new ParcelRouteFareResponse(
-                f.RouteId,
-                f.SizeCategory.ToString(),
-                f.OperatorId,
-                f.PriceVnd.Amount,
-                f.EffectiveFrom,
-                f.EffectiveUntil,
-                f.CreatedAt,
-                f.UpdatedAt))
+            .Select(group => group.Key)
             .ToListAsync(cancellationToken);
 
-        return PagedResult<ParcelRouteFareResponse>.Create(items, query.Page, query.PageSize, totalItems);
+        if (pageRouteIds.Count == 0)
+        {
+            return PagedResult<ParcelRouteFareGroupResponse>.Create(
+                [], query.Page, query.PageSize, totalItems);
+        }
+
+        var pageFares = await _repository.QueryNoTracking()
+            .Where(fare => fare.OperatorId == query.OperatorId
+                && pageRouteIds.Contains(fare.RouteId))
+            .OrderBy(fare => fare.RouteId)
+            .ThenBy(fare => fare.SizeCategory)
+            .Select(fare => new
+            {
+                fare.RouteId,
+                Fare = new ParcelRouteFareListItemResponse(
+                    fare.SizeCategory.ToString(),
+                    fare.PriceVnd.Amount,
+                    fare.EffectiveFrom,
+                    fare.EffectiveUntil),
+            })
+            .ToListAsync(cancellationToken);
+        var faresByRoute = pageFares
+            .GroupBy(item => item.RouteId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<ParcelRouteFareListItemResponse>)group
+                    .Select(item => item.Fare)
+                    .ToArray());
+        var items = pageRouteIds
+            .Select(routeId => new ParcelRouteFareGroupResponse(
+                routeId,
+                faresByRoute.TryGetValue(routeId, out var fares) ? fares : []))
+            .ToArray();
+
+        return PagedResult<ParcelRouteFareGroupResponse>.Create(
+            items, query.Page, query.PageSize, totalItems);
     }
 }

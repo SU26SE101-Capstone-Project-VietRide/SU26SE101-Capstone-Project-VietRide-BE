@@ -70,6 +70,24 @@ public sealed class OperatorShuttleController : ControllerBase
             cancellationToken));
     }
 
+    [HttpGet("shuttle-trips/{shuttleTripId:guid}/assignment-history")]
+    [Authorize(Roles = "OPERATOR_ADMIN,OPERATOR_STAFF")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ShuttleAssignmentHistoryItemDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PagedResult<ShuttleAssignmentHistoryItemDto>>> GetAssignmentHistory(
+        Guid shuttleTripId,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+        => Ok(await _sender.Send(
+            new GetShuttleAssignmentHistoryQuery(
+                GetOperatorId(),
+                shuttleTripId,
+                Math.Max(1, page),
+                Math.Clamp(pageSize, 1, 100)),
+            cancellationToken));
+
     [HttpGet("shuttle-requests")]
     [AllowedQueryParameters("page", "pageSize", "from", "to", "mainTripId", "search")]
     [Authorize(Roles = "OPERATOR_STAFF,OPERATOR_ADMIN")]
@@ -131,6 +149,7 @@ public sealed class OperatorShuttleController : ControllerBase
         => Ok(await _sender.Send(
             new ReassignShuttleTripCommand(
                 GetOperatorId(),
+                CurrentUserClaims.GetUserId(User),
                 shuttleTripId,
                 request.DriverUserId,
                 request.VehicleId,

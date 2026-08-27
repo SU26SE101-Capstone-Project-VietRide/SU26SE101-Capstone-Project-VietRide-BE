@@ -14,6 +14,7 @@ public sealed class ReassignShuttleTripTests
         var command = new ReassignShuttleTripCommand(
             Guid.NewGuid(),
             Guid.NewGuid(),
+            Guid.NewGuid(),
             null,
             null,
             " ");
@@ -30,6 +31,7 @@ public sealed class ReassignShuttleTripTests
     {
         var validator = new ReassignShuttleTripCommandValidator();
         var common = new ReassignShuttleTripCommand(
+            Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
@@ -54,6 +56,7 @@ public sealed class ReassignShuttleTripTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid(),
+            Guid.NewGuid(),
             null,
             "Driver unavailable");
         var expected = new ReassignShuttleTripResult(
@@ -69,6 +72,7 @@ public sealed class ReassignShuttleTripTests
 
             var input = Assert.IsType<ReassignShuttleTripInput>(args![0]);
             input.OperatorId.Should().Be(command.OperatorId);
+            input.ActorUserId.Should().Be(command.ActorUserId);
             input.ShuttleTripId.Should().Be(command.ShuttleTripId);
             input.DriverUserId.Should().Be(command.DriverUserId);
             input.VehicleId.Should().BeNull();
