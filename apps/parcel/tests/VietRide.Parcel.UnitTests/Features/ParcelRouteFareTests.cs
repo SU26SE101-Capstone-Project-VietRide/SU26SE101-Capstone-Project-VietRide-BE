@@ -209,8 +209,9 @@ public sealed class ParcelRouteFareTests
         var fares = new List<ParcelRouteFare>
         {
             CreateFare(routeId, ParcelSizeCategory.SMALL, operatorA, 50_000, Now),
+            CreateFare(routeId, ParcelSizeCategory.MEDIUM, operatorA, 80_000, Now),
             CreateFare(Guid.NewGuid(), ParcelSizeCategory.MEDIUM, operatorA, 80_000, Now),
-            CreateFare(Guid.NewGuid(), ParcelSizeCategory.LARGE, operatorB, 100_000, Now),
+            CreateFare(routeId, ParcelSizeCategory.LARGE, operatorB, 100_000, Now),
         };
 
         var repo = Substitute.For<IParcelRouteFareRepository>();
@@ -223,7 +224,9 @@ public sealed class ParcelRouteFareTests
 
         result.Items.Should().HaveCount(2);
         result.TotalItems.Should().Be(2);
-        result.Items.Should().AllSatisfy(r => r.OperatorId.Should().Be(operatorA));
+        result.Items.Single(item => item.RouteId == routeId).Fares
+            .Select(fare => fare.SizeCategory)
+            .Should().Equal("SMALL", "MEDIUM");
         result.Page.Should().Be(1);
         result.PageSize.Should().Be(20);
     }
@@ -252,33 +255,38 @@ public sealed class ParcelRouteFareTests
         result.Items.Should().ContainSingle();
         result.TotalItems.Should().Be(1);
         result.Items.Single().RouteId.Should().Be(routeId);
-        result.Items.Single().SizeCategory.Should().Be("SMALL");
+        result.Items.Single().Fares.Select(fare => fare.SizeCategory)
+            .Should().Equal("SMALL", "MEDIUM", "LARGE");
     }
 
     [Fact]
     public async Task List_SupportsPagination()
     {
-        var fares = Enumerable.Range(0, 25)
-            .Select(i => CreateFare(
-                Guid.NewGuid(),
-                (ParcelSizeCategory)(i % 4),
-                OperatorId,
-                50_000 + i * 1000,
-                Now.AddDays(-i)))
+        var routeIds = Enumerable.Range(0, 12).Select(_ => Guid.NewGuid()).ToArray();
+        var fares = routeIds
+            .SelectMany((routeId, routeIndex) => Enum.GetValues<ParcelSizeCategory>()
+                .Select(sizeCategory => CreateFare(
+                    routeId,
+                    sizeCategory,
+                    OperatorId,
+                    50_000 + routeIndex * 1000 + (int)sizeCategory,
+                    Now.AddDays(-routeIndex))))
             .ToList();
 
         var repo = Substitute.For<IParcelRouteFareRepository>();
         repo.QueryNoTracking().Returns(fares.AsAsyncQueryable());
 
         var handler = new ListParcelRouteFaresQueryHandler(repo);
-        var query = new ListParcelRouteFaresQuery(OperatorId, null, null, 2, 10);
+        var query = new ListParcelRouteFaresQuery(OperatorId, null, null, 2, 5);
 
         var result = await handler.Handle(query, CancellationToken.None);
 
-        result.Items.Should().HaveCount(10);
+        result.Items.Should().HaveCount(5);
+        result.Items.Should().OnlyHaveUniqueItems(item => item.RouteId);
+        result.Items.Should().AllSatisfy(item => item.Fares.Should().HaveCount(4));
         result.Page.Should().Be(2);
-        result.PageSize.Should().Be(10);
-        result.TotalItems.Should().Be(25);
+        result.PageSize.Should().Be(5);
+        result.TotalItems.Should().Be(12);
         result.TotalPages.Should().Be(3);
         result.HasNextPage.Should().BeTrue();
         result.HasPreviousPage.Should().BeTrue();
@@ -331,6 +339,7 @@ public sealed class ParcelRouteFareTests
         var fares = new[]
         {
             ParcelRouteFare.Create(matchingRouteId, ParcelSizeCategory.SMALL, OperatorId, Money.FromRaw(10000), Now, null),
+            ParcelRouteFare.Create(matchingRouteId, ParcelSizeCategory.MEDIUM, OperatorId, Money.FromRaw(15000), Now, null),
             ParcelRouteFare.Create(otherRouteId, ParcelSizeCategory.SMALL, OperatorId, Money.FromRaw(20000), Now, null),
         };
         var repo = Substitute.For<IParcelRouteFareRepository>();
@@ -345,6 +354,114 @@ public sealed class ParcelRouteFareTests
 
         result.TotalItems.Should().Be(1);
         result.Items.Should().ContainSingle(item => item.RouteId == matchingRouteId);
+        result.Items.Single().Fares.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task List_ReturnsCanonicalFareOrderAndPreservesMixedEffectiveWindows()
+    {
+        var routeId = Guid.NewGuid();
+        var smallUntil = Now.AddMonths(1);
+        var fares = new[]
+        {
+            CreateFare(routeId, ParcelSizeCategory.EXTRA_LARGE, OperatorId, 40_000, Now.AddDays(3)),
+            CreateFare(routeId, ParcelSizeCategory.SMALL, OperatorId, 10_000, Now, smallUntil),
+            CreateFare(routeId, ParcelSizeCategory.LARGE, OperatorId, 30_000, Now.AddDays(2)),
+            CreateFare(routeId, ParcelSizeCategory.MEDIUM, OperatorId, 20_000, Now.AddDays(1)),
+        };
+        var repo = Substitute.For<IParcelRouteFareRepository>();
+        repo.QueryNoTracking().Returns(fares.AsAsyncQueryable());
+
+        var result = await new ListParcelRouteFaresQueryHandler(repo).Handle(
+            new ListParcelRouteFaresQuery(OperatorId, routeId, null, 1, 20),
+            CancellationToken.None);
+
+        var groupedFares = result.Items.Single().Fares;
+        groupedFares.Select(fare => fare.SizeCategory)
+            .Should().Equal("SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE");
+        groupedFares.Single(fare => fare.SizeCategory == "SMALL").EffectiveUntil
+            .Should().Be(smallUntil);
+        groupedFares.Single(fare => fare.SizeCategory == "EXTRA_LARGE").EffectiveFrom
+            .Should().Be(Now.AddDays(3));
+    }
+
+    [Fact]
+    public async Task List_EffectiveFromSortAggregatesQualifyingFaresAndUsesRouteIdTieBreak()
+    {
+        var lowerRouteId = Guid.Parse("10000000-0000-0000-0000-000000000000");
+        var higherRouteId = Guid.Parse("20000000-0000-0000-0000-000000000000");
+        var newestRouteId = Guid.Parse("30000000-0000-0000-0000-000000000000");
+        var fares = new[]
+        {
+            CreateFare(lowerRouteId, ParcelSizeCategory.SMALL, OperatorId, 10_000, Now),
+            CreateFare(lowerRouteId, ParcelSizeCategory.MEDIUM, OperatorId, 20_000, Now.AddDays(1)),
+            CreateFare(higherRouteId, ParcelSizeCategory.SMALL, OperatorId, 11_000, Now),
+            CreateFare(higherRouteId, ParcelSizeCategory.MEDIUM, OperatorId, 21_000, Now.AddDays(1)),
+            CreateFare(newestRouteId, ParcelSizeCategory.SMALL, OperatorId, 12_000, Now.AddDays(2)),
+        };
+        var repo = Substitute.For<IParcelRouteFareRepository>();
+        repo.QueryNoTracking().Returns(fares.AsAsyncQueryable());
+        var handler = new ListParcelRouteFaresQueryHandler(repo);
+
+        var descending = await handler.Handle(
+            new ListParcelRouteFaresQuery(
+                OperatorId, null, null, 1, 20, SortBy: "effectiveFrom", SortDir: "desc"),
+            CancellationToken.None);
+        var ascending = await handler.Handle(
+            new ListParcelRouteFaresQuery(
+                OperatorId, null, null, 1, 20, SortBy: "effectiveFrom", SortDir: "asc"),
+            CancellationToken.None);
+
+        descending.Items.Select(item => item.RouteId)
+            .Should().Equal(newestRouteId, higherRouteId, lowerRouteId);
+        ascending.Items.Select(item => item.RouteId)
+            .Should().Equal(lowerRouteId, higherRouteId, newestRouteId);
+    }
+
+    [Fact]
+    public async Task List_EffectiveFilterSelectsRoutesButReturnsEveryPersistedFareForTheRoute()
+    {
+        var matchingRouteId = Guid.NewGuid();
+        var scheduledOnlyRouteId = Guid.NewGuid();
+        var fares = new[]
+        {
+            CreateFare(
+                matchingRouteId,
+                ParcelSizeCategory.SMALL,
+                OperatorId,
+                10_000,
+                Now.AddDays(-1)),
+            CreateFare(
+                matchingRouteId,
+                ParcelSizeCategory.MEDIUM,
+                OperatorId,
+                20_000,
+                Now.AddDays(2)),
+            CreateFare(
+                scheduledOnlyRouteId,
+                ParcelSizeCategory.SMALL,
+                OperatorId,
+                30_000,
+                Now.AddDays(3)),
+        };
+        var repo = Substitute.For<IParcelRouteFareRepository>();
+        repo.QueryNoTracking().Returns(fares.AsAsyncQueryable());
+
+        var result = await new ListParcelRouteFaresQueryHandler(repo).Handle(
+            new ListParcelRouteFaresQuery(
+                OperatorId,
+                null,
+                null,
+                1,
+                20,
+                EffectiveAt: new DateOnly(2026, 6, 29),
+                Status: "ACTIVE"),
+            CancellationToken.None);
+
+        result.TotalItems.Should().Be(1);
+        result.Items.Should().ContainSingle(item => item.RouteId == matchingRouteId);
+        result.Items.Single().Fares.Select(fare => fare.SizeCategory)
+            .Should().Equal("SMALL", "MEDIUM");
     }
 
     [Fact]
@@ -479,10 +596,21 @@ public sealed class ParcelRouteFareTests
 
     #endregion
 
-    private static ParcelRouteFare CreateFare(Guid routeId, ParcelSizeCategory size, Guid operatorId,
-        long price, DateTimeOffset effectiveFrom)
+    private static ParcelRouteFare CreateFare(
+        Guid routeId,
+        ParcelSizeCategory size,
+        Guid operatorId,
+        long price,
+        DateTimeOffset effectiveFrom,
+        DateTimeOffset? effectiveUntil = null)
     {
-        var fare = ParcelRouteFare.Create(routeId, size, operatorId, Money.FromRaw(price), effectiveFrom);
+        var fare = ParcelRouteFare.Create(
+            routeId,
+            size,
+            operatorId,
+            Money.FromRaw(price),
+            effectiveFrom,
+            effectiveUntil);
         fare.CreatedAt = Now;
         fare.UpdatedAt = Now;
         return fare;

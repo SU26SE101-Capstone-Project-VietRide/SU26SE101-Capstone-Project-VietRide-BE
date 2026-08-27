@@ -57,11 +57,11 @@ public sealed class OperatorParcelRouteFaresController : ControllerBase
     [HttpGet]
     [AllowedQueryParameters("routeId", "sizeCategory", "page", "pageSize", "search", "sortBy", "sortDir", "effectiveAt", "status")]
     [Authorize(Roles = $"{AdminRole},{StaffRole}")]
-    [ProducesResponseType(typeof(ApiResponse<PagedResult<ParcelRouteFareResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ParcelRouteFareGroupResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
-    public async Task<ActionResult<PagedResult<ParcelRouteFareResponse>>> ListAsync(
+    public async Task<ActionResult<PagedResult<ParcelRouteFareGroupResponse>>> ListAsync(
         [FromQuery] Guid? routeId,
         [FromQuery] string? sizeCategory,
         [FromQuery] int page = 1,

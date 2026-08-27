@@ -1,4 +1,3 @@
-using VietRide.Parcel.Application.Features.ParcelRouteFares.Create;
 using VietRide.Shared.Application.Cqrs;
 using VietRide.Shared.Kernel.Primitives;
 
@@ -14,4 +13,4 @@ public sealed record ListParcelRouteFaresQuery(
     string? SortBy = null,
     string? SortDir = null,
     DateOnly? EffectiveAt = null,
-    string? Status = null) : IQuery<PagedResult<ParcelRouteFareResponse>>;
+    string? Status = null) : IQuery<PagedResult<ParcelRouteFareGroupResponse>>;

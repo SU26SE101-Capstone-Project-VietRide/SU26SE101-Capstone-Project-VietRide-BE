@@ -10215,6 +10215,45 @@ Internal Trip Route search and applies returned route IDs before count/paging. I
 or denormalize Route/Station names. No route match returns a normal empty page; Trip lookup failure
 returns `503 UPSTREAM_UNAVAILABLE`.
 
+The list is grouped and paged by distinct `routeId`; one route occupies one item and `totalItems`
+counts routes rather than physical fare rows. Each item is `{routeId,fares}` where `fares` contains
+only persisted rows, ordered `SMALL|MEDIUM|LARGE|EXTRA_LARGE`, and each fare is
+`{sizeCategory,priceVnd,effectiveFrom,effectiveUntil}`. Route, size, search and effective-window
+filters select qualifying routes; after route paging, every persisted fare for each selected route
+is returned so clients can render one batch-edit form. Missing categories are omitted rather than
+synthesized.
+
+```json
+{
+  "items": [
+    {
+      "routeId": "11111111-1111-1111-1111-111111111111",
+      "fares": [
+        {
+          "sizeCategory": "SMALL",
+          "priceVnd": 10000,
+          "effectiveFrom": "2026-08-27T16:30:00Z",
+          "effectiveUntil": null
+        }
+      ]
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "totalItems": 1,
+  "totalPages": 1,
+  "hasNextPage": false,
+  "hasPreviousPage": false
+}
+```
+
+`sortBy=priceVnd|effectiveFrom` remains route-level: ascending uses the minimum value among fare
+rows that satisfy the filters, descending uses the maximum, and `routeId` in the same direction is
+the deterministic tie-break. The default remains `effectiveFrom desc`. Clients compare the
+returned `(effectiveFrom,effectiveUntil)` pairs: a mixed route must require an explicit common
+window and confirmation before calling the batch endpoint, because that write normalizes every
+submitted category to the request-level window.
+
 ### PUT `/v1/operator/parcel-route-fares/{routeId}/batch`
 
 Auth: `OPERATOR_ADMIN`; route ownership comes from JWT tenant. Body:
