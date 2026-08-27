@@ -813,6 +813,25 @@ CREATE INDEX idx_shuttle_trips_vehicle_schedule
     WHERE status IN ('SCHEDULED', 'IN_PROGRESS');
 
 -- -----------------------------------------------------------------------------
+-- shuttle_trip_assignment_audit_logs (append-only)
+-- -----------------------------------------------------------------------------
+CREATE TABLE shuttle_trip_assignment_audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    shuttle_trip_id UUID NOT NULL REFERENCES shuttle_trips (id) ON DELETE RESTRICT,
+    operator_id UUID NOT NULL,
+    actor_user_id UUID NOT NULL,
+    action VARCHAR(32) NOT NULL,
+    metadata JSONB NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_shuttle_trip_assignment_audit_logs_action
+        CHECK (action IN ('INITIAL_ASSIGNED', 'REASSIGNED'))
+);
+
+CREATE INDEX idx_shuttle_assignment_audit_operator_trip_occurred
+    ON shuttle_trip_assignment_audit_logs (operator_id, shuttle_trip_id, occurred_at DESC);
+
+-- -----------------------------------------------------------------------------
 -- shuttle_passengers (manifest)
 -- -----------------------------------------------------------------------------
 CREATE TABLE shuttle_passengers (

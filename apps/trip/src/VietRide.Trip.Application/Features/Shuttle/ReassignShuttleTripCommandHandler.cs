@@ -19,6 +19,7 @@ public sealed class ReassignShuttleTripCommandHandler
         => _service.ReassignAsync(
             new ReassignShuttleTripInput(
                 request.OperatorId,
+                request.ActorUserId,
                 request.ShuttleTripId,
                 request.DriverUserId,
                 request.VehicleId,

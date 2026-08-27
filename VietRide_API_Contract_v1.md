@@ -7174,6 +7174,46 @@ History items also expose nullable dispatch audit data: `notes`, `createdAt`, `c
 Rows created before audit capture may return null actor IDs. Cancellation writes dedicated audit
 fields and does not append or parse cancellation text in `notes`.
 
+Assignment audit is exposed separately and is immutable. The additive `latestAssignment` field is
+nullable; it is the most recent assignment action and must not be inferred from `createdBy`:
+
+```json
+"latestAssignment": {
+  "action": "REASSIGNED",
+  "assignedAt": "2026-08-27T15:30:00+07:00",
+  "assignedBy": {
+    "userId": "uuid",
+    "displayName": "Trần Minh Bình",
+    "role": "OPERATOR_ADMIN"
+  },
+  "reason": "Xe cũ gặp sự cố"
+}
+```
+
+`latestAssignment` is `null` for ShuttleTrip rows created before assignment-audit capture. The
+legacy `createdBy` field remains in the response for compatibility, but it only identifies the
+actor who created the ShuttleTrip and is never the fallback for the current assigner.
+
+### GET `/v1/operator/shuttle-trips/{shuttleTripId}/assignment-history`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Tenant is taken from the JWT. A missing ShuttleTrip or
+a ShuttleTrip owned by another tenant is masked as `404 SHUTTLE_TRIP_NOT_FOUND`.
+
+Query: `page` (default `1`) and `pageSize` (default `20`, maximum `100`). Response `200` is
+`PagedResult<ShuttleAssignmentHistoryItemDto>`, sorted by `assignedAt DESC` (newest first). Each
+item contains `id`, `action` (`INITIAL_ASSIGNED` or `REASSIGNED`), `assignedAt`, `assignedBy`
+(`userId`, display name, role), nullable `reason`, `previousDriver`, `currentDriver`,
+`previousVehicle`, and `currentVehicle`. Driver snapshots contain `id` and nullable
+`displayName`; vehicle snapshots contain `id` and `licensePlate`.
+
+The initial create writes exactly one `INITIAL_ASSIGNED` record. Reassignment writes a
+`REASSIGNED` record only when the driver or vehicle actually changes; a same-assignment replay
+does not create another audit record or `trip.shuttle.reassigned` event. Audit, assignment,
+reservations and Outbox are committed atomically. Identity transport failures return
+`503 UPSTREAM_UNAVAILABLE`; a missing/inactive actor or actor from another operator returns
+`403 FORBIDDEN`. The existing create/reassign response shapes and `trip.shuttle.reassigned`
+payload are unchanged.
+
 ### GET `/v1/operator/shuttle-trips/{shuttleTripId}/passengers`
 
 Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`, scoped to the operator tenant from JWT. Response groups

@@ -462,6 +462,12 @@ public sealed class ShuttlePersistenceIntegrationTests
                 "OPERATOR_ADMIN",
                 seed.OperatorId,
                 CancellationToken.None);
+            var assignmentHistory = await service.GetAssignmentHistoryAsync(
+                seed.OperatorId,
+                shuttleTrip.Id,
+                page: 1,
+                pageSize: 20,
+                CancellationToken.None);
 
             var item = result.Items.Should().ContainSingle().Subject;
             item.MainTrip.Should().Be(new OperatorShuttleMainTripDto(
@@ -473,6 +479,16 @@ public sealed class ShuttlePersistenceIntegrationTests
             item.Station.Should().Be(new OperatorShuttleStationDto(originStation.Id, "Shuttle Origin"));
             item.Vehicle.TypeDisplayName.Should().Be("Shuttle integration vehicle");
             item.Vehicle.UsablePassengerCapacity.Should().Be(4);
+            item.LatestAssignment.Should().BeNull();
+            assignmentHistory.Items.Should().BeEmpty();
+            var crossTenantHistory = async () => await service.GetAssignmentHistoryAsync(
+                Guid.NewGuid(),
+                shuttleTrip.Id,
+                page: 1,
+                pageSize: 20,
+                CancellationToken.None);
+            await crossTenantHistory.Should().ThrowAsync<CodedNotFoundException>()
+                .Where(error => error.ErrorCode == "SHUTTLE_TRIP_NOT_FOUND");
             item.PassengerCount.Should().Be(4);
             item.StopCount.Should().Be(3);
             item.PassengerProgress.Should().Be(new OperatorShuttlePassengerProgressDto(
@@ -634,6 +650,11 @@ public sealed class ShuttlePersistenceIntegrationTests
             item.CancelledAt.Should().Be(now);
             item.CancelReason.Should().Be("Vehicle unavailable");
             item.CancelledBy.Should().Be(cancelledByUserId);
+            item.LatestAssignment!.Action
+                .Should().Be(ShuttleTripAssignmentAuditLog.InitialAssignedAction);
+            item.LatestAssignment.AssignedBy.UserId.Should().Be(createdByUserId);
+            (await db.ShuttleTripAssignmentAuditLogs.CountAsync(
+                audit => audit.ShuttleTripId == created.ShuttleTripId)).Should().Be(1);
         }
         finally
         {
@@ -794,6 +815,7 @@ public sealed class ShuttlePersistenceIntegrationTests
             db.Vehicles.Add(replacementVehicle);
             await db.SaveChangesAsync();
             var replacementDriverId = Guid.NewGuid();
+            var reassignedByUserId = Guid.NewGuid();
             var manifestBefore = await db.ShuttlePassengers.AsNoTracking()
                 .Where(manifest => manifest.ShuttleTripId == created.ShuttleTripId)
                 .OrderBy(manifest => manifest.Id)
@@ -810,6 +832,7 @@ public sealed class ShuttlePersistenceIntegrationTests
             var result = await service.ReassignAsync(
                 new ReassignShuttleTripInput(
                     seed.OperatorId,
+                    reassignedByUserId,
                     created.ShuttleTripId,
                     replacementDriverId,
                     replacementVehicle.Id,
@@ -818,6 +841,7 @@ public sealed class ShuttlePersistenceIntegrationTests
             await service.ReassignAsync(
                 new ReassignShuttleTripInput(
                     seed.OperatorId,
+                    Guid.NewGuid(),
                     created.ShuttleTripId,
                     replacementDriverId,
                     replacementVehicle.Id,
@@ -847,6 +871,24 @@ public sealed class ShuttlePersistenceIntegrationTests
             var reassignedEvent = await db.OutboxEvents.AsNoTracking()
                 .SingleAsync(item => item.EventType == "trip.shuttle.reassigned");
             using var reassignedPayload = JsonDocument.Parse(reassignedEvent.Payload);
+            var auditRows = await db.ShuttleTripAssignmentAuditLogs.AsNoTracking()
+                .Where(audit => audit.ShuttleTripId == created.ShuttleTripId)
+                .OrderBy(audit => audit.OccurredAt)
+                .ToArrayAsync();
+            var history = await service.GetAssignmentHistoryAsync(
+                seed.OperatorId,
+                created.ShuttleTripId,
+                page: 1,
+                pageSize: 20,
+                CancellationToken.None);
+            var shuttleList = await service.GetHistoryAsync(
+                seed.OperatorId,
+                page: 1,
+                pageSize: 20,
+                from: null,
+                to: null,
+                statuses: null,
+                CancellationToken.None);
 
             result.Should().Be(new ReassignShuttleTripResult(
                 created.ShuttleTripId,
@@ -874,6 +916,20 @@ public sealed class ShuttlePersistenceIntegrationTests
                 .GetString().Should().Be(replacementVehicle.LicensePlate);
             reassignedPayload.RootElement.GetProperty("reason").GetString()
                 .Should().Be("Original vehicle needs maintenance");
+            auditRows.Should().HaveCount(2);
+            auditRows[0].Action.Should().Be(ShuttleTripAssignmentAuditLog.InitialAssignedAction);
+            auditRows[1].Action.Should().Be(ShuttleTripAssignmentAuditLog.ReassignedAction);
+            auditRows[1].ActorUserId.Should().Be(reassignedByUserId);
+            history.Items.Should().HaveCount(2);
+            history.Items[0].Action.Should().Be(ShuttleTripAssignmentAuditLog.ReassignedAction);
+            history.Items[0].AssignedBy.UserId.Should().Be(reassignedByUserId);
+            history.Items[0].Reason.Should().Be("Original vehicle needs maintenance");
+            history.Items[0].PreviousVehicle!.Id.Should().Be(seed.ShuttleVehicleId);
+            history.Items[0].CurrentVehicle.Id.Should().Be(replacementVehicle.Id);
+            shuttleList.Items.Should().ContainSingle();
+            shuttleList.Items[0].LatestAssignment!.Action
+                .Should().Be(ShuttleTripAssignmentAuditLog.ReassignedAction);
+            shuttleList.Items[0].LatestAssignment!.AssignedBy.UserId.Should().Be(reassignedByUserId);
         }
         finally
         {
@@ -936,6 +992,7 @@ public sealed class ShuttlePersistenceIntegrationTests
             var capacityFailure = async () => await service.ReassignAsync(
                 new ReassignShuttleTripInput(
                     seed.OperatorId,
+                    Guid.NewGuid(),
                     created.ShuttleTripId,
                     null,
                     undersizedVehicle.Id,
@@ -947,6 +1004,7 @@ public sealed class ShuttlePersistenceIntegrationTests
             var conflictFailure = async () => await service.ReassignAsync(
                 new ReassignShuttleTripInput(
                     seed.OperatorId,
+                    Guid.NewGuid(),
                     created.ShuttleTripId,
                     conflictingDriverId,
                     null,
@@ -958,6 +1016,7 @@ public sealed class ShuttlePersistenceIntegrationTests
             var foreignTenant = async () => await service.ReassignAsync(
                 new ReassignShuttleTripInput(
                     Guid.NewGuid(),
+                    Guid.NewGuid(),
                     created.ShuttleTripId,
                     Guid.NewGuid(),
                     null,
@@ -965,6 +1024,23 @@ public sealed class ShuttlePersistenceIntegrationTests
                 CancellationToken.None);
             await foreignTenant.Should().ThrowAsync<CodedNotFoundException>()
                 .Where(error => error.ErrorCode == "SHUTTLE_TRIP_NOT_FOUND");
+
+            var unavailableIdentityService = CreateDispatchService(
+                db,
+                clock,
+                seed.OperatorId,
+                throwProfileTransportError: true);
+            var identityFailure = async () => await unavailableIdentityService.ReassignAsync(
+                new ReassignShuttleTripInput(
+                    seed.OperatorId,
+                    Guid.NewGuid(),
+                    created.ShuttleTripId,
+                    Guid.NewGuid(),
+                    null,
+                    "Identity is unavailable"),
+                CancellationToken.None);
+            await identityFailure.Should().ThrowAsync<TripIdentityUnavailableException>()
+                .Where(error => error.ErrorCode == "UPSTREAM_UNAVAILABLE" && error.StatusCode == 503);
 
             db.ChangeTracker.Clear();
             var persisted = await db.ShuttleTrips.AsNoTracking()
@@ -981,6 +1057,10 @@ public sealed class ShuttlePersistenceIntegrationTests
             reservations.Should().ContainSingle(reservation =>
                 reservation.ResourceRole == ResourceReservationRole.VEHICLE
                 && reservation.ResourceId == seed.ShuttleVehicleId);
+            (await db.ShuttleTripAssignmentAuditLogs.CountAsync(
+                audit => audit.ShuttleTripId == created.ShuttleTripId)).Should().Be(1);
+            (await db.OutboxEvents.CountAsync(
+                item => item.EventType == "trip.shuttle.reassigned")).Should().Be(0);
 
             var mutable = await db.ShuttleTrips.SingleAsync(shuttle => shuttle.Id == created.ShuttleTripId);
             mutable.Start(now);
@@ -988,6 +1068,7 @@ public sealed class ShuttlePersistenceIntegrationTests
             var invalidState = async () => await service.ReassignAsync(
                 new ReassignShuttleTripInput(
                     seed.OperatorId,
+                    Guid.NewGuid(),
                     created.ShuttleTripId,
                     Guid.NewGuid(),
                     null,

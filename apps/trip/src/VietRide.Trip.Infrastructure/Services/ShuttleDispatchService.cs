@@ -344,6 +344,19 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             .Take(pageSize)
             .ToArrayAsync(cancellationToken);
 
+        var shuttleTripIds = rows.Select(row => row.Id).ToArray();
+        var latestAudits = shuttleTripIds.Length == 0
+            ? Array.Empty<ShuttleTripAssignmentAuditLog>()
+            : await _db.ShuttleTripAssignmentAuditLogs.AsNoTracking()
+                .Where(audit => audit.OperatorId == operatorId
+                    && shuttleTripIds.Contains(audit.ShuttleTripId))
+                .OrderBy(audit => audit.ShuttleTripId)
+                .ThenByDescending(audit => audit.OccurredAt)
+                .ThenByDescending(audit => audit.Id)
+                .ToArrayAsync(cancellationToken);
+        var latestAuditByTripId = latestAudits
+            .GroupBy(audit => audit.ShuttleTripId)
+            .ToDictionary(group => group.Key, group => group.First());
         var driverIds = rows.Select(row => row.DriverUserId).Distinct().ToArray();
         var profiles = await GetIdentityProfilesOrThrowAsync(driverIds.Select(id => (Guid?)id), cancellationToken);
         var items = rows.Select(row => new OperatorShuttleTripListItemDto(
@@ -387,9 +400,43 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             row.CreatedByUserId,
             row.CancelledAt,
             row.CancelReason,
-            row.CancelledByUserId)).ToArray();
+            row.CancelledByUserId,
+            latestAuditByTripId.TryGetValue(row.Id, out var latestAudit)
+                ? ToLatestAssignment(latestAudit)
+                : null)).ToArray();
 
         return PagedResult<OperatorShuttleTripListItemDto>.Create(items, page, pageSize, totalItems);
+    }
+
+    public async Task<PagedResult<ShuttleAssignmentHistoryItemDto>> GetAssignmentHistoryAsync(
+        Guid operatorId,
+        Guid shuttleTripId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        var exists = await _db.ShuttleTrips.AsNoTracking().AnyAsync(
+            shuttle => shuttle.Id == shuttleTripId && shuttle.OperatorId == operatorId,
+            cancellationToken);
+        if (!exists)
+        {
+            throw new CodedNotFoundException("SHUTTLE_TRIP_NOT_FOUND", "Shuttle trip was not found.");
+        }
+
+        var query = _db.ShuttleTripAssignmentAuditLogs.AsNoTracking()
+            .Where(audit => audit.ShuttleTripId == shuttleTripId && audit.OperatorId == operatorId);
+        var totalItems = await query.CountAsync(cancellationToken);
+        var audits = await query
+            .OrderByDescending(audit => audit.OccurredAt)
+            .ThenByDescending(audit => audit.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToArrayAsync(cancellationToken);
+        return PagedResult<ShuttleAssignmentHistoryItemDto>.Create(
+            audits.Select(ToAssignmentHistoryItem).ToArray(),
+            page,
+            pageSize,
+            totalItems);
     }
 
     public async Task<ShuttlePassengerContactResponse> GetPassengerContactsAsync(
@@ -481,6 +528,11 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         {
             throw new CodedValidationException("VALIDATION_ERROR", "orderedBookingIds must be a non-empty distinct list.");
         }
+
+        var actor = await GetOperatorActorProfileAsync(
+            input.ActorUserId,
+            input.OperatorId,
+            cancellationToken);
 
         var availabilityInput = new ShuttleAvailabilityInput(
             input.OperatorId,
@@ -617,6 +669,17 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
             input.Direction,
             input.ActorUserId);
         _db.ShuttleTrips.Add(shuttleTrip);
+        _db.ShuttleTripAssignmentAuditLogs.Add(CreateAssignmentAuditLog(
+            shuttleTrip.Id,
+            input.OperatorId,
+            actor,
+            ShuttleTripAssignmentAuditLog.InitialAssignedAction,
+            _clock.UtcNow,
+            previousDriver: null,
+            new ShuttleAssignmentDriverDto(input.DriverUserId, driver.DisplayName!),
+            previousVehicle: null,
+            new ShuttleAssignmentVehicleDto(vehicle.Id, vehicle.LicensePlate),
+            reason: null));
 
         for (var index = 0; index < selectedIds.Length; index++)
         {
@@ -692,6 +755,17 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         var oldVehicleId = shuttleTrip.VehicleId;
         var driverUserId = input.DriverUserId ?? oldDriverUserId;
         var vehicleId = input.VehicleId ?? oldVehicleId;
+        if (oldDriverUserId == driverUserId && oldVehicleId == vehicleId)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return new ReassignShuttleTripResult(shuttleTrip.Id, driverUserId, vehicleId);
+        }
+
+        var actor = await GetOperatorActorProfileAsync(
+            input.ActorUserId,
+            input.OperatorId,
+            cancellationToken);
+
         var vehicle = await _db.Vehicles.SingleOrDefaultAsync(
             candidate => candidate.Id == vehicleId
                 && candidate.OperatorId == input.OperatorId
@@ -712,9 +786,23 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         var driver = await _identity.GetUserAsync(driverUserId, cancellationToken);
         if (!driver.Found || driver.OperatorId != input.OperatorId
             || !string.Equals(driver.Role, "DRIVER", StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(driver.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+            || !string.Equals(driver.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(driver.DisplayName))
         {
             throw new CodedNotFoundException("DRIVER_NOT_FOUND", "An active driver was not found.");
+        }
+
+        string? oldDriverDisplayName;
+        if (oldDriverUserId == driverUserId)
+        {
+            oldDriverDisplayName = driver.DisplayName;
+        }
+        else
+        {
+            var oldDriverProfiles = await GetIdentityProfilesOrThrowAsync(
+                [oldDriverUserId],
+                cancellationToken);
+            oldDriverDisplayName = oldDriverProfiles.GetValueOrDefault(oldDriverUserId)?.DisplayName;
         }
 
         var manifests = await _db.ShuttlePassengers.AsNoTracking()
@@ -774,6 +862,28 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         if (oldDriverUserId != driverUserId || oldVehicleId != vehicleId)
         {
             var occurredAt = _clock.UtcNow;
+            var previousAuditAt = await _db.ShuttleTripAssignmentAuditLogs
+                .Where(audit => audit.ShuttleTripId == shuttleTrip.Id)
+                .Select(audit => (DateTimeOffset?)audit.OccurredAt)
+                .MaxAsync(cancellationToken);
+            if (previousAuditAt.HasValue && occurredAt <= previousAuditAt.Value)
+            {
+                // PostgreSQL timestamptz stores microsecond precision; one .NET tick
+                // would be truncated and make same-clock audits order nondeterministically.
+                occurredAt = previousAuditAt.Value.AddTicks(TimeSpan.TicksPerMicrosecond);
+            }
+
+            _db.ShuttleTripAssignmentAuditLogs.Add(CreateAssignmentAuditLog(
+                shuttleTrip.Id,
+                shuttleTrip.OperatorId,
+                actor,
+                ShuttleTripAssignmentAuditLog.ReassignedAction,
+                occurredAt,
+                new ShuttleAssignmentDriverDto(oldDriverUserId, oldDriverDisplayName),
+                new ShuttleAssignmentDriverDto(driverUserId, driver.DisplayName!),
+                new ShuttleAssignmentVehicleDto(oldVehicle.Id, oldVehicle.LicensePlate),
+                new ShuttleAssignmentVehicleDto(vehicle.Id, vehicle.LicensePlate),
+                input.Reason));
             var integrationEvent = new ShuttleReassignedIntegrationEvent(
                 Guid.NewGuid(),
                 occurredAt,
@@ -1610,6 +1720,86 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         await _db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new ShuttleLifecycleResult(shuttleTripId, shuttleTrip.Status, manifests.Length, now);
+    }
+
+    private static ShuttleLatestAssignmentDto ToLatestAssignment(
+        ShuttleTripAssignmentAuditLog audit)
+    {
+        var metadata = ReadAssignmentAuditMetadata(audit);
+        return new ShuttleLatestAssignmentDto(
+            audit.Action,
+            audit.OccurredAt,
+            metadata.AssignedBy,
+            metadata.Reason);
+    }
+
+    private static ShuttleAssignmentHistoryItemDto ToAssignmentHistoryItem(
+        ShuttleTripAssignmentAuditLog audit)
+    {
+        var metadata = ReadAssignmentAuditMetadata(audit);
+        return new ShuttleAssignmentHistoryItemDto(
+            audit.Id,
+            audit.Action,
+            audit.OccurredAt,
+            metadata.AssignedBy,
+            metadata.Reason,
+            metadata.PreviousDriver,
+            metadata.CurrentDriver,
+            metadata.PreviousVehicle,
+            metadata.CurrentVehicle);
+    }
+
+    private static ShuttleAssignmentAuditMetadata ReadAssignmentAuditMetadata(
+        ShuttleTripAssignmentAuditLog audit)
+        => audit.Metadata.Deserialize<ShuttleAssignmentAuditMetadata>(JsonOptions)
+            ?? throw new InvalidOperationException(
+                $"Shuttle assignment audit '{audit.Id}' has invalid metadata.");
+
+    private static ShuttleTripAssignmentAuditLog CreateAssignmentAuditLog(
+        Guid shuttleTripId,
+        Guid operatorId,
+        IdentityUserProfile actor,
+        string action,
+        DateTimeOffset occurredAt,
+        ShuttleAssignmentDriverDto? previousDriver,
+        ShuttleAssignmentDriverDto currentDriver,
+        ShuttleAssignmentVehicleDto? previousVehicle,
+        ShuttleAssignmentVehicleDto currentVehicle,
+        string? reason)
+    {
+        var metadata = new ShuttleAssignmentAuditMetadata(
+            new ShuttleAssignmentActorDto(actor.Id, actor.DisplayName, actor.Role),
+            string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(),
+            previousDriver,
+            currentDriver,
+            previousVehicle,
+            currentVehicle);
+        return ShuttleTripAssignmentAuditLog.Create(
+            Guid.NewGuid(),
+            shuttleTripId,
+            operatorId,
+            actor.Id,
+            action,
+            JsonSerializer.Serialize(metadata, JsonOptions),
+            occurredAt);
+    }
+
+    private async Task<IdentityUserProfile> GetOperatorActorProfileAsync(
+        Guid actorUserId,
+        Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        var profiles = await GetIdentityProfilesOrThrowAsync([actorUserId], cancellationToken);
+        if (!profiles.TryGetValue(actorUserId, out var actor)
+            || actor.OperatorId != operatorId
+            || !string.Equals(actor.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ForbiddenException(
+                "FORBIDDEN",
+                "The authenticated operator actor is not eligible to manage Shuttle assignments.");
+        }
+
+        return actor;
     }
 
     private async Task ValidateShuttleMutationEligibilityAsync(

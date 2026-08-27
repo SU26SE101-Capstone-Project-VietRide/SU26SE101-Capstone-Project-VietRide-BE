@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Trip.Api.Controllers;
+using VietRide.Trip.Api.Controllers.Requests;
 using VietRide.Trip.Api.Filters;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Shuttle;
@@ -120,5 +121,71 @@ public sealed class ShuttlePickupEndpointMetadataTests
         method.GetCustomAttributes<ProducesResponseTypeAttribute>()
             .Select(attribute => attribute.StatusCode)
             .Should().BeEquivalentTo([200, 403, 404, 409, 422, 503]);
+    }
+
+    [Fact]
+    public void OperatorAssignmentHistory_IsTenantScopedGetForBothOperatorRoles()
+    {
+        var method = typeof(OperatorShuttleController)
+            .GetMethod(nameof(OperatorShuttleController.GetAssignmentHistory))!;
+
+        method.GetCustomAttribute<HttpGetAttribute>()!.Template
+            .Should().Be("shuttle-trips/{shuttleTripId:guid}/assignment-history");
+        method.GetCustomAttribute<AuthorizeAttribute>()!.Roles
+            .Should().Be("OPERATOR_ADMIN,OPERATOR_STAFF");
+        method.GetCustomAttributes<ProducesResponseTypeAttribute>()
+            .Select(attribute => attribute.StatusCode)
+            .Should().BeEquivalentTo([200, 403, 404]);
+    }
+
+    [Fact]
+    public async Task OperatorShuttleReassignment_ForwardsActorFromJwt()
+    {
+        var operatorId = Guid.NewGuid();
+        var actorUserId = Guid.NewGuid();
+        var shuttleTripId = Guid.NewGuid();
+        var replacementVehicleId = Guid.NewGuid();
+        var response = new ReassignShuttleTripResult(shuttleTripId, Guid.NewGuid(), replacementVehicleId);
+        var sender = TestProxy<ISender>.Create((method, args) =>
+        {
+            if (method.Name == nameof(ISender.Send))
+            {
+                var command = Assert.IsType<ReassignShuttleTripCommand>(args![0]);
+                command.OperatorId.Should().Be(operatorId);
+                command.ActorUserId.Should().Be(actorUserId);
+                command.ShuttleTripId.Should().Be(shuttleTripId);
+                command.VehicleId.Should().Be(replacementVehicleId);
+                return response;
+            }
+
+            return null;
+        });
+        var controller = new OperatorShuttleController(sender)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        [
+                            new Claim("operatorId", operatorId.ToString()),
+                            new Claim(ClaimTypes.NameIdentifier, actorUserId.ToString()),
+                        ],
+                        "test")),
+                },
+            },
+        };
+
+        var result = await controller.ReassignTrip(
+            shuttleTripId,
+            new ReassignShuttleTripRequest
+            {
+                VehicleId = replacementVehicleId,
+                Reason = "Xe cũ bảo trì",
+            },
+            CancellationToken.None);
+
+        result.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().Be(response);
     }
 }

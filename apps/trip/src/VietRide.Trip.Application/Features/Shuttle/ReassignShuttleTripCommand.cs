@@ -7,6 +7,7 @@ namespace VietRide.Trip.Application.Features.Shuttle;
 [SkipTransaction]
 public sealed record ReassignShuttleTripCommand(
     Guid OperatorId,
+    Guid ActorUserId,
     Guid ShuttleTripId,
     Guid? DriverUserId,
     Guid? VehicleId,

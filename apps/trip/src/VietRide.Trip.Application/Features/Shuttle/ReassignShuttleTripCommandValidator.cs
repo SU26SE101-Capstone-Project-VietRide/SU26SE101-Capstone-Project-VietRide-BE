@@ -7,6 +7,7 @@ public sealed class ReassignShuttleTripCommandValidator : AbstractValidator<Reas
     public ReassignShuttleTripCommandValidator()
     {
         RuleFor(command => command.OperatorId).NotEmpty();
+        RuleFor(command => command.ActorUserId).NotEmpty();
         RuleFor(command => command.ShuttleTripId).NotEmpty();
         RuleFor(command => command)
             .Must(command => command.DriverUserId.HasValue || command.VehicleId.HasValue)
