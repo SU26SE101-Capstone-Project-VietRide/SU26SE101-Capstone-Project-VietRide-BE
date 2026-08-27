@@ -64,7 +64,7 @@ describe('Shuttle Goong Directions ETA (fake HTTP E2E)', () => {
       distanceMeters: 5_909,
       updatedAt: expect.any(String) as unknown,
     });
-    expect(receivedRequest?.pathname).toBe('/Direction');
+    expect(receivedRequest?.pathname).toBe('/v2/direction');
     expect(receivedRequest?.searchParams.get('origin')).toBe('10.762622,106.660172');
     expect(receivedRequest?.searchParams.get('destination')).toBe('10.7769,106.7009');
     expect(receivedRequest?.searchParams.get('vehicle')).toBe('car');

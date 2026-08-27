@@ -20,7 +20,7 @@ before(async () => {
       activeRequests -= 1;
     });
     const requestUrl = new URL(request.url, `http://${request.headers.host}`);
-    if (request.method !== 'GET' || requestUrl.pathname !== '/Direction') {
+    if (request.method !== 'GET' || requestUrl.pathname !== '/v2/direction') {
       response.writeHead(404).end();
       return;
     }
@@ -154,7 +154,7 @@ test('redacts key, query and full URL from failure output', async () => {
   assert.equal(exitCode, 1);
   assert.doesNotMatch(joined, new RegExp(SECRET));
   assert.doesNotMatch(joined, new RegExp(baseUrl.replaceAll('.', '\\.')));
-  assert.doesNotMatch(joined, /api_key|origin=|destination=|\/Direction/i);
+  assert.doesNotMatch(joined, /api_key|origin=|destination=|\/v2\/direction/i);
   assert.match(joined, /code=GOONG_HTTP_STATUS_INVALID/);
 });
 

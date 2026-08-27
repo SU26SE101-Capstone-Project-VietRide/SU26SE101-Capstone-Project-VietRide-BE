@@ -91,7 +91,7 @@ export class GoongDirectionsEtaProvider implements EtaProvider {
   ): Promise<GoongLeg[] | null> {
     if (targets.length === 0) return [];
     const baseUrl = this.env.GOONG_BASE_URL ?? 'https://rsapi.goong.io';
-    const requestUrl = new URL('/Direction', baseUrl);
+    const requestUrl = new URL('/v2/direction', baseUrl);
     requestUrl.searchParams.set('origin', this.formatCoordinate(origin));
     requestUrl.searchParams.set(
       'destination',

@@ -4,6 +4,7 @@
 
 Runbook này áp dụng cho runtime định tuyến của Trip và Tracking. Trạng thái mục tiêu là
 `ROUTING_PROVIDER=GOONG`; trạng thái rollback an toàn là `ROUTING_PROVIDER=LOCAL`.
+Goong Directions v2 là contract hiện hành và sử dụng dữ liệu địa giới hành chính mới sau sáp nhập.
 
 Việc chuyển provider không đổi endpoint, event, Gateway route, cổng, network hoặc credential của
 các service khác. `GOOGLE_MAPS_API_KEY` dùng để hiển thị bản đồ và các biến Google OAuth vẫn độc lập,
@@ -18,7 +19,7 @@ Trip và Tracking phải nhận cùng năm biến sau:
 |---|---|---|
 | `ROUTING_PROVIDER` | `GOONG` hoặc `LOCAL` | Chọn Goong hoặc thuật toán Local. Production rollout dùng `GOONG`. |
 | `GOONG_API_KEY` | secret do môi trường inject | Bắt buộc khi provider là `GOONG`; không ghi vào Git, log hoặc URI được in ra. |
-| `GOONG_BASE_URL` | `https://rsapi.goong.io` | Base URL của Goong Directions. |
+| `GOONG_BASE_URL` | `https://rsapi.goong.io` | Origin của Goong; runtime ghép endpoint Directions v2 `/v2/direction`. |
 | `GOONG_MAX_DESTINATIONS_PER_REQUEST` | `10` | Số đích tối đa trong mỗi request; không đặt lớn hơn contract. |
 | `TRACKING_ROUTING_TIMEOUT_MS` | `1500` theo mặc định | Timeout của request Goong trong Tracking. Live gate Day 51 dùng ngưỡng riêng `5000`. |
 

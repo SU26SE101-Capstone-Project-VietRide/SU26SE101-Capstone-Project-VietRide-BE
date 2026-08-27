@@ -524,7 +524,8 @@ contract realtime hiện hành.
 
 - Runtime chỉ có `ROUTING_PROVIDER=GOONG|LOCAL`; không duy trì dual runtime Google/Goong. Google
   OAuth, Google Maps SDK/deep link hiển thị và Google encoded polyline nằm ngoài scope, không đổi.
-- Gọi `GET {GOONG_BASE_URL}/Direction` với `origin=lat,lng`, `destination` gồm các target đúng thứ
+- Directions v2 là contract hiện hành và sử dụng dữ liệu địa giới hành chính mới sau sáp nhập. Gọi
+  `GET {GOONG_BASE_URL}/v2/direction` với `origin=lat,lng`, `destination` gồm các target đúng thứ
   tự phân cách bằng `;`, `vehicle=car`, `alternatives=false` và query `api_key=GOONG_API_KEY`.
   Không log full URI/query vì API key là secret nằm trong query string.
 - `GOONG_MAX_DESTINATIONS_PER_REQUEST` mặc định 10. Chuỗi dài hơn phải chia chunk không đổi thứ tự,

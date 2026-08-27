@@ -310,7 +310,7 @@ function formatCoordinate(point) {
 
 function createEndpoint(baseUrl) {
   try {
-    return new URL('/Direction', baseUrl);
+    return new URL('/v2/direction', baseUrl);
   } catch {
     throw new LiveGateError('GOONG_BASE_URL_INVALID');
   }

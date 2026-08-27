@@ -5370,7 +5370,8 @@ Tracking Phase 10 invariants (legacy fields remain compatible; delay fields belo
   A newly selected stop with no cache is calculated immediately even when the previous stop was
   calculated less than 60 seconds ago. `STOPS_ONLY` geometry is refreshed after 30 seconds;
   Route polyline geometry uses the configured longer cache TTL.
-- A Goong request is `GET {GOONG_BASE_URL}/Direction` with ordered `origin=lat,lng`, semicolon-
+- Goong Directions v2 is the current provider contract and uses updated post-merger administrative-boundary
+  data. A request is `GET {GOONG_BASE_URL}/v2/direction` with ordered `origin=lat,lng`, semicolon-
   separated ordered `destination` targets, `vehicle=car`, `alternatives=false` and query secret
   `api_key=GOONG_API_KEY`. `GOONG_MAX_DESTINATIONS_PER_REQUEST` defaults to 10. Longer chains are
   chunked without reordering and leg distance/duration are accumulated across chunks. Empty or
