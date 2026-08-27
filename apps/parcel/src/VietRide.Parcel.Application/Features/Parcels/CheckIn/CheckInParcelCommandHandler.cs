@@ -3,6 +3,7 @@ using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Exceptions;
+using VietRide.Parcel.Application.Services;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Abstractions;
@@ -59,6 +60,10 @@ public sealed class CheckInParcelCommandHandler
         if (!parcel.LatestCheckInAt.HasValue || now >= parcel.LatestCheckInAt.Value)
             throw new CodedConflictException("PARCEL_CHECK_IN_CLOSED", "Parcel check-in deadline has passed.");
 
+        var origin = _custody is null
+            ? ((Guid Id, string Name)?)null
+            : await TripOriginLocationResolver.ResolveAsync(_trips, parcel.TripId, cancellationToken);
+
         var snapshot = await _parcels.TryCheckInAsync(
             parcel.Id,
             command.TripId,
@@ -75,8 +80,8 @@ public sealed class CheckInParcelCommandHandler
                 parcel,
                 ParcelCustodyEventType.CHECKED_IN,
                 ParcelCustodyLocationType.ORIGIN_STATION,
-                null,
-                parcel.TripSnapshotOriginStationName,
+                origin!.Value.Id,
+                origin.Value.Name,
                 command.AssistantUserId,
                 "ASSISTANT",
                 "CHECK_IN",

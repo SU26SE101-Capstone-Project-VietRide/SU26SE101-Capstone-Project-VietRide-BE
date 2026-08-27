@@ -253,9 +253,9 @@ public sealed class Day29AssistantLoadEndpointTests
         loadMethod.GetCustomAttribute<RequireIdempotencyAttribute>().Should().NotBeNull();
         var responseTypes = loadMethod.GetCustomAttributes<ProducesResponseTypeAttribute>()
             .ToDictionary(attribute => attribute.StatusCode);
-        responseTypes.Keys.Should().BeEquivalentTo(new[] { 200, 401, 403, 404, 409, 422 });
+        responseTypes.Keys.Should().BeEquivalentTo(new[] { 200, 401, 403, 404, 409, 422, 503 });
         responseTypes[200].Type.Should().Be(typeof(ApiResponse<AssistantParcelActionResponse>));
-        foreach (var statusCode in new[] { 401, 403, 404, 409, 422 })
+        foreach (var statusCode in new[] { 401, 403, 404, 409, 422, 503 })
         {
             responseTypes[statusCode].Type.Should().Be(typeof(ApiResponse));
         }
@@ -666,7 +666,11 @@ internal sealed class ControlledTripServiceClient : ITripServiceClient
                     Guid.NewGuid(),
                     "Integration test route",
                     "Origin",
-                    "Destination"),
+                    "Destination")
+                {
+                    OriginStationId = Guid.NewGuid(),
+                    DestinationStationId = Guid.NewGuid(),
+                },
                 new TripVehicleSummarySnapshot(
                     Guid.NewGuid(),
                     "TEST-LOAD",

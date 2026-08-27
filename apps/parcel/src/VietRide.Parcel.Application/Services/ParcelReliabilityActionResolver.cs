@@ -34,8 +34,10 @@ internal static class ParcelReliabilityActionResolver
         switch (parcel.Status)
         {
             case ParcelStatus.RESERVED:
-            case ParcelStatus.PENDING:
                 actions.Add("CHECK_IN");
+                break;
+            case ParcelStatus.CHECKED_IN:
+                actions.Add("REWEIGH");
                 break;
             case ParcelStatus.READY_TO_LOAD:
                 actions.Add("LOAD");

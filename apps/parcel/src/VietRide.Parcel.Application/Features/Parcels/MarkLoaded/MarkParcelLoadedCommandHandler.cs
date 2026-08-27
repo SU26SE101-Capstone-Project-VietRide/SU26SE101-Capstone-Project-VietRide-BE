@@ -5,6 +5,7 @@ using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Application.Services;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -75,6 +76,10 @@ public sealed class MarkParcelLoadedCommandHandler
                 "INVALID_STATUS",
                 $"Parcel '{command.ParcelId}' is in status '{parcel.Status}' and cannot be loaded.");
 
+        var origin = _custody is null
+            ? ((Guid Id, string Name)?)null
+            : await TripOriginLocationResolver.ResolveAsync(_tripClient, parcel.TripId, cancellationToken);
+
         var now = DateTimeOffset.UtcNow;
         var snapshot = await _parcelRepository.TryMarkLoadedAsync(
             command.ParcelId,
@@ -104,8 +109,8 @@ public sealed class MarkParcelLoadedCommandHandler
                 parcel,
                 ParcelCustodyEventType.LOADED,
                 ParcelCustodyLocationType.ORIGIN_STATION,
-                null,
-                parcel.TripSnapshotOriginStationName,
+                origin!.Value.Id,
+                origin.Value.Name,
                 command.LoadedByUserId,
                 "ASSISTANT",
                 "LOAD",

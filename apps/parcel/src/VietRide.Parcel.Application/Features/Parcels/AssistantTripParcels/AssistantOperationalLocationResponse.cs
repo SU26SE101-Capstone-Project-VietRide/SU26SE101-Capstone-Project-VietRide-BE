@@ -5,5 +5,5 @@ namespace VietRide.Parcel.Application.Features.Parcels.AssistantTripParcels;
 public sealed record AssistantOperationalLocationResponse(
     ReliabilityLocationResponse Location,
     string Status,
-    DateTimeOffset? ArrivedAt,
-    DateTimeOffset? DepartedAt);
+    DateTimeOffset? ActualArrivalAt,
+    DateTimeOffset? ActualDepartureAt);

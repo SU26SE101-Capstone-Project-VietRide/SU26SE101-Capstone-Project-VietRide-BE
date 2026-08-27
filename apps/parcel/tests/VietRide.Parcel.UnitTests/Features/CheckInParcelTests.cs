@@ -3,6 +3,7 @@ using FluentAssertions;
 using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Application.Features.Parcels.CheckIn;
@@ -21,6 +22,7 @@ public sealed class CheckInParcelTests
     private static readonly Guid AssistantUserId = Guid.NewGuid();
     private static readonly Guid OperatorId = Guid.NewGuid();
     private static readonly Guid TripId = Guid.NewGuid();
+    private static readonly Guid OriginStationId = Guid.NewGuid();
     private static readonly DateTimeOffset Now = new(2026, 7, 27, 1, 0, 0, TimeSpan.Zero);
     private static readonly string CheckInPhotoUrl =
         $"https://storage.googleapis.com/vietride.appspot.com/parcel-ops/{OperatorId:D}/{AssistantUserId:D}/{ParcelId:D}/check-in.webp";
@@ -63,6 +65,98 @@ public sealed class CheckInParcelTests
         result.Status.Should().Be(nameof(ParcelStatus.CHECKED_IN));
         result.CheckedInAt.Should().Be(Now);
         result.LatestCheckInAt.Should().Be(Now.AddMinutes(10));
+    }
+
+    [Fact]
+    public async Task Handle_WithCustody_PersistsConfirmedOriginStationIdentity()
+    {
+        var repository = Substitute.For<IParcelRepository>();
+        var trip = Substitute.For<ITripServiceClient>();
+        var custody = Substitute.For<IParcelCustodyService>();
+        var parcel = CreateReservedParcel(Now.AddMinutes(10));
+        repository.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        repository.TryCheckInAsync(
+                ParcelId,
+                TripId,
+                parcel.ParcelCode,
+                AssistantUserId,
+                Arg.Any<IReadOnlyCollection<string>?>(),
+                Now,
+                Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.CHECKED_IN));
+        trip.AuthorizeAssistantForTripAsync(
+                TripId,
+                AssistantUserId,
+                OperatorId,
+                Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+        trip.GetTripSummariesAsync(
+                Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(new[] { TripId })),
+                Arg.Any<CancellationToken>())
+            .Returns(TripSummary());
+
+        await new CheckInParcelCommandHandler(repository, trip, Clock(), custody).Handle(
+            new CheckInParcelCommand(
+                ParcelId,
+                TripId,
+                parcel.ParcelCode,
+                null,
+                AssistantUserId,
+                OperatorId),
+            CancellationToken.None);
+
+        await custody.Received(1).AppendAsync(
+            parcel,
+            ParcelCustodyEventType.CHECKED_IN,
+            ParcelCustodyLocationType.ORIGIN_STATION,
+            OriginStationId,
+            "Bến xe Miền Tây",
+            AssistantUserId,
+            "ASSISTANT",
+            "CHECK_IN",
+            null,
+            null,
+            null,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_WhenOriginCannotBeResolved_DoesNotTransitionParcel()
+    {
+        var repository = Substitute.For<IParcelRepository>();
+        var trip = Substitute.For<ITripServiceClient>();
+        var custody = Substitute.For<IParcelCustodyService>();
+        var parcel = CreateReservedParcel(Now.AddMinutes(10));
+        repository.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        trip.AuthorizeAssistantForTripAsync(
+                TripId,
+                AssistantUserId,
+                OperatorId,
+                Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+        trip.GetTripSummariesAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(TripSummaryBatchOutcome.TransportFailure("Trip unavailable"));
+
+        var action = () => new CheckInParcelCommandHandler(repository, trip, Clock(), custody).Handle(
+            new CheckInParcelCommand(
+                ParcelId,
+                TripId,
+                parcel.ParcelCode,
+                null,
+                AssistantUserId,
+                OperatorId),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<ParcelDependencyUnavailableException>()
+            .Where(exception => exception.ErrorCode == "TRIP_SERVICE_UNAVAILABLE");
+        await repository.DidNotReceive().TryCheckInAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<Guid>(),
+            Arg.Any<string>(),
+            Arg.Any<Guid>(),
+            Arg.Any<IReadOnlyCollection<string>?>(),
+            Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -198,6 +292,26 @@ public sealed class CheckInParcelTests
             SenderUserId,
             ParcelSizeCategory.SMALL,
             AdditionalPaymentId: null);
+
+    private static TripSummaryBatchOutcome TripSummary()
+        => TripSummaryBatchOutcome.Success(
+        [
+            new TripSummarySnapshot(
+                TripId,
+                "SCHEDULED",
+                Now.AddHours(1),
+                Now.AddHours(3),
+                new TripRouteSummarySnapshot(
+                    Guid.NewGuid(),
+                    "Miền Tây - Cần Thơ",
+                    "Bến xe Miền Tây",
+                    "Bến xe Cần Thơ")
+                {
+                    OriginStationId = OriginStationId,
+                    DestinationStationId = Guid.NewGuid(),
+                },
+                new TripVehicleSummarySnapshot(Guid.NewGuid(), "51B-12345", "ACTIVE")),
+        ]);
 
     private static void SetPrivateProperty<T>(ParcelEntity parcel, string propertyName, T value)
         => typeof(ParcelEntity)
