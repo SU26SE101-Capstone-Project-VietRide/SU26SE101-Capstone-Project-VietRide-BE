@@ -1,8 +1,10 @@
-# Hướng dẫn sửa FE Driver/Assistant — Parcel check-in, custody và load
+# Hướng dẫn sửa FE Driver/Assistant — Parcel check-in, custody, load và duyệt sự cố
+
+> Backend contract áp dụng: commit `c6306059` trở lên, ngày 2026-08-28.
 
 ## 1. Mục đích
 
-Tài liệu này hướng dẫn Driver/Assistant Mobile tích hợp đúng luồng nhận kiện, cân đo, chất hàng, ghi nhận custody và xử lý vị trí vận hành của chuyến.
+Tài liệu này hướng dẫn Driver/Assistant Mobile tích hợp đúng luồng nhận kiện, cân đo, chất hàng, ghi nhận custody, xử lý vị trí vận hành và quy trình Assistant báo cáo — Driver phê duyệt custody exception.
 
 Phạm vi tập trung vào lỗi FE đang hiển thị:
 
@@ -35,6 +37,10 @@ Kết luận: thông báo trên là validation do FE tự đặt sai ngữ cản
 5. Sau khi check-in thành công, backend đã tự tạo custody event `CHECKED_IN` tại `ORIGIN_STATION`. FE không cần bắt người dùng quét thêm để “ghi nhận vị trí”.
 6. Sau `CHECKED_IN`, thao tác tiếp theo đúng là cân/đo thực tế bằng API `reweigh`, không phải custody scan.
 7. Backend đã trả action `REWEIGH` khi parcel ở `CHECKED_IN`. FE nên ưu tiên `availableActions`; fallback theo status tại mục 9 chỉ dùng để tương thích với backend cũ trong thời gian rollout.
+8. Assistant không còn gửi `supervisorApprovalUserId` khi báo cáo sự cố.
+9. Assistant chỉ tạo báo cáo `PENDING_APPROVAL`; Driver được phân công mới được approve/reject bằng JWT của chính Driver.
+10. Trong lúc chờ duyệt, `searchDeadline = null`; FE không được hiển thị đang tìm kiếm, SLA 72 giờ hoặc cho mở claim.
+11. Chỉ sau khi approve, incident mới sang `SEARCHING`, tạo custody event và bắt đầu SLA tìm kiếm.
 
 ## 3. Phân biệt các loại dữ liệu vị trí
 
@@ -270,6 +276,200 @@ Quy tắc `actualLocationId`:
 
 Custody scan là thao tác nghiệp vụ bổ sung. Nó không phải bước bắt buộc ngay sau check-in.
 
+### 6.6. Assistant báo cáo custody exception
+
+Endpoint này dành riêng cho Assistant đã được phân công vào Trip của Parcel:
+
+```http
+POST /v1/assistant/parcels/{parcelId}/custody-exception
+Authorization: Bearer <assistantAccessToken>
+Idempotency-Key: <uuid-v4>
+Content-Type: application/json
+```
+
+Request mẫu:
+
+```json
+{
+  "incidentType": "WRONG_STOP",
+  "actualLocationType": "ROUTE_STOP",
+  "actualLocationId": "3ce01b86-713a-4c44-bc65-6e6f2ef4640a",
+  "locationSnapshot": "Bến xe Miền Đông",
+  "temporaryExceptionTag": null,
+  "description": "Kiện đã bị đặt xuống ngoài luồng unload chuẩn",
+  "observedWeightKg": 5.5,
+  "evidenceUrls": [
+    "https://example.com/wrong-stop-photo.jpg"
+  ],
+  "reason": "Phát hiện kiện nằm tại bến không đúng điểm trả"
+}
+```
+
+Tuyệt đối không gửi các field sau:
+
+```text
+supervisorApprovalUserId
+reviewedByUserId
+reviewerUserId
+```
+
+Backend lấy người báo cáo từ Assistant JWT. Response thành công là HTTP `202`:
+
+```json
+{
+  "success": true,
+  "statusCode": 202,
+  "data": {
+    "requestId": "uuid",
+    "parcelId": "uuid",
+    "incidentId": "uuid",
+    "incidentType": "WRONG_STOP",
+    "incidentStatus": "OPEN",
+    "status": "PENDING_APPROVAL",
+    "actualLocationType": "ROUTE_STOP",
+    "actualLocationId": "uuid",
+    "locationSnapshot": "Bến xe Miền Đông",
+    "temporaryExceptionTag": null,
+    "description": "Kiện đã bị đặt xuống ngoài luồng unload chuẩn",
+    "observedWeightKg": 5.5,
+    "evidenceReferences": [
+      "https://example.com/wrong-stop-photo.jpg"
+    ],
+    "reason": "Phát hiện kiện nằm tại bến không đúng điểm trả",
+    "reportedByUserId": "uuid",
+    "reportedByRole": "ASSISTANT",
+    "reportedAt": "2026-08-28T10:00:00+00:00",
+    "reviewedByUserId": null,
+    "reviewedAt": null,
+    "reviewedByRole": null,
+    "reviewNote": null,
+    "approvedCustodyEventId": null,
+    "searchDeadline": null,
+    "availableActions": [
+      "WAIT_FOR_APPROVAL"
+    ]
+  },
+  "meta": {
+    "traceId": "..."
+  }
+}
+```
+
+Sau response này, Assistant UI cần:
+
+- khóa nút gửi lại cùng sự cố;
+- hiển thị “Đang chờ Driver/nhà xe phê duyệt”;
+- không hiển thị “Đang tìm kiếm hàng hóa”;
+- không tự tạo custody event tại máy;
+- retry request lỗi mạng bằng đúng `Idempotency-Key` cũ.
+
+### 6.7. Driver đọc báo cáo đang chờ duyệt
+
+```http
+GET /v1/crew/parcels/{parcelId}/custody-exception
+Authorization: Bearer <driverAccessToken>
+```
+
+Chỉ Driver được phân công đúng Trip mới đọc được. Khi request còn pending:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "requestId": "uuid",
+    "parcelId": "uuid",
+    "incidentId": "uuid",
+    "incidentStatus": "OPEN",
+    "status": "PENDING_APPROVAL",
+    "searchDeadline": null,
+    "availableActions": [
+      "APPROVE",
+      "REJECT"
+    ]
+  },
+  "meta": {
+    "traceId": "..."
+  }
+}
+```
+
+Driver phải xem location, mô tả, cân nặng và evidence trước khi quyết định. Không nhận UUID người duyệt từ Assistant và không cho người dùng chọn một user bất kỳ làm người duyệt.
+
+> Giới hạn contract hiện tại: endpoint Driver cần biết `parcelId`; backend chưa có Driver approval queue riêng. Không gọi `/v1/assistant/...` bằng Driver JWT. Nếu màn hình Driver chưa có nguồn `parcelId`, dùng luồng Operator Web phê duyệt hoặc tạo backlog BE cho Driver pending-approval queue; không tự bypass role.
+
+### 6.8. Driver approve hoặc reject
+
+```http
+POST /v1/crew/parcels/{parcelId}/custody-exception-decision
+Authorization: Bearer <driverAccessToken>
+Idempotency-Key: <uuid-v4>
+Content-Type: application/json
+```
+
+Approve:
+
+```json
+{
+  "decision": "APPROVE",
+  "note": "Đã đối chiếu ảnh và xác nhận kiện đang ở bến được báo cáo"
+}
+```
+
+Reject:
+
+```json
+{
+  "decision": "REJECT",
+  "note": "Ảnh camera cho thấy kiện vẫn nằm trên xe"
+}
+```
+
+Không gửi `reviewerUserId`: backend lấy `reviewedByUserId` và `reviewedByRole` từ Driver JWT.
+
+Kết quả approve:
+
+```text
+status = APPROVED
+incidentStatus = SEARCHING
+approvedCustodyEventId != null
+searchDeadline != null
+availableActions = [CONTINUE_SEARCH]
+```
+
+Kết quả reject:
+
+```text
+status = REJECTED
+incidentStatus = RESOLVED
+approvedCustodyEventId = null
+searchDeadline = giá trị audit nhưng không còn hiệu lực vì incident đã RESOLVED
+availableActions = []
+```
+
+Khi approve, backend mới ghi `MANUAL_CUSTODY_EXCEPTION`, tạo search tasks, bắt đầu SLA và gửi thông báo tìm kiếm. Khi reject, backend không ghi custody event và khôi phục Parcel khỏi trạng thái chờ xử lý.
+
+Operator Staff/Admin có endpoint tương đương trên Operator Web:
+
+```http
+POST /v1/operator/parcel-incidents/{incidentId}/custody-exception-decision
+```
+
+Driver/Assistant Mobile không gọi endpoint Operator này.
+
+### 6.9. State machine FE cho custody exception
+
+```text
+Assistant report
+  → PENDING_APPROVAL / incident OPEN / searchDeadline null
+      ├─ Driver hoặc Operator APPROVE
+      │    → APPROVED / incident SEARCHING / custody event đã tạo / SLA bắt đầu
+      └─ Driver hoặc Operator REJECT
+           → REJECTED / incident RESOLVED / không có custody event
+```
+
+FE không được cho phép `MARK_FOUND`, `DECLARE_LOST`, forwarding hoặc claim trong `PENDING_APPROVAL`. Nếu cố gọi, backend trả `409 PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED`.
+
 ## 7. Cách chọn location đúng trên FE
 
 ```ts
@@ -462,6 +662,10 @@ Response lỗi chuẩn:
 | `SCAN_IDENTITY_MISMATCH` | QR không khớp kiện/chuyến; giữ kiện, yêu cầu xác minh danh tính kiện |
 | `PARCEL_CUSTODY_LOCATION_REQUIRED` | Request custody thiếu location hoặc location ID bắt buộc |
 | `PARCEL_CUSTODY_LOCATION_MISMATCH` | Đang thao tác ở sai stop; hiển thị expected/actual stop từ `error.fields` nếu backend trả |
+| `PARCEL_INCIDENT_ALREADY_OPEN` | Parcel đã có incident cùng loại đang hoạt động; mở trạng thái incident hiện có thay vì tạo report mới |
+| `PARCEL_CUSTODY_EXCEPTION_REQUEST_NOT_FOUND` | Không có report để Driver duyệt, sai parcel, sai tenant hoặc Driver không còn thấy request |
+| `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED` | Người khác đã approve/reject trước; đóng modal và GET lại trạng thái một lần |
+| `PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED` | Đang cố tìm kiếm/found/lost/claim trước khi report được duyệt; quay về màn hình phê duyệt |
 | `TRIP_CARGO_CAPACITY_EXCEEDED` | Xe không đủ sức chứa; không retry liên tục, chuyển operator xử lý |
 | `TRIP_SERVICE_UNAVAILABLE` | Lỗi upstream tạm thời; cho phép retry an toàn bằng cùng `Idempotency-Key` |
 | `RACE_LOST` | Có thao tác đồng thời; refetch state một lần trước khi hiển thị hành động tiếp theo |
@@ -538,6 +742,16 @@ Contract thực tế hiện tại cho phép handler quyết định bằng Parce
 - [ ] Retry mutation dùng lại cùng `Idempotency-Key`; thao tác mới dùng UUID mới.
 - [ ] `INVALID_STATUS` hoặc `RACE_LOST` chỉ refetch một lần, không tạo vòng lặp retry.
 - [ ] Không hiển thị actor/evidence nội bộ hoặc dữ liệu parcel ngoài trip được phân công.
+- [ ] Assistant report không gửi `supervisorApprovalUserId` hoặc UUID người duyệt.
+- [ ] Report thành công HTTP `202` hiển thị `PENDING_APPROVAL`, không hiển thị đang tìm kiếm.
+- [ ] `searchDeadline = null` khi pending không bị FE thay bằng deadline tự tính.
+- [ ] Assistant không thấy nút `APPROVE`/`REJECT`.
+- [ ] Driver dùng JWT của chính mình để GET và quyết định report.
+- [ ] Driver không được phân công nhận `403 FORBIDDEN` và không thấy evidence.
+- [ ] Approve cập nhật `APPROVED`, `SEARCHING`, `approvedCustodyEventId` và deadline thật.
+- [ ] Reject cập nhật `REJECTED`, `RESOLVED` và không tạo custody event.
+- [ ] Hai thiết bị quyết định đồng thời: thiết bị thua handle `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED`.
+- [ ] Retry cùng thao tác dùng lại idempotency key; approve và reject mới phải dùng key khác nhau.
 
 ## 15. Case đã xác minh trước khi backend fix được deploy
 
@@ -561,3 +775,63 @@ Kết quả lịch sử này chứng minh:
 - `currentOperationalLocation = null` không có nghĩa là mất vị trí kiện;
 - popup trong ảnh là do FE dùng sai field và chặn sai luồng;
 - bước tiếp theo phải là reweigh, không phải bắt custody scan để tạo `ORIGIN_STATION` lần nữa.
+
+## 16. Phân công cụ thể cho agent FE Driver/Assistant
+
+### Phần Assistant cần sửa
+
+1. Xóa `supervisorApprovalUserId` khỏi DTO, form, validation và API client của custody exception.
+2. Gắn Assistant access token và UUID v4 `Idempotency-Key` vào report mutation.
+3. Nhận đúng HTTP `202`, lưu `requestId`, `incidentId`, `status` và `availableActions`.
+4. Dựng UI `PENDING_APPROVAL`; không gọi custody scan để giả lập approval.
+5. Disable report trùng và chỉ retry cùng idempotency key khi request trước chưa biết kết quả.
+6. Khi API trả request đã `APPROVED` hoặc `REJECTED` qua replay/refetch, đồng bộ card theo response thay vì giữ state pending cũ.
+
+### Phần Driver cần sửa
+
+1. Tạo model `CustodyExceptionApproval` theo response tại mục 6.6–6.8.
+2. Khi đã có `parcelId`, gọi GET `/v1/crew/parcels/{parcelId}/custody-exception` bằng Driver JWT.
+3. Chỉ render hai CTA từ `availableActions`: `APPROVE`, `REJECT`.
+4. Bắt nhập `note` theo yêu cầu UX nội bộ; backend cho phép optional nhưng nên có lý do audit rõ ràng.
+5. Gọi decision endpoint bằng UUID v4 idempotency key và không gửi reviewer UUID.
+6. Sau mutation, dùng response để đóng modal/cập nhật incident; không cần refetch nếu response đã đủ.
+7. Handle `403`, `404`, `409` theo bảng lỗi; tuyệt đối không fallback sang Assistant hoặc Operator endpoint.
+
+### Phần shared API/store cần sửa
+
+```ts
+export type CustodyExceptionApprovalStatus =
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'CANCELLED';
+
+export type CustodyExceptionApproval = {
+  requestId: string;
+  parcelId: string;
+  incidentId: string;
+  incidentType: string;
+  incidentStatus: string;
+  status: CustodyExceptionApprovalStatus;
+  actualLocationType: string;
+  actualLocationId: string | null;
+  locationSnapshot: string | null;
+  temporaryExceptionTag: string | null;
+  description: string | null;
+  observedWeightKg: number | null;
+  evidenceReferences: string[];
+  reason: string;
+  reportedByUserId: string;
+  reportedByRole: string;
+  reportedAt: string;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+  reviewedByRole: string | null;
+  reviewNote: string | null;
+  approvedCustodyEventId: string | null;
+  searchDeadline: string | null;
+  availableActions: string[];
+};
+```
+
+Không đổi tên field, không dùng snake_case và không tự dựng `reviewedByUserId` từ state đăng nhập để gửi lên backend. JWT là nguồn reviewer identity duy nhất.
