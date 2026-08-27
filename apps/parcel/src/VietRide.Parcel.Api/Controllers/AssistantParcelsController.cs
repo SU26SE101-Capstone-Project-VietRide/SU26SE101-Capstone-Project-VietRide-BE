@@ -105,6 +105,7 @@ public sealed class AssistantParcelsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<AssistantParcelActionResponse>> LoadAsync(
         Guid parcelId,
         [FromBody] LoadParcelRequest request,

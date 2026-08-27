@@ -10,6 +10,7 @@ using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Caching;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
+using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Application.Features.Parcels.AccessCheck;
 using VietRide.Parcel.Application.Features.Parcels.ConfirmDelivery;
@@ -46,6 +47,7 @@ public sealed class Phase67ParcelTests
     private static readonly Guid TripId = Guid.NewGuid();
     private static readonly Guid DropoffStopId = Guid.NewGuid();
     private static readonly Guid DestinationStationId = Guid.NewGuid();
+    private static readonly Guid OriginStationId = Guid.NewGuid();
     private static readonly Guid AssistantUserId = Guid.NewGuid();
 
     [Fact]
@@ -63,6 +65,63 @@ public sealed class Phase67ParcelTests
         result.Status.Should().Be("LOADED");
         await repo.Received(1).TryMarkLoadedAsync(
             ParcelId, TripId, "VRP-001", null, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task MarkLoaded_WithCustody_PersistsConfirmedOriginStationIdentity()
+    {
+        var parcel = CreateParcel(ParcelStatus.READY_TO_LOAD);
+        var repo = Substitute.For<IParcelRepository>();
+        var trip = TripCargo();
+        var custody = Substitute.For<IParcelCustodyService>();
+        repo.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        repo.TryMarkLoadedAsync(
+                ParcelId,
+                TripId,
+                "VRP-001",
+                null,
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Snapshot(ParcelStatus.LOADED));
+        trip.GetTripSummariesAsync(
+                Arg.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(new[] { TripId })),
+                Arg.Any<CancellationToken>())
+            .Returns(TripSummaryBatchOutcome.Success(
+            [
+                new TripSummarySnapshot(
+                    TripId,
+                    "BOARDING",
+                    DateTimeOffset.UtcNow,
+                    DateTimeOffset.UtcNow.AddHours(1),
+                    new TripRouteSummarySnapshot(
+                        Guid.NewGuid(),
+                        "Origin - Destination",
+                        "Origin",
+                        "Destination")
+                    {
+                        OriginStationId = OriginStationId,
+                        DestinationStationId = DestinationStationId,
+                    },
+                    new TripVehicleSummarySnapshot(Guid.NewGuid(), "51B-12345", "ACTIVE")),
+            ]));
+
+        var result = await new MarkParcelLoadedCommandHandler(repo, trip, Outbox(), Stats(), custody)
+            .Handle(new MarkParcelLoadedCommand(ParcelId, TripId, "VRP-001", null), default);
+
+        result.Status.Should().Be("LOADED");
+        await custody.Received(1).AppendAsync(
+            parcel,
+            ParcelCustodyEventType.LOADED,
+            ParcelCustodyLocationType.ORIGIN_STATION,
+            OriginStationId,
+            "Origin",
+            null,
+            "ASSISTANT",
+            "LOAD",
+            null,
+            null,
+            null,
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

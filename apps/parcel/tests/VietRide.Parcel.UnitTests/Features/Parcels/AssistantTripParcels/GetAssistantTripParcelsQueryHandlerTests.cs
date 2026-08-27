@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text.Json;
 using FluentAssertions;
 using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
@@ -56,6 +58,8 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
             .Handle(new GetAssistantTripParcelsQuery(TripId, UserId, OperatorId, 1, 20), default);
 
         result.Items.Should().ContainSingle();
+        result.Items[0].AvailableActions.Should().Contain("REWEIGH");
+        result.Items[0].AvailableActions.Should().NotContain("CHECK_IN");
         result.Items[0].Should().BeEquivalentTo(new
         {
             ParcelId = parcel.Id,
@@ -125,8 +129,29 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
         result.IsValid.Should().BeFalse();
     }
 
+    [Fact]
+    public void OperationalLocationResponse_UsesSharedContractTimestampNames()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-08-28T01:00:00+07:00");
+        var response = new AssistantOperationalLocationResponse(
+            new ReliabilityLocationResponse("ROUTE_STOP", Guid.NewGuid(), "Stop 1"),
+            "ARRIVED",
+            timestamp,
+            null);
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(
+            response,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+        json.RootElement.GetProperty("actualArrivalAt").GetDateTimeOffset().Should().Be(timestamp);
+        json.RootElement.GetProperty("actualDepartureAt").ValueKind.Should().Be(JsonValueKind.Null);
+        json.RootElement.TryGetProperty("arrivedAt", out _).Should().BeFalse();
+        json.RootElement.TryGetProperty("departedAt", out _).Should().BeFalse();
+    }
+
     private static ParcelEntity CreateParcel()
-        => ParcelEntity.CreatePendingPayment(
+    {
+        var parcel = ParcelEntity.CreatePendingPayment(
             "VR-PCL-001",
             Guid.NewGuid(),
             Guid.NewGuid(),
@@ -143,6 +168,11 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
             2.5m,
             ParcelDeliveryMethod.TERMINAL_PICKUP,
             Money.FromRaw(100_000));
+        typeof(ParcelEntity)
+            .GetProperty(nameof(ParcelEntity.Status), BindingFlags.Instance | BindingFlags.Public)!
+            .SetValue(parcel, ParcelStatus.CHECKED_IN);
+        return parcel;
+    }
 
     private static ParcelScreenReadModel CreateScreen(ParcelEntity parcel)
         => new(
