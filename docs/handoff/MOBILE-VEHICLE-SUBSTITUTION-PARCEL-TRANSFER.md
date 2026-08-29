@@ -52,9 +52,15 @@ Mobile không được hiển thị kiện hàng là “đã lên xe mới” kh
 ## Manifest của crew mới
 
 ```http
-GET /v1/crew/trips/{newTripId}/parcels?page=1&pageSize=20
+GET /v1/crew/trips/{newTripId}/parcels?stopId=<uuid-stop>&status=PENDING_TRANSFER_CONFIRM&hasException=false&search=VR-PCL-001&page=1&pageSize=20
 Authorization: Bearer <crew-token>
 ```
+
+Các query filter mà Mobile phải hỗ trợ và truyền đúng khi người dùng lọc manifest:
+
+`stopId`, `status`, `hasException`, `search`, `page`, `pageSize`.
+
+Khi không lọc, có thể bỏ các filter tùy chọn (`stopId`, `status`, `hasException`, `search`) nhưng vẫn truyền phân trang `page` và `pageSize`.
 
 Endpoint dùng chung cho role `DRIVER|ASSISTANT`, trả cả:
 
@@ -92,6 +98,16 @@ POST /v1/crew/parcels/{parcelId}/confirm-transfer
 Idempotency-Key: <uuid-v4>
 Content-Type: application/json
 ```
+
+Body bắt buộc:
+
+```json
+{
+  "parcelCode": "VR-PCL-001"
+}
+```
+
+`parcelCode` phải khớp với kiện hàng được nhận thực tế; không gửi `null` hoặc bỏ trống field này.
 
 Chỉ tài xế/phụ xe được gán vào Trip đích có quyền xác nhận. Thành công trả hàng về `LOADED`, đổi `tripId` sang Trip mới và xóa `transferTargetTripId`.
 

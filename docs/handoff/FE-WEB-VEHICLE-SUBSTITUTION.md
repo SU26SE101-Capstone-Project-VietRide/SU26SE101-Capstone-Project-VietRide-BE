@@ -15,6 +15,8 @@ Web Operator chịu trách nhiệm chọn đầy đủ tài nguyên thay thế, 
 
 ## API đổi xe
 
+Quyền gọi API: chỉ `OPERATOR_ADMIN` được phép thực hiện substitution. `OPERATOR_STAFF` chỉ được xem và điều phối dữ liệu xe/sự cố; nếu gọi API này phải nhận `403 FORBIDDEN`.
+
 ```http
 POST /v1/operator/trips/{tripId}/substitute-vehicle
 Idempotency-Key: <uuid-v4>
@@ -37,6 +39,25 @@ Content-Type: application/json
 ```
 
 Mỗi lần thay đổi body sau một response phải dùng `Idempotency-Key` UUID-v4 mới. Không tái sử dụng key cũ cho request có nội dung khác.
+
+Ví dụ response thành công:
+
+```json
+{
+  "substitutionId": "uuid-substitution",
+  "oldTripId": "uuid-trip-cu",
+  "oldTripStatus": "DISRUPTED",
+  "newTripId": "uuid-trip-moi",
+  "newTripStatus": "BOARDING",
+  "newTripDepartureDateTime": "2026-08-29T04:30:00Z",
+  "transferStatus": "QUEUED",
+  "affectedBookingCount": 12,
+  "affectedPassengerCount": 15,
+  "pendingSeatAssignmentCount": 0
+}
+```
+
+Web dùng `newTripId` để refresh chuyến thay thế. `transferStatus = QUEUED` chỉ cho biết luồng chuyển hàng đang chờ crew xác nhận; không được coi các kiện hàng là đã sang xe mới trước khi có confirm thành công.
 
 ## Validation và lỗi cần hiển thị
 
