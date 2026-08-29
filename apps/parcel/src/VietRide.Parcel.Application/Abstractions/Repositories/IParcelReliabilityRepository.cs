@@ -88,7 +88,26 @@ public interface IParcelReliabilityRepository
 
     Task<ParcelClaim?> GetClaimByIdAsync(Guid claimId, CancellationToken ct = default);
 
+    Task<ParcelClaim?> GetClaimByIdForUpdateAsync(Guid claimId, CancellationToken ct = default);
+
     Task<ParcelClaim?> GetClaimByIncidentAsync(Guid incidentId, CancellationToken ct = default);
+
+    Task<ParcelClaimAppeal?> GetClaimAppealByIdAsync(Guid appealId, CancellationToken ct = default);
+
+    Task<ParcelClaimAppeal?> GetClaimAppealByIdForUpdateAsync(Guid appealId, CancellationToken ct = default);
+
+    Task<ParcelClaimAppeal?> GetClaimAppealByClaimAsync(Guid claimId, CancellationToken ct = default);
+
+    Task<ParcelClaimAppeal?> GetClaimAppealByIdempotencyKeyAsync(
+        Guid idempotencyKey,
+        CancellationToken ct = default);
+
+    Task<PagedResult<ParcelClaimAppeal>> SearchClaimAppealsByOperatorAsync(
+        Guid operatorId,
+        ParcelClaimAppealStatus? status,
+        int page,
+        int pageSize,
+        CancellationToken ct = default);
 
     Task<ParcelCompensationPolicy?> GetCompensationPolicyAsync(Guid operatorId, CancellationToken ct = default);
 
@@ -154,6 +173,7 @@ public interface IParcelReliabilityRepository
     Task AddIncidentAsync(ParcelIncident entity, CancellationToken ct = default);
     Task AddSearchTaskAsync(ParcelSearchTask entity, CancellationToken ct = default);
     Task AddClaimAsync(ParcelClaim entity, CancellationToken ct = default);
+    Task AddClaimAppealAsync(ParcelClaimAppeal entity, CancellationToken ct = default);
     Task AddClaimEvidenceAsync(ParcelClaimEvidence entity, CancellationToken ct = default);
     Task AddCompensationPolicyAsync(ParcelCompensationPolicy entity, CancellationToken ct = default);
     Task AddUnidentifiedPackageAsync(UnidentifiedParcelPackage entity, CancellationToken ct = default);
@@ -163,6 +183,7 @@ public interface IParcelReliabilityRepository
     Task UpdateIncidentAsync(ParcelIncident entity, CancellationToken ct = default);
     Task UpdateSearchTaskAsync(ParcelSearchTask entity, CancellationToken ct = default);
     Task UpdateClaimAsync(ParcelClaim entity, CancellationToken ct = default);
+    Task UpdateClaimAppealAsync(ParcelClaimAppeal entity, CancellationToken ct = default);
     Task UpdateCompensationPolicyAsync(ParcelCompensationPolicy entity, CancellationToken ct = default);
     Task UpdateUnidentifiedPackageAsync(UnidentifiedParcelPackage entity, CancellationToken ct = default);
 }

@@ -114,6 +114,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IParcelRepository, ParcelRepository>();
         services.AddScoped<IParcelReliabilityRepository, ParcelReliabilityRepository>();
         services.AddScoped<IParcelCustodyExceptionRequestRepository, ParcelCustodyExceptionRequestRepository>();
+        services.AddScoped<IParcelStopDepartureApprovalRepository, ParcelStopDepartureApprovalRepository>();
         services.AddScoped<IParcelCustodyService, ParcelCustodyService>();
         services.AddScoped<IParcelReliabilityReadModelService, ParcelReliabilityReadModelService>();
         services.AddScoped<IOperatorParcelStatsRepository, OperatorParcelStatsRepository>();

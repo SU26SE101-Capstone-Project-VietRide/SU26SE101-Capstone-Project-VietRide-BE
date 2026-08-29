@@ -20,7 +20,33 @@ public sealed class HandleParcelCompensationStatusCommandHandler
     {
         var claim = await _reliability.GetClaimByIdAsync(command.ClaimId, cancellationToken);
         if (claim is null)
-            return false;
+        {
+            var appeal = await _reliability.GetClaimAppealByIdForUpdateAsync(
+                command.ClaimId,
+                cancellationToken);
+            if (appeal is null)
+                return false;
+            if (string.Equals(command.Status, "PAID", StringComparison.OrdinalIgnoreCase))
+            {
+                if (appeal.Status == ParcelClaimAppealStatus.PAID)
+                    return true;
+                appeal.MarkPaid(command.PayoutId, command.OccurredAt);
+            }
+            else if (string.Equals(command.Status, "FUNDING_PENDING", StringComparison.OrdinalIgnoreCase))
+            {
+                if (appeal.Status is ParcelClaimAppealStatus.FUNDING_PENDING
+                    or ParcelClaimAppealStatus.PAID)
+                    return true;
+                appeal.MarkFundingPending();
+            }
+            else
+            {
+                return false;
+            }
+
+            await _reliability.UpdateClaimAppealAsync(appeal, cancellationToken);
+            return true;
+        }
         if (string.Equals(command.Status, "PAID", StringComparison.OrdinalIgnoreCase))
         {
             if (claim.Status == ParcelClaimStatus.PAID)
@@ -29,7 +55,7 @@ public sealed class HandleParcelCompensationStatusCommandHandler
         }
         else if (string.Equals(command.Status, "FUNDING_PENDING", StringComparison.OrdinalIgnoreCase))
         {
-            if (claim.Status == ParcelClaimStatus.FUNDING_PENDING)
+            if (claim.Status is ParcelClaimStatus.FUNDING_PENDING or ParcelClaimStatus.PAID)
                 return true;
             claim.MarkFundingPending();
         }

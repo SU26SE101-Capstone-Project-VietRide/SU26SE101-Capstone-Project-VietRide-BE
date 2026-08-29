@@ -31,7 +31,8 @@ public sealed record ParcelClaimResponse(
     ParcelCompensationPolicySnapshotResponse? PolicySnapshot = null,
     DateTimeOffset? DecisionDeadline = null,
     DateTimeOffset? PayoutDeadline = null,
-    IReadOnlyList<string>? AvailableActions = null);
+    IReadOnlyList<string>? AvailableActions = null,
+    ParcelClaimAppealResponse? Appeal = null);
 
 public sealed record ParcelClaimEvidenceResponse(
     Guid EvidenceId,

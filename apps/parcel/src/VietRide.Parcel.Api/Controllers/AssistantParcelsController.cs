@@ -338,7 +338,7 @@ public sealed class AssistantParcelsController : ControllerBase
                 request.ScannedParcelIds ?? Array.Empty<Guid>(),
                 request.ManualExceptionParcelIds ?? Array.Empty<Guid>(),
                 request.DepartureOverrideReason,
-                request.SupervisorApprovalUserId),
+                Guid.Parse(Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString())),
             cancellationToken);
         return Ok(result);
     }

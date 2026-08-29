@@ -993,6 +993,22 @@ describe('buildRouteTable', () => {
     const incidents = matchRoute(routes, '/v1/operator/parcel-incidents', 'GET');
     const claimQueue = matchRoute(routes, '/v1/operator/claims', 'GET');
     const claimDecision = matchRoute(routes, `/v1/operator/claims/${claimId}/decision`, 'POST');
+    const claimAppealQueue = matchRoute(routes, '/v1/operator/claim-appeals', 'GET');
+    const claimAppealDecision = matchRoute(
+      routes,
+      `/v1/operator/claim-appeals/${claimId}/decision`,
+      'POST',
+    );
+    const operatorDepartureApproval = matchRoute(
+      routes,
+      `/v1/operator/parcel-stop-departure-approvals/${claimId}/decision`,
+      'POST',
+    );
+    const driverDepartureApproval = matchRoute(
+      routes,
+      `/v1/crew/parcel-stop-departure-approvals/${claimId}/decision`,
+      'POST',
+    );
     const unidentified = matchRoute(routes, '/v1/operator/unidentified-packages', 'GET');
     const policyRead = matchRoute(routes, '/v1/operator/policies/parcel-compensation', 'GET');
     const policyWrite = matchRoute(routes, '/v1/operator/policies/parcel-compensation', 'PUT');
@@ -1005,6 +1021,13 @@ describe('buildRouteTable', () => {
     expect(incidents?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
     expect(claimQueue?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
     expect(claimDecision?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
+    expect(claimAppealQueue?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
+    expect(claimAppealDecision?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
+    expect(operatorDepartureApproval?.requiredRoles).toEqual([
+      'OPERATOR_ADMIN',
+      'OPERATOR_STAFF',
+    ]);
+    expect(driverDepartureApproval?.requiredRoles).toEqual(['DRIVER']);
     expect(unidentified?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
     expect(policyRead?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
     expect(policyWrite?.requiredRoles).toEqual(['OPERATOR_ADMIN']);

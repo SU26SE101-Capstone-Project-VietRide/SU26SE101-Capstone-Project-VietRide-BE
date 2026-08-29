@@ -8,7 +8,23 @@ public interface IParcelImpactClient
         Guid tripId,
         Guid operatorId,
         CancellationToken cancellationToken);
+
+    Task<ParcelStopDepartureClearanceProjection> GetStopDepartureClearanceAsync(
+        Guid tripId,
+        Guid stopId,
+        Guid operatorId,
+        CancellationToken cancellationToken);
 }
+
+public sealed record ParcelStopDepartureClearanceProjection(
+    Guid TripId,
+    Guid StopId,
+    Guid OperatorId,
+    string Status,
+    IReadOnlyList<Guid> UnresolvedParcelIds,
+    Guid? ApprovalRequestId,
+    Guid? ApprovedByUserId,
+    DateTimeOffset? ApprovedAt);
 
 public sealed record TripParcelCancellationImpactProjection(
     Guid TripId,

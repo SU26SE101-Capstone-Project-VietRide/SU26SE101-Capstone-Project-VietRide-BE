@@ -8,6 +8,7 @@ using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Application.Features.Parcels.ResendDeliveryEmail;
 using VietRide.Parcel.Application.Features.Reliability.CustodyException;
+using VietRide.Parcel.Application.Features.Reliability.Reconciliation;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 
@@ -23,6 +24,53 @@ public sealed class CrewParcelsController : ControllerBase
     public CrewParcelsController(IMediator mediator)
     {
         _mediator = mediator;
+    }
+
+    [HttpGet("~/v1/crew/parcel-stop-departure-approvals/{requestId:guid}")]
+    [Authorize(Roles = "DRIVER")]
+    [ProducesResponseType(typeof(ApiResponse<ParcelStopDepartureApprovalResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ParcelStopDepartureApprovalResponse>> GetStopDepartureApprovalAsync(
+        Guid requestId,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new GetParcelStopDepartureApprovalQuery(
+                requestId,
+                CurrentUserClaims.GetUserId(User),
+                operatorId,
+                "DRIVER"),
+            cancellationToken));
+    }
+
+    [HttpPost("~/v1/crew/parcel-stop-departure-approvals/{requestId:guid}/decision")]
+    [Authorize(Roles = "DRIVER")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<ParcelStopDepartureApprovalResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ParcelStopDepartureApprovalResponse>> DecideStopDepartureApprovalAsync(
+        Guid requestId,
+        [FromBody] DecideParcelStopDepartureApprovalRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new DecideParcelStopDepartureApprovalCommand(
+                requestId,
+                CurrentUserClaims.GetUserId(User),
+                operatorId,
+                "DRIVER",
+                request.Decision?.Trim().ToUpperInvariant() ?? string.Empty,
+                request.Note,
+                Guid.Parse(Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString())),
+            cancellationToken));
     }
 
     [HttpGet("~/v1/crew/trips/{tripId:guid}/parcels")]

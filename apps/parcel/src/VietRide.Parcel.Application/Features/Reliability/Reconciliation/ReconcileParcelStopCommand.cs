@@ -11,7 +11,7 @@ public sealed record ReconcileParcelStopCommand(
     IReadOnlyCollection<Guid> ScannedParcelIds,
     IReadOnlyCollection<Guid> ManualExceptionParcelIds,
     string? DepartureOverrideReason,
-    Guid? SupervisorApprovalUserId) : IRequest<ReconcileParcelStopResponse>;
+    Guid IdempotencyKey) : IRequest<ReconcileParcelStopResponse>;
 
 public sealed record ReconcileParcelStopResponse(
     int ExpectedCount,
@@ -19,7 +19,8 @@ public sealed record ReconcileParcelStopResponse(
     int ManualExceptionCount,
     IReadOnlyList<ReconcileUnresolvedParcelResponse> UnresolvedParcels,
     bool CanDepart,
-    bool RequiresSupervisorApproval)
+    bool RequiresSupervisorApproval,
+    ParcelStopDepartureApprovalResponse? DepartureOverrideRequest)
 {
     public IReadOnlyList<Guid> UnresolvedParcelIds
         => UnresolvedParcels.Select(parcel => parcel.ParcelId).ToArray();

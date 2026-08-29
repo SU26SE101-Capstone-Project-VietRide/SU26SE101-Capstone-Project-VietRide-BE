@@ -1058,6 +1058,21 @@ public sealed class TripHandlerProjectionTests
 
     private sealed class FakeParcelImpactClient(TripParcelCancellationImpactProjection projection) : IParcelImpactClient
     {
+        public Task<ParcelStopDepartureClearanceProjection> GetStopDepartureClearanceAsync(
+            Guid tripId,
+            Guid stopId,
+            Guid operatorId,
+            CancellationToken cancellationToken)
+            => Task.FromResult(new ParcelStopDepartureClearanceProjection(
+                tripId,
+                stopId,
+                operatorId,
+                "CLEAR",
+                [],
+                null,
+                null,
+                null));
+
         public Task<TripParcelCancellationImpactProjection> GetTripCancellationImpactAsync(
             Guid tripId,
             Guid operatorId,

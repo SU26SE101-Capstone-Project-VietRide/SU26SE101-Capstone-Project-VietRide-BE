@@ -179,6 +179,94 @@ public sealed class Day24DepartStopWarningTests
         fixture.Outbox.Entries.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Handle_UnresolvedParcelWithoutApprovedOverride_BlocksBeforeDeparture()
+    {
+        var fixture = CreateFixture();
+        var unresolvedParcelId = Guid.NewGuid();
+        fixture.Parcel.Clearance = new(
+            fixture.Trip.Id,
+            fixture.Stop.Id,
+            fixture.Trip.OperatorId,
+            "BLOCKED_PENDING_APPROVAL",
+            [unresolvedParcelId],
+            Guid.NewGuid(),
+            null,
+            null);
+
+        var action = () => fixture.Sut.Handle(fixture.Command, CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<CodedConflictException>();
+        exception.Which.ErrorCode.Should().Be("PARCEL_STOP_RECONCILIATION_REQUIRED");
+        fixture.TripStops.MarkDepartedCalls.Should().Be(0);
+        fixture.Booking.Calls.Should().Be(0);
+        fixture.Outbox.Entries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_ApprovedParcelOverride_AllowsDeparture()
+    {
+        var fixture = CreateFixture();
+        fixture.Parcel.Clearance = new(
+            fixture.Trip.Id,
+            fixture.Stop.Id,
+            fixture.Trip.OperatorId,
+            "APPROVED_OVERRIDE",
+            [Guid.NewGuid()],
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Now.AddMinutes(-1));
+
+        var result = await fixture.Sut.Handle(fixture.Command, CancellationToken.None);
+
+        result.StopId.Should().Be(fixture.Stop.Id);
+        fixture.TripStops.MarkDepartedCalls.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Handle_ParcelClearanceTransportOrTimeout_FailsClosedBeforeDeparture(
+        bool timeout)
+    {
+        var fixture = CreateFixture();
+        fixture.Parcel.Exception = timeout
+            ? new TaskCanceledException("timeout")
+            : new HttpRequestException("5xx");
+
+        var action = () => fixture.Sut.Handle(fixture.Command, CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<TripUpstreamUnavailableException>();
+        exception.Which.ErrorCode.Should().Be("UPSTREAM_UNAVAILABLE");
+        exception.Which.StatusCode.Should().Be(502);
+        fixture.TripStops.MarkDepartedCalls.Should().Be(0);
+        fixture.Booking.Calls.Should().Be(0);
+        fixture.Outbox.Entries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_InconsistentParcelClearance_FailsClosedBeforeDeparture()
+    {
+        var fixture = CreateFixture();
+        fixture.Parcel.Clearance = new(
+            fixture.Trip.Id,
+            fixture.Stop.Id,
+            fixture.Trip.OperatorId,
+            "CLEAR",
+            [Guid.NewGuid()],
+            null,
+            null,
+            null);
+
+        var action = () => fixture.Sut.Handle(fixture.Command, CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<TripUpstreamUnavailableException>();
+        exception.Which.ErrorCode.Should().Be("UPSTREAM_UNAVAILABLE");
+        fixture.TripStops.MarkDepartedCalls.Should().Be(0);
+        fixture.Booking.Calls.Should().Be(0);
+        fixture.Outbox.Entries.Should().BeEmpty();
+    }
+
     private static Fixture CreateFixture(
         TripStatus tripStatus = TripStatus.IN_PROGRESS,
         TripStopStatus stopStatus = TripStopStatus.ARRIVED,
@@ -216,12 +304,14 @@ public sealed class Day24DepartStopWarningTests
         var tripStops = new FakeTripStopRepository(tripStop, casWinner);
         var stops = new FakeStopRepository(stop);
         var booking = new FakeBookingImpactClient();
+        var parcel = new FakeParcelImpactClient();
         var outbox = new RecordingOutbox();
         var sut = new DepartStopHandler(
             trips,
             tripStops,
             stops,
             booking,
+            parcel,
             outbox,
             new FrozenClock(Now));
         var command = new DepartStopCommand(
@@ -230,7 +320,7 @@ public sealed class Day24DepartStopWarningTests
             driverId,
             "DRIVER",
             operatorId);
-        return new Fixture(sut, command, trip, tripStop, stop, tripStops, booking, outbox);
+        return new Fixture(sut, command, trip, tripStop, stop, tripStops, booking, parcel, outbox);
     }
 
     private static void MoveTripToStatus(TripEntity trip, TripStatus status)
@@ -338,6 +428,35 @@ public sealed class Day24DepartStopWarningTests
             => throw new NotSupportedException();
     }
 
+    private sealed class FakeParcelImpactClient : IParcelImpactClient
+    {
+        public Exception? Exception { get; set; }
+        public ParcelStopDepartureClearanceProjection Clearance { get; set; }
+            = new(Guid.Empty, Guid.Empty, Guid.Empty, "CLEAR", [], null, null, null);
+
+        public Task<ParcelStopDepartureClearanceProjection> GetStopDepartureClearanceAsync(
+            Guid tripId,
+            Guid stopId,
+            Guid operatorId,
+            CancellationToken cancellationToken)
+        {
+            if (Exception is not null)
+                return Task.FromException<ParcelStopDepartureClearanceProjection>(Exception);
+            return Task.FromResult(Clearance with
+            {
+                TripId = tripId,
+                StopId = stopId,
+                OperatorId = operatorId,
+            });
+        }
+
+        public Task<TripParcelCancellationImpactProjection> GetTripCancellationImpactAsync(
+            Guid tripId,
+            Guid operatorId,
+            CancellationToken cancellationToken)
+            => throw new NotSupportedException();
+    }
+
     private sealed class RecordingOutbox : IIntegrationEventOutbox
     {
         public List<OutboxEntry> Entries { get; } = [];
@@ -367,5 +486,6 @@ public sealed class Day24DepartStopWarningTests
         Stop Stop,
         FakeTripStopRepository TripStops,
         FakeBookingImpactClient Booking,
+        FakeParcelImpactClient Parcel,
         RecordingOutbox Outbox);
 }

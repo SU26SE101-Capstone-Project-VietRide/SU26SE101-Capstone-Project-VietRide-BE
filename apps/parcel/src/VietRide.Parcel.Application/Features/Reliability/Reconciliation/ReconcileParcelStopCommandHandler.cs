@@ -17,6 +17,7 @@ public sealed class ReconcileParcelStopCommandHandler
 {
     private readonly IParcelRepository _parcels;
     private readonly IParcelReliabilityRepository _reliability;
+    private readonly IParcelStopDepartureApprovalRepository _departureApprovals;
     private readonly ITripServiceClient _trips;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
@@ -24,12 +25,14 @@ public sealed class ReconcileParcelStopCommandHandler
     public ReconcileParcelStopCommandHandler(
         IParcelRepository parcels,
         IParcelReliabilityRepository reliability,
+        IParcelStopDepartureApprovalRepository departureApprovals,
         ITripServiceClient trips,
         IIntegrationEventOutbox outbox,
         IClock clock)
     {
         _parcels = parcels;
         _reliability = reliability;
+        _departureApprovals = departureApprovals;
         _trips = trips;
         _outbox = outbox;
         _clock = clock;
@@ -129,9 +132,13 @@ public sealed class ReconcileParcelStopCommandHandler
                 "One or more reconciled parcels have no matching custody event at this stop.");
 
         var unresolved = expectedIds.Except(scanned).Except(manual).ToArray();
-        var hasAuthorizedOverride = unresolved.Length > 0
-            && !string.IsNullOrWhiteSpace(command.DepartureOverrideReason)
-            && command.SupervisorApprovalUserId.HasValue;
+        if (unresolved.Length > 0)
+        {
+            await _departureApprovals.AcquireTripStopLockAsync(
+                command.TripId,
+                command.StopId,
+                cancellationToken);
+        }
         var now = _clock.UtcNow;
         var existingIncidents = await _reliability.ListActiveIncidentsByParcelsAsync(unresolved, cancellationToken);
         var incidentByParcel = existingIncidents
@@ -222,12 +229,65 @@ public sealed class ReconcileParcelStopCommandHandler
                     "SEARCH_VEHICLE_OR_STATION");
             }).ToArray();
 
+        ParcelStopDepartureApprovalRequest? departureApproval = null;
+        var hasAuthorizedOverride = false;
+        if (unresolved.Length > 0)
+        {
+            departureApproval = await _departureApprovals.GetLatestByTripStopForUpdateAsync(
+                command.TripId,
+                command.StopId,
+                cancellationToken);
+            hasAuthorizedOverride = departureApproval is not null
+                && departureApproval.OperatorId == command.OperatorId
+                && departureApproval.Status == ParcelStopDepartureApprovalStatus.APPROVED
+                && ParcelStopDepartureApprovalMapper.Matches(departureApproval, unresolved);
+
+            if (!hasAuthorizedOverride && !string.IsNullOrWhiteSpace(command.DepartureOverrideReason))
+            {
+                var replay = await _departureApprovals.GetByIdempotencyKeyAsync(
+                    command.IdempotencyKey,
+                    cancellationToken);
+                if (replay is not null)
+                {
+                    if (replay.TripId != command.TripId
+                        || replay.StopId != command.StopId
+                        || replay.OperatorId != command.OperatorId
+                        || !ParcelStopDepartureApprovalMapper.Matches(replay, unresolved))
+                        throw new CodedConflictException(
+                            "IDEMPOTENCY_KEY_REUSED",
+                            "Idempotency-Key was already used for a different departure override request.");
+                    departureApproval = replay;
+                }
+                else if (departureApproval is null
+                    || departureApproval.Status != ParcelStopDepartureApprovalStatus.PENDING_APPROVAL
+                    || !ParcelStopDepartureApprovalMapper.Matches(departureApproval, unresolved))
+                {
+                    if (departureApproval?.Status == ParcelStopDepartureApprovalStatus.PENDING_APPROVAL)
+                        departureApproval.CancelAsSuperseded(now);
+                    departureApproval = ParcelStopDepartureApprovalRequest.Create(
+                        command.TripId,
+                        command.StopId,
+                        command.OperatorId,
+                        ParcelStopDepartureApprovalMapper.SerializeParcelIds(unresolved),
+                        command.DepartureOverrideReason,
+                        command.ActorUserId,
+                        "ASSISTANT",
+                        now,
+                        command.IdempotencyKey);
+                    await _departureApprovals.AddAsync(departureApproval, cancellationToken);
+                }
+            }
+        }
+
         return new ReconcileParcelStopResponse(
             expected.Length,
             expected.Count(x => scanned.Contains(x.Id)),
             expected.Count(x => manual.Contains(x.Id)),
             unresolvedResponses,
             unresolved.Length == 0 || hasAuthorizedOverride,
-            unresolved.Length > 0 && !hasAuthorizedOverride);
+            unresolved.Length > 0 && !hasAuthorizedOverride,
+            departureApproval is null
+                ? null
+                : ParcelStopDepartureApprovalMapper.Map(departureApproval));
     }
 }

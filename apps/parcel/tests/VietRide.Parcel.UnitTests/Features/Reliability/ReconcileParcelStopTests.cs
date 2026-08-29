@@ -25,7 +25,7 @@ public sealed class ReconcileParcelStopTests
     [Fact]
     public async Task Handle_StopAlreadyDeparted_RejectsStaleTripSnapshot()
     {
-        var (handler, parcels, _) = CreateHandler(atCurrentStop: false);
+        var (handler, parcels, _, _) = CreateHandler(atCurrentStop: false);
 
         var action = () => handler.Handle(
             new ReconcileParcelStopCommand(
@@ -36,7 +36,7 @@ public sealed class ReconcileParcelStopTests
                 Array.Empty<Guid>(),
                 Array.Empty<Guid>(),
                 null,
-                null),
+                Guid.NewGuid()),
             CancellationToken.None);
 
         var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
@@ -70,7 +70,7 @@ public sealed class ReconcileParcelStopTests
             null,
             null,
             1);
-        var (handler, parcels, reliability) = CreateHandler();
+        var (handler, parcels, reliability, _) = CreateHandler();
         parcels.ListDropoffManifestByTripAndStopAsync(TripId, StopId, Arg.Any<CancellationToken>())
             .Returns(new[] { parcel });
         reliability.ListCustodyEventsByParcelsAsync(
@@ -95,7 +95,7 @@ public sealed class ReconcileParcelStopTests
                 new[] { ParcelId },
                 Array.Empty<Guid>(),
                 null,
-                null),
+                Guid.NewGuid()),
             CancellationToken.None);
 
         result.ExpectedCount.Should().Be(1);
@@ -108,7 +108,7 @@ public sealed class ReconcileParcelStopTests
     public async Task Handle_RejectsClientAssertedScanWithoutMatchingCustodyEvent()
     {
         var parcel = CreateManifestParcel(ParcelStatus.IN_TRANSIT);
-        var (handler, parcels, reliability) = CreateHandler();
+        var (handler, parcels, reliability, _) = CreateHandler();
         parcels.ListDropoffManifestByTripAndStopAsync(TripId, StopId, Arg.Any<CancellationToken>())
             .Returns(new[] { parcel });
         reliability.ListCustodyEventsByParcelsAsync(
@@ -125,20 +125,68 @@ public sealed class ReconcileParcelStopTests
                 new[] { ParcelId },
                 Array.Empty<Guid>(),
                 null,
-                null),
+                Guid.NewGuid()),
             CancellationToken.None);
 
         var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
         exception.ErrorCode.Should().Be("PARCEL_CUSTODY_EVENT_NOT_FOUND");
     }
 
+    [Fact]
+    public async Task Handle_UnresolvedWithReason_CreatesPendingApprovalWithoutAuthorizingDeparture()
+    {
+        var parcel = CreateManifestParcel(ParcelStatus.IN_TRANSIT);
+        var (handler, parcels, reliability, approvals) = CreateHandler();
+        parcels.ListDropoffManifestByTripAndStopAsync(TripId, StopId, Arg.Any<CancellationToken>())
+            .Returns(new[] { parcel });
+        reliability.ListCustodyEventsByParcelsAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<ParcelCustodyEvent>());
+        reliability.ListActiveIncidentsByParcelsAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<ParcelIncident>());
+        reliability.ListCurrentCustodiesAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<ParcelCurrentCustody>());
+
+        var result = await handler.Handle(
+            new ReconcileParcelStopCommand(
+                TripId,
+                StopId,
+                AssistantId,
+                OperatorId,
+                Array.Empty<Guid>(),
+                Array.Empty<Guid>(),
+                "Vehicle must leave for an emergency.",
+                Guid.NewGuid()),
+            CancellationToken.None);
+
+        result.CanDepart.Should().BeFalse();
+        result.RequiresSupervisorApproval.Should().BeTrue();
+        result.DepartureOverrideRequest.Should().NotBeNull();
+        result.DepartureOverrideRequest!.Status.Should().Be("PENDING_APPROVAL");
+        result.DepartureOverrideRequest.RequestedByUserId.Should().Be(AssistantId);
+        result.DepartureOverrideRequest.ReviewedByUserId.Should().BeNull();
+        await approvals.Received(1).AddAsync(
+            Arg.Is<ParcelStopDepartureApprovalRequest>(request =>
+                request.TripId == TripId
+                && request.StopId == StopId
+                && request.RequestedByUserId == AssistantId),
+            Arg.Any<CancellationToken>());
+    }
+
     private static (
         ReconcileParcelStopCommandHandler Handler,
         IParcelRepository Parcels,
-        IParcelReliabilityRepository Reliability) CreateHandler(bool atCurrentStop = true)
+        IParcelReliabilityRepository Reliability,
+        IParcelStopDepartureApprovalRepository Approvals) CreateHandler(bool atCurrentStop = true)
     {
         var parcels = Substitute.For<IParcelRepository>();
         var reliability = Substitute.For<IParcelReliabilityRepository>();
+        var departureApprovals = Substitute.For<IParcelStopDepartureApprovalRepository>();
         var trips = Substitute.For<ITripServiceClient>();
         trips.AuthorizeAssistantForTripAsync(
                 TripId,
@@ -170,11 +218,13 @@ public sealed class ReconcileParcelStopTests
             new ReconcileParcelStopCommandHandler(
                 parcels,
                 reliability,
+                departureApprovals,
                 trips,
                 Substitute.For<IIntegrationEventOutbox>(),
                 clock),
             parcels,
-            reliability);
+            reliability,
+            departureApprovals);
     }
 
     private static TripParcelSnapshot CreateTripSnapshot()

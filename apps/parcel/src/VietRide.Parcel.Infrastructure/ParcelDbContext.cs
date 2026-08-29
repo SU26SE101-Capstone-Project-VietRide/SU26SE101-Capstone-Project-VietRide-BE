@@ -30,8 +30,11 @@ public sealed class ParcelDbContext : VietRideDbContextBase
     public DbSet<ParcelIncident> ParcelIncidents => Set<ParcelIncident>();
     public DbSet<ParcelCustodyExceptionRequest> ParcelCustodyExceptionRequests
         => Set<ParcelCustodyExceptionRequest>();
+    public DbSet<ParcelStopDepartureApprovalRequest> ParcelStopDepartureApprovalRequests
+        => Set<ParcelStopDepartureApprovalRequest>();
     public DbSet<ParcelSearchTask> ParcelSearchTasks => Set<ParcelSearchTask>();
     public DbSet<ParcelClaim> ParcelClaims => Set<ParcelClaim>();
+    public DbSet<ParcelClaimAppeal> ParcelClaimAppeals => Set<ParcelClaimAppeal>();
     public DbSet<ParcelClaimEvidence> ParcelClaimEvidence => Set<ParcelClaimEvidence>();
     public DbSet<ParcelCompensationPolicy> ParcelCompensationPolicies => Set<ParcelCompensationPolicy>();
     public DbSet<UnidentifiedParcelPackage> UnidentifiedParcelPackages => Set<UnidentifiedParcelPackage>();

@@ -393,7 +393,8 @@ public sealed class ParcelsController : ControllerBase
                 parcelId,
                 claimId,
                 CurrentUserClaims.GetUserId(User),
-                request.Reason),
+                request.Reason,
+                Guid.Parse(Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString())),
             cancellationToken);
         return Ok(result);
     }
