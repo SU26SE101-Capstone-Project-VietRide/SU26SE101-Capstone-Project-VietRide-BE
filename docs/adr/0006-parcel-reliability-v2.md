@@ -19,7 +19,7 @@ Public tracking exposes only the latest confirmed business location and mileston
 
 Unload requires the requested actual location to equal both the Parcel destination and the Trip operational location. A route stop must be `ARRIVED` with no actual departure; terminal delivery requires the destination-arrival anchor. A mismatch returns `409 PARCEL_CUSTODY_LOCATION_MISMATCH` before Parcel or Trip cargo mutation.
 
-Manual handling is explicit. An unreadable/missing QR requires a photographed `MANUAL_CUSTODY_EXCEPTION` or an `UNIDENTIFIED_PACKAGE` with a temporary tag. A stop close reconciles expected, scanned, manual-exception, and unresolved Parcels. Departure with unresolved cargo opens a search incident; absence of a scan does not by itself confirm loss.
+Manual handling is explicit. An unreadable/missing QR requires a photographed `MANUAL_CUSTODY_EXCEPTION` or an `UNIDENTIFIED_PACKAGE` with a temporary tag. A stop close reconciles expected, scanned, manual-exception, and unresolved Parcels. When unresolved cargo remains, the Assistant may create a `PENDING_APPROVAL` stop-departure request but cannot name or impersonate its reviewer. The assigned Driver or a same-tenant Operator Staff/Admin decides it using identity from that reviewer's JWT. Trip calls the Parcel clearance endpoint before committing departure and fails closed unless it receives `CLEAR` or an approved override matching the exact current unresolved snapshot. Absence of a scan does not by itself confirm loss.
 
 Trip emits `trip.stop.departed` for every committed stop departure, independently of the
 passenger-only `trip.stop.departed_with_pending` warning. Parcel consumes the operational fact to
@@ -52,13 +52,17 @@ Without acceptable proof, `cargoAward = min(fallbackMultiplier * parcelFreight, 
 
 ### Payout is durable and tenant-fenced
 
-Payment owns one `ParcelCompensationPayout` per `claimId`. Before Trip settlement it debits that operator/Trip's PlatformWallet holding; after settlement it debits that operator's OperatorWallet. It then credits the sender PassengerWallet and writes `PARCEL_COMPENSATION` wallet/ledger references atomically. Insufficient funds move the payout and claim to `FUNDING_PENDING`; a recurring job retries against future settlement funds. Operator wallets never become negative, funds never cross operator tenants, and replayed claim snapshots cannot create a second payout.
+Payment owns one `ParcelCompensationPayout` per compensation reference. The original approved claim uses `claimId`; an approved appeal adjustment uses `appealId` and only its positive supplementary delta. Before Trip settlement it debits that operator/Trip's PlatformWallet holding; after settlement it debits that operator's OperatorWallet. It then credits the sender PassengerWallet and writes `PARCEL_COMPENSATION` wallet/ledger references atomically. Insufficient funds move the payout and owning claim/appeal to `FUNDING_PENDING`; a recurring job retries against future settlement funds. Operator wallets never become negative, funds never cross operator tenants, and replayed decision snapshots cannot create a second payout.
 
 Cross-service changes use Internal JWT, Outbox, routing keys registered in the BSOT, UUID-v4 idempotency on public mutations, ADR 0004 envelopes, and tenant-masked reads.
 
-A sender appeal is allowed after a paid or rejected decision. Appeal reason, actor, and timestamp
-are stored separately so the original decision reason, decision maker, amount, and payout audit
-remain immutable.
+A sender may create one separate `ParcelClaimAppeal` after a paid or rejected decision. The
+original claim never transitions to `APPEALED`; its decision reason, reviewer, award and payout
+remain immutable. The appeal is `SUBMITTED -> UNDER_REVIEW -> UPHELD` or
+`SUBMITTED -> UNDER_REVIEW -> ADJUSTMENT_APPROVED -> FUNDING_PENDING -> PAID`.
+`OPERATOR_ADMIN` may uphold the original outcome or approve a recalculated award only when it is
+greater than the amount already paid. Payment credits only the positive supplementary delta and
+uses `appealId` as its unique compensation reference.
 
 ## Consequences
 

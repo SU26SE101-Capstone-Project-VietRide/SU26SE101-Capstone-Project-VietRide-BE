@@ -4683,13 +4683,21 @@ Identity batch; nullable display enrichment degrades without hiding the Parcel f
 | `GET /v1/parcels/{parcelId}/incidents` | Sender, linked recipient, same-tenant operator | `200` incident summaries |
 | `POST /v1/parcels/{parcelId}/claims` | Sender `PASSENGER`; bodyless | `201` snapshotted claim; requires `LOST_CONFIRMED` within claim window |
 | `POST /v1/parcels/{parcelId}/claims/{claimId}/evidence` | Sender; `{ evidenceType, reference, note? }` | `201` updated claim with all evidence metadata, deadlines, frozen policy and `availableActions`; no raw upload token |
-| `POST /v1/parcels/{parcelId}/claims/{claimId}/appeal` | Sender; `{ reason }`; claim must be `PAID` or `REJECTED` | `200` claim in `APPEALED`; original decision fields remain immutable |
+| `POST /v1/parcels/{parcelId}/claims/{claimId}/appeal` | Sender; `{ reason }`; claim must be `PAID` or `REJECTED`; UUID-v4 `Idempotency-Key` | `200` original claim unchanged, with the new separate appeal in `data.appeal` |
 | `GET /v1/parcels/{parcelId}/claims` | Sender or same-tenant operator; recipient is not authorized | `200` claims and evidence metadata |
 
 The sender is always `beneficiaryUserId`. Claim response freezes `declaredValueVnd,
 provenDirectLossVnd,compensationRatePercent,policyCapVnd,cargoAwardVnd,freightRefundVnd,
-totalAwardVnd,policyVersion,status,decisionReason,decidedBy,decidedAt,payoutReferenceId,paidAt,
-appealReason,appealedByUserId,appealedAt`. An appeal never overwrites the original decision audit.
+totalAwardVnd,policyVersion,status,decisionReason,decidedBy,decidedAt,payoutReferenceId,paidAt`.
+Legacy `appealReason,appealedByUserId,appealedAt` remain nullable compatibility fields; new writes
+use the nested `appeal` resource. The original claim remains `PAID` or `REJECTED` and is never
+mutated to `APPEALED`.
+
+`data.appeal` has
+`appealId,claimId,originalClaimStatus,originalTotalAwardVnd,status,reason,submittedByUserId,
+submittedAt,revisedProvenDirectLossVnd,revisedCargoAwardVnd,revisedFreightRefundVnd,
+revisedTotalAwardVnd,supplementaryAwardVnd,decisionReason,decidedByUserId,decidedAt,
+payoutReferenceId,paidAt,availableActions`. One claim may have at most one appeal.
 
 ### Assistant/station custody APIs
 
@@ -4766,8 +4774,8 @@ request.
 
 #### POST `/v1/assistant/trips/{tripId}/stops/{stopId}/reconcile`
 
-Body `{ scannedParcelIds?, manualExceptionParcelIds?, departureOverrideReason?,
-supervisorApprovalUserId? }`. Response data:
+Body `{ scannedParcelIds?, manualExceptionParcelIds?, departureOverrideReason? }`. The Assistant
+cannot submit a reviewer UUID. Response data:
 
 ```json
 {
@@ -4786,16 +4794,71 @@ supervisorApprovalUserId? }`. Response data:
     "recommendedAction": "SEARCH_VEHICLE_OR_STATION"
   }],
   "canDepart": false,
-  "requiresSupervisorApproval": true
+  "requiresSupervisorApproval": true,
+  "departureOverrideRequest": {
+    "requestId": "uuid",
+    "tripId": "uuid",
+    "stopId": "uuid",
+    "operatorId": "uuid",
+    "unresolvedParcelIds": ["uuid"],
+    "departureOverrideReason": "Operational emergency",
+    "status": "PENDING_APPROVAL",
+    "requestedByUserId": "uuid",
+    "requestedByRole": "ASSISTANT",
+    "requestedAt": "2026-08-29T16:30:00Z",
+    "reviewedByUserId": null,
+    "reviewedByRole": null,
+    "reviewedAt": null,
+    "reviewNote": null,
+    "availableActions": ["APPROVE", "REJECT"]
+  }
 }
 ```
 
-An override with unresolved Parcels requires both reason and supervisor. Each unresolved Parcel
-opens `UNSCANNED_HANDOFF`; the Trip departure event may additionally open
+With unresolved Parcels, `departureOverrideReason` creates or replays a `PENDING_APPROVAL`
+request for the exact unresolved snapshot. It does not authorize departure. Each unresolved Parcel
+opens `UNSCANNED_HANDOFF`; a committed Trip departure event may additionally open
 `MISSING_AFTER_DEPARTURE`. No scan gap directly confirms loss.
 `scannedParcelIds` and `manualExceptionParcelIds` are assertions only: Parcel derives the counts
 from matching append-only `UNLOADED` or `MANUAL_CUSTODY_EXCEPTION` facts for the same Trip and stop.
 An asserted id without that custody fact returns `409 PARCEL_CUSTODY_EVENT_NOT_FOUND`.
+
+#### Stop-departure approval APIs
+
+| Endpoint | Auth/body | Response |
+|---|---|---|
+| `GET /v1/crew/parcel-stop-departure-approvals/{requestId}` | Assigned `DRIVER` | `200` `ParcelStopDepartureApprovalResponse` |
+| `POST /v1/crew/parcel-stop-departure-approvals/{requestId}/decision` | Assigned `DRIVER`; `{ decision: "APPROVE|REJECT", note? }`; UUID-v4 `Idempotency-Key` | `200` decided request |
+| `GET /v1/operator/parcel-stop-departure-approvals/{requestId}` | Same-tenant `OPERATOR_STAFF|OPERATOR_ADMIN` | `200` request |
+| `POST /v1/operator/parcel-stop-departure-approvals/{requestId}/decision` | Same-tenant `OPERATOR_STAFF|OPERATOR_ADMIN`; same body/header | `200` decided request |
+
+The reviewer is always the caller from JWT. A client-supplied reviewer user ID is not accepted.
+A second decision returns `409 PARCEL_STOP_DEPARTURE_ALREADY_DECIDED`; a hidden/missing request
+returns `404 PARCEL_STOP_DEPARTURE_APPROVAL_NOT_FOUND`.
+
+#### GET `/internal/v1/parcels/trips/{tripId}/stops/{stopId}/departure-clearance`
+
+Auth: Internal JWT. Query: required `operatorId` UUID. Caller: Trip, immediately before committing
+the stop departure. Success is a raw internal DTO:
+
+```json
+{
+  "tripId": "uuid",
+  "stopId": "uuid",
+  "operatorId": "uuid",
+  "status": "CLEAR|APPROVED_OVERRIDE|BLOCKED_PENDING_APPROVAL",
+  "unresolvedParcelIds": ["uuid"],
+  "approvalRequestId": "uuid|null",
+  "approvedByUserId": "uuid|null",
+  "approvedAt": "2026-08-29T16:35:00Z|null"
+}
+```
+
+Trip permits departure only for `CLEAR|APPROVED_OVERRIDE`. For
+`BLOCKED_PENDING_APPROVAL`, Driver/Assistant departure returns
+`409 PARCEL_STOP_RECONCILIATION_REQUIRED` with structured fields
+`approvalRequestId,unresolvedParcelIds,requiredAction`. Parcel timeout, invalid response or other
+upstream failure maps to `502 UPSTREAM_UNAVAILABLE`; departure is not persisted.
 
 #### Unidentified package APIs
 
@@ -4849,6 +4912,20 @@ read with evidence, custody, incident, Trip and beneficiary. Staff may read; onl
 the Parcel's frozen policy; the client cannot provide rate, cap, or award. Approval emits
 `parcel.claim.decided`; rejection does not call Payment.
 
+Claim appeals are a separate resource:
+
+| Endpoint | Auth/body | Response |
+|---|---|---|
+| `GET /v1/operator/claim-appeals?status=&page=&pageSize=` | Same-tenant `OPERATOR_STAFF|OPERATOR_ADMIN`; `status` is a `ParcelClaimAppealStatus` name | `200` `PagedResult<ParcelClaimAppealResponse>` |
+| `GET /v1/operator/claim-appeals/{appealId}` | Same roles | `200` appeal detail |
+| `POST /v1/operator/claim-appeals/{appealId}/decision` | `OPERATOR_ADMIN`; UUID-v4 `Idempotency-Key`; `{ decision: "UPHOLD|APPROVE_ADJUSTMENT", revisedProvenDirectLossVnd?, reason }` | `200` decided appeal |
+
+`UPHOLD` keeps the original outcome and creates no payout. `APPROVE_ADJUSTMENT` recalculates with
+the original frozen rate/cap/fallback and requires the revised total award to exceed the original
+paid award. Payment receives only `supplementaryAwardVnd`; the payout unique reference is
+`appealId`, not the old claim payout reference. Insufficient operator funds move the appeal to
+`FUNDING_PENDING`; a successful compensation event moves it to `PAID`.
+
 `GET /v1/operator/policies/parcel-compensation` returns the active policy. PUT on the same path
 accepts:
 
@@ -4890,7 +4967,10 @@ never exposed through Gateway.
 `PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED`, `PARCEL_CLAIM_ALREADY_EXISTS`,
 `PARCEL_CLAIM_EVIDENCE_REQUIRED`, `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY`,
 `PARCEL_CLAIM_ALREADY_DECIDED`, `PARCEL_CLAIM_APPEAL_NOT_ALLOWED`,
-`PARCEL_CLAIM_FUNDING_PENDING`,
+`PARCEL_CLAIM_APPEAL_ALREADY_EXISTS`, `PARCEL_CLAIM_APPEAL_NOT_FOUND`,
+`PARCEL_CLAIM_APPEAL_ALREADY_DECIDED`, `PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED`,
+`PARCEL_CLAIM_FUNDING_PENDING`, `PARCEL_STOP_DEPARTURE_APPROVAL_NOT_FOUND`,
+`PARCEL_STOP_DEPARTURE_ALREADY_DECIDED`, `PARCEL_STOP_RECONCILIATION_REQUIRED`,
 `POLICY_BELOW_DEFAULT_ACK_REQUIRED`.
 
 ## Payment & Wallet Service
