@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Application.Features.Reliability.CustodyException;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -12,15 +13,18 @@ public sealed class DeclareIncidentLostCommandHandler
     : IRequestHandler<DeclareIncidentLostCommand, ParcelIncidentListItem>
 {
     private readonly IParcelReliabilityRepository _reliability;
+    private readonly IParcelCustodyExceptionRequestRepository _custodyExceptionRequests;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
 
     public DeclareIncidentLostCommandHandler(
         IParcelReliabilityRepository reliability,
+        IParcelCustodyExceptionRequestRepository custodyExceptionRequests,
         IIntegrationEventOutbox outbox,
         IClock clock)
     {
         _reliability = reliability;
+        _custodyExceptionRequests = custodyExceptionRequests;
         _outbox = outbox;
         _clock = clock;
     }
@@ -33,6 +37,10 @@ public sealed class DeclareIncidentLostCommandHandler
             ?? throw new CodedNotFoundException("PARCEL_INCIDENT_NOT_FOUND", "Incident was not found.");
         if (incident.OperatorId != request.OperatorId)
             throw new ForbiddenException("FORBIDDEN", "Incident does not belong to this operator.");
+        await CustodyExceptionApprovalGuard.EnsureNotPendingAsync(
+            _custodyExceptionRequests,
+            incident.Id,
+            cancellationToken);
 
         var now = _clock.UtcNow;
         if (now < incident.SearchDeadline)

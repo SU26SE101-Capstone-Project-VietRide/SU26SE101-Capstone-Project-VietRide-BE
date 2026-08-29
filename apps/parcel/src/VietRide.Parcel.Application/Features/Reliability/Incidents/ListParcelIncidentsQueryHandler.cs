@@ -16,6 +16,7 @@ public sealed class ListParcelIncidentsQueryHandler
 {
     private readonly IParcelReliabilityRepository _reliability;
     private readonly IParcelRepository _parcels;
+    private readonly IParcelCustodyExceptionRequestRepository _custodyExceptionRequests;
     private readonly ITripServiceClient _trips;
     private readonly IIdentityServiceClient _identity;
     private readonly IClock _clock;
@@ -23,12 +24,14 @@ public sealed class ListParcelIncidentsQueryHandler
     public ListParcelIncidentsQueryHandler(
         IParcelReliabilityRepository reliability,
         IParcelRepository parcels,
+        IParcelCustodyExceptionRequestRepository custodyExceptionRequests,
         ITripServiceClient trips,
         IIdentityServiceClient identity,
         IClock clock)
     {
         _reliability = reliability;
         _parcels = parcels;
+        _custodyExceptionRequests = custodyExceptionRequests;
         _trips = trips;
         _identity = identity;
         _clock = clock;
@@ -85,6 +88,9 @@ public sealed class ListParcelIncidentsQueryHandler
             return PagedResult<ParcelIncidentListItem>.Create([], page.Page, page.PageSize, page.TotalItems);
 
         var incidentIds = page.Items.Select(incident => incident.Id).ToArray();
+        var pendingCustodyApprovals = await _custodyExceptionRequests.ListPendingIncidentIdsAsync(
+            incidentIds,
+            cancellationToken);
         var parcelIds = page.Items.Select(incident => incident.ParcelId).Distinct().ToArray();
         var parcels = await _parcels.ListByIdsAsync(parcelIds, cancellationToken);
         var parcelById = parcels.ToDictionary(parcel => parcel.Id);
@@ -146,7 +152,7 @@ public sealed class ListParcelIncidentsQueryHandler
                 incident.Status.ToString(),
                 incident.TripId,
                 incident.LastKnownLocation,
-                incident.SearchDeadline,
+                pendingCustodyApprovals.Contains(incident.Id) ? null : incident.SearchDeadline,
                 incident.CreatedAt,
                 incident.OperatorProcessBreach,
                 parcel is null ? null : MapParcel(parcel),
@@ -161,11 +167,15 @@ public sealed class ListParcelIncidentsQueryHandler
                     incidentTasks.Length,
                     assignees),
                 parcel is null ? null : ParcelReliabilityReadModelService.MapClaim(claim, parcel, now),
-                new ParcelIncidentSlaResponse(
-                    incident.SearchDeadline,
-                    remaining,
-                    ParcelReliabilityReadModelService.MapIncident(incident, now)!.SlaState),
-                ParcelReliabilityActionResolver.Operator(incident, claim, now));
+                pendingCustodyApprovals.Contains(incident.Id)
+                    ? null
+                    : new ParcelIncidentSlaResponse(
+                        incident.SearchDeadline,
+                        remaining,
+                        ParcelReliabilityReadModelService.MapIncident(incident, now)!.SlaState),
+                pendingCustodyApprovals.Contains(incident.Id)
+                    ? ["APPROVE", "REJECT"]
+                    : ParcelReliabilityActionResolver.Operator(incident, claim, now));
         }).ToArray();
 
         return PagedResult<ParcelIncidentListItem>.Create(items, page.Page, page.PageSize, page.TotalItems);

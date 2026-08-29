@@ -1,10 +1,27 @@
 namespace VietRide.Parcel.Application.Features.Reliability.CustodyException;
 
 public sealed record ReportCustodyExceptionResponse(
+    Guid RequestId,
     Guid ParcelId,
     Guid IncidentId,
     string IncidentType,
     string IncidentStatus,
-    Guid CustodyEventId,
-    string CustodyEventType,
-    DateTimeOffset SearchDeadline);
+    string Status,
+    string ActualLocationType,
+    Guid? ActualLocationId,
+    string? LocationSnapshot,
+    string? TemporaryExceptionTag,
+    string? Description,
+    decimal? ObservedWeightKg,
+    IReadOnlyList<string> EvidenceReferences,
+    string Reason,
+    Guid ReportedByUserId,
+    string ReportedByRole,
+    DateTimeOffset ReportedAt,
+    Guid? ReviewedByUserId,
+    DateTimeOffset? ReviewedAt,
+    string? ReviewedByRole,
+    string? ReviewNote,
+    Guid? ApprovedCustodyEventId,
+    DateTimeOffset? SearchDeadline,
+    IReadOnlyList<string> AvailableActions);

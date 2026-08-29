@@ -2,6 +2,7 @@ using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Application.Features.Reliability.CustodyException;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -14,6 +15,7 @@ public sealed class MarkIncidentFoundCommandHandler
 {
     private readonly IParcelReliabilityRepository _reliability;
     private readonly IParcelRepository _parcels;
+    private readonly IParcelCustodyExceptionRequestRepository _custodyExceptionRequests;
     private readonly IParcelCustodyService _custody;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
@@ -21,12 +23,14 @@ public sealed class MarkIncidentFoundCommandHandler
     public MarkIncidentFoundCommandHandler(
         IParcelReliabilityRepository reliability,
         IParcelRepository parcels,
+        IParcelCustodyExceptionRequestRepository custodyExceptionRequests,
         IParcelCustodyService custody,
         IIntegrationEventOutbox outbox,
         IClock clock)
     {
         _reliability = reliability;
         _parcels = parcels;
+        _custodyExceptionRequests = custodyExceptionRequests;
         _custody = custody;
         _outbox = outbox;
         _clock = clock;
@@ -40,6 +44,10 @@ public sealed class MarkIncidentFoundCommandHandler
             ?? throw new CodedNotFoundException("PARCEL_INCIDENT_NOT_FOUND", "Incident was not found.");
         if (incident.OperatorId != request.OperatorId)
             throw new ForbiddenException("FORBIDDEN", "Incident does not belong to this operator.");
+        await CustodyExceptionApprovalGuard.EnsureNotPendingAsync(
+            _custodyExceptionRequests,
+            incident.Id,
+            cancellationToken);
         if (incident.Status is not (ParcelIncidentStatus.OPEN
             or ParcelIncidentStatus.SEARCHING
             or ParcelIncidentStatus.ESCALATED

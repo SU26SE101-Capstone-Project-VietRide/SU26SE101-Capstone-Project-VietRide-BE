@@ -16,5 +16,4 @@ public sealed record ReportCustodyExceptionCommand(
     decimal? ObservedWeightKg,
     IReadOnlyCollection<string>? EvidenceUrls,
     string Reason,
-    Guid? SupervisorApprovalUserId,
-    Guid? IdempotencyKey) : IRequest<ReportCustodyExceptionResponse>;
+    Guid IdempotencyKey) : IRequest<ReportCustodyExceptionResponse>;

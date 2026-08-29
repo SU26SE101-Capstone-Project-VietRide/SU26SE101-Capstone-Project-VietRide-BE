@@ -696,6 +696,61 @@ CREATE INDEX idx_parcel_incidents_operator_status
     ON parcel_incidents (operator_id, status, created_at);
 CREATE INDEX idx_parcel_incidents_search_deadline ON parcel_incidents (search_deadline, status);
 
+CREATE TABLE parcel_custody_exception_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    parcel_id UUID NOT NULL REFERENCES parcels(id) ON DELETE RESTRICT,
+    incident_id UUID NOT NULL REFERENCES parcel_incidents(id) ON DELETE RESTRICT,
+    operator_id UUID NOT NULL,
+    trip_id UUID NOT NULL,
+    incident_type VARCHAR(40) NOT NULL,
+    actual_location_type VARCHAR(32) NOT NULL,
+    actual_location_id UUID NULL,
+    location_snapshot VARCHAR(500) NULL,
+    temporary_exception_tag VARCHAR(100) NULL,
+    description TEXT NULL,
+    observed_weight_kg NUMERIC(10,3) NULL,
+    evidence_references_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    reason TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    reported_by_user_id UUID NOT NULL,
+    reported_by_role VARCHAR(32) NOT NULL,
+    reported_at TIMESTAMPTZ NOT NULL,
+    reviewed_by_user_id UUID NULL,
+    reviewed_by_role VARCHAR(32) NULL,
+    reviewed_at TIMESTAMPTZ NULL,
+    review_note TEXT NULL,
+    approved_custody_event_id UUID NULL REFERENCES parcel_custody_events(id) ON DELETE RESTRICT,
+    idempotency_key UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    row_version INT NOT NULL DEFAULT 0,
+    CONSTRAINT chk_parcel_custody_exception_request_status
+        CHECK (status IN ('PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'CANCELLED')),
+    CONSTRAINT chk_parcel_custody_exception_review_audit CHECK (
+        (status = 'PENDING_APPROVAL'
+            AND reviewed_by_user_id IS NULL
+            AND reviewed_by_role IS NULL
+            AND reviewed_at IS NULL)
+        OR
+        (status <> 'PENDING_APPROVAL'
+            AND reviewed_by_user_id IS NOT NULL
+            AND reviewed_by_role IS NOT NULL
+            AND reviewed_at IS NOT NULL))
+);
+CREATE UNIQUE INDEX uq_parcel_custody_exception_requests_incident
+    ON parcel_custody_exception_requests (incident_id);
+CREATE UNIQUE INDEX uq_parcel_custody_exception_requests_idempotency
+    ON parcel_custody_exception_requests (idempotency_key);
+CREATE UNIQUE INDEX uq_parcel_custody_exception_requests_pending_parcel_type
+    ON parcel_custody_exception_requests (parcel_id, incident_type)
+    WHERE status = 'PENDING_APPROVAL';
+CREATE INDEX idx_parcel_custody_exception_requests_operator_status
+    ON parcel_custody_exception_requests (operator_id, status, created_at);
+CREATE INDEX idx_parcel_custody_exception_requests_trip_status
+    ON parcel_custody_exception_requests (trip_id, status, created_at);
+CREATE INDEX idx_parcel_custody_exception_requests_approved_event
+    ON parcel_custody_exception_requests (approved_custody_event_id);
+
 CREATE TABLE parcel_search_tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     incident_id UUID NOT NULL REFERENCES parcel_incidents(id) ON DELETE CASCADE,
@@ -866,6 +921,9 @@ CREATE TRIGGER trg_parcel_transit_legs_updated_at BEFORE UPDATE ON parcel_transi
 CREATE TRIGGER trg_parcel_current_custody_updated_at BEFORE UPDATE ON parcel_current_custody
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_parcel_incidents_updated_at BEFORE UPDATE ON parcel_incidents
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+CREATE TRIGGER trg_parcel_custody_exception_requests_updated_at
+    BEFORE UPDATE ON parcel_custody_exception_requests
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 CREATE TRIGGER trg_parcel_search_tasks_updated_at BEFORE UPDATE ON parcel_search_tasks
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();

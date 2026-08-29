@@ -248,13 +248,14 @@ public sealed class AssistantParcelsController : ControllerBase
 
     [HttpPost("{parcelId:guid}/custody-exception")]
     [RequireIdempotencyKey]
-    [ProducesResponseType(typeof(ApiResponse<AssistantParcelActionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ReportCustodyExceptionResponse>), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
-    public async Task<ActionResult<AssistantParcelActionResponse>> ReportCustodyExceptionAsync(
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ReportCustodyExceptionResponse>> ReportCustodyExceptionAsync(
         Guid parcelId,
         [FromBody] CustodyExceptionRequest request,
         CancellationToken cancellationToken)
@@ -262,7 +263,7 @@ public sealed class AssistantParcelsController : ControllerBase
         var operatorId = CurrentUserClaims.GetOperatorId(User)
             ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
 
-        await _mediator.Send(
+        var result = await _mediator.Send(
             new ReportCustodyExceptionCommand(
                 parcelId,
                 CurrentUserClaims.GetUserId(User),
@@ -277,16 +278,10 @@ public sealed class AssistantParcelsController : ControllerBase
                 request.ObservedWeightKg,
                 request.EvidenceUrls,
                 request.Reason,
-                request.SupervisorApprovalUserId,
                 ReadIdempotencyKey(parcelId)),
             cancellationToken);
 
-        return Ok(await GetActionStateAsync(
-            parcelId,
-            operatorId,
-            true,
-            "Custody exception recorded; follow the incident search workflow.",
-            cancellationToken));
+        return Accepted(result);
     }
 
     [HttpPost("{parcelId:guid}/custody-scan")]
