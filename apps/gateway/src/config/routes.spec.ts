@@ -353,7 +353,10 @@ describe('buildRouteTable', () => {
     const cases = [
       ['/v1/admin/operators', env.IDENTITY_BASE_URL],
       ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/approve', env.IDENTITY_BASE_URL],
-      ['/v1/admin/operators/11111111-1111-1111-1111-111111111111/reactivate', env.IDENTITY_BASE_URL],
+      [
+        '/v1/admin/operators/11111111-1111-1111-1111-111111111111/reactivate',
+        env.IDENTITY_BASE_URL,
+      ],
       ['/v1/admin/operator-users', env.IDENTITY_BASE_URL],
       ['/v1/admin/users', env.IDENTITY_BASE_URL],
       ['/v1/admin/activity-logs', env.IDENTITY_BASE_URL],
@@ -498,8 +501,7 @@ describe('buildRouteTable', () => {
   });
 
   it('routes exact operator shuttle passenger contacts GET to Trip for both operator roles', () => {
-    const path =
-      '/v1/operator/shuttle-trips/11111111-1111-4111-8111-111111111111/passengers';
+    const path = '/v1/operator/shuttle-trips/11111111-1111-4111-8111-111111111111/passengers';
     const route = matchRoute(routes, path, 'GET');
 
     expect(route).toMatchObject({
@@ -512,8 +514,7 @@ describe('buildRouteTable', () => {
   });
 
   it('routes exact scheduled Shuttle reassignment PATCH to Trip for operator admins', () => {
-    const path =
-      '/v1/operator/shuttle-trips/11111111-1111-4111-8111-111111111111/assignment';
+    const path = '/v1/operator/shuttle-trips/11111111-1111-4111-8111-111111111111/assignment';
     const route = matchRoute(routes, path, 'PATCH');
 
     expect(route).toMatchObject({
@@ -907,6 +908,14 @@ describe('buildRouteTable', () => {
   });
 
   it('routes crew parcel actions to Parcel with assigned crew roles', () => {
+    expect(
+      matchRoute(routes, '/v1/crew/trips/11111111-1111-4111-8111-111111111111/parcels', 'GET'),
+    ).toMatchObject({
+      prefix: '/v1/crew/trips/{tripId}/parcels',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER', 'ASSISTANT'],
+    });
     const crewParcelRouteIndex = routes.findIndex((route) => route.prefix === '/v1/crew/parcels');
     const publicParcelRouteIndex = routes.findIndex((route) => route.prefix === '/v1/parcels');
 
@@ -980,29 +989,13 @@ describe('buildRouteTable', () => {
   it('routes Parcel Reliability passenger and operator APIs with their exact access gates', () => {
     const parcelId = '11111111-1111-4111-8111-111111111111';
     const claimId = '22222222-2222-4222-8222-222222222222';
-    const appeal = matchRoute(
-      routes,
-      `/v1/parcels/${parcelId}/claims/${claimId}/appeal`,
-      'POST',
-    );
+    const appeal = matchRoute(routes, `/v1/parcels/${parcelId}/claims/${claimId}/appeal`, 'POST');
     const incidents = matchRoute(routes, '/v1/operator/parcel-incidents', 'GET');
     const claimQueue = matchRoute(routes, '/v1/operator/claims', 'GET');
-    const claimDecision = matchRoute(
-      routes,
-      `/v1/operator/claims/${claimId}/decision`,
-      'POST',
-    );
+    const claimDecision = matchRoute(routes, `/v1/operator/claims/${claimId}/decision`, 'POST');
     const unidentified = matchRoute(routes, '/v1/operator/unidentified-packages', 'GET');
-    const policyRead = matchRoute(
-      routes,
-      '/v1/operator/policies/parcel-compensation',
-      'GET',
-    );
-    const policyWrite = matchRoute(
-      routes,
-      '/v1/operator/policies/parcel-compensation',
-      'PUT',
-    );
+    const policyRead = matchRoute(routes, '/v1/operator/policies/parcel-compensation', 'GET');
+    const policyWrite = matchRoute(routes, '/v1/operator/policies/parcel-compensation', 'PUT');
 
     expect(appeal).toMatchObject({
       target: env.PARCEL_BASE_URL,

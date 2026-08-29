@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
+using VietRide.Parcel.Application.Features.Parcels.AssistantTripParcels;
 using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Application.Features.Parcels.ResendDeliveryEmail;
@@ -21,6 +22,40 @@ public sealed class CrewParcelsController : ControllerBase
     public CrewParcelsController(IMediator mediator)
     {
         _mediator = mediator;
+    }
+
+    [HttpGet("~/v1/crew/trips/{tripId:guid}/parcels")]
+    [ProducesResponseType(typeof(ApiResponse<AssistantTripParcelManifestResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<AssistantTripParcelManifestResponse>> GetTripManifestAsync(
+        Guid tripId,
+        [FromQuery] Guid? stopId = null,
+        [FromQuery] string? status = null,
+        [FromQuery] bool? hasException = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        var result = await _mediator.Send(
+            new GetAssistantTripParcelsQuery(
+                tripId,
+                CurrentUserClaims.GetUserId(User),
+                operatorId,
+                page,
+                pageSize,
+                stopId,
+                status,
+                hasException,
+                search,
+                CurrentUserClaims.GetRole(User)),
+            cancellationToken);
+        return Ok(result);
     }
 
     [HttpPost("{parcelId:guid}/confirm-transfer")]

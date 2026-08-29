@@ -23,9 +23,7 @@ export const TripVehicleSubstitutedMappingSchema = z
     isSeatDowngrade: z.boolean().optional(),
   })
   .strict();
-export type TripVehicleSubstitutedMapping = z.infer<
-  typeof TripVehicleSubstitutedMappingSchema
->;
+export type TripVehicleSubstitutedMapping = z.infer<typeof TripVehicleSubstitutedMappingSchema>;
 
 export const TripVehicleSubstitutedEventSchema = z
   .object({
@@ -46,6 +44,12 @@ export const TripVehicleSubstitutedEventSchema = z
     reason: z.string(),
     notifyPassengers: z.boolean(),
     mappings: z.array(TripVehicleSubstitutedMappingSchema),
+    incidentId: z.string().uuid().optional(),
+    incidentLatitude: z.number().nullable().optional(),
+    incidentLongitude: z.number().nullable().optional(),
+    incidentDescription: z.string().nullable().optional(),
+    newDriverId: z.string().uuid().optional(),
+    newAssistantId: z.string().uuid().optional(),
   })
   .strict()
   .superRefine((event, context) => {

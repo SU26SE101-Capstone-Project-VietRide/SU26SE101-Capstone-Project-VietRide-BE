@@ -63,13 +63,16 @@ public sealed class CreateDriverScheduleHandler : IRequestHandler<CreateDriverSc
             throw new CodedNotFoundException("ROUTE_NOT_FOUND", "Route was not found.");
         }
 
-        if (request.VehicleId.HasValue
-            && await vehicleRepository.GetOwnedByIdAsync(
+        if (request.VehicleId.HasValue)
+        {
+            var vehicle = await vehicleRepository.GetOwnedByIdAsync(
                 request.OperatorId,
                 request.VehicleId.Value,
-                cancellationToken) is null)
-        {
-            throw new CodedNotFoundException("VEHICLE_NOT_FOUND", "Vehicle was not found.");
+                cancellationToken);
+            if (vehicle is null)
+                throw new CodedNotFoundException("VEHICLE_NOT_FOUND", "Vehicle was not found.");
+            if (!vehicle.IsActive || vehicle.DeletedAt.HasValue || vehicle.Status != VehicleStatus.ACTIVE)
+                throw new CodedValidationException("VEHICLE_NOT_ACTIVE", "Assigned vehicle must be active.");
         }
 
         await ValidateAssignedUsersAsync(

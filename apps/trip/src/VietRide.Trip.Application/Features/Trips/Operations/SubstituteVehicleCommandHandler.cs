@@ -26,6 +26,7 @@ public sealed class SubstituteVehicleCommandHandler
     private readonly ITripStopRepository tripStops;
     private readonly ITripStopFareRepository tripStopFares;
     private readonly ITripAuditLogRepository auditLogs;
+    private readonly IIncidentRepository incidents;
     private readonly IBookingImpactClient bookingImpact;
     private readonly IIdentityInternalClient identity;
     private readonly IIntegrationEventOutbox outbox;
@@ -41,6 +42,7 @@ public sealed class SubstituteVehicleCommandHandler
         ITripStopRepository tripStops,
         ITripStopFareRepository tripStopFares,
         ITripAuditLogRepository auditLogs,
+        IIncidentRepository incidents,
         IBookingImpactClient bookingImpact,
         IIdentityInternalClient identity,
         IIntegrationEventOutbox outbox,
@@ -55,6 +57,7 @@ public sealed class SubstituteVehicleCommandHandler
         this.tripStops = tripStops;
         this.tripStopFares = tripStopFares;
         this.auditLogs = auditLogs;
+        this.incidents = incidents;
         this.bookingImpact = bookingImpact;
         this.identity = identity;
         this.outbox = outbox;
@@ -73,6 +76,12 @@ public sealed class SubstituteVehicleCommandHandler
                 trip => trip.Id == request.TripId && trip.OperatorId == request.OperatorId,
                 cancellationToken)
             ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip was not found.");
+        if (!request.IncidentId.HasValue)
+            throw new CodedValidationException("VALIDATION_ERROR", "incidentId is required.");
+        _ = await incidents.QueryNoTracking()
+            .SingleOrDefaultAsync(incident => incident.Id == request.IncidentId.Value
+                && incident.TripId == request.TripId, cancellationToken)
+            ?? throw new CodedValidationException("VALIDATION_ERROR", "incidentId must belong to the Trip.");
         var replacementVehicle = await vehicles.GetOwnedByIdAsync(
             request.OperatorId,
             request.ReplacementVehicleId,
@@ -80,12 +89,15 @@ public sealed class SubstituteVehicleCommandHandler
             ?? throw new CodedNotFoundException("VEHICLE_NOT_FOUND", "Replacement vehicle was not found.");
         EnsureVehicleActive(replacementVehicle);
 
-        var driverId = request.ReplacementCrewSpecified
-            ? request.ReplacementDriverId!.Value
-            : preflightTrip.DriverUserId;
-        var assistantId = request.ReplacementCrewSpecified
-            ? request.ReplacementAssistantId
-            : preflightTrip.AssistantUserId;
+        var driverId = request.ReplacementDriverId!.Value;
+        var assistantId = request.ReplacementAssistantId!.Value;
+        if (replacementVehicle.Id == preflightTrip.VehicleId)
+            throw new CodedConflictException("TRIP_VEHICLE_SAME_AS_OLD", "Replacement vehicle must differ from the old vehicle.");
+        var oldCrewIds = new HashSet<Guid> { preflightTrip.DriverUserId };
+        if (preflightTrip.AssistantUserId.HasValue)
+            oldCrewIds.Add(preflightTrip.AssistantUserId.Value);
+        if (oldCrewIds.Contains(driverId) || oldCrewIds.Contains(assistantId))
+            throw new CodedConflictException("TRIP_CREW_SAME_AS_OLD", "Replacement crew must differ from the old crew.");
         await ValidateCrewAsync(request.OperatorId, driverId, assistantId, cancellationToken);
 
         // Booking owns eligibility. This call intentionally completes before the Trip transaction starts.
@@ -102,6 +114,13 @@ public sealed class SubstituteVehicleCommandHandler
             {
                 throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip was not found.");
             }
+            var incident = await incidents.AcquireOperatorIncidentAsync(
+                request.OperatorId,
+                request.IncidentId.Value,
+                cancellationToken)
+                ?? throw new CodedValidationException("VALIDATION_ERROR", "incidentId must belong to the Trip.");
+            if (incident.TripId != oldTrip.Id)
+                throw new CodedValidationException("VALIDATION_ERROR", "incidentId must belong to the Trip.");
 
             if (!TripVehicleSubstitutionPolicy.CanSubstitute(oldTrip.Status))
             {
@@ -123,12 +142,14 @@ public sealed class SubstituteVehicleCommandHandler
 
             var lockedVehicles = await vehicles.AcquireForVehicleSwapAsync(
                 request.OperatorId,
-                [request.ReplacementVehicleId],
+                [oldTrip.VehicleId, request.ReplacementVehicleId],
                 cancellationToken);
-            replacementVehicle = lockedVehicles.SingleOrDefault()
+            replacementVehicle = lockedVehicles.SingleOrDefault(vehicle => vehicle.Id == request.ReplacementVehicleId)
                 ?? throw new CodedNotFoundException(
                     "VEHICLE_NOT_FOUND",
                     "Replacement vehicle was not found.");
+            var oldVehicle = lockedVehicles.SingleOrDefault(vehicle => vehicle.Id == oldTrip.VehicleId)
+                ?? throw new CodedNotFoundException("VEHICLE_NOT_FOUND", "Old vehicle was not found.");
             EnsureVehicleActive(replacementVehicle);
 
             var passengerLayout = ParsePassengerLayout(replacementVehicle);
@@ -210,6 +231,8 @@ public sealed class SubstituteVehicleCommandHandler
                 cancellationToken);
 
             oldTrip.SubstituteVehicle(disruptedAt, request.Reason);
+            var oldVehicleStatusBefore = oldVehicle.Status;
+            oldVehicle.ChangeStatus(VehicleStatus.MAINTENANCE);
             if (routeChangeProposals is not null)
                 await routeChangeProposals.ExpirePendingForTripAsync(oldTrip.Id, disruptedAt, cancellationToken);
             await auditLogs.AddAsync(
@@ -222,6 +245,15 @@ public sealed class SubstituteVehicleCommandHandler
                     {
                         replacementTripId = newTrip.Id,
                         replacementVehicleId = replacementVehicle.Id,
+                        incidentId = incident.Id,
+                        oldVehicleId = oldVehicle.Id,
+                        oldVehicleStatusBefore = oldVehicleStatusBefore.ToString(),
+                        oldVehicleStatusAfter = oldVehicle.Status.ToString(),
+                        substitutedAt = disruptedAt,
+                        oldDriverId = oldTrip.DriverUserId,
+                        oldAssistantId = oldTrip.AssistantUserId,
+                        newDriverId = newTrip.DriverUserId,
+                        newAssistantId = newTrip.AssistantUserId,
                         reason = request.Reason.Trim(),
                         acknowledgedInsufficientSeats = request.AcknowledgeInsufficientSeats,
                         usableSeats,
@@ -249,7 +281,16 @@ public sealed class SubstituteVehicleCommandHandler
                 request.ActorUserId,
                 request.Reason.Trim(),
                 request.NotifyPassengers,
-                mappings);
+                mappings)
+            with
+            {
+                IncidentId = incident.Id,
+                IncidentLatitude = incident.Latitude,
+                IncidentLongitude = incident.Longitude,
+                IncidentDescription = incident.Description,
+                NewDriverId = newTrip.DriverUserId,
+                NewAssistantId = newTrip.AssistantUserId,
+            };
             await outbox.EnqueueAsync(
                 substitutionId,
                 TripVehicleSubstitutedIntegrationEvent.EventType,

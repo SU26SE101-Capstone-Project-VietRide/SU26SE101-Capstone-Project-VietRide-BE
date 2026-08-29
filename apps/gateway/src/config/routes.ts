@@ -272,16 +272,14 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
     {
       prefix: '/v1/operator/shuttle-trips/{shuttleTripId}/cancel',
-      pathPattern:
-        /^\/v1\/operator\/shuttle-trips\/[0-9a-fA-F-]{36}\/cancel$/,
+      pathPattern: /^\/v1\/operator\/shuttle-trips\/[0-9a-fA-F-]{36}\/cancel$/,
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
     {
       prefix: '/v1/operator/shuttle-trips/{shuttleTripId}/passengers',
-      pathPattern:
-        /^\/v1\/operator\/shuttle-trips\/[0-9a-fA-F-]{36}\/passengers$/,
+      pathPattern: /^\/v1\/operator\/shuttle-trips\/[0-9a-fA-F-]{36}\/passengers$/,
       method: 'GET',
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
@@ -289,8 +287,7 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
     {
       prefix: '/v1/operator/shuttle-trips/{shuttleTripId}/assignment',
-      pathPattern:
-        /^\/v1\/operator\/shuttle-trips\/[0-9a-fA-F-]{36}\/assignment$/,
+      pathPattern: /^\/v1\/operator\/shuttle-trips\/[0-9a-fA-F-]{36}\/assignment$/,
       method: 'PATCH',
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
@@ -486,8 +483,7 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
     {
       prefix: '/v1/assistant/trips/{tripId}/stops/{stopId}/reconcile',
-      pathPattern:
-        /^\/v1\/assistant\/trips\/[0-9a-fA-F-]{36}\/stops\/[0-9a-fA-F-]{36}\/reconcile$/,
+      pathPattern: /^\/v1\/assistant\/trips\/[0-9a-fA-F-]{36}\/stops\/[0-9a-fA-F-]{36}\/reconcile$/,
       method: 'POST',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
@@ -613,8 +609,7 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     },
     {
       prefix: '/v1/operator/claims/{claimId}/decision',
-      pathPattern:
-        /^\/v1\/operator\/claims\/[0-9a-fA-F-]{36}\/decision$/,
+      pathPattern: /^\/v1\/operator\/claims\/[0-9a-fA-F-]{36}\/decision$/,
       method: 'POST',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
@@ -651,6 +646,14 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/crew/trips/{tripId}/parcels',
+      pathPattern: /^\/v1\/crew\/trips\/[0-9a-fA-F-]{36}\/parcels$/,
+      method: 'GET',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER', 'ASSISTANT'],
     },
     {
       prefix: '/v1/crew/parcels',
@@ -818,14 +821,15 @@ export function matchRoute(
   // Longest prefix wins so /v1/identity/health beats /v1/auth. Routes without a method
   // remain catch-alls for backwards-compatible route families.
   return table
-    .filter((r) =>
-      (normalizedMethod === undefined ||
-        r.method === undefined ||
-        r.method === 'ALL' ||
-        r.method === normalizedMethod) &&
-      (r.pathPattern
-        ? r.pathPattern.test(path)
-        : path === r.prefix || path.startsWith(r.prefix + '/')),
+    .filter(
+      (r) =>
+        (normalizedMethod === undefined ||
+          r.method === undefined ||
+          r.method === 'ALL' ||
+          r.method === normalizedMethod) &&
+        (r.pathPattern
+          ? r.pathPattern.test(path)
+          : path === r.prefix || path.startsWith(r.prefix + '/')),
     )
     .sort((a, b) => b.prefix.length - a.prefix.length)[0];
 }

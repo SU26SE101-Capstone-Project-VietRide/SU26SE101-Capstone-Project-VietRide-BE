@@ -3082,13 +3082,14 @@ Request is exactly:
 ```jsonc
 {
   "replacementVehicleId": "uuid",
+  "incidentId": "uuid",
   "estimatedRecoveryDepartureAt": "2026-07-25T08:30:00Z",
   "reason": "Vehicle breakdown",
   "notifyPassengers": true,
   "acknowledgeInsufficientSeats": false,
   "replacementCrew": {
     "driverId": "uuid",
-    "assistantId": null
+    "assistantId": "uuid"
   }
 }
 ```
@@ -3096,10 +3097,10 @@ Request is exactly:
 `replacementVehicleId` is a required UUID. `estimatedRecoveryDepartureAt` is a required absolute UTC timestamp.
 `reason` is required, trimmed, and at most 500 characters. `notifyPassengers` is optional and defaults to `true`.
 `acknowledgeInsufficientSeats` is optional and defaults to `false`.
-`replacementCrew` is optional and nullable; when absent or null it
-copies the old driver and assistant. When present it is exactly `{driverId,assistantId}`:
-`driverId` is a required UUID and `assistantId` is a nullable UUID. Both crew values are validated
-for active role, operator ownership, and existing Trip conflict rules.
+`incidentId` is a required UUID belonging to the same Trip and operator. `replacementCrew` is
+required and exactly `{driverId,assistantId}`; both are required, non-null UUIDs. The replacement
+driver and assistant must be active, operator-owned, conflict-free, and different from the old
+crew. The replacement vehicle must be active, operator-owned, and different from the old vehicle.
 
 Unknown fields are rejected, including legacy top-level `newVehicleId`,
 `estimatedArrivalMinutes`, top-level `driverId`, and top-level `assistantId`.
@@ -3111,7 +3112,7 @@ earlier value returns `422 VALIDATION_ERROR` with
 or Outbox row is written. The old Trip must be `IN_PROGRESS`, otherwise this substitution-only
 endpoint returns `409 TRIP_NOT_SUBSTITUTABLE`.
 
-After locking and revalidating the old Trip and replacement Vehicle, the service compares the
+After locking and revalidating the old Trip, incident, old Vehicle, and replacement Vehicle, the service compares the
 replacement layout's usable seats with the distinct eligible passengers in the Booking impact
 snapshot. When seats are insufficient and `acknowledgeInsufficientSeats=false`, it returns
 `409 REPLACEMENT_VEHICLE_INSUFFICIENT_SEATS` before creating a Trip, changing resources, writing
@@ -3137,7 +3138,8 @@ audit, or enqueueing Outbox rows. The ADR 0004 error uses `error.fields` (not `e
 The Operator may retry with `acknowledgeInsufficientSeats=true`; because the request body changes,
 that retry MUST use a new UUID-v4 `Idempotency-Key`.
 
-On success the old Trip is `DISRUPTED` with `hasSubstitution=true`. The dedicated replacement Trip
+On success the old Trip is `DISRUPTED` with `hasSubstitution=true`, and the old Vehicle transitions
+from `ACTIVE` to `MAINTENANCE`. The dedicated replacement Trip
 is `BOARDING`, has `source=VEHICLE_SUBSTITUTION`, and
 `departureDateTime=estimatedRecoveryDepartureAt`. The existing assigned-driver start flow moves
 the replacement `BOARDING -> IN_PROGRESS` and captures `actualDepartureTime`.
@@ -3966,6 +3968,16 @@ Errors: `401 UNAUTHORIZED` without a valid access token; `403 FORBIDDEN` when th
 caller is not the assigned Assistant, has no operator scope, or the trip is unavailable;
 `422 VALIDATION_FAILED` for invalid pagination; `503 TRIP_SERVICE_UNAVAILABLE` when
 assignment verification cannot reach Trip service.
+
+### GET `/v1/crew/trips/{tripId}/parcels`
+
+Auth: assigned `DRIVER|ASSISTANT`. This is the shared crew alias of the Assistant manifest and
+accepts the same filters/pagination. Besides parcels whose `tripId` equals the authorized Trip,
+it includes incoming parcels where `transferTargetTripId=tripId` and
+`status=PENDING_TRANSFER_CONFIRM`. Incoming items expose
+`transferContext="TRANSFER_IN"`, `sourceTripId`, and `targetTripId`; they remain physically owned
+by the source Trip until assigned replacement crew confirms transfer. The legacy Assistant route
+remains available for backward compatibility.
 
 ### POST `/v1/assistant/trips/{tripId}/parcels/qr-scan`
 

@@ -119,6 +119,21 @@ public sealed class ActivateDriverScheduleHandlerTests
         fixture.Scheduler.EnqueueCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task Handle_MaintenanceVehicle_DoesNotActivateSchedule()
+    {
+        var fixture = ActivateFixture.Create(isActive: false, vehicleStatus: VehicleStatus.MAINTENANCE);
+
+        var action = () => fixture.Handler.Handle(
+            new ActivateDriverScheduleCommand(fixture.OperatorId, fixture.Schedule.Id),
+            CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<CodedValidationException>();
+        exception.Which.ErrorCode.Should().Be("VEHICLE_NOT_ACTIVE");
+        fixture.Schedule.IsActive.Should().BeFalse();
+        fixture.UnitOfWork.SaveChangesCount.Should().Be(0);
+    }
+
     private sealed class ActivateFixture
     {
         private ActivateFixture(
@@ -157,7 +172,8 @@ public sealed class ActivateDriverScheduleHandlerTests
             Guid? assistantUserId = null,
             IdentityUserLookupResult? driverLookup = null,
             IdentityUserLookupResult? assistantLookup = null,
-            string? assistantStatus = null)
+            string? assistantStatus = null,
+            VehicleStatus vehicleStatus = VehicleStatus.ACTIVE)
         {
             var operatorId = Guid.NewGuid();
             var route = Route.Create(
@@ -168,10 +184,23 @@ public sealed class ActivateDriverScheduleHandlerTests
                 Money.FromRaw(250000),
                 120m,
                 routeDurationMinutes);
+            var vehicle = Vehicle.Create(
+                operatorId,
+                Guid.NewGuid(),
+                $"TEST-{Guid.NewGuid():N}"[..20],
+                JsonSerializer.SerializeToElement(new
+                {
+                    version = 1,
+                    seats = new[] { new { seatNumber = "A01", type = "STANDARD" } },
+                }),
+                1,
+                100m,
+                10m);
+            vehicle.ChangeStatus(vehicleStatus);
             var schedule = DriverSchedule.Create(
                 operatorId,
                 route.Id,
-                Guid.NewGuid(),
+                vehicle.Id,
                 Guid.NewGuid(),
                 assistantUserId,
                 JsonSerializer.SerializeToElement(new[] { 2, 4 }),
@@ -195,6 +224,8 @@ public sealed class ActivateDriverScheduleHandlerTests
             var routes = StubDispatchProxy<IRouteRepository>.Create();
             routes.SetResult(nameof(IRouteRepository.QueryNoTracking), new[] { route }.AsQueryable());
             var routeStops = StubDispatchProxy<IRouteStopRepository>.Create();
+            var vehicles = StubDispatchProxy<IVehicleRepository>.Create();
+            vehicles.SetResult(nameof(IVehicleRepository.GetOwnedByIdAsync), vehicle);
             routeStops.SetResult(
                 nameof(IRouteStopRepository.QueryNoTracking),
                 (routeStopDurations ?? []).Select((duration, index) => RouteStop.Create(route.Id, Guid.NewGuid(), index + 1, duration, null)).AsQueryable());
@@ -206,6 +237,7 @@ public sealed class ActivateDriverScheduleHandlerTests
                 identity.Object,
                 routes.Object,
                 routeStops.Object,
+                vehicles.Object,
                 scheduler,
                 unitOfWork);
 

@@ -21,10 +21,7 @@ import {
 import { NotificationType } from '../generated/notification-prisma-client';
 import { formatVietnamDateTime } from '@vietride/nest-common';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
-import {
-  formatOperatorLabel,
-  formatParcelLabel,
-} from './notification-display';
+import { formatOperatorLabel, formatParcelLabel } from './notification-display';
 import type { ParcelRecipientSnapshot } from './parcel-recipient.provider';
 import {
   BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
@@ -172,6 +169,21 @@ const BaseOperatorPayloadSchema = z
   .merge(RecipientPayloadSchema)
   .passthrough();
 
+const TripVehicleSubstitutedPayloadSchema = BaseOperatorPayloadSchema.and(
+  z.object({
+    operatorId: z.string().uuid(),
+    newTripId: z.string().uuid().optional(),
+    newVehicleId: z.string().uuid().optional(),
+    newVehiclePlateNumber: z.string().trim().min(1).optional(),
+    incidentId: z.string().uuid().optional(),
+    incidentLatitude: z.number().nullable().optional(),
+    incidentLongitude: z.number().nullable().optional(),
+    incidentDescription: z.string().nullable().optional(),
+    newDriverId: z.string().uuid().optional(),
+    newAssistantId: z.string().uuid().optional(),
+  }),
+);
+
 const SubscriptionLimitPayloadSchema = BaseOperatorPayloadSchema.and(
   z.object({
     resource: z.string().trim().min(1).optional(),
@@ -295,7 +307,9 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
     case PARCEL_CREATED_ROUTING_KEY:
       return mapParcelCreatedEvent(BaseParcelPayloadSchema.parse(payload));
     case PARCEL_LOADED_ROUTING_KEY:
-      return (await mapParcelLoadedEvent(ParcelLoadedEventSchema.parse(payload))).map((item) => item);
+      return (await mapParcelLoadedEvent(ParcelLoadedEventSchema.parse(payload))).map(
+        (item) => item,
+      );
     case PARCEL_UNLOADED_ROUTING_KEY:
       return mapParcelUnloadedEvent(ParcelUnloadedPayloadSchema.parse(payload));
     case PARCEL_DELIVERED_PENDING_CONFIRM_ROUTING_KEY:
@@ -426,15 +440,9 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
     case PARCEL_CLAIM_DECIDED_ROUTING_KEY:
       return [mapParcelClaimDecided(ParcelClaimPayloadSchema.parse(payload))];
     case PARCEL_COMPENSATION_PAID_ROUTING_KEY:
-      return [
-        mapParcelCompensationPaid(ParcelCompensationPayloadSchema.parse(payload)),
-      ];
+      return [mapParcelCompensationPaid(ParcelCompensationPayloadSchema.parse(payload))];
     case PARCEL_COMPENSATION_FUNDING_PENDING_ROUTING_KEY:
-      return [
-        mapParcelCompensationFundingPending(
-          ParcelCompensationPayloadSchema.parse(payload),
-        ),
-      ];
+      return [mapParcelCompensationFundingPending(ParcelCompensationPayloadSchema.parse(payload))];
     case TRIP_STOP_ARRIVED_ROUTING_KEY:
       return fanOut(
         BaseOperatorPayloadSchema.parse(payload),
@@ -442,10 +450,9 @@ export async function mapParcelSubscriptionOperatorEventToNotifications(
         mapTripStopArrived,
       );
     case TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY:
-      return fanOut(
-        BaseOperatorPayloadSchema.parse(payload),
+      return mapTripVehicleSubstitutedEvent(
+        TripVehicleSubstitutedPayloadSchema.parse(payload),
         resolveOperatorRecipientUserIds,
-        mapTripVehicleSubstituted,
       );
     case SUBSCRIPTION_LIMIT_TRIP_SKIPPED_ROUTING_KEY:
       return fanOut(
@@ -581,17 +588,13 @@ function mapParcelLoaded(userId: string, payload: ParcelPayload): CreateNotifica
 }
 
 function mapParcelLoadedEvent(payload: ParcelLoadedEvent): CreateNotificationDto[] {
-  return payload.userIds.map((userId) =>
-    mapParcelLoaded(userId, { ...payload, userId }),
-  );
+  return payload.userIds.map((userId) => mapParcelLoaded(userId, { ...payload, userId }));
 }
 
 function mapParcelUnloadedEvent(
   payload: z.infer<typeof ParcelUnloadedPayloadSchema>,
 ): CreateNotificationDto[] {
-  return payload.userIds.map((userId) =>
-    mapParcelUnloaded(userId, { ...payload, userId }),
-  );
+  return payload.userIds.map((userId) => mapParcelUnloaded(userId, { ...payload, userId }));
 }
 
 function mapParcelUnloaded(userId: string, payload: ParcelPayload): CreateNotificationDto {
@@ -960,17 +963,42 @@ function mapTripStopArrived(userId: string, payload: OperatorPayload): CreateNot
   };
 }
 
-function mapTripVehicleSubstituted(
-  userId: string,
-  payload: OperatorPayload,
-): CreateNotificationDto {
-  return {
-    userId,
-    type: NotificationType.VEHICLE_SUBSTITUTED,
-    title: 'Đã thay xe cho chuyến',
-    body: `Chuyến xe đã được gán xe thay thế.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
-    data: buildNotificationData(payload),
-  };
+async function mapTripVehicleSubstitutedEvent(
+  payload: z.infer<typeof TripVehicleSubstitutedPayloadSchema>,
+  resolveOperatorRecipientUserIds: (operatorId: string) => Promise<string[]>,
+): Promise<CreateNotificationDto[]> {
+  const operatorId = payload.operatorId;
+  if (!operatorId) {
+    throw new z.ZodError([
+      {
+        code: z.ZodIssueCode.custom,
+        message: 'operatorId is required',
+        path: ['operatorId'],
+      },
+    ]);
+  }
+  const operatorRecipients = await resolveOperatorRecipientUserIds(operatorId);
+  const crewRecipients = [payload.newDriverId, payload.newAssistantId].filter(isString);
+  const userIds = [...new Set([...operatorRecipients, ...crewRecipients])];
+  return userIds.map((userId) => {
+    const isReplacementCrew = crewRecipients.includes(userId);
+    const location =
+      typeof payload.incidentLatitude === 'number' &&
+      typeof payload.incidentLongitude === 'number'
+        ? ` Tọa độ sự cố: ${payload.incidentLatitude}, ${payload.incidentLongitude}.`
+        : payload.incidentDescription
+          ? ` Vị trí sự cố: ${payload.incidentDescription}.`
+          : '';
+    return {
+      userId,
+      type: NotificationType.VEHICLE_SUBSTITUTED,
+      title: isReplacementCrew ? 'Bạn được gán xe thay thế' : 'Đã thay xe cho chuyến',
+      body: isReplacementCrew
+        ? `Bạn được gán vào chuyến thay thế và cần đến điểm sự cố để nhận hàng.${location}`
+        : `Chuyến xe đã được gán xe thay thế.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
+      data: buildNotificationData(payload),
+    };
+  });
 }
 
 function mapSubscriptionLimit(
