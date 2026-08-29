@@ -24,4 +24,7 @@ public sealed record AssistantTripParcelResponse(
     ReliabilityIncidentSummaryResponse? ActiveIncident = null,
     AssistantParcelPaymentStateResponse? PaymentState = null,
     AssistantParcelIdentityHintsResponse? IdentityCheckHints = null,
-    IReadOnlyList<string>? AvailableActions = null);
+    IReadOnlyList<string>? AvailableActions = null,
+    string? TransferContext = null,
+    Guid? SourceTripId = null,
+    Guid? TargetTripId = null);

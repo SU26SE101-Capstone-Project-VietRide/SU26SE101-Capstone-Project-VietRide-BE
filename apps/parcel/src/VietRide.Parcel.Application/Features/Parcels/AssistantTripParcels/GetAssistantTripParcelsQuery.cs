@@ -11,4 +11,5 @@ public sealed record GetAssistantTripParcelsQuery(
     Guid? StopId = null,
     string? Status = null,
     bool? HasException = null,
-    string? Search = null) : IQuery<AssistantTripParcelManifestResponse>;
+    string? Search = null,
+    string Role = "ASSISTANT") : IQuery<AssistantTripParcelManifestResponse>;

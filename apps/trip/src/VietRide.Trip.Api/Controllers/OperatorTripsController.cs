@@ -154,6 +154,7 @@ public sealed class OperatorTripsController : ControllerBase
                 request.ReplacementVehicleId,
                 request.EstimatedRecoveryDepartureAt,
                 request.Reason,
+                request.IncidentId,
                 request.NotifyPassengers,
                 request.ReplacementCrew?.DriverId,
                 request.ReplacementCrew?.AssistantId,

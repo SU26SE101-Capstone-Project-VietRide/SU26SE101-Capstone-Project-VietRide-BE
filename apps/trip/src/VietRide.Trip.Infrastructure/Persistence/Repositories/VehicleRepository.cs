@@ -108,7 +108,7 @@ internal sealed class VehicleRepository : IVehicleRepository
                     AND id = ANY({orderedIds})
                     AND deleted_at IS NULL
                 ORDER BY id
-                FOR SHARE
+                FOR UPDATE
                 """)
             .ToArrayAsync(cancellationToken);
         foreach (var vehicle in vehicles)

@@ -114,6 +114,8 @@ public sealed class SubstituteVehicleEndpointTests
         oldTrip.Status.Should().Be(TripStatus.DISRUPTED);
         oldTrip.HasSubstitution.Should().BeTrue();
         oldTrip.DisruptedAt.Should().Be(SubstitutionHarness.Now);
+        (await assertionDb.Vehicles.AsNoTracking().SingleAsync(vehicle => vehicle.Id == harness.OldVehicleId))
+            .Status.Should().Be(VehicleStatus.MAINTENANCE);
         replacement.Status.Should().Be(TripStatus.BOARDING);
         replacement.Source.Should().Be(TripSource.VEHICLE_SUBSTITUTION);
         replacement.DepartureDateTime.Should().Be(SubstitutionHarness.RecoveryDeparture);
@@ -136,9 +138,17 @@ public sealed class SubstituteVehicleEndpointTests
         stops[0].StopId.Should().Be(harness.PendingStopId);
         stops[0].EstimatedArrivalTime.Should().Be(
             harness.PendingStopEta + (SubstitutionHarness.RecoveryDeparture - SubstitutionHarness.Now));
-        (await assertionDb.TripAuditLogs.AsNoTracking()
-            .CountAsync(log => log.TripId == harness.OldTripId
-                && log.Action == "VEHICLE_SUBSTITUTION_TRIGGERED")).Should().Be(1);
+        var substitutionAudit = await assertionDb.TripAuditLogs.AsNoTracking()
+            .SingleAsync(log => log.TripId == harness.OldTripId
+                && log.Action == "VEHICLE_SUBSTITUTION_TRIGGERED");
+        substitutionAudit.ActorUserId.Should().Be(harness.ActorId);
+        var auditMetadata = substitutionAudit.Metadata!.Value;
+        auditMetadata.GetProperty("incidentId").GetGuid().Should().Be(harness.IncidentId);
+        auditMetadata.GetProperty("oldVehicleStatusBefore").GetString().Should().Be("ACTIVE");
+        auditMetadata.GetProperty("oldVehicleStatusAfter").GetString().Should().Be("MAINTENANCE");
+        auditMetadata.GetProperty("oldDriverId").GetGuid().Should().Be(harness.DriverId);
+        auditMetadata.GetProperty("newDriverId").GetGuid().Should().Be(harness.ReplacementDriverId);
+        auditMetadata.GetProperty("newAssistantId").GetGuid().Should().Be(harness.ReplacementAssistantId);
 
         var rows = await assertionDb.OutboxEvents.AsNoTracking()
             .Where(row => row.EventType == "trip.trip.vehicle_substituted"
@@ -155,6 +165,10 @@ public sealed class SubstituteVehicleEndpointTests
             {
                 payload.RootElement.GetProperty("actorUserId").GetGuid()
                     .Should().Be(harness.ActorId);
+                payload.RootElement.GetProperty("incidentId").GetGuid()
+                    .Should().Be(harness.IncidentId);
+                payload.RootElement.GetProperty("newDriverId").GetGuid()
+                    .Should().Be(harness.ReplacementDriverId);
             }
         }
     }
@@ -173,6 +187,20 @@ public sealed class SubstituteVehicleEndpointTests
         using var overlong = await harness.SendAsync(reason: $"  {new string('x', 501)}  ");
         overlong.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         await AssertErrorAsync(overlong, "VALIDATION_ERROR", "reason");
+        await harness.AssertUnchangedAsync(unchanged);
+
+        using var missingCrew = await harness.SendRawAsync(
+            $$"""
+            {
+              "replacementVehicleId":"{{harness.ReplacementVehicleId:D}}",
+              "incidentId":"{{harness.IncidentId:D}}",
+              "estimatedRecoveryDepartureAt":"{{SubstitutionHarness.RecoveryDeparture:O}}",
+              "reason":"breakdown",
+              "notifyPassengers":true
+            }
+            """);
+        missingCrew.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        await AssertErrorAsync(missingCrew, "VALIDATION_ERROR");
         await harness.AssertUnchangedAsync(unchanged);
 
         using var unknown = await harness.SendRawAsync(
@@ -246,6 +274,23 @@ public sealed class SubstituteVehicleEndpointTests
                 replacementDriverId: Guid.NewGuid());
             invalidCrew.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
             await AssertErrorAsync(invalidCrew, "VALIDATION_ERROR");
+            await harness.AssertUnchangedAsync(unchanged);
+
+            using var sameVehicle = await harness.SendAsync(
+                replacementVehicleId: harness.OldVehicleId);
+            sameVehicle.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            await AssertErrorAsync(sameVehicle, "TRIP_VEHICLE_SAME_AS_OLD");
+            await harness.AssertUnchangedAsync(unchanged);
+
+            using var oldCrew = await harness.SendAsync(
+                replacementDriverId: harness.DriverId);
+            oldCrew.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            await AssertErrorAsync(oldCrew, "TRIP_CREW_SAME_AS_OLD");
+            await harness.AssertUnchangedAsync(unchanged);
+
+            using var foreignIncident = await harness.SendAsync(incidentId: Guid.NewGuid());
+            foreignIncident.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+            await AssertErrorAsync(foreignIncident, "VALIDATION_ERROR");
             await harness.AssertUnchangedAsync(unchanged);
 
             await harness.DeactivateReplacementAsync();
@@ -369,7 +414,7 @@ public sealed class SubstituteVehicleEndpointTests
             new EfUnitOfWork(db),
             new FrozenClock(SubstitutionHarness.RecoveryDeparture));
         var started = await handler.Handle(
-            new StartTripCommand(body!.Data!.NewTripId, harness.DriverId),
+            new StartTripCommand(body!.Data!.NewTripId, harness.ReplacementDriverId),
             CancellationToken.None);
 
         started.Status.Should().Be("IN_PROGRESS");
@@ -429,6 +474,9 @@ public sealed class SubstituteVehicleEndpointTests
             ActorId = seed.ActorId;
             DriverId = seed.DriverId;
             AssistantId = seed.AssistantId;
+            ReplacementDriverId = seed.ReplacementDriverId;
+            ReplacementAssistantId = seed.ReplacementAssistantId;
+            IncidentId = seed.IncidentId;
             OldEstimatedArrival = seed.OldEstimatedArrival;
             PendingStopId = seed.PendingStopId;
             PendingStopEta = seed.PendingStopEta;
@@ -442,6 +490,9 @@ public sealed class SubstituteVehicleEndpointTests
         public Guid ActorId { get; }
         public Guid DriverId { get; }
         public Guid AssistantId { get; }
+        public Guid ReplacementDriverId { get; }
+        public Guid ReplacementAssistantId { get; }
+        public Guid IncidentId { get; }
         public DateTimeOffset OldEstimatedArrival { get; }
         public Guid PendingStopId { get; }
         public DateTimeOffset PendingStopEta { get; }
@@ -480,18 +531,19 @@ public sealed class SubstituteVehicleEndpointTests
             bool authenticated = true,
             Guid? replacementVehicleId = null,
             Guid? replacementDriverId = null,
+            Guid? replacementAssistantId = null,
+            Guid? incidentId = null,
             bool acknowledgeInsufficientSeats = false) =>
             SendRawAsync(
                 $$"""
                 {
                   "replacementVehicleId":"{{(replacementVehicleId ?? ReplacementVehicleId):D}}",
+                  "incidentId":"{{(incidentId ?? IncidentId):D}}",
                   "estimatedRecoveryDepartureAt":"{{(recoveryDeparture ?? RecoveryDeparture):O}}",
                   "reason":{{JsonSerializer.Serialize(reason)}},
                   "notifyPassengers":true,
                   "acknowledgeInsufficientSeats":{{acknowledgeInsufficientSeats.ToString().ToLowerInvariant()}},
-                  "replacementCrew":{{(replacementDriverId.HasValue
-                      ? $$"""{"driverId":"{{replacementDriverId.Value:D}}","assistantId":null}"""
-                      : "null")}}
+                  "replacementCrew":{"driverId":"{{(replacementDriverId ?? ReplacementDriverId):D}}","assistantId":"{{(replacementAssistantId ?? ReplacementAssistantId):D}}"}
                 }
                 """,
                 idempotencyKey,
@@ -638,7 +690,7 @@ public sealed class SubstituteVehicleEndpointTests
                 OperatorId,
                 (await db.Trips.AsNoTracking().SingleAsync(trip => trip.Id == OldTripId)).RouteId,
                 conflictVehicleId,
-                vehicleConflict ? Guid.NewGuid() : DriverId,
+                vehicleConflict ? Guid.NewGuid() : ReplacementDriverId,
                 null,
                 null,
                 RecoveryDeparture,
@@ -672,6 +724,8 @@ public sealed class SubstituteVehicleEndpointTests
             var actorId = Guid.NewGuid();
             var driverId = Guid.NewGuid();
             var assistantId = Guid.NewGuid();
+            var replacementDriverId = Guid.NewGuid();
+            var replacementAssistantId = Guid.NewGuid();
             var origin = Station.Create(
                 "Substitution origin",
                 $"sub-origin-{Guid.NewGuid():N}",
@@ -740,6 +794,15 @@ public sealed class SubstituteVehicleEndpointTests
                 10m,
                 20m,
                 seatLayoutSnapshotJson: oldVehicle.SeatLayoutJson);
+            var incident = Incident.Create(
+                trip.Id,
+                driverId,
+                IncidentCategory.VEHICLE_BREAKDOWN,
+                "Xe hỏng tại điểm dừng",
+                null,
+                10.7626m,
+                106.6602m,
+                Now.AddMinutes(-15));
             if (inProgress)
             {
                 trip.MarkBoarding(departure);
@@ -794,7 +857,8 @@ public sealed class SubstituteVehicleEndpointTests
                 otherSeat,
                 pending,
                 finalized,
-                fare);
+                fare,
+                incident);
             await db.SaveChangesAsync();
             db.ChangeTracker.Clear();
             return new Seed(
@@ -805,6 +869,9 @@ public sealed class SubstituteVehicleEndpointTests
                 actorId,
                 driverId,
                 assistantId,
+                replacementDriverId,
+                replacementAssistantId,
+                incident.Id,
                 oldEstimatedArrival,
                 pendingStop.Id,
                 pendingStopEta,
@@ -981,6 +1048,10 @@ public sealed class SubstituteVehicleEndpointTests
                     ? "DRIVER"
                     : userId == seed.AssistantId
                         ? "ASSISTANT"
+                        : userId == seed.ReplacementDriverId
+                            ? "DRIVER"
+                            : userId == seed.ReplacementAssistantId
+                                ? "ASSISTANT"
                         : null;
                 return Task.FromResult(role is null
                     ? IdentityUserLookupResult.ValidationFailure("Unknown crew.")
@@ -1000,6 +1071,9 @@ public sealed class SubstituteVehicleEndpointTests
             Guid ActorId,
             Guid DriverId,
             Guid AssistantId,
+            Guid ReplacementDriverId,
+            Guid ReplacementAssistantId,
+            Guid IncidentId,
             DateTimeOffset OldEstimatedArrival,
             Guid PendingStopId,
             DateTimeOffset PendingStopEta,

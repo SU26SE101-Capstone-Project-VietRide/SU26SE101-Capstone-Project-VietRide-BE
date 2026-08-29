@@ -117,6 +117,93 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task Handle_IncomingTransferParcel_IsMarkedTransferInForReplacementCrew()
+    {
+        var sourceTripId = Guid.NewGuid();
+        var parcel = CreateParcel();
+        typeof(ParcelEntity).GetProperty(nameof(ParcelEntity.TripId))!.SetValue(parcel, sourceTripId);
+        typeof(ParcelEntity).GetProperty(nameof(ParcelEntity.TransferTargetTripId))!.SetValue(parcel, TripId);
+        typeof(ParcelEntity).GetProperty(nameof(ParcelEntity.Status))!.SetValue(parcel, ParcelStatus.PENDING_TRANSFER_CONFIRM);
+        var repository = Substitute.For<IParcelRepository>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        var screenModels = Substitute.For<IParcelReliabilityReadModelService>();
+        tripClient.AuthorizeAssistantForTripAsync(TripId, UserId, OperatorId, Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+        repository.ListByTripAndOperatorFilteredAsync(
+                TripId, OperatorId, null, null, null, null, 1, 20, Arg.Any<CancellationToken>())
+            .Returns(PagedResult<ParcelEntity>.Create([parcel], 1, 20, 1));
+        repository.GetAssistantManifestCountsAsync(TripId, OperatorId, null, Arg.Any<CancellationToken>())
+            .Returns(new AssistantParcelManifestCounts(1, 0, 0, 0, 0, 0, 0));
+        screenModels.BuildAsync(Arg.Any<IReadOnlyCollection<ParcelEntity>>(), UserId, false, Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<Guid, ParcelScreenReadModel> { [parcel.Id] = CreateScreen(parcel) });
+
+        var result = await new GetAssistantTripParcelsQueryHandler(repository, tripClient, screenModels)
+            .Handle(new GetAssistantTripParcelsQuery(TripId, UserId, OperatorId, 1, 20), default);
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].TransferContext.Should().Be("TRANSFER_IN");
+        result.Items[0].SourceTripId.Should().Be(sourceTripId);
+        result.Items[0].TargetTripId.Should().Be(TripId);
+        result.Items[0].AvailableActions.Should().Contain("CONFIRM_TRANSFER");
+    }
+
+    [Fact]
+    public async Task Handle_OutgoingTransferParcel_DoesNotOfferTargetCrewConfirmation()
+    {
+        var parcel = CreateParcel();
+        typeof(ParcelEntity).GetProperty(nameof(ParcelEntity.TripId))!.SetValue(parcel, TripId);
+        typeof(ParcelEntity).GetProperty(nameof(ParcelEntity.TransferTargetTripId))!.SetValue(parcel, Guid.NewGuid());
+        typeof(ParcelEntity).GetProperty(nameof(ParcelEntity.Status))!.SetValue(parcel, ParcelStatus.PENDING_TRANSFER_CONFIRM);
+        var repository = Substitute.For<IParcelRepository>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        var screenModels = Substitute.For<IParcelReliabilityReadModelService>();
+        tripClient.AuthorizeAssistantForTripAsync(TripId, UserId, OperatorId, Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+        repository.ListByTripAndOperatorFilteredAsync(
+                TripId, OperatorId, null, null, null, null, 1, 20, Arg.Any<CancellationToken>())
+            .Returns(PagedResult<ParcelEntity>.Create([parcel], 1, 20, 1));
+        repository.GetAssistantManifestCountsAsync(TripId, OperatorId, null, Arg.Any<CancellationToken>())
+            .Returns(new AssistantParcelManifestCounts(1, 0, 0, 0, 0, 0, 0));
+        screenModels.BuildAsync(Arg.Any<IReadOnlyCollection<ParcelEntity>>(), UserId, false, Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<Guid, ParcelScreenReadModel> { [parcel.Id] = CreateScreen(parcel) });
+
+        var result = await new GetAssistantTripParcelsQueryHandler(repository, tripClient, screenModels)
+            .Handle(new GetAssistantTripParcelsQuery(TripId, UserId, OperatorId, 1, 20), default);
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].TransferContext.Should().BeNull();
+        result.Items[0].AvailableActions.Should().NotContain("CONFIRM_TRANSFER");
+    }
+
+    [Fact]
+    public async Task Handle_AssignedDriver_UsesCrewAuthorizationForSharedManifest()
+    {
+        var repository = Substitute.For<IParcelRepository>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        var screenModels = Substitute.For<IParcelReliabilityReadModelService>();
+        tripClient.AuthorizeCrewForTripAsync(
+                TripId, UserId, OperatorId, "DRIVER", Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+        repository.ListByTripAndOperatorFilteredAsync(
+                TripId, OperatorId, null, null, null, null, 1, 20, Arg.Any<CancellationToken>())
+            .Returns(PagedResult<ParcelEntity>.Create([], 1, 20, 0));
+        repository.GetAssistantManifestCountsAsync(TripId, OperatorId, null, Arg.Any<CancellationToken>())
+            .Returns(new AssistantParcelManifestCounts(0, 0, 0, 0, 0, 0, 0));
+        tripClient.GetTripSummariesAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(TripSummaryBatchOutcome.Success([CreateTripSummary()]));
+        screenModels.BuildAsync(Arg.Any<IReadOnlyCollection<ParcelEntity>>(), UserId, false, Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<Guid, ParcelScreenReadModel>());
+
+        var result = await new GetAssistantTripParcelsQueryHandler(repository, tripClient, screenModels)
+            .Handle(new GetAssistantTripParcelsQuery(
+                TripId, UserId, OperatorId, 1, 20, Role: "DRIVER"), default);
+
+        result.Items.Should().BeEmpty();
+        await tripClient.Received(1).AuthorizeCrewForTripAsync(
+            TripId, UserId, OperatorId, "DRIVER", Arg.Any<CancellationToken>());
+    }
+
     [Theory]
     [InlineData(0, 20)]
     [InlineData(1, 0)]
@@ -196,4 +283,13 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
             null,
             new ReliabilityLocationResponse("ROUTE_STOP", parcel.DropoffStopId, null),
             new ParcelReliabilitySummaryResponse(null, null, null, null, []));
+
+    private static TripSummarySnapshot CreateTripSummary()
+        => new(
+            TripId,
+            "BOARDING",
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddHours(1),
+            new TripRouteSummarySnapshot(Guid.NewGuid(), "Route", "Origin", "Destination"),
+            new TripVehicleSummarySnapshot(Guid.NewGuid(), "51B-12345", "ACTIVE"));
 }

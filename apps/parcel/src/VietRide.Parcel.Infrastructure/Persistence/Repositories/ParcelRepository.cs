@@ -2100,7 +2100,10 @@ internal sealed class ParcelRepository : IParcelRepository
         pageSize = Math.Clamp(pageSize, 1, 100);
         var query = _db.Parcels
             .AsNoTracking()
-            .Where(parcel => parcel.TripId == tripId && parcel.OperatorId == operatorId);
+            .Where(parcel => parcel.OperatorId == operatorId
+                && (parcel.TripId == tripId
+                    || (parcel.TransferTargetTripId == tripId
+                        && parcel.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM)));
         if (stopId.HasValue)
             query = query.Where(parcel => parcel.DropoffStopId == stopId.Value);
         if (status.HasValue)
@@ -2144,7 +2147,10 @@ internal sealed class ParcelRepository : IParcelRepository
     {
         var parcels = _db.Parcels
             .AsNoTracking()
-            .Where(parcel => parcel.TripId == tripId && parcel.OperatorId == operatorId);
+            .Where(parcel => parcel.OperatorId == operatorId
+                && (parcel.TripId == tripId
+                    || (parcel.TransferTargetTripId == tripId
+                        && parcel.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM)));
         var grouped = await parcels
             .GroupBy(_ => 1)
             .Select(group => new

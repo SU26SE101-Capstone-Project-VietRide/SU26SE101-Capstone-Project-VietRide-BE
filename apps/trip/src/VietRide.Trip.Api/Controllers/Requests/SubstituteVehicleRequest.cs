@@ -7,6 +7,7 @@ public sealed record SubstituteVehicleRequest(
     Guid ReplacementVehicleId,
     DateTimeOffset EstimatedRecoveryDepartureAt,
     string Reason,
+    Guid? IncidentId,
     bool NotifyPassengers = true,
     ReplacementCrewRequest? ReplacementCrew = null,
     bool AcknowledgeInsufficientSeats = false);

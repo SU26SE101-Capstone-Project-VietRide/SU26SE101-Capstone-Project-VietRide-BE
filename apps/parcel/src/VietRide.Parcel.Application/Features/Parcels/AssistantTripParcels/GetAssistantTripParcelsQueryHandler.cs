@@ -32,11 +32,18 @@ public sealed class GetAssistantTripParcelsQueryHandler
         GetAssistantTripParcelsQuery query,
         CancellationToken cancellationToken)
     {
-        var authorization = await _tripClient.AuthorizeAssistantForTripAsync(
-            query.TripId,
-            query.UserId,
-            query.OperatorId,
-            cancellationToken);
+        var authorization = string.Equals(query.Role, "ASSISTANT", StringComparison.OrdinalIgnoreCase)
+            ? await _tripClient.AuthorizeAssistantForTripAsync(
+                query.TripId,
+                query.UserId,
+                query.OperatorId,
+                cancellationToken)
+            : await _tripClient.AuthorizeCrewForTripAsync(
+                query.TripId,
+                query.UserId,
+                query.OperatorId,
+                query.Role,
+                cancellationToken);
 
         switch (authorization.Kind)
         {
@@ -80,7 +87,13 @@ public sealed class GetAssistantTripParcelsQueryHandler
             query.UserId,
             includeClaim: false,
             cancellationToken);
-        var trip = screens.Values.FirstOrDefault()?.Trip;
+        var trip = screens.Values
+            .Select(screen => screen.Trip.TripId == query.TripId
+                ? screen.Trip
+                : screen.ForwardingTrip?.TripId == query.TripId
+                    ? screen.ForwardingTrip
+                    : null)
+            .FirstOrDefault(candidate => candidate is not null);
         if (trip is null)
         {
             var tripOutcome = await _tripClient.GetTripSummariesAsync([query.TripId], cancellationToken);
@@ -142,9 +155,22 @@ public sealed class GetAssistantTripParcelsQueryHandler
                 parcel.ActualLengthCm,
                 parcel.ActualWidthCm,
                 parcel.ActualHeightCm),
-            ParcelReliabilityActionResolver.Assistant(
+            ResolveAvailableActions(
                 parcel,
-                screens.GetValueOrDefault(parcel.Id)?.Reliability.ActiveIncident is not null))).ToList();
+                screens.GetValueOrDefault(parcel.Id)?.Reliability.ActiveIncident is not null,
+                query.TripId),
+            parcel.TransferTargetTripId == query.TripId
+                && parcel.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM
+                ? "TRANSFER_IN"
+                : null,
+            parcel.TransferTargetTripId == query.TripId
+                && parcel.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM
+                ? parcel.TripId
+                : null,
+            parcel.TransferTargetTripId == query.TripId
+                && parcel.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM
+                ? parcel.TransferTargetTripId
+                : null)).ToList();
 
         return new AssistantTripParcelManifestResponse(
             new AssistantTripManifestContextResponse(
@@ -178,5 +204,20 @@ public sealed class GetAssistantTripParcelsQueryHandler
                 pagedResult.TotalPages,
                 pagedResult.HasNextPage,
                 pagedResult.HasPreviousPage));
+    }
+
+    private static IReadOnlyList<string> ResolveAvailableActions(
+        Domain.Entities.Parcel parcel,
+        bool hasIncident,
+        Guid manifestTripId)
+    {
+        var actions = ParcelReliabilityActionResolver.Assistant(parcel, hasIncident);
+        if (parcel.Status != ParcelStatus.PENDING_TRANSFER_CONFIRM
+            || parcel.TransferTargetTripId != manifestTripId)
+        {
+            return actions;
+        }
+
+        return actions.Append("CONFIRM_TRANSFER").Distinct().ToArray();
     }
 }

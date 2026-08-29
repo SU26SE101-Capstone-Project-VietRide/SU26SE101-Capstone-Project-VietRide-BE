@@ -119,10 +119,13 @@ public sealed class TripGenerationService
             var vehicle = schedule.VehicleId.HasValue
                 ? vehicleRepository.QueryNoTracking().FirstOrDefault(vehicle => vehicle.Id == schedule.VehicleId.Value)
                 : null;
-            if (vehicle is null || !vehicle.IsActive || vehicle.DeletedAt is not null)
+            if (vehicle is null
+                || !vehicle.IsActive
+                || vehicle.DeletedAt is not null
+                || vehicle.Status != VehicleStatus.ACTIVE)
             {
                 var message = schedule.VehicleId.HasValue
-                    ? "Assigned vehicle was missing, inactive, or deleted."
+                    ? "Assigned vehicle was missing, inactive, under maintenance, or deleted."
                     : "No vehicle is assigned to this DriverSchedule.";
                 foreach (var serviceDate in serviceDates)
                 {

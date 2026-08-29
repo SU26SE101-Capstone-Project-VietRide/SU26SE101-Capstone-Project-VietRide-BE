@@ -25,6 +25,12 @@ public sealed record TripVehicleSubstitutedIntegrationEvent : IIntegrationEvent
     [JsonRequired] public string Reason { get; init; } = string.Empty;
     [JsonRequired] public bool NotifyPassengers { get; init; }
     [JsonRequired] public IReadOnlyCollection<TripVehicleSubstitutedMapping> Mappings { get; init; } = [];
+    public Guid? IncidentId { get; init; }
+    public decimal? IncidentLatitude { get; init; }
+    public decimal? IncidentLongitude { get; init; }
+    public string? IncidentDescription { get; init; }
+    public Guid? NewDriverId { get; init; }
+    public Guid? NewAssistantId { get; init; }
 
     [JsonIgnore]
     string IIntegrationEvent.EventType => EventTypeValue;

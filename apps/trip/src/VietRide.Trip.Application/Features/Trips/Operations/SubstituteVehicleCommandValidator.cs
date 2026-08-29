@@ -10,6 +10,7 @@ public sealed class SubstituteVehicleCommandValidator : AbstractValidator<Substi
         RuleFor(command => command.OperatorId).NotEmpty();
         RuleFor(command => command.ActorUserId).NotEmpty();
         RuleFor(command => command.ReplacementVehicleId).NotEmpty();
+        RuleFor(command => command.IncidentId).NotNull().NotEmpty();
         RuleFor(command => command.EstimatedRecoveryDepartureAt)
             .Must(value => value.Offset == TimeSpan.Zero)
             .WithMessage("must be an absolute UTC timestamp");
@@ -19,12 +20,9 @@ public sealed class SubstituteVehicleCommandValidator : AbstractValidator<Substi
             .Must(reason => reason is null || reason.Trim().Length <= 500)
             .WithMessage("must not exceed 500 characters")
             .OverridePropertyName("reason");
-        RuleFor(command => command.ReplacementDriverId)
-            .NotNull()
-            .NotEmpty()
-            .When(command => command.ReplacementCrewSpecified);
-        RuleFor(command => command.ReplacementAssistantId)
-            .NotEqual(Guid.Empty)
-            .When(command => command.ReplacementAssistantId.HasValue);
+        RuleFor(command => command.ReplacementCrewSpecified).Equal(true)
+            .WithMessage("replacementCrew is required.");
+        RuleFor(command => command.ReplacementDriverId).NotNull().NotEmpty();
+        RuleFor(command => command.ReplacementAssistantId).NotNull().NotEmpty();
     }
 }

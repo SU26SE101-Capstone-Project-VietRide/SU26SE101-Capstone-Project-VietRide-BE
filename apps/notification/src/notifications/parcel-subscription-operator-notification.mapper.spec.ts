@@ -49,9 +49,7 @@ const PLAN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
   it('uses the canonical Identity subscription lifecycle routing keys', () => {
-    expect(SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY).toBe(
-      'identity.subscription.trial_expiring',
-    );
+    expect(SUBSCRIPTION_TRIAL_EXPIRING_ROUTING_KEY).toBe('identity.subscription.trial_expiring');
     expect(SUBSCRIPTION_EXPIRED_ROUTING_KEY).toBe('identity.subscription.expired');
     expect(SUBSCRIPTION_PAYMENT_AUTO_REVERTED_ROUTING_KEY).toBe(
       'identity.subscription.payment_auto_reverted',
@@ -303,6 +301,64 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
     expect(TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY).toBe('trip.trip.vehicle_substituted');
   });
 
+  it('notifies replacement crew with incident coordinates in the payload', async () => {
+    const replacementDriverId = '44444444-4444-4444-8444-444444444444';
+    const replacementAssistantId = '55555555-5555-4555-8555-555555555555';
+    const notifications = await mapParcelSubscriptionOperatorEventToNotifications(
+      TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
+      {
+        operatorId: OPERATOR_ID,
+        newTripId: TRIP_ID,
+        newVehicleId: '66666666-6666-4666-8666-666666666666',
+        newVehiclePlateNumber: '51B-12345',
+        newDriverId: replacementDriverId,
+        newAssistantId: replacementAssistantId,
+        incidentId: '77777777-7777-4777-8777-777777777777',
+        incidentLatitude: 10.7626,
+        incidentLongitude: 106.6602,
+        reason: 'Xe hỏng',
+      },
+      async () => [SECOND_USER_ID],
+    );
+
+    expect(notifications.map((item) => item.userId)).toEqual([
+      SECOND_USER_ID,
+      replacementDriverId,
+      replacementAssistantId,
+    ]);
+    expect(notifications.find((item) => item.userId === replacementDriverId)).toEqual(
+      expect.objectContaining({
+        title: 'Bạn được gán xe thay thế',
+        body: expect.stringContaining('10.7626, 106.6602'),
+        data: expect.objectContaining({ newTripId: TRIP_ID }),
+      }),
+    );
+  });
+
+  it('uses incident description instead of null coordinates for replacement crew', async () => {
+    const replacementDriverId = '44444444-4444-4444-8444-444444444444';
+    const notifications = await mapParcelSubscriptionOperatorEventToNotifications(
+      TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
+      {
+        operatorId: OPERATOR_ID,
+        newTripId: TRIP_ID,
+        newDriverId: replacementDriverId,
+        incidentLatitude: null,
+        incidentLongitude: null,
+        incidentDescription: 'Km 20, Quốc lộ 1A',
+      },
+      resolveNoOperatorRecipients,
+    );
+
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        userId: replacementDriverId,
+        body: expect.stringContaining('Vị trí sự cố: Km 20, Quốc lộ 1A.'),
+      }),
+    ]);
+    expect(notifications[0]?.body).not.toContain('null');
+  });
+
   it.each([
     ['CHECK_IN_TIMEOUT', 'không check-in đúng hạn'],
     ['FINAL_PAYMENT_TIMEOUT', 'không thanh toán số dư đúng hạn'],
@@ -384,30 +440,33 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
   it.each([
     ['READY_TO_LOAD', 'sẵn sàng lên xe'],
     ['CANCELLED', 'Số tiền cần hoàn'],
-  ] as const)('maps settlement recovery %s as a corrective sender notification', async (status, copy) => {
-    const notifications = await mapParcelSubscriptionOperatorEventToNotifications(
-      PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
-      {
-        eventId: '99999999-9999-4999-8999-999999999999',
-        occurredAt: '2026-07-18T03:00:00Z',
-        parcelId: PARCEL_ID,
-        parcelCode: 'PRC123',
-        userId: USER_ID,
-        tripId: TRIP_ID,
-        recoveredStatus: status,
-        refundAmountVnd: 50000,
-      },
-      resolveNoOperatorRecipients,
-    );
+  ] as const)(
+    'maps settlement recovery %s as a corrective sender notification',
+    async (status, copy) => {
+      const notifications = await mapParcelSubscriptionOperatorEventToNotifications(
+        PARCEL_SETTLEMENT_RECOVERED_ROUTING_KEY,
+        {
+          eventId: '99999999-9999-4999-8999-999999999999',
+          occurredAt: '2026-07-18T03:00:00Z',
+          parcelId: PARCEL_ID,
+          parcelCode: 'PRC123',
+          userId: USER_ID,
+          tripId: TRIP_ID,
+          recoveredStatus: status,
+          refundAmountVnd: 50000,
+        },
+        resolveNoOperatorRecipients,
+      );
 
-    expect(notifications).toEqual([
-      expect.objectContaining({
-        userId: USER_ID,
-        type: NotificationType.PARCEL_SETTLEMENT_RECOVERED,
-        body: expect.stringContaining(copy),
-      }),
-    ]);
-  });
+      expect(notifications).toEqual([
+        expect.objectContaining({
+          userId: USER_ID,
+          type: NotificationType.PARCEL_SETTLEMENT_RECOVERED,
+          body: expect.stringContaining(copy),
+        }),
+      ]);
+    },
+  );
 
   it('uses Parcel snapshot for sender and operator policies on legacy delivery events', async () => {
     const snapshot = async (): Promise<ParcelRecipientSnapshot> => ({

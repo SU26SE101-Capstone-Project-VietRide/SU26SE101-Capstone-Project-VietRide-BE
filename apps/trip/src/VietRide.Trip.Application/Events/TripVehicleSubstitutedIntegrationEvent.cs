@@ -20,6 +20,12 @@ public sealed record TripVehicleSubstitutedIntegrationEvent(
     IReadOnlyList<TripVehicleSubstitutedIntegrationEvent.Mapping> Mappings)
 {
     public const string EventType = "trip.trip.vehicle_substituted";
+    public Guid? IncidentId { get; init; }
+    public decimal? IncidentLatitude { get; init; }
+    public decimal? IncidentLongitude { get; init; }
+    public string? IncidentDescription { get; init; }
+    public Guid? NewDriverId { get; init; }
+    public Guid? NewAssistantId { get; init; }
 
     public sealed record Mapping(
         Guid BookingId,

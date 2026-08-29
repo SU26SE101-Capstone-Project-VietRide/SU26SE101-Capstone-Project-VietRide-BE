@@ -159,7 +159,13 @@ public sealed class TripVehicleSubstitutedIntegrationEventTests
                 "actorUserId",
                 "reason",
                 "notifyPassengers",
-                "mappings");
+                "mappings",
+                "incidentId",
+                "incidentLatitude",
+                "incidentLongitude",
+                "incidentDescription",
+                "newDriverId",
+                "newAssistantId");
         payload.RootElement.GetProperty("eventId").GetGuid().Should().Be(row.Id);
         payload.RootElement.GetProperty("substitutionId").GetGuid().Should().Be(row.Id);
         payload.RootElement.GetProperty("occurredAt").GetDateTimeOffset()
@@ -168,6 +174,15 @@ public sealed class TripVehicleSubstitutedIntegrationEventTests
             .Should().Be(SubstituteVehicleEndpointTests.SubstitutionHarness.Now);
         payload.RootElement.GetProperty("oldTripStatus").GetString().Should().Be("DISRUPTED");
         payload.RootElement.GetProperty("newTripStatus").GetString().Should().Be("BOARDING");
+        payload.RootElement.GetProperty("incidentId").GetGuid().Should().Be(harness.IncidentId);
+        payload.RootElement.GetProperty("incidentLatitude").GetDecimal().Should().Be(10.7626m);
+        payload.RootElement.GetProperty("incidentLongitude").GetDecimal().Should().Be(106.6602m);
+        payload.RootElement.GetProperty("incidentDescription").GetString()
+            .Should().Be("Xe hỏng tại điểm dừng");
+        payload.RootElement.GetProperty("newDriverId").GetGuid()
+            .Should().Be(harness.ReplacementDriverId);
+        payload.RootElement.GetProperty("newAssistantId").GetGuid()
+            .Should().Be(harness.ReplacementAssistantId);
         var mapping = payload.RootElement.GetProperty("mappings").EnumerateArray().Single();
         mapping.EnumerateObject().Select(property => property.Name)
             .Should().BeEquivalentTo(

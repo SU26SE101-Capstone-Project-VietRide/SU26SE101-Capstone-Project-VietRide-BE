@@ -11,6 +11,7 @@ public sealed record SubstituteVehicleCommand(
     Guid ReplacementVehicleId,
     DateTimeOffset EstimatedRecoveryDepartureAt,
     string Reason,
+    Guid? IncidentId,
     bool NotifyPassengers,
     Guid? ReplacementDriverId,
     Guid? ReplacementAssistantId,

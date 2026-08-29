@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
+using VietRide.Parcel.Application.Features.Parcels.AssistantTripParcels;
 using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Application.Features.Parcels.ResendDeliveryEmail;
@@ -24,53 +25,36 @@ public sealed class CrewParcelsController : ControllerBase
         _mediator = mediator;
     }
 
-    [HttpGet("{parcelId:guid}/custody-exception")]
-    [Authorize(Roles = "DRIVER")]
-    [ProducesResponseType(typeof(ApiResponse<ReportCustodyExceptionResponse>), StatusCodes.Status200OK)]
+    [HttpGet("~/v1/crew/trips/{tripId:guid}/parcels")]
+    [ProducesResponseType(typeof(ApiResponse<AssistantTripParcelManifestResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
-    public async Task<ActionResult<ReportCustodyExceptionResponse>> GetCustodyExceptionAsync(
-        Guid parcelId,
-        CancellationToken cancellationToken)
-    {
-        var operatorId = CurrentUserClaims.GetOperatorId(User)
-            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
-        return Ok(await _mediator.Send(
-            new GetCustodyExceptionRequestQuery(
-                parcelId,
-                CurrentUserClaims.GetUserId(User),
-                operatorId,
-                CurrentUserClaims.GetRole(User)),
-            cancellationToken));
-    }
-
-    [HttpPost("{parcelId:guid}/custody-exception-decision")]
-    [Authorize(Roles = "DRIVER")]
-    [RequireIdempotencyKey]
-    [ProducesResponseType(typeof(ApiResponse<ReportCustodyExceptionResponse>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
-    public async Task<ActionResult<ReportCustodyExceptionResponse>> DecideCustodyExceptionAsync(
-        Guid parcelId,
-        [FromBody] DecideCustodyExceptionRequest request,
-        CancellationToken cancellationToken)
+    public async Task<ActionResult<AssistantTripParcelManifestResponse>> GetTripManifestAsync(
+        Guid tripId,
+        [FromQuery] Guid? stopId = null,
+        [FromQuery] string? status = null,
+        [FromQuery] bool? hasException = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
         var operatorId = CurrentUserClaims.GetOperatorId(User)
             ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
         var result = await _mediator.Send(
-            new DecideCustodyExceptionCommand(
-                parcelId,
-                "PARCEL",
+            new GetAssistantTripParcelsQuery(
+                tripId,
                 CurrentUserClaims.GetUserId(User),
                 operatorId,
-                CurrentUserClaims.GetRole(User),
-                request.Decision?.Trim().ToUpperInvariant() ?? string.Empty,
-                request.Note,
-                Guid.Parse(Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString())),
+                page,
+                pageSize,
+                stopId,
+                status,
+                hasException,
+                search,
+                CurrentUserClaims.GetRole(User)),
             cancellationToken);
         return Ok(result);
     }

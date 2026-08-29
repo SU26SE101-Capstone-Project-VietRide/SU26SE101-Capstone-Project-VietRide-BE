@@ -19,6 +19,7 @@ public sealed class ActivateDriverScheduleHandler : IRequestHandler<ActivateDriv
     private readonly IIdentityInternalClient identityInternalClient;
     private readonly IRouteRepository routeRepository;
     private readonly IRouteStopRepository routeStopRepository;
+    private readonly IVehicleRepository vehicleRepository;
     private readonly ITripGenerationJobScheduler tripGenerationJobScheduler;
     private readonly IUnitOfWork unitOfWork;
     private readonly IResourceAvailabilityService? resourceAvailability;
@@ -28,6 +29,7 @@ public sealed class ActivateDriverScheduleHandler : IRequestHandler<ActivateDriv
         IIdentityInternalClient identityInternalClient,
         IRouteRepository routeRepository,
         IRouteStopRepository routeStopRepository,
+        IVehicleRepository vehicleRepository,
         ITripGenerationJobScheduler tripGenerationJobScheduler,
         IUnitOfWork unitOfWork,
         IResourceAvailabilityService? resourceAvailability = null)
@@ -36,6 +38,7 @@ public sealed class ActivateDriverScheduleHandler : IRequestHandler<ActivateDriv
         this.identityInternalClient = identityInternalClient;
         this.routeRepository = routeRepository;
         this.routeStopRepository = routeStopRepository;
+        this.vehicleRepository = vehicleRepository;
         this.tripGenerationJobScheduler = tripGenerationJobScheduler;
         this.resourceAvailability = resourceAvailability;
         this.unitOfWork = unitOfWork;
@@ -66,6 +69,23 @@ public sealed class ActivateDriverScheduleHandler : IRequestHandler<ActivateDriv
             schedule.DriverUserId,
             schedule.AssistantUserId,
             cancellationToken);
+
+        if (schedule.VehicleId.HasValue)
+        {
+            var vehicle = await vehicleRepository.GetOwnedByIdAsync(
+                schedule.OperatorId,
+                schedule.VehicleId.Value,
+                cancellationToken);
+            if (vehicle is null
+                || !vehicle.IsActive
+                || vehicle.DeletedAt.HasValue
+                || vehicle.Status != VehicleStatus.ACTIVE)
+            {
+                throw new CodedValidationException(
+                    "VEHICLE_NOT_ACTIVE",
+                    "Assigned vehicle must be active before schedule activation.");
+            }
+        }
 
         EnsureRouteCanGenerateTrips(schedule);
         var availabilityInput = new DriverScheduleAvailabilityInput(
