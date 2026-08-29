@@ -414,7 +414,7 @@ public sealed class SubstituteVehicleEndpointTests
             new EfUnitOfWork(db),
             new FrozenClock(SubstitutionHarness.RecoveryDeparture));
         var started = await handler.Handle(
-            new StartTripCommand(body!.Data!.NewTripId, harness.DriverId),
+            new StartTripCommand(body!.Data!.NewTripId, harness.ReplacementDriverId),
             CancellationToken.None);
 
         started.Status.Should().Be("IN_PROGRESS");
