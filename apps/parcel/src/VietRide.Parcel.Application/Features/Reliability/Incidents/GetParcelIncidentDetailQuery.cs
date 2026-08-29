@@ -1,5 +1,6 @@
 using MediatR;
 using VietRide.Parcel.Application.Features.Reliability.Claims;
+using VietRide.Parcel.Application.Features.Reliability.CustodyException;
 using VietRide.Parcel.Application.Features.Reliability.ReadModels;
 using VietRide.Parcel.Application.Features.Reliability.Trace;
 
@@ -30,7 +31,8 @@ public sealed record ParcelIncidentDetailResponse(
     OperatorUserSummaryResponse? Reporter = null,
     ReliabilityTripResponse? ForwardingSummary = null,
     IReadOnlyList<string>? AvailableActions = null,
-    ParcelForwardingOperationResponse? ForwardingOperation = null);
+    ParcelForwardingOperationResponse? ForwardingOperation = null,
+    ReportCustodyExceptionResponse? CustodyExceptionApproval = null);
 
 public sealed record ParcelForwardingOperationResponse(
     ReliabilityTripResponse TargetTrip,

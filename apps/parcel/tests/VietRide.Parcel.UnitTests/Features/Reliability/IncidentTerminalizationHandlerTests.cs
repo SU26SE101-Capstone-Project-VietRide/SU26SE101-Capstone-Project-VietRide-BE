@@ -40,6 +40,7 @@ public sealed class IncidentTerminalizationHandlerTests
         var response = await new MarkIncidentFoundCommandHandler(
                 reliability,
                 parcels,
+                Substitute.For<IParcelCustodyExceptionRequestRepository>(),
                 Substitute.For<IParcelCustodyService>(),
                 Substitute.For<IIntegrationEventOutbox>(),
                 clock)
@@ -102,6 +103,7 @@ public sealed class IncidentTerminalizationHandlerTests
 
         var response = await new DeclareIncidentLostCommandHandler(
                 reliability,
+                Substitute.For<IParcelCustodyExceptionRequestRepository>(),
                 Substitute.For<IIntegrationEventOutbox>(),
                 clock)
             .Handle(

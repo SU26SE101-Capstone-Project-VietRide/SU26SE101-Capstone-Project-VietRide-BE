@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Api.Filters;
 using VietRide.Parcel.Application.Features.Reliability.Claims;
+using VietRide.Parcel.Application.Features.Reliability.CustodyException;
 using VietRide.Parcel.Application.Features.Reliability.Forwarding;
 using VietRide.Parcel.Application.Features.Reliability.Incidents;
 using VietRide.Parcel.Application.Features.Reliability.Policies;
@@ -22,6 +23,34 @@ public sealed class OperatorParcelIncidentsController : ControllerBase
     public OperatorParcelIncidentsController(IMediator mediator)
     {
         _mediator = mediator;
+    }
+
+    [HttpPost("{incidentId:guid}/custody-exception-decision")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<ReportCustodyExceptionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ReportCustodyExceptionResponse>> DecideCustodyExceptionAsync(
+        Guid incidentId,
+        [FromBody] DecideCustodyExceptionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        var result = await _mediator.Send(
+            new DecideCustodyExceptionCommand(
+                incidentId,
+                "INCIDENT",
+                CurrentUserClaims.GetUserId(User),
+                operatorId,
+                CurrentUserClaims.GetRole(User),
+                request.Decision?.Trim().ToUpperInvariant() ?? string.Empty,
+                request.Note,
+                Guid.Parse(Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString())),
+            cancellationToken);
+        return Ok(result);
     }
 
     [HttpGet]

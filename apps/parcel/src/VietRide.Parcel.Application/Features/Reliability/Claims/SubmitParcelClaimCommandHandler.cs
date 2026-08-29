@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Application.Features.Reliability.CustodyException;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -19,17 +20,20 @@ public sealed class SubmitParcelClaimCommandHandler
 
     private readonly IParcelRepository _parcels;
     private readonly IParcelReliabilityRepository _reliability;
+    private readonly IParcelCustodyExceptionRequestRepository _custodyExceptionRequests;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
 
     public SubmitParcelClaimCommandHandler(
         IParcelRepository parcels,
         IParcelReliabilityRepository reliability,
+        IParcelCustodyExceptionRequestRepository custodyExceptionRequests,
         IIntegrationEventOutbox outbox,
         IClock clock)
     {
         _parcels = parcels;
         _reliability = reliability;
+        _custodyExceptionRequests = custodyExceptionRequests;
         _outbox = outbox;
         _clock = clock;
     }
@@ -49,6 +53,10 @@ public sealed class SubmitParcelClaimCommandHandler
             throw new CodedConflictException(
                 "PARCEL_CLAIM_WINDOW_NOT_OPEN",
                 "A claim is available only after an incident is confirmed lost.");
+        await CustodyExceptionApprovalGuard.EnsureNotPendingAsync(
+            _custodyExceptionRequests,
+            incident.Id,
+            cancellationToken);
         var claimWindowDays = parcel.ClaimWindowDaysSnapshot > 0
             ? parcel.ClaimWindowDaysSnapshot
             : ParcelCompensationPolicy.DefaultClaimWindowDays;

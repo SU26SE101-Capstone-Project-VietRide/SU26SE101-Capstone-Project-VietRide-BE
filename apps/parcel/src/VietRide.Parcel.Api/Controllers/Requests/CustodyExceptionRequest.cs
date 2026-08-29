@@ -12,5 +12,4 @@ public sealed record CustodyExceptionRequest(
     string? Description,
     decimal? ObservedWeightKg,
     IReadOnlyCollection<string>? EvidenceUrls,
-    string Reason,
-    Guid? SupervisorApprovalUserId);
+    string Reason);

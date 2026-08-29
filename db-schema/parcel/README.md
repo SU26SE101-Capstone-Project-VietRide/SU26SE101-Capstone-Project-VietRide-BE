@@ -88,6 +88,12 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | `uq_parcel_transit_legs_parcel_sequence` | `(parcel_id, sequence)` | unique | Thứ tự leg bất biến, forwarding không sửa leg cũ |
 | `uq_parcel_incidents_active_type` | `(parcel_id, type)` partial | unique | Không mở trùng active incident cùng type |
 | `idx_parcel_incidents_search_deadline` | `(search_deadline, status)` | B-tree | Search expiry scan 15 phút |
+| `uq_parcel_custody_exception_requests_incident` | `(incident_id)` | unique | Một incident custody exception chỉ có một approval request |
+| `uq_parcel_custody_exception_requests_idempotency` | `(idempotency_key)` | unique | Retry assistant report không tạo request mới |
+| `uq_parcel_custody_exception_requests_pending_parcel_type` | `(parcel_id, incident_type)` partial | unique | Một pending approval cho cùng Parcel + loại sự cố |
+| `idx_parcel_custody_exception_requests_operator_status` | `(operator_id, status, created_at)` | B-tree | Operator approval queue |
+| `idx_parcel_custody_exception_requests_trip_status` | `(trip_id, status, created_at)` | B-tree | Assigned Driver approval queue |
+| `idx_parcel_custody_exception_requests_approved_event` | `(approved_custody_event_id)` | B-tree | Audit link đến custody fact đã duyệt |
 | `uq_parcel_claims_incident` | `incident_id` | unique | Một claim cho mỗi lost incident |
 | `uq_parcel_compensation_policies_operator` | `operator_id` | unique | Một active policy/version per operator |
 | `uq_parcel_status_history_migration_baseline` | `parcel_id` partial khi `source = 'MIGRATION_BASELINE'` | unique | Tối đa một baseline cho mỗi Parcel |

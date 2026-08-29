@@ -10,7 +10,7 @@ public sealed record ParcelIncidentListItem(
     string Status,
     Guid? TripId,
     string? LastKnownLocation,
-    DateTimeOffset SearchDeadline,
+    DateTimeOffset? SearchDeadline,
     DateTimeOffset CreatedAt,
     bool OperatorProcessBreach,
     ReliabilityParcelSummaryResponse? Parcel = null,

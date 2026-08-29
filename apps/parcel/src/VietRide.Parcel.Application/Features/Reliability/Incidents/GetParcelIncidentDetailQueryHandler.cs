@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.Reliability.Claims;
+using VietRide.Parcel.Application.Features.Reliability.CustodyException;
 using VietRide.Parcel.Application.Features.Reliability.ReadModels;
 using VietRide.Parcel.Application.Features.Reliability.Trace;
 using VietRide.Parcel.Application.Services;
@@ -19,6 +20,7 @@ public sealed class GetParcelIncidentDetailQueryHandler
 {
     private readonly IParcelReliabilityRepository _reliability;
     private readonly IParcelRepository _parcels;
+    private readonly IParcelCustodyExceptionRequestRepository _custodyExceptionRequests;
     private readonly ITripServiceClient _trips;
     private readonly IIdentityServiceClient _identity;
     private readonly IClock _clock;
@@ -26,12 +28,14 @@ public sealed class GetParcelIncidentDetailQueryHandler
     public GetParcelIncidentDetailQueryHandler(
         IParcelReliabilityRepository reliability,
         IParcelRepository parcels,
+        IParcelCustodyExceptionRequestRepository custodyExceptionRequests,
         ITripServiceClient trips,
         IIdentityServiceClient identity,
         IClock clock)
     {
         _reliability = reliability;
         _parcels = parcels;
+        _custodyExceptionRequests = custodyExceptionRequests;
         _trips = trips;
         _identity = identity;
         _clock = clock;
@@ -60,6 +64,9 @@ public sealed class GetParcelIncidentDetailQueryHandler
             request.Limit,
             cancellationToken);
         var claim = await _reliability.GetClaimByIncidentAsync(incident.Id, cancellationToken);
+        var custodyExceptionRequest = await _custodyExceptionRequests.GetByIncidentAsync(
+            incident.Id,
+            cancellationToken);
         var claimResponse = claim is null
             ? null
             : await ParcelClaimResponseMapper.MapAsync(
@@ -137,7 +144,13 @@ public sealed class GetParcelIncidentDetailQueryHandler
                 ExpectedDropoff = ParcelReliabilityReadModelService.MapDropoff(parcel, trip),
                 LastCustody = ParcelReliabilityReadModelService.MapCustody(current),
                 ClaimSummary = ParcelReliabilityReadModelService.MapClaim(claim, parcel, _clock.UtcNow),
-                AvailableActions = ParcelReliabilityActionResolver.Operator(incident, claim, _clock.UtcNow),
+                SearchDeadline = custodyExceptionRequest?.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL
+                    ? null
+                    : incident.SearchDeadline,
+                Sla = null,
+                AvailableActions = custodyExceptionRequest?.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL
+                    ? ["APPROVE", "REJECT"]
+                    : ParcelReliabilityActionResolver.Operator(incident, claim, _clock.UtcNow),
             },
             taskResponses,
             incident.ExpectedLocation,
@@ -178,8 +191,18 @@ public sealed class GetParcelIncidentDetailQueryHandler
                 ? ListParcelIncidentsQueryHandler.MapUser(incident.ReporterId.Value, users, incident.ReporterSource)
                 : new OperatorUserSummaryResponse(null, null, null, null, null, incident.ReporterSource),
             forwardingTrip,
-            ParcelReliabilityActionResolver.Operator(incident, claim, _clock.UtcNow),
-            MapForwardingOperation(forwardingTrip, forwardingLeg));
+            custodyExceptionRequest?.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL
+                ? ["APPROVE", "REJECT"]
+                : ParcelReliabilityActionResolver.Operator(incident, claim, _clock.UtcNow),
+            MapForwardingOperation(forwardingTrip, forwardingLeg),
+            custodyExceptionRequest is null
+                ? null
+                : CustodyExceptionResponseMapper.Map(
+                    custodyExceptionRequest,
+                    incident,
+                    custodyExceptionRequest.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL
+                        ? ["APPROVE", "REJECT"]
+                        : []));
     }
 
     private static IReadOnlyList<string> DeserializeEvidenceReferences(string? json)

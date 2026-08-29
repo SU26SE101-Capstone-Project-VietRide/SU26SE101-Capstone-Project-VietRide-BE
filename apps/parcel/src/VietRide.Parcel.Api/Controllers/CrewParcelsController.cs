@@ -7,6 +7,7 @@ using VietRide.Parcel.Application.Features.Parcels.AssistantTripParcels;
 using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Application.Features.Parcels.ResendDeliveryEmail;
+using VietRide.Parcel.Application.Features.Reliability.CustodyException;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 
