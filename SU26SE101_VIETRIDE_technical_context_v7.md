@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-25 (Migration runtime định tuyến Google Routes sang Goong)
+> **Cập nhật:** 2026-08-29 (Parcel stop-departure approval và claim appeal settlement)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -3159,6 +3159,10 @@ không expose UUID nội bộ, và nhất quán với booking QR dùng plain boo
   `TRIP_NOT_ACCEPTING_PARCEL` ("Chuyến xe không còn nhận bưu kiện mới. Vui lòng chọn chuyến khác.").
 - `BOARDING` bắt đầu tại T-30, đúng lúc cửa check-in Parcel đã đóng; vì vậy Trip search và create
   đều phải loại trạng thái này để không tạo Parcel không thể check-in.
+- Trip phải có `assistantUserId`; nếu chưa phân công Assistant thì create trả
+  `409 PARCEL_ASSISTANT_REQUIRED`. Forwarding/transfer cũng không được chọn target Trip thiếu
+  Assistant. V1 giữ Driver là supervisor và không mở rộng các mutation check-in/load/unload cho
+  Driver, nên không được nhận hàng vào một Trip không có người đủ quyền vận hành hàng hóa.
 
 **Deadline trước giờ đóng tải:**
 
@@ -3237,9 +3241,14 @@ Operator override (exception handling only):
   → Không dùng override cho bulk action — phải per-parcel
 
 Arrival Outbox facts không trực tiếp đổi `ParcelStatus`: `trip.stop.arrived` chỉ có Notification
-consumer; `trip.destination.arrived` kích hoạt Parcel search cho terminal-bound parcel vẫn
-`LOADED|IN_TRANSIT`. Custody projection chỉ update từ custody event và không suy diễn vị trí từ
-arrival/departure fact.
+consumer; `trip.destination.arrived` chỉ thiết lập cửa sổ unload tại bến cuối và không được xem
+terminal-bound parcel còn `LOADED|IN_TRANSIT` là thất lạc. Nếu Trip đã chuyển `COMPLETED` mà kiện
+vẫn chưa unload, Parcel mới chuyển sang `PENDING_OPERATOR_ACTION/CUSTODY_EXCEPTION`, giữ
+`pendingActionResumeStatus=LOADED|IN_TRANSIT` và mở search incident hệ thống. Custody projection
+chỉ update từ custody event và không suy diễn vị trí từ arrival/departure fact. Assigned Assistant
+có thể quét đúng QR để xác nhận kiện của system-created `MISSING|MISSING_AFTER_DEPARTURE` vẫn ở
+trên xe; thao tác ghi `FOUND@VEHICLE`, resolve incident và khôi phục resume status trong cùng
+transaction.
 ```
 
 **Parcel behavior khi Trip CANCELLED (SCHEDULED hoặc BOARDING):**
@@ -3630,9 +3639,18 @@ cân nặng, kích thước và serial/IMEI.
 
 Không scan không đồng nghĩa mất. QR hỏng phải dùng `MANUAL_CUSTODY_EXCEPTION`; kiện chưa định danh
 nhận temporary tag và `UNIDENTIFIED_PACKAGE`. Stop close đối soát expected/scanned/manual/unresolved.
-Unresolved khi departure tạo `UNSCANNED_HANDOFF` hoặc `MISSING_AFTER_DEPARTURE` và search case dựa
-trên manifest, Trip/vehicle, crew, station/stop, thời gian, ảnh và mô tả. Trip luôn phát
-`trip.stop.departed`, vì vậy detection không phụ thuộc vào việc Booking có pending passenger.
+Các count được derive hoàn toàn từ custody event đã persist; FE không gửi danh sách Parcel tự khai
+đã scan/manual. Request stop reconciliation chỉ có optional `departureOverrideReason`, còn
+destination reconciliation là bodyless.
+Assistant không được tự khai UUID người duyệt. Khi còn unresolved và có lý do xin rời bến, Parcel
+tạo `ParcelStopDepartureApprovalRequest=PENDING_APPROVAL` với snapshot chính xác danh sách kiện.
+Assigned Driver hoặc cùng-tenant `OPERATOR_STAFF|OPERATOR_ADMIN` duyệt/từ chối bằng danh tính lấy
+từ JWT của chính người duyệt. Trip bắt buộc gọi Parcel departure-clearance trước khi commit rời bến:
+chỉ `CLEAR` hoặc `APPROVED_OVERRIDE` mới được đi; `BLOCKED_PENDING_APPROVAL`, upstream lỗi hoặc
+response không hợp lệ đều fail closed. Approval cũ không có hiệu lực nếu snapshot unresolved đổi.
+Unresolved mở `UNSCANNED_HANDOFF`; nếu xe thực sự rời bến thì event reconciliation có thể mở
+`MISSING_AFTER_DEPARTURE`. Trip luôn phát `trip.stop.departed`, vì vậy detection không phụ thuộc
+vào việc Booking có pending passenger.
 
 Incident types gồm `MISSING|WRONG_STOP|DELIVERY_NOT_RECEIVED|PARTIAL_LOSS|DAMAGED|
 SCAN_IDENTITY_MISMATCH|PACKAGE_IDENTITY_MISMATCH|UNSCANNED_HANDOFF|MISSING_AFTER_DEPARTURE`.
@@ -3672,10 +3690,18 @@ bất khả kháng và chứng từ không hợp lệ. Wrong stop, lỗi crew/op
 Operator chịu nghĩa vụ tài chính; VietRide không ứng trước. Payment dùng một payout unique theo
 `claimId`: trước settlement debit đúng operator/Trip PlatformWallet holding, sau settlement debit
 đúng OperatorWallet, rồi credit PassengerWallet và ghi `PARCEL_COMPENSATION` ledger. Thiếu tiền
-  chuyển `FUNDING_PENDING` và job retry khấu trừ settlement tương lai; không cho ví âm, cross-tenant
-  funding hoặc double payout. Sender có thể appeal claim `PAID` hoặc `REJECTED`; appeal lưu reason,
-  actor và timestamp riêng, không ghi đè decision audit gốc. Chi tiết kỹ thuật được ratify trong
-  ADR 0006.
+chuyển `FUNDING_PENDING` và job retry khấu trừ settlement tương lai; không cho ví âm, cross-tenant
+funding hoặc double payout.
+
+Sender có thể tạo đúng một `ParcelClaimAppeal` cho claim gốc `PAID` hoặc `REJECTED`; claim gốc và
+payout gốc luôn bất biến. Appeal đi theo
+`SUBMITTED -> UNDER_REVIEW -> UPHELD` hoặc
+`SUBMITTED -> UNDER_REVIEW -> ADJUSTMENT_APPROVED -> FUNDING_PENDING -> PAID`.
+`OPERATOR_ADMIN` có thể giữ nguyên quyết định (`UPHOLD`) hoặc duyệt mức thiệt hại đã sửa
+(`APPROVE_ADJUSTMENT`). Duyệt điều chỉnh chỉ hợp lệ nếu award mới lớn hơn award đã trả của claim
+gốc. Payment chi đúng `supplementaryAward = revisedTotalAward - originalPaidAward`, dùng
+`appealId` làm unique payout reference để retry không trả trùng và tuyệt đối không sửa ledger cũ.
+Chi tiết kỹ thuật được ratify trong ADR 0006.
 
 ### 6.7 Thông báo (Notifications)
 
@@ -5268,7 +5294,7 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
   - **Payment:** `PAYMENT_INSUFFICIENT_WALLET`, `PAYMENT_VNPAY_ERROR`, `PAYMENT_TIMEOUT`, `PAYMENT_ALREADY_PROCESSED`, `PAYMENT_SIGNATURE_INVALID` (VNPay HMAC verify fail)
   - **Wallet:** `WALLET_INSUFFICIENT_BALANCE`, `WALLET_TOP_UP_FAILED`, `WALLET_TOP_UP_AMOUNT_TOO_LOW`
   - **Trip:** `TRIP_NOT_FOUND`, `TRIP_NOT_EDITABLE`, `TRIP_VEHICLE_CONFLICT`, `TRIP_DRIVER_CONFLICT`, `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST`, `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`, `TRIP_VEHICLE_SWAP_TOO_LATE`, `TRIP_NOT_ACCEPTING_PARCEL` (Trip IN_PROGRESS — không nhận parcel mới), `TRIP_NOT_IN_PROGRESS`, `TRIP_STOP_NOT_ARRIVED`, `TRIP_STOP_ALREADY_DEPARTED`, `DRIVER_SCHEDULE_EDIT_TOO_LATE`, `INCIDENT_NOT_FOUND`, `INCIDENT_ALREADY_RESOLVED`
-  - **Parcel:** `PARCEL_NOT_FOUND`, `PARCEL_CAPACITY_EXCEEDED`, `PARCEL_PRICING_NOT_CONFIGURED`, `PARCEL_QUOTE_INVALID`, `PARCEL_QUOTE_EXPIRED`, `PARCEL_QUOTE_STALE`, `PARCEL_QUOTE_MISMATCH`, `PARCEL_CARGO_RECOVERY_IN_PROGRESS`, `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, `PARCEL_NOT_TRANSFERABLE`, `PARCEL_ADDITIONAL_PAYMENT_REQUIRED`, `PARCEL_REVIEW_TIMEOUT`, `PARCEL_CUSTODY_LOCATION_REQUIRED`, `PARCEL_CUSTODY_LOCATION_MISMATCH`, `PARCEL_CUSTODY_EVENT_DUPLICATE`, `SCAN_IDENTITY_MISMATCH`, `PACKAGE_IDENTITY_MISMATCH`, `UNIDENTIFIED_PACKAGE_NOT_FOUND`, `PARCEL_INCIDENT_NOT_FOUND`, `PARCEL_INCIDENT_ALREADY_OPEN`, `PARCEL_INCIDENT_INVALID_STATUS`, `PARCEL_CUSTODY_EXCEPTION_REQUEST_NOT_FOUND`, `PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED`, `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED`, `PARCEL_SEARCH_TASK_NOT_FOUND`, `PARCEL_SEARCH_TASK_MISMATCH`, `PARCEL_SEARCH_SLA_NOT_EXPIRED`, `PARCEL_CLAIM_NOT_FOUND`, `PARCEL_CLAIM_WINDOW_NOT_OPEN`, `PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED`, `PARCEL_CLAIM_ALREADY_EXISTS`, `PARCEL_CLAIM_EVIDENCE_REQUIRED`, `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY`, `PARCEL_CLAIM_ALREADY_DECIDED`, `PARCEL_CLAIM_FUNDING_PENDING`, `POLICY_BELOW_DEFAULT_ACK_REQUIRED`
+  - **Parcel:** `PARCEL_NOT_FOUND`, `PARCEL_CAPACITY_EXCEEDED`, `PARCEL_PRICING_NOT_CONFIGURED`, `PARCEL_QUOTE_INVALID`, `PARCEL_QUOTE_EXPIRED`, `PARCEL_QUOTE_STALE`, `PARCEL_QUOTE_MISMATCH`, `PARCEL_CARGO_RECOVERY_IN_PROGRESS`, `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, `PARCEL_NOT_TRANSFERABLE`, `PARCEL_ADDITIONAL_PAYMENT_REQUIRED`, `PARCEL_REVIEW_TIMEOUT`, `PARCEL_CUSTODY_LOCATION_REQUIRED`, `PARCEL_CUSTODY_LOCATION_MISMATCH`, `PARCEL_CUSTODY_EVENT_DUPLICATE`, `SCAN_IDENTITY_MISMATCH`, `PACKAGE_IDENTITY_MISMATCH`, `UNIDENTIFIED_PACKAGE_NOT_FOUND`, `PARCEL_INCIDENT_NOT_FOUND`, `PARCEL_INCIDENT_ALREADY_OPEN`, `PARCEL_INCIDENT_INVALID_STATUS`, `PARCEL_CUSTODY_EXCEPTION_REQUEST_NOT_FOUND`, `PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED`, `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED`, `PARCEL_STOP_DEPARTURE_APPROVAL_NOT_FOUND`, `PARCEL_STOP_DEPARTURE_ALREADY_DECIDED`, `PARCEL_STOP_RECONCILIATION_REQUIRED`, `PARCEL_SEARCH_TASK_NOT_FOUND`, `PARCEL_SEARCH_TASK_MISMATCH`, `PARCEL_SEARCH_SLA_NOT_EXPIRED`, `PARCEL_CLAIM_NOT_FOUND`, `PARCEL_CLAIM_WINDOW_NOT_OPEN`, `PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED`, `PARCEL_CLAIM_ALREADY_EXISTS`, `PARCEL_CLAIM_EVIDENCE_REQUIRED`, `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY`, `PARCEL_CLAIM_ALREADY_DECIDED`, `PARCEL_CLAIM_APPEAL_NOT_ALLOWED`, `PARCEL_CLAIM_APPEAL_ALREADY_EXISTS`, `PARCEL_CLAIM_APPEAL_NOT_FOUND`, `PARCEL_CLAIM_APPEAL_ALREADY_DECIDED`, `PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED`, `PARCEL_CLAIM_FUNDING_PENDING`, `POLICY_BELOW_DEFAULT_ACK_REQUIRED`
   - **Stop/Route:** `STOP_NOT_FOUND`, `STOP_REPLACEMENT_INVALID`, `STOP_REPLACEMENT_CYCLE` (replacedByStopId tạo cycle), `STOP_REPLACEMENT_DIFFERENT_OPERATOR`, `STOP_ALREADY_DISABLED`, `STOP_DISABLED_BOOKING_AFFECTED` (legacy/deprecated synchronous warning/count for DELETE; unrelated usages remain unchanged), `STOP_NOT_PICKUP_ALLOWED`, `STOP_NOT_DROPOFF_ALLOWED`, `ROUTE_NOT_FOUND`, `ROUTE_RETURN_NOT_CONFIGURED` (Route.returnRouteId null khi đặt round-trip)
   - **Station:** `STATION_NOT_FOUND`, `STATION_DUPLICATE_NEARBY` (warning khi operator tạo Station mới quá gần Station hiện có — gợi ý link thay vì tạo), `STATION_MERGE_CONFLICT` (merge vi phạm Route/domain invariant; không partial write)
   - **Invoice:** `INVOICE_NOT_FOUND`, `INVOICE_PDF_GENERATION_FAILED`

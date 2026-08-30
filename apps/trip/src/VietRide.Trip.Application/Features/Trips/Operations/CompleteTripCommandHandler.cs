@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Domain.Entities;
@@ -19,6 +20,7 @@ public sealed class CompleteTripCommandHandler
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
     private readonly ILogger<CompleteTripCommandHandler> _logger;
+    private readonly IParcelImpactClient _parcelImpact;
     private readonly IRouteChangeProposalLifecycleService? _routeChangeProposals;
 
     public CompleteTripCommandHandler(
@@ -26,12 +28,14 @@ public sealed class CompleteTripCommandHandler
         IIntegrationEventOutbox outbox,
         IClock clock,
         ILogger<CompleteTripCommandHandler> logger,
+        IParcelImpactClient parcelImpact,
         IRouteChangeProposalLifecycleService? routeChangeProposals = null)
     {
         _trips = trips;
         _outbox = outbox;
         _clock = clock;
         _logger = logger;
+        _parcelImpact = parcelImpact;
         _routeChangeProposals = routeChangeProposals;
     }
 
@@ -60,6 +64,14 @@ public sealed class CompleteTripCommandHandler
                     "Only the assigned driver or assistant can complete this trip.");
             }
         }
+
+        await ParcelTripCompletionClearanceGuard.EnsureAsync(
+            _parcelImpact,
+            trip.Id,
+            trip.OperatorId,
+            allowAcknowledgedIncidents: !request.IsAutomatic
+                && request.ActorUserId == trip.DriverUserId,
+            cancellationToken);
 
         var now = _clock.UtcNow;
         if (request.IsAutomatic)

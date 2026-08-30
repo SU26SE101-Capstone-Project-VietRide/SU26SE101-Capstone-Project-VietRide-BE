@@ -28,5 +28,9 @@ public interface IParcelCustodyExceptionRequestRepository
         IReadOnlyCollection<Guid> incidentIds,
         CancellationToken ct = default);
 
+    Task<IReadOnlyList<ParcelCustodyExceptionRequest>> ListLatestByParcelsAsync(
+        IReadOnlyCollection<Guid> parcelIds,
+        CancellationToken ct = default);
+
     Task AddAsync(ParcelCustodyExceptionRequest entity, CancellationToken ct = default);
 }

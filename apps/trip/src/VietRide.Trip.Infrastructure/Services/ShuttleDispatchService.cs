@@ -352,6 +352,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
                     && shuttleTripIds.Contains(audit.ShuttleTripId))
                 .OrderBy(audit => audit.ShuttleTripId)
                 .ThenByDescending(audit => audit.OccurredAt)
+                .ThenByDescending(audit => audit.Action == ShuttleTripAssignmentAuditLog.ReassignedAction)
                 .ThenByDescending(audit => audit.Id)
                 .ToArrayAsync(cancellationToken);
         var latestAuditByTripId = latestAudits
@@ -428,6 +429,7 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         var totalItems = await query.CountAsync(cancellationToken);
         var audits = await query
             .OrderByDescending(audit => audit.OccurredAt)
+            .ThenByDescending(audit => audit.Action == ShuttleTripAssignmentAuditLog.ReassignedAction)
             .ThenByDescending(audit => audit.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)

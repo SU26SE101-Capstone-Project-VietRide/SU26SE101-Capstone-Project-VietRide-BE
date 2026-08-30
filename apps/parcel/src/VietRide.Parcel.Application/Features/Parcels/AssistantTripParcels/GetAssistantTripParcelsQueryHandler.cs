@@ -15,15 +15,18 @@ public sealed class GetAssistantTripParcelsQueryHandler
     : IRequestHandler<GetAssistantTripParcelsQuery, AssistantTripParcelManifestResponse>
 {
     private readonly IParcelRepository _parcelRepository;
+    private readonly IParcelCustodyExceptionRequestRepository _custodyExceptionRequests;
     private readonly ITripServiceClient _tripClient;
     private readonly IParcelReliabilityReadModelService _screenModels;
 
     public GetAssistantTripParcelsQueryHandler(
         IParcelRepository parcelRepository,
         ITripServiceClient tripClient,
-        IParcelReliabilityReadModelService screenModels)
+        IParcelReliabilityReadModelService screenModels,
+        IParcelCustodyExceptionRequestRepository custodyExceptionRequests)
     {
         _parcelRepository = parcelRepository;
+        _custodyExceptionRequests = custodyExceptionRequests;
         _tripClient = tripClient;
         _screenModels = screenModels;
     }
@@ -116,7 +119,16 @@ public sealed class GetAssistantTripParcelsQueryHandler
             currentStop?.StopId,
             cancellationToken);
 
-        var items = pagedResult.Items.Select(parcel => new AssistantTripParcelResponse(
+        var custodyExceptionApprovals = await _custodyExceptionRequests.ListLatestByParcelsAsync(
+            pagedResult.Items.Select(parcel => parcel.Id).ToArray(),
+            cancellationToken);
+        var approvalByParcel = custodyExceptionApprovals.ToDictionary(request => request.ParcelId);
+
+        var items = pagedResult.Items.Select(parcel =>
+        {
+            approvalByParcel.TryGetValue(parcel.Id, out var approval);
+            var pendingApproval = approval?.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL;
+            return new AssistantTripParcelResponse(
             parcel.Id,
             parcel.ParcelCode,
             parcel.Status.ToString(),
@@ -157,8 +169,11 @@ public sealed class GetAssistantTripParcelsQueryHandler
                 parcel.ActualHeightCm),
             ResolveAvailableActions(
                 parcel,
-                screens.GetValueOrDefault(parcel.Id)?.Reliability.ActiveIncident is not null,
-                query.TripId),
+                screens.GetValueOrDefault(parcel.Id)?.Reliability.ActiveIncident,
+                query.TripId,
+                query.Role,
+                pendingApproval,
+                currentStop is not null),
             parcel.TransferTargetTripId == query.TripId
                 && parcel.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM
                 ? "TRANSFER_IN"
@@ -170,7 +185,17 @@ public sealed class GetAssistantTripParcelsQueryHandler
             parcel.TransferTargetTripId == query.TripId
                 && parcel.Status == ParcelStatus.PENDING_TRANSFER_CONFIRM
                 ? parcel.TransferTargetTripId
-                : null)).ToList();
+                : null,
+            approval is null
+                ? null
+                : new CrewCustodyExceptionApprovalResponse(
+                    approval.Id,
+                    approval.IncidentId,
+                    approval.IncidentType.ToString(),
+                    approval.Status.ToString(),
+                    approval.Reason,
+                    approval.ReportedAt));
+        }).ToList();
 
         return new AssistantTripParcelManifestResponse(
             new AssistantTripManifestContextResponse(
@@ -208,10 +233,22 @@ public sealed class GetAssistantTripParcelsQueryHandler
 
     private static IReadOnlyList<string> ResolveAvailableActions(
         Domain.Entities.Parcel parcel,
-        bool hasIncident,
-        Guid manifestTripId)
+        ReliabilityIncidentSummaryResponse? incident,
+        Guid manifestTripId,
+        string role,
+        bool hasPendingCustodyExceptionApproval,
+        bool hasCurrentOperationalStop)
     {
-        var actions = ParcelReliabilityActionResolver.Assistant(parcel, hasIncident);
+        var actions = string.Equals(role, "DRIVER", StringComparison.OrdinalIgnoreCase)
+            ? ParcelReliabilityActionResolver.Driver(
+                incident is not null,
+                hasPendingCustodyExceptionApproval)
+            : ParcelReliabilityActionResolver.Assistant(
+                parcel,
+                incident is not null,
+                incident?.Type,
+                incident?.Status,
+                hasCurrentOperationalStop);
         if (parcel.Status != ParcelStatus.PENDING_TRANSFER_CONFIRM
             || parcel.TransferTargetTripId != manifestTripId)
         {

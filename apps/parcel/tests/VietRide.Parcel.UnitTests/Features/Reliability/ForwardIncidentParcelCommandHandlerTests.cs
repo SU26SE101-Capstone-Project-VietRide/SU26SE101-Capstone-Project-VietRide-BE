@@ -145,6 +145,7 @@ public sealed class ForwardIncidentParcelCommandHandlerTests
             destination,
             [],
             new TripSeatSummaryDto(40, 10),
-            null);
+            null,
+            AssistantUserId: Guid.NewGuid());
     }
 }

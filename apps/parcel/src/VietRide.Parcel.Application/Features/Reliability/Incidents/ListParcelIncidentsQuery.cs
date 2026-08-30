@@ -10,6 +10,7 @@ public sealed record ListParcelIncidentsQuery(
     Guid? TripId,
     Guid? AssigneeId,
     string? SlaState,
+    string? ApprovalStatus,
     DateTimeOffset? From,
     DateTimeOffset? To,
     int Page,

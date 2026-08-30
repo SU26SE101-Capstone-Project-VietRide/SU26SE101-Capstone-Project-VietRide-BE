@@ -42,14 +42,22 @@ public sealed class GetTripManifestQueryHandler
         var pickupOrderByStopId = trip.Stops.ToDictionary(
             stop => stop.StopId,
             stop => stop.OrderIndex);
+        var pickupNameByStopId = trip.Stops.ToDictionary(
+            stop => stop.StopId,
+            stop => stop.Name);
+        var exposeBuyerContact = CanExposeBuyerContact(trip.Status);
 
         var confirmedBookings = _bookings.QueryNoTracking()
             .Where(booking => booking.TripId == request.TripId
-                && booking.Status == BookingStatus.CONFIRMED)
+                && (booking.Status == BookingStatus.CONFIRMED
+                    || booking.Status == BookingStatus.PARTIAL_NO_SHOW
+                    || booking.Status == BookingStatus.NO_SHOW))
             .Select(booking => new
             {
                 booking.BookingCode,
                 booking.PickupStopId,
+                booking.BuyerDisplayName,
+                booking.BuyerPhone,
                 Passengers = booking.Passengers
                     .Select(passenger => new
                     {
@@ -90,7 +98,16 @@ public sealed class GetTripManifestQueryHandler
                                 passenger.SeatNumber!,
                                 booking.BookingCode.Value,
                                 booking.PickupStopId,
-                                passenger.BoardingStatus.ToString()),
+                                passenger.BoardingStatus.ToString(),
+                                GetPickupPointName(
+                                    booking.PickupStopId,
+                                    trip.OriginStation.Name,
+                                    pickupNameByStopId),
+                                GetBuyerName(booking.BuyerDisplayName, exposeBuyerContact),
+                                GetBuyerPhone(
+                                    booking.BuyerDisplayName,
+                                    booking.BuyerPhone,
+                                    exposeBuyerContact)),
                             PickupOrder = GetPickupOrder(booking.PickupStopId, pickupOrderByStopId),
                         };
                     });
@@ -102,6 +119,51 @@ public sealed class GetTripManifestQueryHandler
             .ToArray();
 
         return new GetTripManifestResult(items);
+    }
+
+    private static bool CanExposeBuyerContact(string tripStatus)
+        => tripStatus is "BOARDING" or "IN_PROGRESS";
+
+    private static string? GetBuyerName(string? buyerDisplayName, bool exposeBuyerContact)
+    {
+        if (!exposeBuyerContact
+            || string.IsNullOrWhiteSpace(buyerDisplayName)
+            || string.Equals(
+                buyerDisplayName,
+                BookingBuyerSnapshotProfile.DeletedDisplayName,
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return buyerDisplayName;
+    }
+
+    private static string? GetBuyerPhone(
+        string? buyerDisplayName,
+        string? buyerPhone,
+        bool exposeBuyerContact)
+        => exposeBuyerContact && !IsRedactedBuyerSnapshot(buyerDisplayName)
+            ? buyerPhone
+            : null;
+
+    private static bool IsRedactedBuyerSnapshot(string? buyerDisplayName)
+        => string.Equals(
+            buyerDisplayName,
+            BookingBuyerSnapshotProfile.DeletedDisplayName,
+            StringComparison.Ordinal);
+
+    private static string? GetPickupPointName(
+        Guid? pickupStopId,
+        string originStationName,
+        IReadOnlyDictionary<Guid, string?> pickupNameByStopId)
+    {
+        if (pickupStopId is null)
+        {
+            return originStationName;
+        }
+
+        return pickupNameByStopId.GetValueOrDefault(pickupStopId.Value);
     }
 
     private static int GetPickupOrder(

@@ -255,6 +255,7 @@ services:
       VNPAY_IS_SANDBOX: '${VNPAY_IS_SANDBOX:-false}'
       VNPAY_WEB_ENABLED: '${VNPAY_WEB_ENABLED:-false}'
       VNPAY_MOBILE_SDK_ENABLED: '${VNPAY_MOBILE_SDK_ENABLED:-false}'
+      InvoiceStorage__Provider: GCS
       InvoiceStorage__Bucket: ${INVOICE_STORAGE_BUCKET:?INVOICE_STORAGE_BUCKET is required in production}
       InvoiceStorage__StableBaseUrl: ${INVOICE_STORAGE_STABLE_BASE_URL:?INVOICE_STORAGE_STABLE_BASE_URL is required in production}
       OperatorWeb__InvoiceDetailBaseUrl: ${OPERATOR_WEB_INVOICE_DETAIL_BASE_URL:?OPERATOR_WEB_INVOICE_DETAIL_BASE_URL is required in production}

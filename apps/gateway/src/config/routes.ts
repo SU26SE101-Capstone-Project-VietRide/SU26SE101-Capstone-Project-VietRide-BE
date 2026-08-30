@@ -499,6 +499,14 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['ASSISTANT'],
     },
     {
+      prefix: '/v1/assistant/trips/{tripId}/destination/reconcile',
+      pathPattern: /^\/v1\/assistant\/trips\/[0-9a-fA-F-]{36}\/destination\/reconcile$/,
+      method: 'POST',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['ASSISTANT'],
+    },
+    {
       prefix: '/v1/assistant/parcels',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
@@ -631,6 +639,26 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
     },
     {
+      prefix: '/v1/operator/claim-appeals/{appealId}/decision',
+      pathPattern: /^\/v1\/operator\/claim-appeals\/[0-9a-fA-F-]{36}\/decision$/,
+      method: 'POST',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/claim-appeals',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
+      prefix: '/v1/operator/parcel-stop-departure-approvals',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    },
+    {
       prefix: '/v1/operator/unidentified-packages',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
@@ -663,6 +691,12 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['DRIVER', 'ASSISTANT'],
+    },
+    {
+      prefix: '/v1/crew/parcel-stop-departure-approvals',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER'],
     },
     {
       prefix: '/v1/crew/parcels',

@@ -6,6 +6,7 @@ using VietRide.Booking.Application.Features.Boarding.ScanBookingCodeForTrip;
 using VietRide.Booking.Application.Features.Boarding.TickPassengerBoarded;
 using VietRide.Booking.Application.Features.Manifest.GetTripManifest;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Booking.Api.Controllers;
 
@@ -24,7 +25,7 @@ public sealed class BoardingController : ControllerBase
         _sender = sender;
     }
 
-    /// <summary>Returns the PII-free passenger manifest ordered by pickup point.</summary>
+    /// <summary>Returns the crew passenger manifest ordered by pickup point.</summary>
     [HttpGet("manifest")]
     [ProducesResponseType(typeof(ApiResponse<GetTripManifestResult>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
@@ -35,6 +36,8 @@ public sealed class BoardingController : ControllerBase
         [FromRoute] Guid tripId,
         CancellationToken cancellationToken)
     {
+        SetPrivateNoStore();
+
         var result = await _sender.Send(
             new GetTripManifestQuery(tripId, GetCallerUserId()),
             cancellationToken);
@@ -66,6 +69,7 @@ public sealed class BoardingController : ControllerBase
 
     /// <summary>Resolves a ticket QR code to its passenger boarding record.</summary>
     [HttpPost("boarding/qr-scan")]
+    [SkipIdempotency("QR scan only resolves a code and does not mutate boarding state.")]
     [ProducesResponseType(typeof(ApiResponse<ScanBookingCodeForTripResult>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
@@ -76,6 +80,8 @@ public sealed class BoardingController : ControllerBase
         [FromBody] ScanBookingCodeForTripRequest request,
         CancellationToken cancellationToken)
     {
+        SetPrivateNoStore();
+
         var result = await _sender.Send(
             new ScanBookingCodeForTripQuery(
                 tripId,
@@ -86,6 +92,9 @@ public sealed class BoardingController : ControllerBase
 
         return Ok(result);
     }
+
+    private void SetPrivateNoStore()
+        => Response.Headers.CacheControl = "private, no-store";
 
     private void EnsureIdempotencyKeyIsPresent()
     {

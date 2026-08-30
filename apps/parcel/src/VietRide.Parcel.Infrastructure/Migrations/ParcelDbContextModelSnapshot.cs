@@ -1041,6 +1041,151 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelClaimAppeal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("BeneficiaryUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("beneficiary_user_id");
+
+                    b.Property<Guid>("ClaimId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("claim_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("decided_at");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("decided_by_user_id");
+
+                    b.Property<string>("DecisionReason")
+                        .HasColumnType("text")
+                        .HasColumnName("decision_reason");
+
+                    b.Property<Guid>("IdempotencyKey")
+                        .HasColumnType("uuid")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<Guid>("IncidentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("incident_id");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operator_id");
+
+                    b.Property<string>("OriginalClaimStatus")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("original_claim_status");
+
+                    b.Property<long>("OriginalTotalAwardVnd")
+                        .HasColumnType("bigint")
+                        .HasColumnName("original_total_award_vnd");
+
+                    b.Property<DateTimeOffset?>("PaidAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("paid_at");
+
+                    b.Property<Guid>("ParcelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parcel_id");
+
+                    b.Property<Guid?>("PayoutReferenceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("payout_reference_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("reason");
+
+                    b.Property<long>("RevisedCargoAwardVnd")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revised_cargo_award_vnd");
+
+                    b.Property<long>("RevisedFreightRefundVnd")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revised_freight_refund_vnd");
+
+                    b.Property<long?>("RevisedProvenDirectLossVnd")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revised_proven_direct_loss_vnd");
+
+                    b.Property<long>("RevisedTotalAwardVnd")
+                        .HasColumnType("bigint")
+                        .HasColumnName("revised_total_award_vnd");
+
+                    b.Property<int>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("row_version");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("submitted_at");
+
+                    b.Property<Guid>("SubmittedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("submitted_by_user_id");
+
+                    b.Property<long>("SupplementaryAwardVnd")
+                        .HasColumnType("bigint")
+                        .HasColumnName("supplementary_award_vnd");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_parcel_claim_appeals");
+
+                    b.HasIndex("ClaimId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_parcel_claim_appeals_claim");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("uq_parcel_claim_appeals_idempotency");
+
+                    b.HasIndex("IncidentId")
+                        .HasDatabaseName("ix_parcel_claim_appeals_incident_id");
+
+                    b.HasIndex("OperatorId", "Status", "CreatedAt")
+                        .HasDatabaseName("idx_parcel_claim_appeals_operator_status");
+
+                    b.ToTable("parcel_claim_appeals", "vietride_parcel", t =>
+                        {
+                            t.HasCheckConstraint("chk_parcel_claim_appeal_awards", "original_total_award_vnd >= 0 AND revised_cargo_award_vnd >= 0 AND revised_freight_refund_vnd >= 0 AND revised_total_award_vnd >= 0 AND supplementary_award_vnd >= 0");
+
+                            t.HasCheckConstraint("chk_parcel_claim_appeal_status", "status IN ('SUBMITTED', 'UNDER_REVIEW', 'UPHELD', 'ADJUSTMENT_APPROVED', 'FUNDING_PENDING', 'PAID')");
+                        });
+                });
+
             modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelClaimEvidence", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1695,7 +1840,7 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("resolved_at");
 
-                    b.Property<DateTimeOffset>("SearchDeadline")
+                    b.Property<DateTimeOffset?>("SearchDeadline")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("search_deadline");
 
@@ -2019,6 +2164,122 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .HasDatabaseName("idx_parcel_status_history_parcel_occurred_id");
 
                     b.ToTable("parcel_status_history", "vietride_parcel");
+                });
+
+            modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelStopDepartureApprovalRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("DepartureOverrideReason")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("departure_override_reason");
+
+                    b.Property<Guid>("IdempotencyKey")
+                        .HasColumnType("uuid")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<Guid>("OperatorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("operator_id");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at");
+
+                    b.Property<string>("RequestedByRole")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("requested_by_role");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("requested_by_user_id");
+
+                    b.Property<string>("ReviewNote")
+                        .HasColumnType("text")
+                        .HasColumnName("review_note");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reviewed_at");
+
+                    b.Property<string>("ReviewedByRole")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("reviewed_by_role");
+
+                    b.Property<Guid?>("ReviewedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("reviewed_by_user_id");
+
+                    b.Property<int>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("row_version");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("StopId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("stop_id");
+
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("trip_id");
+
+                    b.Property<string>("UnresolvedParcelIdsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("unresolved_parcel_ids_json");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id")
+                        .HasName("pk_parcel_stop_departure_approval_requests");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("uq_parcel_stop_departure_approval_idempotency");
+
+                    b.HasIndex("OperatorId", "Status", "CreatedAt")
+                        .HasDatabaseName("idx_parcel_stop_departure_approval_operator_status");
+
+                    b.HasIndex("TripId", "StopId", "CreatedAt")
+                        .HasDatabaseName("idx_parcel_stop_departure_approval_trip_stop");
+
+                    b.HasIndex("TripId", "StopId", "Status")
+                        .IsUnique()
+                        .HasDatabaseName("uq_parcel_stop_departure_approval_pending")
+                        .HasFilter("status = 'PENDING_APPROVAL'");
+
+                    b.ToTable("parcel_stop_departure_approval_requests", "vietride_parcel", t =>
+                        {
+                            t.HasCheckConstraint("chk_parcel_stop_departure_approval_status", "status IN ('PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'CANCELLED')");
+
+                            t.HasCheckConstraint("chk_parcel_stop_departure_review_audit", "(status = 'PENDING_APPROVAL' AND reviewed_by_user_id IS NULL AND reviewed_by_role IS NULL AND reviewed_at IS NULL) OR (status IN ('APPROVED', 'REJECTED') AND reviewed_by_user_id IS NOT NULL AND reviewed_by_role IS NOT NULL AND reviewed_at IS NOT NULL) OR (status = 'CANCELLED' AND reviewed_by_user_id IS NULL AND reviewed_by_role = 'SYSTEM' AND reviewed_at IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelTransitLeg", b =>
@@ -2468,6 +2729,23 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_parcel_claims_parcels_parcel_id");
+                });
+
+            modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelClaimAppeal", b =>
+                {
+                    b.HasOne("VietRide.Parcel.Domain.Entities.ParcelClaim", null)
+                        .WithMany()
+                        .HasForeignKey("ClaimId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_parcel_claim_appeals_parcel_claims_claim_id");
+
+                    b.HasOne("VietRide.Parcel.Domain.Entities.ParcelIncident", null)
+                        .WithMany()
+                        .HasForeignKey("IncidentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_parcel_claim_appeals_parcel_incidents_incident_id");
                 });
 
             modelBuilder.Entity("VietRide.Parcel.Domain.Entities.ParcelClaimEvidence", b =>

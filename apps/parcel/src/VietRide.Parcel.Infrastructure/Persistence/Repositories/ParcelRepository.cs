@@ -414,7 +414,11 @@ internal sealed class ParcelRepository : IParcelRepository
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(p => p.Status, ParcelStatus.PENDING_OPERATOR_ACTION)
                 .SetProperty(p => p.PendingActionType, actionType)
-                .SetProperty(p => p.PendingActionResumeStatus, resumeStatus)
+                .SetProperty(
+                    p => p.PendingActionResumeStatus,
+                    p => p.Status == ParcelStatus.PENDING_OPERATOR_ACTION
+                        ? p.PendingActionResumeStatus
+                        : resumeStatus)
                 .SetProperty(p => p.PendingActionReason, reason)
                 .SetProperty(p => p.RefundAmount, refundAmount ?? Money.Zero)
                 .SetProperty(p => p.UpdatedAt, now), ct);
@@ -1259,7 +1263,10 @@ internal sealed class ParcelRepository : IParcelRepository
         return await ExecuteBulkReturningAsync(
             """
             UPDATE vietride_parcel.parcels
-            SET status = CAST(@target_status AS vietride_parcel.parcel_status),
+            SET pending_action_resume_status = status,
+                status = CAST(@target_status AS vietride_parcel.parcel_status),
+                pending_action_type = 'CUSTODY_EXCEPTION',
+                pending_action_reason = 'TRIP_COMPLETED_WITH_PENDING_PARCEL',
                 updated_at = @now
             WHERE trip_id = @trip_id
                   AND status IN (
@@ -2222,6 +2229,26 @@ internal sealed class ParcelRepository : IParcelRepository
             .AsNoTracking()
             .Where(x => x.TripId == tripId
                 && x.DropoffStopId == stopId
+                && (x.Status == ParcelStatus.LOADED
+                    || x.Status == ParcelStatus.IN_TRANSIT
+                    || x.Status == ParcelStatus.UNLOADED
+                    || x.Status == ParcelStatus.DELIVERED_PENDING_CONFIRM
+                    || x.Status == ParcelStatus.DELIVERY_CONFIRMED
+                    || x.Status == ParcelStatus.DELIVERY_REJECTED
+                    || x.Status == ParcelStatus.RETURN_INITIATED
+                    || x.Status == ParcelStatus.RETURNED
+                    || (x.Status == ParcelStatus.PENDING_OPERATOR_ACTION
+                        && x.PendingActionType == PendingActionType.CUSTODY_EXCEPTION)))
+            .OrderBy(x => x.Id)
+            .ToArrayAsync(ct);
+
+    public async Task<IReadOnlyList<ParcelEntity>> ListTerminalDropoffManifestByTripAsync(
+        Guid tripId,
+        CancellationToken ct = default)
+        => await _db.Parcels
+            .AsNoTracking()
+            .Where(x => x.TripId == tripId
+                && x.DropoffStopId == null
                 && (x.Status == ParcelStatus.LOADED
                     || x.Status == ParcelStatus.IN_TRANSIT
                     || x.Status == ParcelStatus.UNLOADED

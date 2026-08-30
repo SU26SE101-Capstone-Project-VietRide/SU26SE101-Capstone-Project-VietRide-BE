@@ -27,4 +27,5 @@ public sealed record AssistantTripParcelResponse(
     IReadOnlyList<string>? AvailableActions = null,
     string? TransferContext = null,
     Guid? SourceTripId = null,
-    Guid? TargetTripId = null);
+    Guid? TargetTripId = null,
+    CrewCustodyExceptionApprovalResponse? CustodyExceptionApproval = null);

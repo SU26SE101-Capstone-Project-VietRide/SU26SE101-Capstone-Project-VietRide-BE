@@ -47,7 +47,8 @@ public sealed class GetForwardingOptionsQueryHandler
             candidates.Select(candidate => candidate.TripId).ToArray(),
             cancellationToken);
         var summaryById = summaries.ToDictionary(summary => summary.TripId);
-        return candidates.Where(candidate => summaryById.ContainsKey(candidate.TripId))
+        return candidates.Where(candidate => summaryById.TryGetValue(candidate.TripId, out var summary)
+                && summary.AssistantUserId.HasValue)
             .Select(candidate => new InternalForwardingOptionDto(
                 summaryById[candidate.TripId],
                 request.PickupLocationId,

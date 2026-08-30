@@ -122,32 +122,4 @@ public sealed class ParcelReliabilityStateTests
         overwrite.Should().Throw<InvalidOperationException>();
     }
 
-    [Fact]
-    public void Claim_Appeal_PreservesOriginalDecisionAudit()
-    {
-        var decidedBy = Guid.NewGuid();
-        var appealedBy = Guid.NewGuid();
-        var appealedAt = DateTimeOffset.UtcNow;
-        var claim = ParcelClaim.Submit(
-            Guid.NewGuid(),
-            Guid.NewGuid(),
-            Guid.NewGuid(),
-            appealedBy,
-            12_000_000,
-            1,
-            50,
-            30_000_000,
-            4);
-        claim.BeginReview();
-        claim.Reject("Invoice did not match the parcel.", decidedBy, appealedAt.AddHours(-1));
-
-        claim.Appeal("Submitted corrected invoice.", appealedBy, appealedAt);
-
-        claim.Status.Should().Be(ParcelClaimStatus.APPEALED);
-        claim.DecisionReason.Should().Be("Invoice did not match the parcel.");
-        claim.DecidedBy.Should().Be(decidedBy);
-        claim.AppealReason.Should().Be("Submitted corrected invoice.");
-        claim.AppealedByUserId.Should().Be(appealedBy);
-        claim.AppealedAt.Should().Be(appealedAt);
-    }
 }

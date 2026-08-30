@@ -8,6 +8,7 @@ using VietRide.Parcel.Application.Features.Parcels.InternalDetail;
 using VietRide.Parcel.Application.Features.Parcels.MarkLoaded;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Application.Features.Parcels.TripCancellationImpact;
+using VietRide.Parcel.Application.Features.Reliability.Reconciliation;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Authentication;
 
@@ -141,5 +142,34 @@ public sealed class InternalParcelsController : ControllerBase
             new GetTripCancellationImpactQuery(tripId, operatorId),
             cancellationToken);
         return Ok(result);
+    }
+
+    [HttpGet("trips/{tripId:guid}/stops/{stopId:guid}/departure-clearance")]
+    [ProducesResponseType(typeof(ApiResponse<ParcelStopDepartureClearanceResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ParcelStopDepartureClearanceResponse>> GetStopDepartureClearanceAsync(
+        Guid tripId,
+        Guid stopId,
+        [FromQuery] Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await _mediator.Send(
+            new GetParcelStopDepartureClearanceQuery(tripId, stopId, operatorId),
+            cancellationToken));
+    }
+
+    [HttpGet("trips/{tripId:guid}/completion-clearance")]
+    [ProducesResponseType(typeof(ApiResponse<ParcelTripCompletionClearanceResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ParcelTripCompletionClearanceResponse>> GetTripCompletionClearanceAsync(
+        Guid tripId,
+        [FromQuery] Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await _mediator.Send(
+            new GetParcelTripCompletionClearanceQuery(tripId, operatorId),
+            cancellationToken));
     }
 }

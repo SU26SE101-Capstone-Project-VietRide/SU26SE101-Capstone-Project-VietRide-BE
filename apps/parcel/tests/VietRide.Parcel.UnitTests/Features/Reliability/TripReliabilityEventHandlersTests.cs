@@ -44,49 +44,15 @@ public sealed class TripReliabilityEventHandlersTests
     }
 
     [Fact]
-    public async Task DestinationArrived_WithTerminalParcelStillInTransit_OpensSearchIncident()
+    public async Task DestinationArrived_WithTerminalParcelStillInTransit_LeavesUnloadWindowOpen()
     {
         var tripId = Guid.NewGuid();
         var stationId = Guid.NewGuid();
         var arrivedAt = DateTimeOffset.UtcNow;
-        var parcel = CreateParcel(tripId, null, ParcelStatus.IN_TRANSIT);
-        var parcels = Substitute.For<IParcelRepository>();
-        var reliability = Substitute.For<IParcelReliabilityRepository>();
-        var outbox = Substitute.For<IIntegrationEventOutbox>();
-        parcels.ListPendingTerminalDropoffByTripAsync(tripId, Arg.Any<CancellationToken>())
-            .Returns(new[] { parcel });
-        parcels.TrySetPendingOperatorActionAsync(
-                parcel.Id,
-                PendingActionType.CUSTODY_EXCEPTION,
-                Arg.Any<string>(),
-                null,
-                arrivedAt,
-                Arg.Any<CancellationToken>(),
-                ParcelStatus.IN_TRANSIT)
-            .Returns(true);
-        ParcelIncident? addedIncident = null;
-        reliability.AddIncidentAsync(Arg.Do<ParcelIncident>(value => addedIncident = value), Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
-
-        var result = await new HandleTripDestinationArrivedCommandHandler(parcels, reliability, outbox)
+        var result = await new HandleTripDestinationArrivedCommandHandler()
             .Handle(new HandleTripDestinationArrivedCommand(tripId, stationId, arrivedAt), CancellationToken.None);
 
-        result.Should().Be(1);
-        addedIncident.Should().NotBeNull();
-        addedIncident!.Type.Should().Be(ParcelIncidentType.MISSING);
-        addedIncident.Status.Should().Be(ParcelIncidentStatus.SEARCHING);
-        addedIncident.ExpectedLocation.Should().Be($"DESTINATION_STATION:{stationId:D}");
-        await reliability.Received(2).AddSearchTaskAsync(
-            Arg.Any<ParcelSearchTask>(),
-            Arg.Any<CancellationToken>());
-        await parcels.Received(1).TrySetPendingOperatorActionAsync(
-            parcel.Id,
-            PendingActionType.CUSTODY_EXCEPTION,
-            Arg.Any<string>(),
-            null,
-            arrivedAt,
-            Arg.Any<CancellationToken>(),
-            ParcelStatus.IN_TRANSIT);
+        result.Should().Be(0);
     }
 
     private static ParcelEntity CreateParcel(Guid tripId, Guid? dropoffStopId, ParcelStatus status)

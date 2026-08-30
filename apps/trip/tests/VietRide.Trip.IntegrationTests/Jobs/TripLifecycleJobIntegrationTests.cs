@@ -21,6 +21,7 @@ using VietRide.Trip.Application.Services;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
 using VietRide.Trip.Infrastructure.Jobs;
+using VietRide.Trip.IntegrationTests.TestDoubles;
 using Domain = VietRide.Trip.Domain;
 
 namespace VietRide.Trip.IntegrationTests.Jobs;
@@ -206,7 +207,8 @@ public sealed class TripLifecycleJobIntegrationTests
                 CreateAuditRepository(manualDb),
                 CreateOutbox(manualDb, new MutableClock(InitialNow)),
                 new DbUnitOfWork(manualDb),
-                new MutableClock(InitialNow));
+                new MutableClock(InitialNow),
+                new ClearParcelImpactClient());
             var automatic = CreateAutoCompletionJob(automaticDb, new MutableClock(InitialNow));
 
             Exception? manualFailure = null;

@@ -33,6 +33,7 @@ using VietRide.Trip.Application.Services;
 using VietRide.Trip.Domain.Constants;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
+using VietRide.Trip.IntegrationTests.TestDoubles;
 
 namespace VietRide.Trip.IntegrationTests.DriverTrips;
 
@@ -730,7 +731,8 @@ public sealed class TripLifecycleEndpointTests
                 CreateAuditRepository(executionDb),
                 new IntegrationEventOutbox(new OutboxStore(executionDb, new FrozenClock(now))),
                 unitOfWork,
-                new FrozenClock(now));
+                new FrozenClock(now),
+                new ClearParcelImpactClient());
 
             var action = () => handler.Handle(
                 new CompleteTripCommand(trip.Id, trip.DriverUserId, "DRIVER"),
@@ -1250,7 +1252,8 @@ public sealed class TripLifecycleEndpointTests
                     CreateAuditRepository(db),
                     new IntegrationEventOutbox(new OutboxStore(db, clock)),
                     new DbUnitOfWork(db),
-                    clock).Handle(command, cancellationToken),
+                    clock,
+                    new ClearParcelImpactClient()).Handle(command, cancellationToken),
                 _ => throw new InvalidOperationException($"Unexpected request {request.GetType().Name}."),
             };
             return (TResponse)response;

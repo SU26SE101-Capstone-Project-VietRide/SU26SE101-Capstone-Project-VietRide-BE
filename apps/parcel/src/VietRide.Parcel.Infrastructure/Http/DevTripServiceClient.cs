@@ -77,7 +77,9 @@ public sealed class DevTripServiceClient : ITripServiceClient
             },
             SeatSummary: new TripSeatSummaryDto(40, 40),
             ReturnRouteId: null,
-            DestinationArrivedAt: now);
+            DestinationArrivedAt: now,
+            DriverUserId: Guid.Parse("77777777-7777-4777-8777-777777777771"),
+            AssistantUserId: Guid.Parse("77777777-7777-4777-8777-777777777772"));
 
         return Task.FromResult(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, snapshot, null));
     }

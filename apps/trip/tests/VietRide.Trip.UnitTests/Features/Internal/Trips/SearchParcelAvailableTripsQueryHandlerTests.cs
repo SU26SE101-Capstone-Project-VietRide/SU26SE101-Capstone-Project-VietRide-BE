@@ -53,6 +53,20 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
         result.TotalItems.Should().Be(1);
     }
 
+    [Fact]
+    public async Task Handle_ExcludesTripWithoutAssignedAssistantBeforeCountAndPagination()
+    {
+        var fixture = Fixture.Create();
+        var staffed = fixture.CreateTrip(Departure, 100m, 10m);
+        var noAssistant = fixture.CreateTrip(Departure.AddHours(1), 100m, 10m, hasAssistant: false);
+        fixture.Trips.Items.AddRange([staffed, noAssistant]);
+
+        var result = await fixture.Handler.Handle(fixture.Query(), CancellationToken.None);
+
+        result.Items.Should().ContainSingle().Which.TripId.Should().Be(staffed.Id);
+        result.TotalItems.Should().Be(1);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -159,13 +173,17 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
             return new Fixture(operatorId, origin, destination, route, trips, handler);
         }
 
-        public TripEntity CreateTrip(DateTimeOffset departure, decimal maxWeightKg, decimal maxVolumeM3)
+        public TripEntity CreateTrip(
+            DateTimeOffset departure,
+            decimal maxWeightKg,
+            decimal maxVolumeM3,
+            bool hasAssistant = true)
             => TripEntity.Create(
                 OperatorId,
                 Route.Id,
                 Guid.NewGuid(),
                 Guid.NewGuid(),
-                null,
+                hasAssistant ? Guid.NewGuid() : null,
                 null,
                 departure,
                 departure.AddHours(12),

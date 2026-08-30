@@ -130,6 +130,43 @@ public sealed class ParcelCustodyServiceTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task AppendFoundOnVehicle_UsesConfirmedOperationalVehicleId()
+    {
+        var parcel = CreateParcel();
+        var confirmedVehicleId = Guid.NewGuid();
+        var reliability = Substitute.For<IParcelReliabilityRepository>();
+        reliability.GetActiveLegAsync(parcel.Id, Arg.Any<CancellationToken>())
+            .Returns((ParcelTransitLeg?)null);
+        reliability.GetLatestTransitLegAsync(parcel.Id, Arg.Any<CancellationToken>())
+            .Returns((ParcelTransitLeg?)null);
+        reliability.ListCustodyEventsAsync(parcel.Id, Arg.Any<CancellationToken>()).Returns([]);
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        ParcelCustodyEvent? addedEvent = null;
+        reliability.AddCustodyEventAsync(
+                Arg.Do<ParcelCustodyEvent>(custodyEvent => addedEvent = custodyEvent),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        await CreateService(reliability, clock).AppendAsync(
+            parcel,
+            ParcelCustodyEventType.FOUND,
+            ParcelCustodyLocationType.VEHICLE,
+            confirmedVehicleId,
+            $"VEHICLE:{confirmedVehicleId:D}",
+            Guid.NewGuid(),
+            "ASSISTANT",
+            "CREW_FOUND_ON_VEHICLE",
+            Guid.NewGuid().ToString("D"),
+            null,
+            null);
+
+        addedEvent.Should().NotBeNull();
+        addedEvent!.ActualLocationId.Should().Be(confirmedVehicleId);
+        addedEvent.VehicleId.Should().Be(confirmedVehicleId);
+    }
+
     private static ParcelCustodyService CreateService(
         IParcelReliabilityRepository reliability,
         IClock clock)

@@ -4,6 +4,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Trips.Operations;
@@ -24,6 +25,7 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
     private readonly IIntegrationEventOutbox outbox;
     private readonly IUnitOfWork unitOfWork;
     private readonly IClock clock;
+    private readonly IParcelImpactClient parcelImpact;
     private readonly IRouteChangeProposalLifecycleService? routeChangeProposals;
     private readonly IResourceAvailabilityService? resourceAvailability;
 
@@ -33,6 +35,7 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
         IClock clock,
+        IParcelImpactClient parcelImpact,
         IRouteChangeProposalLifecycleService? routeChangeProposals = null,
         IResourceAvailabilityService? resourceAvailability = null)
     {
@@ -41,6 +44,7 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
         this.outbox = outbox;
         this.unitOfWork = unitOfWork;
         this.clock = clock;
+        this.parcelImpact = parcelImpact;
         this.routeChangeProposals = routeChangeProposals;
         this.resourceAvailability = resourceAvailability;
     }
@@ -55,6 +59,13 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
                 ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip was not found.");
 
             EnsureAssigned(trip, request.ActorUserId, request.ActorRole);
+
+            await ParcelTripCompletionClearanceGuard.EnsureAsync(
+                parcelImpact,
+                trip.Id,
+                trip.OperatorId,
+                request.ActorRole == DriverRole,
+                cancellationToken);
 
             try
             {

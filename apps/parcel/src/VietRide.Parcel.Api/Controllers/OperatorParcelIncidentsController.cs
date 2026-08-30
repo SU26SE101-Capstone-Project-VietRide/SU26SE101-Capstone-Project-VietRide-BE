@@ -8,6 +8,7 @@ using VietRide.Parcel.Application.Features.Reliability.CustodyException;
 using VietRide.Parcel.Application.Features.Reliability.Forwarding;
 using VietRide.Parcel.Application.Features.Reliability.Incidents;
 using VietRide.Parcel.Application.Features.Reliability.Policies;
+using VietRide.Parcel.Application.Features.Reliability.Reconciliation;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 
@@ -23,6 +24,51 @@ public sealed class OperatorParcelIncidentsController : ControllerBase
     public OperatorParcelIncidentsController(IMediator mediator)
     {
         _mediator = mediator;
+    }
+
+    [HttpGet("~/v1/operator/parcel-stop-departure-approvals/{requestId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<ParcelStopDepartureApprovalResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ParcelStopDepartureApprovalResponse>> GetStopDepartureApprovalAsync(
+        Guid requestId,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new GetParcelStopDepartureApprovalQuery(
+                requestId,
+                CurrentUserClaims.GetUserId(User),
+                operatorId,
+                CurrentUserClaims.GetRole(User)),
+            cancellationToken));
+    }
+
+    [HttpPost("~/v1/operator/parcel-stop-departure-approvals/{requestId:guid}/decision")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<ParcelStopDepartureApprovalResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ParcelStopDepartureApprovalResponse>> DecideStopDepartureApprovalAsync(
+        Guid requestId,
+        [FromBody] DecideParcelStopDepartureApprovalRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new DecideParcelStopDepartureApprovalCommand(
+                requestId,
+                CurrentUserClaims.GetUserId(User),
+                operatorId,
+                CurrentUserClaims.GetRole(User),
+                request.Decision?.Trim().ToUpperInvariant() ?? string.Empty,
+                request.Note,
+                Guid.Parse(Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString())),
+            cancellationToken));
     }
 
     [HttpPost("{incidentId:guid}/custody-exception-decision")]
@@ -63,6 +109,7 @@ public sealed class OperatorParcelIncidentsController : ControllerBase
         [FromQuery] Guid? tripId,
         [FromQuery] Guid? assigneeId,
         [FromQuery] string? slaState,
+        [FromQuery] string? approvalStatus,
         [FromQuery] DateTimeOffset? from,
         [FromQuery] DateTimeOffset? to,
         [FromQuery] int page = 1,
@@ -80,6 +127,7 @@ public sealed class OperatorParcelIncidentsController : ControllerBase
                 tripId,
                 assigneeId,
                 slaState,
+                approvalStatus,
                 from,
                 to,
                 page,
@@ -336,6 +384,63 @@ public sealed class OperatorParcelIncidentsController : ControllerBase
             cancellationToken);
         return Ok(await _mediator.Send(
             new GetOperatorParcelClaimDetailQuery(claimId, operatorId),
+            cancellationToken));
+    }
+
+    [HttpGet("~/v1/operator/claim-appeals")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ParcelClaimAppealResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<PagedResult<ParcelClaimAppealResponse>>> ListClaimAppealsAsync(
+        [FromQuery] string? status,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new ListParcelClaimAppealsQuery(operatorId, status, page, pageSize),
+            cancellationToken));
+    }
+
+    [HttpGet("~/v1/operator/claim-appeals/{appealId:guid}")]
+    [ProducesResponseType(typeof(ApiResponse<ParcelClaimAppealResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ParcelClaimAppealResponse>> GetClaimAppealAsync(
+        Guid appealId,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new GetParcelClaimAppealQuery(appealId, operatorId),
+            cancellationToken));
+    }
+
+    [HttpPost("~/v1/operator/claim-appeals/{appealId:guid}/decision")]
+    [Authorize(Roles = "OPERATOR_ADMIN")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<ParcelClaimAppealResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ParcelClaimAppealResponse>> DecideClaimAppealAsync(
+        Guid appealId,
+        [FromBody] DecideParcelClaimAppealRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new DecideParcelClaimAppealCommand(
+                appealId,
+                operatorId,
+                CurrentUserClaims.GetUserId(User),
+                request.Decision?.Trim().ToUpperInvariant() ?? string.Empty,
+                request.RevisedProvenDirectLossVnd,
+                request.Reason),
             cancellationToken));
     }
 

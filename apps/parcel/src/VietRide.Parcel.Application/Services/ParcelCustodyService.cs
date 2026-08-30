@@ -80,6 +80,10 @@ public sealed class ParcelCustodyService : IParcelCustodyService
         else if (leg.Status != previousLegStatus)
             await _repository.UpdateTransitLegAsync(leg, cancellationToken);
 
+        var confirmedVehicleId = actualLocationType == ParcelCustodyLocationType.VEHICLE
+            && actualLocationId.HasValue
+                ? actualLocationId
+                : parcel.TripSnapshotVehicleId;
         var custodyEvent = ParcelCustodyEvent.Create(
             parcel.Id,
             leg.Id,
@@ -92,7 +96,7 @@ public sealed class ParcelCustodyService : IParcelCustodyService
             actualLocationType,
             actualLocationId,
             locationSnapshot,
-            parcel.TripSnapshotVehicleId,
+            confirmedVehicleId,
             actorId,
             actorRole,
             now,

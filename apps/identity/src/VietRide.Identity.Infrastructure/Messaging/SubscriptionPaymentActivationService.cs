@@ -48,8 +48,8 @@ public sealed class SubscriptionPaymentActivationService
             || attempt.Amount.Amount != context.Amount
             || !string.Equals(attempt.BillingPeriod.ToString(), context.BillingPeriod, StringComparison.Ordinal)
             || !Enum.TryParse<SubscriptionPaymentMethod>(context.Method, false, out var paymentMethod)
-            || context.PeriodFrom != attempt.PeriodFrom
-            || context.PeriodTo != attempt.PeriodTo)
+            || !IsSamePostgresInstant(context.PeriodFrom, attempt.PeriodFrom)
+            || !IsSamePostgresInstant(context.PeriodTo, attempt.PeriodTo))
         {
             return Quarantine(context, "context mismatch");
         }
@@ -93,8 +93,8 @@ public sealed class SubscriptionPaymentActivationService
             attempt.TargetPlanId,
             attempt.BillingPeriod,
             paymentMethod,
-            context.PeriodFrom,
-            context.PeriodTo,
+            attempt.PeriodFrom,
+            attempt.PeriodTo,
             attempt.TargetCyclePrice,
             attempt.IsProrated);
         attempt.MarkSucceeded(context.PaymentId);
@@ -102,6 +102,9 @@ public sealed class SubscriptionPaymentActivationService
         _attempts.Update(attempt);
         return true;
     }
+
+    private static bool IsSamePostgresInstant(DateTimeOffset left, DateTimeOffset right)
+        => (left.ToUniversalTime() - right.ToUniversalTime()).Duration() < TimeSpan.FromTicks(10);
 
     private bool Quarantine(
         SubscriptionPaymentActivationContext context,

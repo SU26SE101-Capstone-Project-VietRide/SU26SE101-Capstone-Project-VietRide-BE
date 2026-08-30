@@ -6,4 +6,5 @@ public sealed record AppealParcelClaimCommand(
     Guid ParcelId,
     Guid ClaimId,
     Guid SenderUserId,
-    string Reason) : IRequest<ParcelClaimResponse>;
+    string Reason,
+    Guid IdempotencyKey) : IRequest<ParcelClaimResponse>;

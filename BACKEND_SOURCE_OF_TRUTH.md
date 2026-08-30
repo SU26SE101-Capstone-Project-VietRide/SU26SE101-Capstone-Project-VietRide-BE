@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.81.0
+> **Phiên bản:** 1.83.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-28
+> **Cập nhật lần cuối:** 2026-08-30
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1281,7 +1281,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
 endpoint có behavior-idempotent hay không, trừ đúng 21 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `217 mutation surfaces / 196 required / 21 exempt`;
+bảng sau. Inventory executable phải giữ tổng `218 mutation surfaces / 197 required / 21 exempt`;
 thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
 
 **Canonical 21 exemptions (không yêu cầu `Idempotency-Key`):**
@@ -1356,6 +1356,7 @@ Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable
 | 22 | `POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive` | Trip |
 | 23 | `POST /v1/driver/trips/{tripId}/destination/arrive` | Trip |
 | 24 | `POST /v1/assistant/parcels/{parcelId}/unload` | Parcel |
+| 24a | `POST /v1/assistant/parcels/{parcelId}/confirm-found-on-vehicle` | Parcel |
 | 25 | `POST /v1/assistant/parcels/{parcelId}/deliver` | Parcel |
 | 26 | `POST /v1/admin/users/{userId}/lock` | Identity |
 | 27 | `POST /v1/admin/users/{userId}/unlock` | Identity |
@@ -1750,6 +1751,7 @@ phát integration event.
 | | `PARCEL_CARGO_RECOVERY_IN_PROGRESS` | 409 | Parcel already has a durable `TRANSFER|RETURN|RELEASE` cargo-recovery operation pending |
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
 | | `PARCEL_REVIEW_TIMEOUT` | 409 | Timeout review 24h cho record legacy `PENDING_OPERATOR_REVIEW` |
+| | `PARCEL_ASSISTANT_REQUIRED` | 409 | Trip nguồn hoặc Trip forwarding/transfer chưa có Assistant được phân công để vận hành hàng hóa |
 | | `PARCEL_CUSTODY_LOCATION_REQUIRED` | 422 | Custody/unload request thiếu hoặc sai actual location type/id bắt buộc |
 | | `PARCEL_SCAN_REQUIRED` | 422 | Normal unload thiếu QR/parcel code; phải dùng manual custody exception nếu không quét được |
 | | `PARCEL_CUSTODY_LOCATION_MISMATCH` | 409 | Requested actual location không phải Trip operational location, stop đã departed, hoặc không khớp Parcel destination |
@@ -1775,7 +1777,14 @@ phát integration event.
 | | `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY` | 422 | Requested/assessed claim value vi phạm frozen declaration/policy cap |
 | | `PARCEL_CLAIM_ALREADY_DECIDED` | 409 | Claim đã rời `SUBMITTED`, không nhận decision/evidence mutation mới |
 | | `PARCEL_CLAIM_APPEAL_NOT_ALLOWED` | 409 | Claim không ở `PAID` hoặc `REJECTED`, nên sender chưa thể appeal |
+| | `PARCEL_CLAIM_APPEAL_ALREADY_EXISTS` | 409 | Claim đã có một hồ sơ appeal riêng |
+| | `PARCEL_CLAIM_APPEAL_NOT_FOUND` | 404 | Appeal không tồn tại hoặc bị tenant-mask |
+| | `PARCEL_CLAIM_APPEAL_ALREADY_DECIDED` | 409 | Appeal đã rời `SUBMITTED`, không nhận decision lần hai |
+| | `PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED` | 422 | Duyệt appeal nhưng award mới không lớn hơn award gốc đã trả |
 | | `PARCEL_CLAIM_FUNDING_PENDING` | 409 | Claim đã approve nhưng operator chưa đủ nguồn payout |
+| | `PARCEL_STOP_DEPARTURE_APPROVAL_NOT_FOUND` | 404 | Yêu cầu vượt đối soát rời stop không tồn tại hoặc bị tenant-mask |
+| | `PARCEL_STOP_DEPARTURE_ALREADY_DECIDED` | 409 | Yêu cầu vượt đối soát rời stop đã được duyệt/từ chối |
+| | `PARCEL_STOP_RECONCILIATION_REQUIRED` | 409 | Trip còn Parcel unresolved và chưa có approved override khớp snapshot hiện tại |
 | | `POLICY_BELOW_DEFAULT_ACK_REQUIRED` | 422 | Operator cấu hình rate dưới 50% hoặc cap dưới 30 triệu mà chưa xác nhận điều khoản |
 | **Stop / Route** | `STOP_NOT_FOUND` | 404 | Day-7 Trip Stop handlers use coded 404 path; cross-tenant DELETE is masked here |
 | | `STOP_REPLACEMENT_INVALID` | 422 | Replacement Stop missing, inactive, cross-operator, or self-reference |
@@ -2310,7 +2319,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 
 | Method + Path | Caller | Mục đích |
 |---|---|---|
-| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves ordinary Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`, then applies the matching active operator holiday surcharge by the Trip departure Asia/Ho_Chi_Minh date. Omitted preserves persisted legacy snapshot semantics and applies no new surcharge. No event/projection is added. |
+| `GET /internal/v1/trips/{tripId}?pricingAt=` | Booking, Parcel, Tracking, Payment | Raw Trip snapshot; includes nullable `actualDepartureTime`, nullable route `totalDistanceKm`, and stops with additive nullable `name`, `status`, nullable `actualArrivalTime`, nullable `distanceFromOriginKm`, and `orderIndex`. Valid Internal JWT only (`401 AUTH_TOKEN_INVALID`), no tenant authorization. Optional ISO-offset `pricingAt` resolves ordinary Booking fare as `MANUAL_OVERRIDE` → active half-open `RouteStopFareTemplate` → `Trip.baseFare`, then applies the matching active operator holiday surcharge by the Trip departure Asia/Ho_Chi_Minh date. Omitted preserves persisted legacy snapshot semantics and applies no new surcharge. No event/projection is added. |
 | `GET /internal/v1/trips/{tripId}/operational-location` | Parcel | Raw `{ tripId,vehicleId,tripStatus,currentStopId?,currentStopStatus?,actualArrivalAt?,actualDepartureAt?,destinationArrivedAt? }`. `currentStopId` is only an `ARRIVED` TripStop with null departure; Parcel unload uses this proof to reject a former stop after departure. |
 | `GET /internal/v1/trips/{tripId}/shuttle-road-distance?direction=&latitude=&longitude=` | Booking | Internal-JWT-only road distance to origin Station (`INBOUND_TO_STATION`) or destination Station (`OUTBOUND_FROM_STATION`). Trip validates Station active/supportsShuttle/coordinates and calls Goong Directions `vehicle=car`; raw success is `{ distanceMeters }`. Goong/configuration/timeout/invalid response maps to `503 SHUTTLE_DISTANCE_UNAVAILABLE`; direction/coordinates/station eligibility maps to `422`. |
 | `POST /internal/v1/trips/summaries/batch` | Booking, Parcel | Read-only `{ tripIds }`, 1..100 distinct UUIDs; one Trip query joins Vehicle Type and returns route/station/vehicle/crew/timing summaries; missing IDs are omitted. Vehicle includes `vehicleType { code, displayName }` for both system-defined and custom types. Booking uses one distinct-ID batch per non-empty passenger-history page to project the current `vehicle { licensePlate, vehicleType }`; enrichment is fail-open per item. |
@@ -2365,6 +2374,7 @@ request. Bổ sung action `UNLOCK_USER`, `STATION_MERGED`, `STATION_NORMALIZED`,
 |---|---|---|
 | `GET /internal/v1/parcels/{id}` | Tracking, Notification | Verify Socket.IO joinTripTracking hoặc resolve recipient policy từ snapshot `{ parcelId, tripId, status, senderUserId, recipientUserId?, operatorId, dropoffStopId? }`; trả ADR 0004 envelope và vẫn đọc được terminal rows |
 | `GET /internal/v1/parcels/{id}/access-check?userId=` | Tracking | Same |
+| `GET /internal/v1/parcels/trips/{tripId}/stops/{stopId}/departure-clearance?operatorId=` | Trip | Raw fail-closed stop manifest result `{tripId,stopId,operatorId,status:CLEAR\|APPROVED_OVERRIDE\|BLOCKED_PENDING_APPROVAL,unresolvedParcelIds[],approvalRequestId?,approvedByUserId?,approvedAt?}` immediately before Trip departure CAS; approved request must match exact current unresolved snapshot |
 | `GET /internal/v1/reports/platform/parcels?from=&to=` | Booking | Raw delivery-confirmed count grouped by operator; legacy money field không thay Payment ledger; `confirmed_at` in UTC `[from,to)` |
 
 #### Tracking Service
@@ -2393,7 +2403,10 @@ TripStop lock/CAS recheck before persisting one timestamp. Success is public `20
 exact data `{tripId,stopId,departedAt,pendingPassengerCount,eventEmitted}`. New-key repeat after
 departure is `409 TRIP_STOP_ALREADY_DEPARTED`; `PENDING|SKIPPED` is
 `422 TRIP_STOP_NOT_ARRIVED`; upstream Booking failure is `502 UPSTREAM_UNAVAILABLE`. Same-key
-replay and mismatch follow §5.6. Every successful departure emits `trip.stop.departed` for
+replay and mismatch follow §5.6. Before the departure CAS, Trip calls Parcel departure-clearance;
+only `CLEAR|APPROVED_OVERRIDE` proceeds. Unresolved cargo without matching approval returns
+`409 PARCEL_STOP_RECONCILIATION_REQUIRED`; Parcel transport/timeout/malformed response returns
+`502 UPSTREAM_UNAVAILABLE`. Neither path persists departure or Outbox. Every successful departure emits `trip.stop.departed` for
 Parcel custody reconciliation; a positive exact Booking pending-count result additionally emits
 `trip.stop.departed_with_pending` for the Driver App warning.
 
@@ -2457,7 +2470,7 @@ Parcel custody reconciliation; a positive exact Booking pending-count result add
 | `trip.stop.departed` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, departedAt }`; emitted for every committed stop departure. Parcel never infers a new location from it; it opens `MISSING_AFTER_DEPARTURE` only for manifest parcels whose expected stop lacks a confirmed unload. |
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }`. |
 | `trip.stop.arrived` | Trip | Notification | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, actorUserId, actualArrivalTime }`; Trip và TripStop lock theo thứ tự, `PENDING -> ARRIVED`, static ETA không đổi, business row + Outbox commit atomic; Parcel reads the Trip snapshot synchronously and has no arrival projection |
-| `trip.destination.arrived` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ; Parcel opens a search incident only for terminal-bound parcels still `LOADED|IN_TRANSIT`. |
+| `trip.destination.arrived` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ; Parcel treats this as terminal-unload readiness only and does not open a missing incident until `trip.trip.completed` still observes `LOADED|IN_TRANSIT`. |
 | `trip.trip.delayed` | Tracking | Notification | `{ eventId, occurredAt, tripId, stopId, delayMinutes, etaNew, staticEstimatedArrivalTime, dynamicEstimatedArrivalTime, userIds? }`; one durable Outbox fact per `tripId/stopId/5-minute-window`, deduped by unique `dedupeKey`; Notification resolves active passengers and operator admins |
 | `trip.incident.reported` | Trip | Notification | `{ eventId, occurredAt, incidentId, tripId, operatorId, reporterUserId, category, description?, photoUrls?, latitude?, longitude?, reportedAt }`; optional fields được omit khi null; Notification resolve active `OPERATOR_ADMIN` theo `operatorId` |
 | `trip.cargo.threshold_crossed` | Trip | Notification | Exact `{ eventId, occurredAt, tripId, operatorId, loadedWeightKg, maxCargoWeightKg, percentFull }`; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
@@ -2510,7 +2523,8 @@ Parcel custody reconciliation; a positive exact Booking pending-count result add
 | `parcel.incident.updated` | Parcel | Notification | Required common `{ incidentId,parcelId,status }` plus transition-specific operator/location/forwarding/resolution fields; statuses include `FOUND|FORWARDING|RESOLVED|LOST_CONFIRMED`. |
 | `parcel.claim.submitted` | Parcel | Notification | `{ claimId,parcelId,incidentId,operatorId,beneficiaryUserId,policyVersion }`; sender is always beneficiary. |
 | `parcel.claim.decided` | Parcel | Payment (only `APPROVED`), Notification | `{ claimId,parcelId,tripId?,operatorId,status:APPROVED\|REJECTED,totalAwardVnd,beneficiaryUserId }`; Payment requires non-null Trip and positive award only for `APPROVED`, and unique payout is keyed by claimId. |
-| `parcel.claim.appealed` | Parcel | None in v1 (registered audit/extension fact) | `{ eventId,occurredAt,claimId,parcelId,incidentId,operatorId,beneficiaryUserId,status:"APPEALED" }`; sender-only mutation, no appeal reason or evidence URL is published. |
+| `parcel.claim.appealed` | Parcel | None in v1 (registered audit/extension fact) | `{ eventId,occurredAt,appealId,claimId,parcelId,incidentId,operatorId,beneficiaryUserId,status:"SUBMITTED" }`; sender-only creation of a separate appeal aggregate; no appeal reason or evidence URL is published and the original claim remains unchanged. |
+| `parcel.claim_appeal.decided` | Parcel | Payment | `{ eventId,occurredAt,appealId,claimId,parcelId,tripId,operatorId,beneficiaryUserId,status:"UPHELD"|"ADJUSTMENT_APPROVED",supplementaryAwardVnd }`; Payment ignores `UPHELD`; an approved adjustment uses `appealId` as the unique compensation reference and credits only the positive supplementary delta. |
 
 **Cancellation event compatibility:** A canonical `booking.booking.cancelled` producer creates a
 fresh UUID-v4 `eventId` and captures offset-date-time `occurredAt`. One-release consumers accept
@@ -3293,7 +3307,9 @@ ParcelIncident loss:     SEARCHING -> ESCALATED -> SEARCH_EXPIRED -> LOST_CONFIR
 ParcelClaim: SUBMITTED -> UNDER_REVIEW -> APPROVED -> FUNDING_PENDING -> PAID
                                   \-> REJECTED
                          APPROVED -> CANCELLED
-                         PAID|REJECTED -> APPEALED (hardening state)
+
+ParcelClaimAppeal: SUBMITTED -> UNDER_REVIEW -> UPHELD
+                                      \-> ADJUSTMENT_APPROVED -> FUNDING_PENDING -> PAID
 ```
 
 The incident, append-only custody timeline, tasks, claim evidence, frozen policy calculation, and
@@ -3315,6 +3331,22 @@ reviewer's own JWT. Approval appends the custody fact, starts the search SLA/tas
 reviewer audit; rejection
 resolves the report as `SUPERVISOR_REJECTED`, restores the frozen Parcel resume status, and never
 creates a custody fact. Public request bodies must never accept a reviewer/supervisor user UUID.
+
+Stop departure with unresolved cargo uses a separate `ParcelStopDepartureApprovalRequest`.
+Assistant reconciliation may create `PENDING_APPROVAL` with the exact sorted unresolved Parcel-ID
+snapshot and a reason; it cannot authorize itself or submit reviewer identity. Assigned Driver or
+same-tenant `OPERATOR_STAFF|OPERATOR_ADMIN` decides with JWT actor audit. Trip synchronously calls
+the Internal Parcel clearance before its stop-departure CAS and permits only `CLEAR` or
+`APPROVED_OVERRIDE`. A changed unresolved snapshot invalidates an older approval. Timeout,
+unreachable Parcel, malformed status, or `BLOCKED_PENDING_APPROVAL` all fail closed before Trip
+state/outbox mutation.
+
+An appeal is a separate aggregate and never changes the original `ParcelClaim` status, decision or
+payout. One claim has at most one appeal. `UPHOLD` creates no financial event. An
+`APPROVE_ADJUSTMENT` decision recalculates under the frozen claim policy, must exceed the original
+paid award, and publishes only the positive supplementary delta. Payment persists that delta with
+`appealId` as its unique compensation reference, so original and supplementary payouts remain
+independently idempotent.
 
 ### 8.3.2 Parcel Reliability FE read-model rule
 
@@ -4348,6 +4380,10 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.85.0** | 2026-08-30 | Codex | **MINOR** — Let assigned Driver/Assistant resolve a crew manifest seat to its Booking buyer during `BOARDING|IN_PROGRESS`: add nullable `buyerName`, canonical-E.164 `buyerPhone`, and `pickupPointName` to the Booking manifest, mirror buyer contact plus `bookingCode` in QR scan, expose additive Stop `name` in the internal Trip snapshot, retain paid no-show rows, and require private no-store responses. Passenger remains operational-only with no per-seat identity; unmatched Trip `BOOKED` seats are never assigned fabricated contact. No schema, dependency, Gateway route or event change. |
+| **1.84.0** | 2026-08-30 | Codex | **MINOR** — Simplify Parcel FE operation contracts after the reality audit. Require an assigned Assistant before Parcel create/forward/transfer; make crew manifests role-aware with inline custody-exception approval context; expose `CUSTODY_SCAN` only for a valid operational context and recovery-on-vehicle for `UNSCANNED_HANDOFF`; derive stop/destination reconciliation exclusively from persisted custody rather than client Parcel-ID assertions; add an operator `approvalStatus` queue filter; and expose nullable `bookingId` in create/detail. Correct the shared manifest contract to use nested pagination. No schema, dependency, Gateway family or routing key is added. |
+| **1.83.0** | 2026-08-30 | Codex | **MINOR** — Correct terminal Parcel recovery: `trip.destination.arrived` now opens the normal unload window without prematurely quarantining `LOADED|IN_TRANSIT`; `trip.trip.completed` freezes `pendingActionResumeStatus` when opening the fallback system search. Add the assigned-Assistant `confirm-found-on-vehicle` mutation to QR-verify an active system missing incident, append `FOUND@VEHICLE`, cancel search tasks, resolve it and atomically restore transport state. Inventory becomes 218/197/21; no schema, dependency, Gateway family or routing key is added. |
+| **1.82.0** | 2026-08-29 | Codex | **MINOR** — Close two Parcel Reliability control gaps. Stop reconciliation no longer accepts an Assistant-supplied supervisor UUID: it creates a JWT-attributed departure-approval request, and Trip now fails closed on Parcel clearance before persisting stop departure. Claim appeal is now a separate one-per-claim aggregate; the original claim/payout remain immutable, Operator Admin may uphold or approve a higher recalculated award, and Payment pays only the idempotent supplementary delta keyed by `appealId`. Add four public approval/appeal reads or mutations, one Internal clearance read, two reversible Parcel tables, one Payment consumer, two event contracts and seven reliability error codes; no dependency is added. |
 | **1.81.0** | 2026-08-28 | Codex | **MINOR** — Replace the unsafe assistant-supplied `supervisorApprovalUserId` custody exception contract with a two-step, JWT-attributed approval aggregate. Assistant submission quarantines the Parcel in approval-pending state without a custody fact, search SLA/tasks, passenger search notification, or lost/claim eligibility; the assigned Driver or same-tenant Operator Staff/Admin can inspect and approve/reject. Approval appends `MANUAL_CUSTODY_EXCEPTION`, starts search/tasks and publishes `parcel.incident.opened`; rejection restores the frozen Parcel state. A transactional row lock plus concurrency token prevents double decisions. Adds two mutations, one Driver read, one reversible Parcel migration, and three error codes; no dependency or Gateway family is added. |
 | **1.80.0** | 2026-08-25 | Codex | **MINOR** — Freeze migration of Vietnam routing runtime from Google Routes to Goong Directions plus Local fallback. Require ordered target chains, configurable chunks defaulting to 10, cumulative leg metrics, strict whole-batch validation and secret-safe logging. Tracking retains fallback/cooldown; Trip planned ETA retains Route-baseline fallback while Shuttle distance and reposition remain fail closed. Add public `ROUTE_BASED`, preserve persisted historical `GOOGLE_ROUTES → TRAFFIC_AWARE`, and map `GOONG → ROUTE_BASED`, `ROUTE_BASELINE`/Local → `FALLBACK`. No endpoint, event, error code, Gateway family or dependency is added; Google OAuth and Google Maps display SDK remain unchanged. |
 | **1.79.0** | 2026-08-25 | Codex | **MINOR** — Complete Vehicle Substitution B1–B7: add explicit insufficient-seat acknowledgement with ADR 0004 fields; persist optional seat-type downgrade evidence; replace stale pending-seat actions with owner/operator shortage alerts; add two-hour BookingTransfer escalation with late confirmation; make notification overrides compatible with `PENDING` and no-seat transfers; and distinguish replacement Trip zero-net settlement markers using optional `trip.completed.source` plus persisted `cancel_reason`. No automatic downgrade refund or delay compensation, no new read API, and no dependency. |
@@ -4550,4 +4586,4 @@ BookingStats additionally persists `total_no_show_passengers`. The no-show detec
 only by passengers newly transitioned to `NO_SHOW`, atomically with its existing writes. Replays
 with no new passenger transition add zero. Existing `total_no_show` remains the booking count.
 
-**End of Backend Source of Truth v1.74.0**
+**End of Backend Source of Truth v1.83.0**

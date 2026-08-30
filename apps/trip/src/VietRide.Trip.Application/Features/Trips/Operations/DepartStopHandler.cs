@@ -16,6 +16,7 @@ public sealed class DepartStopHandler : IRequestHandler<DepartStopCommand, Depar
     private readonly ITripStopRepository tripStops;
     private readonly IStopRepository stops;
     private readonly IBookingImpactClient bookingImpact;
+    private readonly IParcelImpactClient parcelImpact;
     private readonly IIntegrationEventOutbox outbox;
     private readonly IClock clock;
 
@@ -24,6 +25,7 @@ public sealed class DepartStopHandler : IRequestHandler<DepartStopCommand, Depar
         ITripStopRepository tripStops,
         IStopRepository stops,
         IBookingImpactClient bookingImpact,
+        IParcelImpactClient parcelImpact,
         IIntegrationEventOutbox outbox,
         IClock clock)
     {
@@ -31,6 +33,7 @@ public sealed class DepartStopHandler : IRequestHandler<DepartStopCommand, Depar
         this.tripStops = tripStops;
         this.stops = stops;
         this.bookingImpact = bookingImpact;
+        this.parcelImpact = parcelImpact;
         this.outbox = outbox;
         this.clock = clock;
     }
@@ -77,6 +80,62 @@ public sealed class DepartStopHandler : IRequestHandler<DepartStopCommand, Depar
         {
             throw new ForbiddenException("FORBIDDEN", "Trip stop does not belong to this tenant.");
         }
+
+        ParcelStopDepartureClearanceProjection clearance;
+        try
+        {
+            clearance = await parcelImpact.GetStopDepartureClearanceAsync(
+                trip.Id,
+                tripStop.StopId,
+                trip.OperatorId,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TripUpstreamUnavailableException("Parcel stop-departure clearance timed out.");
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new TripUpstreamUnavailableException(
+                "Parcel stop-departure clearance is unavailable.",
+                exception);
+        }
+        catch (JsonException exception)
+        {
+            throw new TripUpstreamUnavailableException(
+                "Parcel stop-departure clearance returned malformed data.",
+                exception);
+        }
+
+        var unresolvedParcelIds = clearance.UnresolvedParcelIds;
+        var validClearance = unresolvedParcelIds is not null
+            && (clearance.Status switch
+            {
+                "CLEAR" => unresolvedParcelIds.Count == 0,
+                "APPROVED_OVERRIDE" => unresolvedParcelIds.Count > 0
+                    && clearance.ApprovalRequestId.HasValue
+                    && clearance.ApprovedByUserId.HasValue
+                    && clearance.ApprovedAt.HasValue,
+                "BLOCKED_PENDING_APPROVAL" => unresolvedParcelIds.Count > 0,
+                _ => false,
+            });
+        if (!validClearance)
+            throw new TripUpstreamUnavailableException(
+                "Parcel stop-departure clearance returned an inconsistent decision.");
+
+        if (clearance.Status == "BLOCKED_PENDING_APPROVAL")
+            throw new CodedConflictException(
+                "PARCEL_STOP_RECONCILIATION_REQUIRED",
+                "Unresolved Parcels must be reconciled or approved before departing this stop.",
+                [
+                    new ValidationError(
+                        "approvalRequestId",
+                        clearance.ApprovalRequestId?.ToString("D") ?? string.Empty),
+                    new ValidationError(
+                        "unresolvedParcelIds",
+                        string.Join(',', unresolvedParcelIds!)),
+                    new ValidationError("requiredAction", "RECONCILE_OR_APPROVE_STOP_DEPARTURE"),
+                ]);
 
         var departedAt = clock.UtcNow.ToUniversalTime();
         if (!await tripStops.TryMarkDepartedAsync(

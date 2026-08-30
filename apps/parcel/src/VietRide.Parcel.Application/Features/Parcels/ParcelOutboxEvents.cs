@@ -39,6 +39,7 @@ public static class ParcelOutboxEvents
     public const string ParcelClaimSubmitted = "parcel.claim.submitted";
     public const string ParcelClaimDecided = "parcel.claim.decided";
     public const string ParcelClaimAppealed = "parcel.claim.appealed";
+    public const string ParcelClaimAppealDecided = "parcel.claim_appeal.decided";
 
     public static Task EnqueueAsync(
         IIntegrationEventOutbox outbox,

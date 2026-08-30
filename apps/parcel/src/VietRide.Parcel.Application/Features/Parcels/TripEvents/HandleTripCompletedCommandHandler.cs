@@ -39,8 +39,14 @@ public sealed class HandleTripCompletedCommandHandler
 
         if (_reliability is not null)
         {
+            var activeIncidents = await _reliability.ListActiveIncidentsByParcelsAsync(
+                updated.Select(parcel => parcel.ParcelId).ToArray(),
+                cancellationToken);
+            var incidentParcels = activeIncidents.Select(incident => incident.ParcelId).ToHashSet();
             foreach (var parcel in updated)
             {
+                if (incidentParcels.Contains(parcel.ParcelId))
+                    continue;
                 var parcelEntity = await _parcelRepository.GetByIdAsync(parcel.ParcelId, cancellationToken);
                 var existing = await _reliability.GetOpenIncidentAsync(
                     parcel.ParcelId,

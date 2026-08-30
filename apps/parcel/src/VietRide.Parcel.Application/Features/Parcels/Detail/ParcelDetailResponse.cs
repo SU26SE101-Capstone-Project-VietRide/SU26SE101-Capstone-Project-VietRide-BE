@@ -13,6 +13,7 @@ public sealed record ParcelDetailResponse(
     string? RecipientPhone,
     Guid OperatorId,
     Guid TripId,
+    Guid? BookingId,
     Guid? DropoffStopId,
     string? Description,
     int Quantity,

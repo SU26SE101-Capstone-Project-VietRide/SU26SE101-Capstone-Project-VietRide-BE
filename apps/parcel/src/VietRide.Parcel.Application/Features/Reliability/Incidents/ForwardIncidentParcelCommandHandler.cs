@@ -55,6 +55,10 @@ public sealed class ForwardIncidentParcelCommandHandler
             throw new CodedNotFoundException("TRIP_NOT_FOUND", "Forwarding trip was not found.");
         if (target.Snapshot.OperatorId != command.OperatorId)
             throw new ForbiddenException("FORBIDDEN", "Forwarding trip does not belong to this operator.");
+        if (!target.Snapshot.AssistantUserId.HasValue)
+            throw new CodedConflictException(
+                "PARCEL_ASSISTANT_REQUIRED",
+                "The forwarding Trip must have an assigned Assistant.");
         if (string.Equals(target.Snapshot.Status, "COMPLETED", StringComparison.OrdinalIgnoreCase)
             || string.Equals(target.Snapshot.Status, "CANCELLED", StringComparison.OrdinalIgnoreCase))
             throw new CodedConflictException("INVALID_STATUS", "Forwarding trip is not operational.");

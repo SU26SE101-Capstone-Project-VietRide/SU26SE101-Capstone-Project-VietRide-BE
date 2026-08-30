@@ -129,18 +129,6 @@ public sealed class ParcelClaim : BaseEntity<Guid>
         PaidAt = paidAt;
     }
 
-    public void Appeal(string reason, Guid appealedByUserId, DateTimeOffset appealedAt)
-    {
-        if (Status is not (ParcelClaimStatus.PAID or ParcelClaimStatus.REJECTED))
-            throw new InvalidOperationException("Only paid or rejected claims can be appealed.");
-        if (appealedByUserId == Guid.Empty)
-            throw new ArgumentException("Appealing user is required.", nameof(appealedByUserId));
-        Status = ParcelClaimStatus.APPEALED;
-        AppealReason = Normalize(reason) ?? throw new ArgumentException("Appeal reason is required.", nameof(reason));
-        AppealedByUserId = appealedByUserId;
-        AppealedAt = appealedAt;
-    }
-
     private static void ValidateAward(
         long? provenDirectLossVnd,
         int compensationRatePercent,

@@ -28,9 +28,12 @@ internal static class ParcelReliabilityActionResolver
 
     public static IReadOnlyList<string> Assistant(
         VietRide.Parcel.Domain.Entities.Parcel parcel,
-        bool hasIncident)
+        bool hasIncident,
+        string? incidentType = null,
+        string? incidentStatus = null,
+        bool allowDirectCustodyScan = false)
     {
-        var actions = new List<string> { "CUSTODY_SCAN" };
+        var actions = new List<string>();
         switch (parcel.Status)
         {
             case ParcelStatus.RESERVED:
@@ -56,7 +59,51 @@ internal static class ParcelReliabilityActionResolver
 
         if (hasIncident)
             actions.Add("VIEW_INCIDENT");
+        if (allowDirectCustodyScan
+            && parcel.Status is ParcelStatus.LOADED or ParcelStatus.IN_TRANSIT or ParcelStatus.UNLOADED)
+            actions.Add("CUSTODY_SCAN");
+        if (parcel.Status == ParcelStatus.PENDING_OPERATOR_ACTION
+            && parcel.PendingActionType == PendingActionType.CUSTODY_EXCEPTION
+            && parcel.PendingActionResumeStatus is ParcelStatus.LOADED or ParcelStatus.IN_TRANSIT
+            && (string.Equals(incidentType, ParcelIncidentType.MISSING.ToString(), StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    incidentType,
+                    ParcelIncidentType.MISSING_AFTER_DEPARTURE.ToString(),
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    incidentType,
+                    ParcelIncidentType.UNSCANNED_HANDOFF.ToString(),
+                    StringComparison.OrdinalIgnoreCase))
+            && (string.Equals(incidentStatus, ParcelIncidentStatus.OPEN.ToString(), StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    incidentStatus,
+                    ParcelIncidentStatus.SEARCHING.ToString(),
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    incidentStatus,
+                    ParcelIncidentStatus.ESCALATED.ToString(),
+                    StringComparison.OrdinalIgnoreCase)
+                || string.Equals(
+                    incidentStatus,
+                    ParcelIncidentStatus.SEARCH_EXPIRED.ToString(),
+                    StringComparison.OrdinalIgnoreCase)))
+            actions.Add("CONFIRM_FOUND_ON_VEHICLE");
         return actions.Distinct().ToArray();
+    }
+
+    public static IReadOnlyList<string> Driver(
+        bool hasIncident,
+        bool hasPendingCustodyExceptionApproval)
+    {
+        var actions = new List<string>();
+        if (hasIncident)
+            actions.Add("VIEW_INCIDENT");
+        if (hasPendingCustodyExceptionApproval)
+        {
+            actions.Add("APPROVE_CUSTODY_EXCEPTION");
+            actions.Add("REJECT_CUSTODY_EXCEPTION");
+        }
+        return actions;
     }
 
     public static IReadOnlyList<string> Operator(
@@ -76,7 +123,8 @@ internal static class ParcelReliabilityActionResolver
                 => new List<string> { "RESOLVE" },
             _ => [],
         };
-        if (incident.SearchDeadline <= now
+        if (incident.SearchDeadline.HasValue
+            && incident.SearchDeadline.Value <= now
             && incident.Status == ParcelIncidentStatus.ESCALATED)
             actions.Add("DECLARE_LOST");
         if (claim?.Status is ParcelClaimStatus.SUBMITTED or ParcelClaimStatus.UNDER_REVIEW)

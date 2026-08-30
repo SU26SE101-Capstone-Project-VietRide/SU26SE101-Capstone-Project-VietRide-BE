@@ -227,6 +227,11 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "payment.parcel-compensation";
                 options.BindingKeys = [ParcelClaimDecidedIntegrationEvent.EventTypeValue];
             });
+            services.AddVietRideEventConsumer<ParcelClaimAppealDecidedIntegrationEvent, ParcelClaimAppealDecidedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "payment.parcel-claim-appeal-compensation";
+                options.BindingKeys = [ParcelClaimAppealDecidedIntegrationEvent.EventTypeValue];
+            });
 
             services.AddVietRideEventConsumer<OperatorApprovedConsumerEvent, BootstrapOperatorWalletEventHandler>(options =>
             {

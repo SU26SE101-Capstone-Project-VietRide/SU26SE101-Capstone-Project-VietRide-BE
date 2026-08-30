@@ -4,6 +4,7 @@ namespace VietRide.Parcel.Application.Features.Parcels.Create;
 
 public sealed record CreateParcelResponse(
     Guid ParcelId,
+    Guid? BookingId,
     string ParcelCode,
     string Status,
     string EstimatedSizeCategory,

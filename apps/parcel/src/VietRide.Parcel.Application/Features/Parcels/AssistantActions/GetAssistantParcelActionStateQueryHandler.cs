@@ -51,6 +51,9 @@ public sealed class GetAssistantParcelActionStateQueryHandler
 
         var screens = await _screenModels.BuildAsync([parcel], request.ActorUserId, false, cancellationToken);
         var screen = screens[parcel.Id];
+        var hasCurrentOperationalStop = screen.Trip.Stops.Any(stop =>
+            string.Equals(stop.Status, "ARRIVED", StringComparison.OrdinalIgnoreCase)
+            && !stop.ActualDepartureAt.HasValue);
         AssistantCreatedCustodyEventResponse? createdEvent = null;
         if (request.IncludeLatestCustodyEvent)
         {
@@ -97,7 +100,12 @@ public sealed class GetAssistantParcelActionStateQueryHandler
             screen.Reliability.CurrentCustody,
             screen.Reliability.ActiveIncident,
             createdEvent,
-            ParcelReliabilityActionResolver.Assistant(parcel, screen.Reliability.ActiveIncident is not null),
+            ParcelReliabilityActionResolver.Assistant(
+                parcel,
+                screen.Reliability.ActiveIncident is not null,
+                screen.Reliability.ActiveIncident?.Type,
+                screen.Reliability.ActiveIncident?.Status,
+                hasCurrentOperationalStop),
             request.Warning);
     }
 }

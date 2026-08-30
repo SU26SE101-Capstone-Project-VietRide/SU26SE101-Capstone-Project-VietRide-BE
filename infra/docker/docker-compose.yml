@@ -288,7 +288,9 @@ services:
       Parcel__BaseUrl: http://parcel:5005
       Trip__BaseUrl: http://trip:5002
       Identity__BaseUrl: http://identity:5001
+      InvoiceStorage__Provider: ${INVOICE_STORAGE_PROVIDER:-E2E_LOCAL}
       InvoiceStorage__Bucket: ${INVOICE_STORAGE_BUCKET:-}
+      InvoiceStorage__LocalRootPath: ${INVOICE_STORAGE_LOCAL_ROOT_PATH:-/tmp/vietride-invoices}
       InvoiceStorage__StableBaseUrl: ${INVOICE_STORAGE_STABLE_BASE_URL:-http://gateway:3000}
       OperatorWeb__InvoiceDetailBaseUrl: ${OPERATOR_WEB_INVOICE_DETAIL_BASE_URL:-http://localhost:5173/operator/invoices}
       # ADC path may point to a read-only file mounted by a developer-specific compose override.

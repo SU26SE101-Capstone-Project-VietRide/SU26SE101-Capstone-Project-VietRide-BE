@@ -198,6 +198,7 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
         Guid? tripId,
         Guid? assigneeId,
         string? slaState,
+        ParcelCustodyExceptionRequestStatus? approvalStatus,
         DateTimeOffset? from,
         DateTimeOffset? toExclusive,
         DateTimeOffset now,
@@ -222,6 +223,11 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
         {
             query = query.Where(incident => _db.ParcelSearchTasks.Any(task =>
                 task.IncidentId == incident.Id && task.AssigneeId == assigneeId.Value));
+        }
+        if (approvalStatus.HasValue)
+        {
+            query = query.Where(incident => _db.ParcelCustodyExceptionRequests.Any(request =>
+                request.IncidentId == incident.Id && request.Status == approvalStatus.Value));
         }
         if (from.HasValue)
             query = query.Where(incident => incident.CreatedAt >= from.Value);
@@ -248,14 +254,18 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
 
         query = slaState?.ToUpperInvariant() switch
         {
-            "BREACHED" => query.Where(incident => incident.SearchDeadline < now
+            "NOT_STARTED" => query.Where(incident => !incident.SearchDeadline.HasValue
+                && incident.Status == ParcelIncidentStatus.OPEN),
+            "BREACHED" => query.Where(incident => incident.SearchDeadline.HasValue
+                && incident.SearchDeadline < now
                 && !_db.ParcelCustodyExceptionRequests.Any(request =>
                     request.IncidentId == incident.Id
                     && request.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL)
                 && incident.Status != ParcelIncidentStatus.CLOSED
                 && incident.Status != ParcelIncidentStatus.RESOLVED
                 && incident.Status != ParcelIncidentStatus.LOST_CONFIRMED),
-            "DUE_SOON" => query.Where(incident => incident.SearchDeadline >= now
+            "DUE_SOON" => query.Where(incident => incident.SearchDeadline.HasValue
+                && incident.SearchDeadline >= now
                 && incident.SearchDeadline <= now.AddHours(2)
                 && !_db.ParcelCustodyExceptionRequests.Any(request =>
                     request.IncidentId == incident.Id
@@ -263,7 +273,8 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
                 && incident.Status != ParcelIncidentStatus.CLOSED
                 && incident.Status != ParcelIncidentStatus.RESOLVED
                 && incident.Status != ParcelIncidentStatus.LOST_CONFIRMED),
-            "ON_TRACK" => query.Where(incident => incident.SearchDeadline > now.AddHours(2)
+            "ON_TRACK" => query.Where(incident => incident.SearchDeadline.HasValue
+                && incident.SearchDeadline > now.AddHours(2)
                 && !_db.ParcelCustodyExceptionRequests.Any(request =>
                     request.IncidentId == incident.Id
                     && request.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL)
@@ -290,8 +301,79 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
     public Task<ParcelClaim?> GetClaimByIdAsync(Guid claimId, CancellationToken ct = default)
         => _db.ParcelClaims.FirstOrDefaultAsync(x => x.Id == claimId, ct);
 
+    public async Task<ParcelClaim?> GetClaimByIdForUpdateAsync(
+        Guid claimId,
+        CancellationToken ct = default)
+    {
+        var matches = await _db.ParcelClaims
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_parcel.parcel_claims
+                WHERE id = {claimId}
+                FOR UPDATE
+                """)
+            .AsTracking()
+            .ToListAsync(ct);
+        return matches.SingleOrDefault();
+    }
+
     public Task<ParcelClaim?> GetClaimByIncidentAsync(Guid incidentId, CancellationToken ct = default)
         => _db.ParcelClaims.FirstOrDefaultAsync(x => x.IncidentId == incidentId, ct);
+
+    public Task<ParcelClaimAppeal?> GetClaimAppealByIdAsync(
+        Guid appealId,
+        CancellationToken ct = default)
+        => _db.ParcelClaimAppeals.FirstOrDefaultAsync(x => x.Id == appealId, ct);
+
+    public async Task<ParcelClaimAppeal?> GetClaimAppealByIdForUpdateAsync(
+        Guid appealId,
+        CancellationToken ct = default)
+    {
+        var matches = await _db.ParcelClaimAppeals
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_parcel.parcel_claim_appeals
+                WHERE id = {appealId}
+                FOR UPDATE
+                """)
+            .AsTracking()
+            .ToListAsync(ct);
+        return matches.SingleOrDefault();
+    }
+
+    public Task<ParcelClaimAppeal?> GetClaimAppealByClaimAsync(
+        Guid claimId,
+        CancellationToken ct = default)
+        => _db.ParcelClaimAppeals.FirstOrDefaultAsync(x => x.ClaimId == claimId, ct);
+
+    public Task<ParcelClaimAppeal?> GetClaimAppealByIdempotencyKeyAsync(
+        Guid idempotencyKey,
+        CancellationToken ct = default)
+        => _db.ParcelClaimAppeals.FirstOrDefaultAsync(x => x.IdempotencyKey == idempotencyKey, ct);
+
+    public async Task<PagedResult<ParcelClaimAppeal>> SearchClaimAppealsByOperatorAsync(
+        Guid operatorId,
+        ParcelClaimAppealStatus? status,
+        int page,
+        int pageSize,
+        CancellationToken ct = default)
+    {
+        page = Math.Max(page, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        var query = _db.ParcelClaimAppeals
+            .AsNoTracking()
+            .Where(appeal => appeal.OperatorId == operatorId);
+        if (status.HasValue)
+            query = query.Where(appeal => appeal.Status == status.Value);
+        var total = await query.CountAsync(ct);
+        var items = await query
+            .OrderByDescending(appeal => appeal.CreatedAt)
+            .ThenBy(appeal => appeal.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToArrayAsync(ct);
+        return PagedResult<ParcelClaimAppeal>.Create(items, page, pageSize, total);
+    }
 
     public Task<ParcelCompensationPolicy?> GetCompensationPolicyAsync(
         Guid operatorId,
@@ -335,7 +417,8 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
         int maxBatch,
         CancellationToken ct = default)
         => await _db.ParcelIncidents
-            .Where(x => x.SearchDeadline <= now
+            .Where(x => x.SearchDeadline.HasValue
+                && x.SearchDeadline <= now
                 && (x.Status == ParcelIncidentStatus.SEARCHING
                     || x.Status == ParcelIncidentStatus.ESCALATED
                     || x.Status == ParcelIncidentStatus.SEARCH_EXPIRED))
@@ -563,6 +646,9 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
     public async Task AddClaimAsync(ParcelClaim entity, CancellationToken ct = default)
         => await _db.ParcelClaims.AddAsync(entity, ct);
 
+    public async Task AddClaimAppealAsync(ParcelClaimAppeal entity, CancellationToken ct = default)
+        => await _db.ParcelClaimAppeals.AddAsync(entity, ct);
+
     public async Task AddClaimEvidenceAsync(ParcelClaimEvidence entity, CancellationToken ct = default)
         => await _db.ParcelClaimEvidence.AddAsync(entity, ct);
 
@@ -599,6 +685,12 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
     public Task UpdateClaimAsync(ParcelClaim entity, CancellationToken ct = default)
     {
         _db.ParcelClaims.Update(entity);
+        return Task.CompletedTask;
+    }
+
+    public Task UpdateClaimAppealAsync(ParcelClaimAppeal entity, CancellationToken ct = default)
+    {
+        _db.ParcelClaimAppeals.Update(entity);
         return Task.CompletedTask;
     }
 

@@ -53,7 +53,7 @@ public sealed record ParcelIncidentResponse(
     string Type,
     string Status,
     string? LastKnownLocation,
-    DateTimeOffset SearchDeadline,
+    DateTimeOffset? SearchDeadline,
     DateTimeOffset CreatedAt,
     DateTimeOffset? ResolvedAt,
     bool OperatorProcessBreach);

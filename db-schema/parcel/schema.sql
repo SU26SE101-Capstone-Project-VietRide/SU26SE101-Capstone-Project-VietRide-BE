@@ -680,7 +680,7 @@ CREATE TABLE parcel_incidents (
     reporter_source VARCHAR(32) NOT NULL,
     description TEXT NULL,
     evidence_json JSONB NULL,
-    search_deadline TIMESTAMPTZ NOT NULL,
+    search_deadline TIMESTAMPTZ,
     escalated_at TIMESTAMPTZ NULL,
     resolved_at TIMESTAMPTZ NULL,
     resolution_code VARCHAR(64) NULL,
@@ -751,6 +751,53 @@ CREATE INDEX idx_parcel_custody_exception_requests_trip_status
 CREATE INDEX idx_parcel_custody_exception_requests_approved_event
     ON parcel_custody_exception_requests (approved_custody_event_id);
 
+CREATE TABLE parcel_stop_departure_approval_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id UUID NOT NULL,
+    stop_id UUID NOT NULL,
+    operator_id UUID NOT NULL,
+    unresolved_parcel_ids_json JSONB NOT NULL,
+    departure_override_reason TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    requested_by_user_id UUID NOT NULL,
+    requested_by_role VARCHAR(32) NOT NULL,
+    requested_at TIMESTAMPTZ NOT NULL,
+    reviewed_by_user_id UUID NULL,
+    reviewed_by_role VARCHAR(32) NULL,
+    reviewed_at TIMESTAMPTZ NULL,
+    review_note TEXT NULL,
+    idempotency_key UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    row_version INT NOT NULL DEFAULT 0,
+    CONSTRAINT chk_parcel_stop_departure_approval_status
+        CHECK (status IN ('PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'CANCELLED')),
+    CONSTRAINT chk_parcel_stop_departure_review_audit CHECK (
+        (status = 'PENDING_APPROVAL'
+            AND reviewed_by_user_id IS NULL
+            AND reviewed_by_role IS NULL
+            AND reviewed_at IS NULL)
+        OR
+        (status IN ('APPROVED', 'REJECTED')
+            AND reviewed_by_user_id IS NOT NULL
+            AND reviewed_by_role IS NOT NULL
+            AND reviewed_at IS NOT NULL)
+        OR
+        (status = 'CANCELLED'
+            AND reviewed_by_user_id IS NULL
+            AND reviewed_by_role = 'SYSTEM'
+            AND reviewed_at IS NOT NULL))
+);
+CREATE UNIQUE INDEX uq_parcel_stop_departure_approval_idempotency
+    ON parcel_stop_departure_approval_requests (idempotency_key);
+CREATE UNIQUE INDEX uq_parcel_stop_departure_approval_pending
+    ON parcel_stop_departure_approval_requests (trip_id, stop_id, status)
+    WHERE status = 'PENDING_APPROVAL';
+CREATE INDEX idx_parcel_stop_departure_approval_operator_status
+    ON parcel_stop_departure_approval_requests (operator_id, status, created_at);
+CREATE INDEX idx_parcel_stop_departure_approval_trip_stop
+    ON parcel_stop_departure_approval_requests (trip_id, stop_id, created_at);
+
 CREATE TABLE parcel_search_tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     incident_id UUID NOT NULL REFERENCES parcel_incidents(id) ON DELETE CASCADE,
@@ -804,6 +851,46 @@ CREATE TABLE parcel_claims (
 CREATE UNIQUE INDEX uq_parcel_claims_incident ON parcel_claims (incident_id);
 CREATE INDEX idx_parcel_claims_operator_status ON parcel_claims (operator_id, status, created_at);
 CREATE INDEX idx_parcel_claims_beneficiary ON parcel_claims (beneficiary_user_id, created_at);
+
+CREATE TABLE parcel_claim_appeals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    claim_id UUID NOT NULL REFERENCES parcel_claims(id) ON DELETE RESTRICT,
+    parcel_id UUID NOT NULL,
+    incident_id UUID NOT NULL REFERENCES parcel_incidents(id) ON DELETE RESTRICT,
+    operator_id UUID NOT NULL,
+    beneficiary_user_id UUID NOT NULL,
+    original_claim_status VARCHAR(24) NOT NULL,
+    original_total_award_vnd BIGINT NOT NULL,
+    status VARCHAR(24) NOT NULL,
+    reason TEXT NOT NULL,
+    submitted_by_user_id UUID NOT NULL,
+    submitted_at TIMESTAMPTZ NOT NULL,
+    revised_proven_direct_loss_vnd BIGINT NULL,
+    revised_cargo_award_vnd BIGINT NOT NULL DEFAULT 0,
+    revised_freight_refund_vnd BIGINT NOT NULL DEFAULT 0,
+    revised_total_award_vnd BIGINT NOT NULL DEFAULT 0,
+    supplementary_award_vnd BIGINT NOT NULL DEFAULT 0,
+    decision_reason TEXT NULL,
+    decided_by_user_id UUID NULL,
+    decided_at TIMESTAMPTZ NULL,
+    payout_reference_id UUID NULL,
+    paid_at TIMESTAMPTZ NULL,
+    idempotency_key UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    row_version INT NOT NULL DEFAULT 0,
+    CONSTRAINT chk_parcel_claim_appeal_status CHECK (
+        status IN ('SUBMITTED', 'UNDER_REVIEW', 'UPHELD',
+            'ADJUSTMENT_APPROVED', 'FUNDING_PENDING', 'PAID')),
+    CONSTRAINT chk_parcel_claim_appeal_awards CHECK (
+        original_total_award_vnd >= 0 AND revised_cargo_award_vnd >= 0
+        AND revised_freight_refund_vnd >= 0 AND revised_total_award_vnd >= 0
+        AND supplementary_award_vnd >= 0)
+);
+CREATE UNIQUE INDEX uq_parcel_claim_appeals_claim ON parcel_claim_appeals (claim_id);
+CREATE UNIQUE INDEX uq_parcel_claim_appeals_idempotency ON parcel_claim_appeals (idempotency_key);
+CREATE INDEX idx_parcel_claim_appeals_operator_status
+    ON parcel_claim_appeals (operator_id, status, created_at);
 
 CREATE TABLE parcel_claim_evidence (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

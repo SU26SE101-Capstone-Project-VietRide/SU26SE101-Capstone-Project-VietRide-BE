@@ -198,6 +198,10 @@ public sealed class CreateParcelCommandHandler
             throw new CodedConflictException(
                 "TRIP_NOT_ACCEPTING_PARCEL",
                 $"Trip '{command.TripId}' is in status '{trip.Status}' and is not accepting parcels.");
+        if (!trip.AssistantUserId.HasValue)
+            throw new CodedConflictException(
+                "PARCEL_ASSISTANT_REQUIRED",
+                "The Trip must have an assigned Assistant before it can accept Parcels.");
 
         var subscriptionEligibility = await _identityClient.GetSubscriptionWriteEligibilityAsync(
             trip.OperatorId,
@@ -464,6 +468,7 @@ public sealed class CreateParcelCommandHandler
 
         return new CreateParcelResponse(
             parcel.Id,
+            parcel.BookingId,
             parcel.ParcelCode,
             parcel.Status.ToString(),
             parcel.EstimatedSizeCategory.ToString(),

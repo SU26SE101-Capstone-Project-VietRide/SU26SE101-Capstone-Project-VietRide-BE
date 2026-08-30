@@ -8,10 +8,12 @@ const env = loadEnv('.env');
 const postgresUser = env.POSTGRES_USER ?? 'vietride';
 const runTag = `${Date.now().toString(36)}${process.pid.toString(36)}`.toLowerCase();
 const password = `Parcel!${runTag}Aa1`;
+const bootstrapE2ePassword =
+  process.env.PARCEL_RELIABILITY_E2E_ADMIN_PASSWORD ?? 'ParcelE2EAdmin2026!';
 const phoneEntropy = randomUUID().replaceAll('-', '').slice(0, 13);
 const shortTag = (BigInt(`0x${phoneEntropy}`) % 10_000_000n).toString().padStart(7, '0');
 const evidenceBase = `https://e2e.vietride.local/${runTag}`;
-const state = { ids: {}, tokens: {}, resources: {}, checks: [] };
+const state = { resources: {}, checks: [], http: [] };
 
 function loadEnv(file) {
   const result = {};
@@ -22,7 +24,10 @@ function loadEnv(file) {
     if (separator < 1) continue;
     const key = line.slice(0, separator).trim();
     let value = line.slice(separator + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
       value = value.slice(1, -1);
     }
     result[key] = value.replaceAll('\\n', '\n');
@@ -84,7 +89,64 @@ async function request(method, path, options = {}) {
       json = { raw: text };
     }
   }
+  state.http.push({
+    method,
+    path,
+    status: response.status,
+    success: json?.success ?? null,
+    errorCode: json?.error?.code ?? null,
+    traceId: json?.meta?.traceId ?? null,
+  });
   return { status: response.status, headers: response.headers, json, text };
+}
+
+function writeAuditReport() {
+  const reportDirectory = 'artifacts/parcel-reality-audit';
+  fs.mkdirSync(reportDirectory, { recursive: true });
+  const jsonPath = `${reportDirectory}/${runTag}.json`;
+  const markdownPath = `${reportDirectory}/${runTag}.md`;
+  const report = {
+    runId: `PCL-E2E-${runTag}`,
+    generatedAt: new Date().toISOString(),
+    gateway,
+    resources: state.resources,
+    checks: state.checks,
+    http: state.http,
+  };
+  fs.writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  const resourceRows = [];
+  const flatten = (prefix, value) => {
+    if (value == null || ['string', 'number', 'boolean'].includes(typeof value)) {
+      resourceRows.push(`| ${prefix} | ${value ?? ''} |`);
+      return;
+    }
+    if (Array.isArray(value)) {
+      resourceRows.push(`| ${prefix} | ${value.join(', ')} |`);
+      return;
+    }
+    for (const [key, child] of Object.entries(value))
+      flatten(prefix ? `${prefix}.${key}` : key, child);
+  };
+  flatten('', state.resources);
+  const checkRows = state.checks.map(
+    (check) => `| PASS | ${check.label} | ${check.detail ?? ''} |`,
+  );
+  const httpRows = state.http.map(
+    (entry) =>
+      `| ${entry.method} | ${entry.path.replaceAll('|', '%7C')} | ${entry.status} | ${entry.errorCode ?? ''} | ${entry.traceId ?? ''} |`,
+  );
+  fs.writeFileSync(
+    markdownPath,
+    `# Parcel Full Reality Audit — ${report.runId}\n\n` +
+      `- Generated at: ${report.generatedAt}\n` +
+      `- Gateway: ${gateway}\n` +
+      `- Result: PASS\n\n` +
+      `## Retained data\n\n| Resource | ID/value |\n|---|---|\n${resourceRows.join('\n')}\n\n` +
+      `## Business checks\n\n| Result | Check | Detail |\n|---|---|---|\n${checkRows.join('\n')}\n\n` +
+      `## HTTP evidence\n\n| Method | Path | HTTP | Error code | traceId |\n|---|---|---:|---|---|\n${httpRows.join('\n')}\n`,
+    'utf8',
+  );
+  return { jsonPath, markdownPath };
 }
 
 function apiData(result, expectedStatus, label) {
@@ -99,9 +161,15 @@ function apiData(result, expectedStatus, label) {
 }
 
 function expectError(result, expectedStatus, expectedCode, label) {
-  assert(result.status === expectedStatus, `${label}: expected HTTP ${expectedStatus}, got ${result.status}: ${result.text}`);
+  assert(
+    result.status === expectedStatus,
+    `${label}: expected HTTP ${expectedStatus}, got ${result.status}: ${result.text}`,
+  );
   assert(result.json?.success === false, `${label}: missing error ApiResponse envelope`);
-  assert(result.json?.error?.code === expectedCode, `${label}: expected ${expectedCode}, got ${result.json?.error?.code}: ${result.text}`);
+  assert(
+    result.json?.error?.code === expectedCode,
+    `${label}: expected ${expectedCode}, got ${result.json?.error?.code}: ${result.text}`,
+  );
   pass(label, `${expectedStatus} ${expectedCode}`);
   return result.json.error;
 }
@@ -122,7 +190,9 @@ async function poll(action, predicate, label, timeoutMs = 120_000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw new Error(`${label} timed out; last=${last instanceof Error ? last.message : JSON.stringify(last)}`);
+  throw new Error(
+    `${label} timed out; last=${last instanceof Error ? last.message : JSON.stringify(last)}`,
+  );
 }
 
 function phone(prefix) {
@@ -171,7 +241,10 @@ function successfulIpn(paymentRedirectUrl, transactionNo) {
   const parameters = {
     vnp_Amount: redirect.searchParams.get('vnp_Amount'),
     vnp_BankCode: 'NCB',
-    vnp_PayDate: new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14),
+    vnp_PayDate: new Date()
+      .toISOString()
+      .replace(/[-:TZ.]/g, '')
+      .slice(0, 14),
     vnp_ResponseCode: '00',
     vnp_TransactionNo: transactionNo,
     vnp_TransactionStatus: '00',
@@ -187,6 +260,45 @@ async function login(email) {
   const data = apiData(result, 200, `login ${email}`);
   assert(data.accessToken, `login ${email}: accessToken missing`);
   return data.accessToken;
+}
+
+async function loginBootstrapAdmin() {
+  const email = env.SYSTEM_ADMIN_BOOTSTRAP_EMAIL;
+  let effectivePassword = env.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD;
+  let result = await request('POST', '/v1/auth/login', {
+    body: { email, password: effectivePassword },
+  });
+  if (result.status === 401 && result.json?.error?.code === 'AUTH_INVALID_CREDENTIALS') {
+    effectivePassword = bootstrapE2ePassword;
+    result = await request('POST', '/v1/auth/login', {
+      body: { email, password: effectivePassword },
+    });
+  }
+  if (result.status === 401 && result.json?.error?.code === 'AUTH_INVALID_CREDENTIALS') {
+    apiData(
+      await request('POST', '/v1/auth/forgot-password', { key: randomUUID(), body: { email } }),
+      200,
+      'request bootstrap admin password reset',
+    );
+    const escapedEmail = email.replaceAll("'", "''");
+    const code = identitySql(
+      `SELECT token.code FROM vietride_identity.email_verification_tokens token JOIN vietride_identity.users users ON users.id=token.user_id WHERE users.email='${escapedEmail}' AND token.purpose='PASSWORD_RESET' AND token.used_at IS NULL ORDER BY token.created_at DESC LIMIT 1;`,
+    );
+    assert(code, 'bootstrap admin PASSWORD_RESET OTP was not persisted');
+    apiData(
+      await request('POST', '/v1/auth/reset-password', {
+        key: randomUUID(),
+        body: { email, code, newPassword: bootstrapE2ePassword },
+      }),
+      200,
+      'reset bootstrap admin password through Auth API',
+    );
+    effectivePassword = bootstrapE2ePassword;
+    result = await request('POST', '/v1/auth/login', {
+      body: { email, password: effectivePassword },
+    });
+  }
+  return apiData(result, 200, 'login system admin');
 }
 
 function latestVerificationCode(userId, purpose) {
@@ -223,7 +335,10 @@ async function setInitialPassword(userId) {
   const code = latestVerificationCode(userId, 'SET_INITIAL_PASSWORD');
   assert(code, `initial-password token missing for ${userId}`);
   apiData(
-    await request('POST', '/v1/auth/set-initial-password', { key: randomUUID(), body: { token: code, password } }),
+    await request('POST', '/v1/auth/set-initial-password', {
+      key: randomUUID(),
+      body: { token: code, password },
+    }),
     200,
     `set initial password ${userId}`,
   );
@@ -319,13 +434,21 @@ async function enableParcelSubscription(systemToken, operator) {
     202,
     'replay subscription upgrade',
   );
-  assert(replay.paymentId === upgrade.paymentId, 'subscription idempotency replay changed paymentId');
+  assert(
+    replay.paymentId === upgrade.paymentId,
+    'subscription idempotency replay changed paymentId',
+  );
   const ipn = successfulIpn(upgrade.paymentRedirectUrl, `91${Date.now()}`);
-  const ipnResponse = await request('POST', `/v1/payments/subscription-vnpay-ipn?${new URLSearchParams(ipn)}`);
+  const ipnResponse = await request(
+    'POST',
+    `/v1/payments/subscription-vnpay-ipn?${new URLSearchParams(ipn)}`,
+  );
   assert(ipnResponse.status === 200, `subscription IPN failed: ${ipnResponse.text}`);
   await poll(
     () => request('GET', '/v1/operator/subscription', { token: operator.token }),
-    (result) => result.json?.data?.plan?.planId === plan.planId && result.json?.data?.plan?.modules?.enableParcel === true,
+    (result) =>
+      result.json?.data?.plan?.planId === plan.planId &&
+      result.json?.data?.plan?.modules?.enableParcel === true,
     'wait for Parcel subscription activation',
   );
   pass('operator subscription upgrade + VNPay IPN + replay', plan.planId);
@@ -352,10 +475,19 @@ async function topUpPassenger(passenger, amount) {
     201,
     'replay passenger wallet top-up',
   );
-  assert(replay.topUpRequestId === topUp.topUpRequestId, 'top-up idempotency replay changed resource');
+  assert(
+    replay.topUpRequestId === topUp.topUpRequestId,
+    'top-up idempotency replay changed resource',
+  );
   const ipn = successfulIpn(topUp.paymentRedirectUrl, `92${Date.now()}`);
-  const response = await request('POST', `/v1/payments/vnpay-topup-ipn?${new URLSearchParams(ipn)}`);
-  assert(response.status === 200 && response.json?.RspCode === '00', `top-up IPN failed: ${response.text}`);
+  const response = await request(
+    'POST',
+    `/v1/payments/vnpay-topup-ipn?${new URLSearchParams(ipn)}`,
+  );
+  assert(
+    response.status === 200 && response.json?.RspCode === '00',
+    `top-up IPN failed: ${response.text}`,
+  );
   const wallet = await poll(
     () => request('GET', '/v1/wallet', { token: passenger.token }),
     (result) => result.json?.data?.balance >= amount,
@@ -380,7 +512,10 @@ async function createTripResources(operator, driver, assistant) {
     });
     if (createResult.status === 201) return apiData(createResult, 201, `create station ${name}`);
     const duplicate = apiData(createResult, 200, `detect nearby station ${name}`);
-    assert(duplicate.warning?.code === 'STATION_DUPLICATE_NEARBY', `unexpected station warning for ${name}`);
+    assert(
+      duplicate.warning?.code === 'STATION_DUPLICATE_NEARBY',
+      `unexpected station warning for ${name}`,
+    );
     const stationId = duplicate.nearbyStations?.[0]?.id;
     assert(stationId, `nearby station id missing for ${name}`);
     const linkResult = await request('POST', '/v1/operator/stations', {
@@ -388,27 +523,31 @@ async function createTripResources(operator, driver, assistant) {
       key: randomUUID(),
       body: { stationId },
     });
-    assert([200, 201].includes(linkResult.status), `link nearby station ${name}: unexpected HTTP ${linkResult.status}`);
+    assert(
+      [200, 201].includes(linkResult.status),
+      `link nearby station ${name}: unexpected HTTP ${linkResult.status}`,
+    );
     return apiData(linkResult, linkResult.status, `link nearby station ${name}`);
   };
   const origin = await createStation('Origin', '27460', 10.75, 106.62);
   const destination = await createStation('Destination', '28789', 10.03, 105.78);
-  const createStop = async (name, code, latitude, longitude) => apiData(
-    await request('POST', '/v1/operator/stops', {
-      token: operator.token,
-      key: randomUUID(),
-      body: {
-        name: `${name} ${runTag}`,
-        latitude,
-        longitude,
-        description: `${name} Parcel E2E`,
-        address: `${name} address`,
-        locationCode: code,
-      },
-    }),
-    201,
-    `create stop ${name}`,
-  );
+  const createStop = async (name, code, latitude, longitude) =>
+    apiData(
+      await request('POST', '/v1/operator/stops', {
+        token: operator.token,
+        key: randomUUID(),
+        body: {
+          name: `${name} ${runTag}`,
+          latitude,
+          longitude,
+          description: `${name} Parcel E2E`,
+          address: `${name} address`,
+          locationCode: code,
+        },
+      }),
+      201,
+      `create stop ${name}`,
+    );
   const wrongStop = await createStop('Wrong Stop', '31186', 10.04, 105.75);
   const targetStop = await createStop('Target Stop', '29551', 10.12, 105.66);
   const route = apiData(
@@ -425,8 +564,22 @@ async function createTripResources(operator, driver, assistant) {
         pathPolyline: null,
         manualMetrics: { totalDistanceKm: 120, estimatedDurationMinutes: 180 },
         stops: [
-          { stopId: wrongStop.id, orderIndex: 1, estimatedDurationFromOriginMinutes: 60, distanceFromOriginKm: 40, allowPickup: true, allowDropoff: true },
-          { stopId: targetStop.id, orderIndex: 2, estimatedDurationFromOriginMinutes: 120, distanceFromOriginKm: 80, allowPickup: true, allowDropoff: true },
+          {
+            stopId: wrongStop.id,
+            orderIndex: 1,
+            estimatedDurationFromOriginMinutes: 60,
+            distanceFromOriginKm: 40,
+            allowPickup: true,
+            allowDropoff: true,
+          },
+          {
+            stopId: targetStop.id,
+            orderIndex: 2,
+            estimatedDurationFromOriginMinutes: 120,
+            distanceFromOriginKm: 80,
+            allowPickup: true,
+            allowDropoff: true,
+          },
         ],
       },
     }),
@@ -457,10 +610,46 @@ async function createTripResources(operator, driver, assistant) {
           decks: 1,
           aisles: [],
           seats: [
-            { seatNumber: 'A01', row: 1, col: 1, deck: 1, type: 'STANDARD', isWindow: true, isAisle: false, disabled: false },
-            { seatNumber: 'A02', row: 1, col: 2, deck: 1, type: 'STANDARD', isWindow: true, isAisle: false, disabled: false },
-            { seatNumber: 'B01', row: 2, col: 1, deck: 1, type: 'STANDARD', isWindow: true, isAisle: false, disabled: false },
-            { seatNumber: 'B02', row: 2, col: 2, deck: 1, type: 'STANDARD', isWindow: true, isAisle: false, disabled: false },
+            {
+              seatNumber: 'A01',
+              row: 1,
+              col: 1,
+              deck: 1,
+              type: 'STANDARD',
+              isWindow: true,
+              isAisle: false,
+              disabled: false,
+            },
+            {
+              seatNumber: 'A02',
+              row: 1,
+              col: 2,
+              deck: 1,
+              type: 'STANDARD',
+              isWindow: true,
+              isAisle: false,
+              disabled: false,
+            },
+            {
+              seatNumber: 'B01',
+              row: 2,
+              col: 1,
+              deck: 1,
+              type: 'STANDARD',
+              isWindow: true,
+              isAisle: false,
+              disabled: false,
+            },
+            {
+              seatNumber: 'B02',
+              row: 2,
+              col: 2,
+              deck: 1,
+              type: 'STANDARD',
+              isWindow: true,
+              isAisle: false,
+              disabled: false,
+            },
           ],
         },
         totalSeats: 4,
@@ -494,8 +683,13 @@ async function createTripResources(operator, driver, assistant) {
     'create active driver schedule',
   );
   const tripsResult = await poll(
-    () => request('GET', `/v1/operator/trips?from=${today}&to=${localDate(6)}&page=1&pageSize=20`, { token: operator.token }),
-    (result) => (result.json?.data?.items?.filter((trip) => trip.route?.routeId === route.id).length ?? 0) >= 2,
+    () =>
+      request('GET', `/v1/operator/trips?from=${today}&to=${localDate(6)}&page=1&pageSize=20`, {
+        token: operator.token,
+      }),
+    (result) =>
+      (result.json?.data?.items?.filter((trip) => trip.route?.routeId === route.id).length ?? 0) >=
+      2,
     'wait for generated real trips',
   );
   const generated = tripsResult.json.data.items
@@ -535,8 +729,14 @@ async function setCompensationPolicy(operator) {
     200,
     'set operator compensation policy',
   );
-  assert(policy.compensationRatePercent === 50 && policy.maxCompensationVnd === 30000000, 'policy values drifted');
-  assert(policy.platformDefaultPolicy && policy.effectiveForNewParcelsOnly === true, 'policy FE metadata missing');
+  assert(
+    policy.compensationRatePercent === 50 && policy.maxCompensationVnd === 30000000,
+    'policy values drifted',
+  );
+  assert(
+    policy.platformDefaultPolicy && policy.effectiveForNewParcelsOnly === true,
+    'policy FE metadata missing',
+  );
   pass('operator compensation policy read model', `v${policy.policyVersion ?? policy.version}`);
   return policy;
 }
@@ -583,12 +783,21 @@ async function quoteParcel(sender, trip) {
   return quote;
 }
 
-async function createParcel(sender, recipient, trip, quote, label, declaredValueVnd) {
+async function createParcel(
+  sender,
+  recipient,
+  trip,
+  quote,
+  label,
+  declaredValueVnd,
+  dropoffStopId = trip.targetStopId,
+  bookingId = null,
+) {
   const key = randomUUID();
   const body = {
     tripId: trip.sourceTripId,
-    dropoffStopId: trip.targetStopId,
-    bookingId: null,
+    dropoffStopId,
+    bookingId,
     itemName: `Parcel ${label} ${runTag}`,
     description: `Parcel Reliability ${label} live E2E`,
     sizeCategory: quote.estimatedSizeCategory,
@@ -619,8 +828,42 @@ async function createParcel(sender, recipient, trip, quote, label, declaredValue
   return { ...created, label, declaredValueVnd };
 }
 
+async function createConfirmedBooking(sender, trip) {
+  const booking = apiData(
+    await request('POST', '/v1/bookings', {
+      token: sender.token,
+      key: randomUUID(),
+      body: {
+        tripId: trip.sourceTripId,
+        pickup: { stationId: trip.originStationId },
+        dropoff: { stationId: trip.destinationStationId },
+        shuttlePickup: null,
+        shuttleDropoff: null,
+        seats: [{ seatNumber: 'A01' }],
+        voucherCode: null,
+        paymentMethod: 'WALLET',
+        paymentReturnMode: null,
+      },
+    }),
+    201,
+    'create wallet-paid Booking for linked Parcel',
+  );
+  const confirmed = await poll(
+    () => request('GET', `/v1/bookings/${booking.bookingId}`, { token: sender.token }),
+    (result) => result.json?.data?.status === 'CONFIRMED',
+    'wait Booking confirmation before attaching Parcel',
+  );
+  assert(confirmed.status === 200, 'confirmed Booking could not be read');
+  pass('real Booking confirmed and ready for Parcel attachment', booking.bookingId);
+  return booking;
+}
+
 async function parcelDetail(parcelId, token) {
-  return apiData(await request('GET', `/v1/parcels/${parcelId}`, { token }), 200, `get Parcel ${parcelId}`);
+  return apiData(
+    await request('GET', `/v1/parcels/${parcelId}`, { token }),
+    200,
+    `get Parcel ${parcelId}`,
+  );
 }
 
 async function waitParcelStatus(parcelId, token, expected) {
@@ -652,7 +895,10 @@ async function payAndCheckIn(parcel, sender, assistant, trip, shouldLoad) {
     200,
     `check-in ${parcel.label}`,
   );
-  assert(checkedIn.parcelState && checkedIn.currentCustody && Array.isArray(checkedIn.availableActions), `${parcel.label}: screen-ready mutation response missing`);
+  assert(
+    checkedIn.parcelState && checkedIn.currentCustody && Array.isArray(checkedIn.availableActions),
+    `${parcel.label}: screen-ready mutation response missing`,
+  );
   const reweighed = apiData(
     await request('POST', `/v1/assistant/parcels/${parcel.parcelId}/reweigh`, {
       token: assistant.token,
@@ -674,7 +920,10 @@ async function payAndCheckIn(parcel, sender, assistant, trip, shouldLoad) {
     );
     await waitParcelStatus(parcel.parcelId, sender.token, 'READY_TO_LOAD');
   } else {
-    assert(reweighed.status === 'READY_TO_LOAD', `${parcel.label}: unexpected reweigh status ${reweighed.status}`);
+    assert(
+      reweighed.status === 'READY_TO_LOAD',
+      `${parcel.label}: unexpected reweigh status ${reweighed.status}`,
+    );
   }
   if (shouldLoad) {
     const loaded = apiData(
@@ -695,12 +944,18 @@ async function payAndCheckIn(parcel, sender, assistant, trip, shouldLoad) {
 
 async function beginTrip(operator, driver, tripId) {
   apiData(
-    await request('POST', `/v1/operator/trips/${tripId}/boarding`, { token: operator.token, key: randomUUID() }),
+    await request('POST', `/v1/operator/trips/${tripId}/boarding`, {
+      token: operator.token,
+      key: randomUUID(),
+    }),
     200,
     `start boarding ${tripId}`,
   );
   apiData(
-    await request('POST', `/v1/driver/trips/${tripId}/start`, { token: driver.token, key: randomUUID() }),
+    await request('POST', `/v1/driver/trips/${tripId}/start`, {
+      token: driver.token,
+      key: randomUUID(),
+    }),
     200,
     `start trip ${tripId}`,
   );
@@ -708,7 +963,10 @@ async function beginTrip(operator, driver, tripId) {
 
 async function arriveStop(driver, tripId, stopId) {
   return apiData(
-    await request('POST', `/v1/driver/trips/${tripId}/stops/${stopId}/arrive`, { token: driver.token, key: randomUUID() }),
+    await request('POST', `/v1/driver/trips/${tripId}/stops/${stopId}/arrive`, {
+      token: driver.token,
+      key: randomUUID(),
+    }),
     200,
     `arrive stop ${stopId}`,
   );
@@ -716,7 +974,10 @@ async function arriveStop(driver, tripId, stopId) {
 
 async function departStop(driver, tripId, stopId) {
   return apiData(
-    await request('POST', `/v1/driver/trips/${tripId}/stops/${stopId}/depart`, { token: driver.token, key: randomUUID() }),
+    await request('POST', `/v1/driver/trips/${tripId}/stops/${stopId}/depart`, {
+      token: driver.token,
+      key: randomUUID(),
+    }),
     200,
     `depart stop ${stopId}`,
   );
@@ -732,7 +993,10 @@ async function deliverAndConfirm(parcel, assistant, recipient) {
     200,
     `deliver ${parcel.label}`,
   );
-  assert(delivered.parcelState && delivered.availableActions, `${parcel.label}: deliver mutation screen model missing`);
+  assert(
+    delivered.parcelState && delivered.availableActions,
+    `${parcel.label}: deliver mutation screen model missing`,
+  );
   // Delivery tokens are deliberately stored only as SHA-256 hashes. Exercise the documented
   // crew verification fallback instead of weakening production token storage for this test.
   apiData(
@@ -747,56 +1011,145 @@ async function deliverAndConfirm(parcel, assistant, recipient) {
   await waitParcelStatus(parcel.parcelId, recipient.token, 'DELIVERY_CONFIRMED');
 }
 
-async function createLostClaim(parcel, sender, operator, provenLossVnd) {
+async function createLostClaim(
+  parcel,
+  sender,
+  operator,
+  provenLossVnd,
+  { addEvidence = true, expireClaimWindow = false } = {},
+) {
+  const forbiddenOperationalIncident = await request(
+    'POST',
+    `/v1/parcels/${parcel.parcelId}/incidents`,
+    {
+      token: sender.token,
+      key: randomUUID(),
+      body: {
+        incidentType: 'MISSING',
+        description: `Forbidden operational incident ${parcel.label}`,
+        evidenceUrls: [],
+      },
+    },
+  );
+  expectError(
+    forbiddenOperationalIncident,
+    422,
+    'PARCEL_INCIDENT_TYPE_NOT_REPORTABLE',
+    `Passenger cannot self-report MISSING for ${parcel.label}`,
+  );
   const incident = apiData(
     await request('POST', `/v1/parcels/${parcel.parcelId}/incidents`, {
       token: sender.token,
       key: randomUUID(),
-      body: { incidentType: 'MISSING', description: `Lost claim ${parcel.label}`, evidenceUrls: [`${evidenceBase}/${parcel.label}.jpg`] },
+      body: {
+        incidentType: 'DELIVERY_NOT_RECEIVED',
+        description: `Lost claim ${parcel.label}`,
+        evidenceUrls: [`${evidenceBase}/${parcel.label}.jpg`],
+      },
     }),
     201,
     `report incident ${parcel.label}`,
   );
-  parcelSql(`UPDATE vietride_parcel.parcel_incidents SET search_deadline=now()-interval '1 minute' WHERE id='${incident.incidentId}';`);
+  parcelSql(
+    `UPDATE vietride_parcel.parcel_incidents SET search_deadline=now()-interval '1 minute' WHERE id='${incident.incidentId}';`,
+  );
   const lost = apiData(
     await request('POST', `/v1/operator/parcel-incidents/${incident.incidentId}/declare-lost`, {
       token: operator.token,
       key: randomUUID(),
-      body: { note: 'Search SLA exhausted by E2E test clock', resolutionCode: 'NOT_FOUND_AFTER_SEARCH' },
+      body: {
+        note: 'Search SLA exhausted by E2E test clock',
+        resolutionCode: 'NOT_FOUND_AFTER_SEARCH',
+      },
     }),
     200,
     `declare lost ${parcel.label}`,
   );
-  assert(lost.incident?.status === 'LOST_CONFIRMED', `${parcel.label}: incident not LOST_CONFIRMED`);
-  const outstandingTasks = Number(parcelSql(`SELECT count(*) FROM vietride_parcel.parcel_search_tasks WHERE incident_id='${incident.incidentId}' AND status IN ('OPEN','IN_PROGRESS');`));
-  const failedTasks = Number(parcelSql(`SELECT count(*) FROM vietride_parcel.parcel_search_tasks WHERE incident_id='${incident.incidentId}' AND status='FAILED' AND completed_at IS NOT NULL;`));
-  const lostLegs = Number(parcelSql(`SELECT count(*) FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcel.parcelId}' AND status='LOST' AND ended_at IS NOT NULL;`));
-  assert(outstandingTasks === 0 && failedTasks > 0, `${parcel.label}: lost incident left non-terminal search tasks`);
+  assert(
+    lost.incident?.status === 'LOST_CONFIRMED',
+    `${parcel.label}: incident not LOST_CONFIRMED`,
+  );
+  const outstandingTasks = Number(
+    parcelSql(
+      `SELECT count(*) FROM vietride_parcel.parcel_search_tasks WHERE incident_id='${incident.incidentId}' AND status IN ('OPEN','IN_PROGRESS');`,
+    ),
+  );
+  const failedTasks = Number(
+    parcelSql(
+      `SELECT count(*) FROM vietride_parcel.parcel_search_tasks WHERE incident_id='${incident.incidentId}' AND status='FAILED' AND completed_at IS NOT NULL;`,
+    ),
+  );
+  const lostLegs = Number(
+    parcelSql(
+      `SELECT count(*) FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcel.parcelId}' AND status='LOST' AND ended_at IS NOT NULL;`,
+    ),
+  );
+  assert(
+    outstandingTasks === 0 && failedTasks > 0,
+    `${parcel.label}: lost incident left non-terminal search tasks`,
+  );
   assert(lostLegs === 1, `${parcel.label}: active/planned transit leg was not marked LOST`);
+  if (expireClaimWindow) {
+    parcelSql(
+      `UPDATE vietride_parcel.parcel_incidents SET resolved_at=now()-interval '31 days' WHERE id='${incident.incidentId}';`,
+    );
+    const expired = await request('POST', `/v1/parcels/${parcel.parcelId}/claims`, {
+      token: sender.token,
+      key: randomUUID(),
+    });
+    expectError(
+      expired,
+      409,
+      'PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED',
+      `claim window expiry enforced for ${parcel.label}`,
+    );
+    return { incident, claim: null, provenLossVnd: null };
+  }
   const claim = apiData(
-    await request('POST', `/v1/parcels/${parcel.parcelId}/claims`, { token: sender.token, key: randomUUID() }),
+    await request('POST', `/v1/parcels/${parcel.parcelId}/claims`, {
+      token: sender.token,
+      key: randomUUID(),
+    }),
     201,
     `submit claim ${parcel.label}`,
   );
+  if (!addEvidence) {
+    assert(
+      claim.evidence?.length === 0,
+      `${parcel.label}: no-proof claim unexpectedly contains evidence`,
+    );
+    return { incident, claim, provenLossVnd: null };
+  }
   const withEvidence = apiData(
     await request('POST', `/v1/parcels/${parcel.parcelId}/claims/${claim.claimId}/evidence`, {
       token: sender.token,
       key: randomUUID(),
-      body: { evidenceType: 'INVOICE', reference: `${evidenceBase}/${parcel.label}-invoice.pdf`, note: `Invoice ${provenLossVnd}` },
+      body: {
+        evidenceType: 'INVOICE',
+        reference: `${evidenceBase}/${parcel.label}-invoice.pdf`,
+        note: `Invoice ${provenLossVnd}`,
+      },
     }),
     201,
     `add claim evidence ${parcel.label}`,
   );
-  assert(withEvidence.evidence?.length >= 1 && Array.isArray(withEvidence.availableActions), `${parcel.label}: evidence mutation did not return updated claim`);
+  assert(
+    withEvidence.evidence?.length >= 1 && Array.isArray(withEvidence.availableActions),
+    `${parcel.label}: evidence mutation did not return updated claim`,
+  );
   return { incident, claim: withEvidence, provenLossVnd };
 }
 
 async function main() {
-  assert(env.SYSTEM_ADMIN_BOOTSTRAP_EMAIL && env.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD, 'System admin bootstrap credentials are missing');
-  const systemLogin = await request('POST', '/v1/auth/login', {
-    body: { email: env.SYSTEM_ADMIN_BOOTSTRAP_EMAIL, password: env.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD },
-  });
-  const system = { token: apiData(systemLogin, 200, 'login system admin').accessToken };
+  assert(
+    env.SYSTEM_ADMIN_BOOTSTRAP_EMAIL && env.SYSTEM_ADMIN_BOOTSTRAP_PASSWORD,
+    'System admin bootstrap credentials are missing',
+  );
+  const systemToken = (await loginBootstrapAdmin()).accessToken;
+  const systemClaims = JSON.parse(
+    Buffer.from(systemToken.split('.')[1], 'base64url').toString('utf8'),
+  );
+  const system = { token: systemToken, userId: systemClaims.sub };
   pass('system admin authenticated through Gateway');
 
   const sender = await createPassenger('sender', 90);
@@ -805,51 +1158,169 @@ async function main() {
   const foreignOperator = await createOperator(system.token, 'B', 96);
   const driver = await createOperatorUser(operator, 'DRIVER', 'driver', 94);
   const assistant = await createOperatorUser(operator, 'ASSISTANT', 'assistant', 98);
-  pass('real users/operator created and password login verified', `operator=${operator.operatorId}`);
+  pass(
+    'real users/operator created and password login verified',
+    `operator=${operator.operatorId}`,
+  );
 
   await enableParcelSubscription(system.token, operator);
-  await topUpPassenger(sender, 50_000_000);
+  await topUpPassenger(sender, 100_000_000);
   const trip = await createTripResources(operator, driver, assistant);
   state.resources.trip = trip;
   await setCompensationPolicy(operator);
   await createRouteFare(operator, trip);
   const quote = await quoteParcel(sender, trip);
+  const booking = await createConfirmedBooking(sender, trip);
 
   const parcels = {};
-  for (const [label, declaredValueVnd, shouldLoad] of [
+  for (const [label, declaredValueVnd, shouldLoad, dropoffStopId, bookingId] of [
     ['happy', 1_000_000, true],
+    ['bookingLinked', 1_500_000, true, trip.targetStopId, booking.bookingId],
     ['wrongStop', 2_000_000, true],
     ['missing', 3_000_000, true],
     ['recovered', 3_500_000, true],
+    ['destinationUnresolved', 2_500_000, true, null],
     ['claim12m', 12_000_000, false],
+    ['claimNoProof', 20_000_000, false],
+    ['claimExpired', 5_000_000, false],
     ['claim80m', 80_000_000, false],
     ['identityMismatch', 4_000_000, false],
   ]) {
-    parcels[label] = await createParcel(sender, recipient, trip, quote, label, declaredValueVnd);
+    parcels[label] = await createParcel(
+      sender,
+      recipient,
+      trip,
+      quote,
+      label,
+      declaredValueVnd,
+      dropoffStopId,
+      bookingId,
+    );
     await payAndCheckIn(parcels[label], sender, assistant, trip, shouldLoad);
   }
-  pass('seven real Parcels created, wallet-paid and physically checked in');
+  const linkedBookingCount = Number(
+    parcelSql(
+      `SELECT count(*) FROM vietride_parcel.parcels WHERE id='${parcels.bookingLinked.parcelId}' AND booking_id='${booking.bookingId}';`,
+    ),
+  );
+  assert(linkedBookingCount === 1, 'Booking-linked Parcel did not persist bookingId');
+  pass('eleven real Parcels created, including Booking-linked and parcel-only flows');
 
-  const senderList = apiData(await request('GET', '/v1/parcels/sent?page=1&pageSize=20', { token: sender.token }), 200, 'Passenger sent screen');
+  const senderList = apiData(
+    await request('GET', '/v1/parcels/sent?page=1&pageSize=20', { token: sender.token }),
+    200,
+    'Passenger sent screen',
+  );
   const senderRow = senderList.items.find((item) => item.parcelId === parcels.happy.parcelId);
-  assert(senderRow?.operator?.operatorId === operator.operatorId && senderRow.dropoffLocation && senderRow.reliability, 'Passenger sent row is not screen-ready');
-  const receivedList = apiData(await request('GET', '/v1/parcels/received?page=1&pageSize=20', { token: recipient.token }), 200, 'Passenger received screen');
-  assert(receivedList.items.some((item) => item.parcelId === parcels.happy.parcelId), 'recipient logical link missing from received list');
+  assert(
+    senderRow?.operator?.operatorId === operator.operatorId &&
+      senderRow.dropoffLocation &&
+      senderRow.reliability,
+    'Passenger sent row is not screen-ready',
+  );
+  const receivedList = apiData(
+    await request('GET', '/v1/parcels/received?page=1&pageSize=20', { token: recipient.token }),
+    200,
+    'Passenger received screen',
+  );
+  assert(
+    receivedList.items.some((item) => item.parcelId === parcels.happy.parcelId),
+    'recipient logical link missing from received list',
+  );
   const detail = await parcelDetail(parcels.happy.parcelId, sender.token);
-  assert(detail.operator && detail.trip && detail.dropoffLocation && detail.compensationPolicySnapshot && detail.reliabilitySummary && Array.isArray(detail.availableActions), 'Passenger Parcel detail is not screen-ready');
+  assert(
+    detail.operator &&
+      detail.trip &&
+      detail.dropoffLocation &&
+      detail.compensationPolicySnapshot &&
+      detail.reliabilitySummary &&
+      Array.isArray(detail.availableActions),
+    'Passenger Parcel detail is not screen-ready',
+  );
   pass('Passenger sent/received/detail require one request per screen');
 
   const manifest = apiData(
-    await request('GET', `/v1/assistant/trips/${trip.sourceTripId}/parcels?page=1&pageSize=50`, { token: assistant.token }),
+    await request('GET', `/v1/assistant/trips/${trip.sourceTripId}/parcels?page=1&pageSize=50`, {
+      token: assistant.token,
+    }),
     200,
     'Driver manifest screen',
   );
   assert(
-    manifest.tripContext?.orderedStops?.length === 2 && manifest.summary && manifest.pagination && manifest.items.length >= 4,
+    manifest.tripContext?.orderedStops?.length === 2 &&
+      manifest.summary &&
+      manifest.pagination &&
+      manifest.items.length >= 4,
     `Driver manifest screen model incomplete: ${JSON.stringify(manifest)}`,
   );
-  assert(manifest.items.every((item) => item.dropoffLocation && item.currentCustody && item.identityCheckHints && Array.isArray(item.availableActions)), 'Driver manifest item enrichment incomplete');
+  assert(
+    manifest.items.every(
+      (item) =>
+        item.dropoffLocation &&
+        item.currentCustody &&
+        item.identityCheckHints &&
+        Array.isArray(item.availableActions),
+    ),
+    'Driver manifest item enrichment incomplete',
+  );
   pass('Driver manifest screen-ready in one request', `${manifest.items.length} items`);
+
+  const custodyCandidateBefore = await parcelDetail(parcels.claim12m.parcelId, sender.token);
+  const acceptedCustodyScan = apiData(
+    await request('POST', `/v1/assistant/parcels/${parcels.claim12m.parcelId}/custody-scan`, {
+      token: assistant.token,
+      key: randomUUID(),
+      body: {
+        parcelCode: parcels.claim12m.parcelCode,
+        eventType: 'ACCEPTED',
+        actualLocationType: 'ORIGIN_STATION',
+        actualLocationId: trip.originStationId,
+        locationSnapshot: `ORIGIN_STATION:${trip.originStationId}`,
+        evidenceReferences: [`${evidenceBase}/accepted-origin.jpg`],
+        reason: 'E2E physical custody confirmation at the Trip origin',
+      },
+    }),
+    200,
+    'custody scan at the authoritative origin',
+  );
+  const custodyCandidateAfter = await parcelDetail(parcels.claim12m.parcelId, sender.token);
+  assert(
+    acceptedCustodyScan.createdCustodyEvent?.eventType === 'ACCEPTED' &&
+      acceptedCustodyScan.currentCustody?.lastConfirmedLocation?.id === trip.originStationId &&
+      custodyCandidateAfter.status === custodyCandidateBefore.status,
+    'valid custody scan did not preserve the Parcel business status',
+  );
+  pass('custody scan records physical trace without changing business status');
+
+  const arbitraryCustodyLocation = await request(
+    'POST',
+    `/v1/assistant/parcels/${parcels.claim12m.parcelId}/custody-scan`,
+    {
+      token: assistant.token,
+      key: randomUUID(),
+      body: {
+        parcelCode: parcels.claim12m.parcelCode,
+        eventType: 'ACCEPTED',
+        actualLocationType: 'ORIGIN_STATION',
+        actualLocationId: trip.destinationStationId,
+        locationSnapshot: `INVALID_ORIGIN:${trip.destinationStationId}`,
+        evidenceReferences: [],
+        reason: 'E2E arbitrary location rejection probe',
+      },
+    },
+  );
+  const arbitraryCustodyError = expectError(
+    arbitraryCustodyLocation,
+    409,
+    'PARCEL_CUSTODY_LOCATION_MISMATCH',
+    'custody scan rejects an arbitrary physical location',
+  );
+  assert(
+    ['expectedLocationId', 'actualLocationId', 'requiredAction'].every((field) =>
+      hasErrorField(arbitraryCustodyError, field),
+    ),
+    `custody location mismatch fields missing: ${JSON.stringify(arbitraryCustodyError.fields)}`,
+  );
 
   const noQr = await request('POST', `/v1/assistant/parcels/${parcels.happy.parcelId}/unload`, {
     token: assistant.token,
@@ -865,47 +1336,117 @@ async function main() {
   const wrongQr = await request('POST', `/v1/assistant/parcels/${parcels.happy.parcelId}/unload`, {
     token: assistant.token,
     key: randomUUID(),
-    body: { parcelCode: parcels.missing.parcelCode, actualLocation: { kind: 'ROUTE_STOP', id: trip.wrongStopId }, photoUrls: [] },
+    body: {
+      parcelCode: parcels.missing.parcelCode,
+      actualLocation: { kind: 'ROUTE_STOP', id: trip.wrongStopId },
+      photoUrls: [],
+    },
   });
-  const wrongQrError = expectError(wrongQr, 409, 'SCAN_IDENTITY_MISMATCH', 'QR of another Parcel rejected');
-  assert(hasErrorField(wrongQrError, 'requiredAction'), 'QR mismatch did not include structured fields');
-  const wrongLocation = await request('POST', `/v1/assistant/parcels/${parcels.happy.parcelId}/unload`, {
-    token: assistant.token,
-    key: randomUUID(),
-    body: { parcelCode: parcels.happy.parcelCode, actualLocation: { kind: 'ROUTE_STOP', id: trip.wrongStopId }, photoUrls: [] },
-  });
-  const wrongLocationError = expectError(wrongLocation, 409, 'PARCEL_CUSTODY_LOCATION_MISMATCH', 'correct QR at wrong stop rejected');
-  assert(
-    ['expectedStop', 'actualStop', 'requiredAction'].every((field) => hasErrorField(wrongLocationError, field)),
-    `location mismatch structured fields missing: ${JSON.stringify(wrongLocationError.fields)}`,
+  const wrongQrError = expectError(
+    wrongQr,
+    409,
+    'SCAN_IDENTITY_MISMATCH',
+    'QR of another Parcel rejected',
   );
-
-  const identityMismatchAction = apiData(
-    await request('POST', `/v1/assistant/parcels/${parcels.identityMismatch.parcelId}/custody-exception`, {
+  assert(
+    hasErrorField(wrongQrError, 'requiredAction'),
+    'QR mismatch did not include structured fields',
+  );
+  const wrongLocation = await request(
+    'POST',
+    `/v1/assistant/parcels/${parcels.happy.parcelId}/unload`,
+    {
       token: assistant.token,
       key: randomUUID(),
       body: {
-        incidentType: 'PACKAGE_IDENTITY_MISMATCH',
-        actualLocationType: 'VEHICLE',
-        actualLocationId: trip.vehicleId,
-        locationSnapshot: `VEHICLE:${trip.vehicleId}`,
-        temporaryExceptionTag: `TMP-ID-${runTag}`,
-        description: 'Physical package does not match label photo and weight',
-        observedWeightKg: 7,
-        evidenceUrls: [`${evidenceBase}/identity-mismatch.jpg`],
-        reason: 'QR label belongs to another physical package',
-        supervisorApprovalUserId: operator.adminUserId,
+        parcelCode: parcels.happy.parcelCode,
+        actualLocation: { kind: 'ROUTE_STOP', id: trip.wrongStopId },
+        photoUrls: [],
       },
-    }),
-    200,
+    },
+  );
+  const wrongLocationError = expectError(
+    wrongLocation,
+    409,
+    'PARCEL_CUSTODY_LOCATION_MISMATCH',
+    'correct QR at wrong stop rejected',
+  );
+  assert(
+    ['expectedStop', 'actualStop', 'requiredAction'].every((field) =>
+      hasErrorField(wrongLocationError, field),
+    ),
+    `location mismatch structured fields missing: ${JSON.stringify(wrongLocationError.fields)}`,
+  );
+
+  const identityMismatchReport = apiData(
+    await request(
+      'POST',
+      `/v1/assistant/parcels/${parcels.identityMismatch.parcelId}/custody-exception`,
+      {
+        token: assistant.token,
+        key: randomUUID(),
+        body: {
+          incidentType: 'PACKAGE_IDENTITY_MISMATCH',
+          actualLocationType: 'VEHICLE',
+          actualLocationId: trip.vehicleId,
+          locationSnapshot: `VEHICLE:${trip.vehicleId}`,
+          temporaryExceptionTag: `TMP-ID-${runTag}`,
+          description: 'Physical package does not match label photo and weight',
+          observedWeightKg: 7,
+          evidenceUrls: [`${evidenceBase}/identity-mismatch.jpg`],
+          reason: 'QR label belongs to another physical package',
+        },
+      },
+    ),
+    202,
     'report package identity mismatch',
   );
   assert(
-    identityMismatchAction.activeIncident?.type === 'PACKAGE_IDENTITY_MISMATCH',
-    `identity mismatch incident type drifted: ${JSON.stringify(identityMismatchAction)}`,
+    identityMismatchReport.incidentType === 'PACKAGE_IDENTITY_MISMATCH' &&
+      identityMismatchReport.status === 'PENDING_APPROVAL' &&
+      identityMismatchReport.incidentStatus === 'OPEN' &&
+      identityMismatchReport.searchDeadline == null &&
+      identityMismatchReport.approvedCustodyEventId == null,
+    `identity mismatch report started search before approval: ${JSON.stringify(identityMismatchReport)}`,
   );
 
-  const wrongStopAction = apiData(
+  const foreignApproval = await request(
+    'POST',
+    `/v1/operator/parcel-incidents/${identityMismatchReport.incidentId}/custody-exception-decision`,
+    {
+      token: foreignOperator.token,
+      key: randomUUID(),
+      body: { decision: 'APPROVE', note: 'Cross-tenant approval must be hidden' },
+    },
+  );
+  expectError(
+    foreignApproval,
+    404,
+    'PARCEL_CUSTODY_EXCEPTION_REQUEST_NOT_FOUND',
+    'cross-tenant custody approval hidden',
+  );
+  const identityMismatchApproved = apiData(
+    await request(
+      'POST',
+      `/v1/operator/parcel-incidents/${identityMismatchReport.incidentId}/custody-exception-decision`,
+      {
+        token: operator.token,
+        key: randomUUID(),
+        body: { decision: 'APPROVE', note: 'Operator verified package identity mismatch evidence' },
+      },
+    ),
+    200,
+    'Operator approves package identity mismatch',
+  );
+  assert(
+    identityMismatchApproved.status === 'APPROVED' &&
+      identityMismatchApproved.incidentStatus === 'SEARCHING' &&
+      identityMismatchApproved.searchDeadline &&
+      identityMismatchApproved.approvedCustodyEventId,
+    `Operator approval did not start search: ${JSON.stringify(identityMismatchApproved)}`,
+  );
+
+  const wrongStopReport = apiData(
     await request('POST', `/v1/assistant/parcels/${parcels.wrongStop.parcelId}/custody-exception`, {
       token: assistant.token,
       key: randomUUID(),
@@ -917,16 +1458,42 @@ async function main() {
         temporaryExceptionTag: null,
         description: 'Parcel was physically placed at the wrong stop',
         observedWeightKg: 2,
-        evidenceUrls: [`${evidenceBase}/wrong-stop.jpg`],
+        evidenceUrls: [],
         reason: 'Crew unloaded outside the normal QR flow',
-        supervisorApprovalUserId: operator.adminUserId,
       },
     }),
-    200,
+    202,
     'record physical wrong-stop exception',
   );
-  const wrongIncident = wrongStopAction.activeIncident;
-  assert(wrongIncident?.status === 'SEARCHING', `wrong-stop incident did not enter SEARCHING: ${JSON.stringify(wrongStopAction)}`);
+  assert(
+    wrongStopReport.status === 'PENDING_APPROVAL' &&
+      wrongStopReport.incidentStatus === 'OPEN' &&
+      wrongStopReport.searchDeadline == null,
+    `wrong-stop report incorrectly started search: ${JSON.stringify(wrongStopReport)}`,
+  );
+  const wrongStopApproved = apiData(
+    await request(
+      'POST',
+      `/v1/crew/parcels/${parcels.wrongStop.parcelId}/custody-exception-decision`,
+      {
+        token: driver.token,
+        key: randomUUID(),
+        body: { decision: 'APPROVE', note: 'Assigned Driver confirmed the Assistant report' },
+      },
+    ),
+    200,
+    'assigned Driver approves wrong-stop report',
+  );
+  assert(
+    wrongStopApproved.status === 'APPROVED' &&
+      wrongStopApproved.incidentStatus === 'SEARCHING' &&
+      wrongStopApproved.reviewedByUserId === driver.userId,
+    `Driver approval identity/status drifted: ${JSON.stringify(wrongStopApproved)}`,
+  );
+  const wrongIncident = {
+    incidentId: wrongStopApproved.incidentId,
+    status: wrongStopApproved.incidentStatus,
+  };
 
   const unidentified = apiData(
     await request('POST', '/v1/stations/parcels/unidentified', {
@@ -946,9 +1513,26 @@ async function main() {
     201,
     'register unidentified package',
   );
-  const unidentifiedList = apiData(await request('GET', '/v1/operator/unidentified-packages?page=1&pageSize=20', { token: operator.token }), 200, 'list unidentified packages');
-  assert(unidentifiedList.items.some((item) => item.packageId === unidentified.packageId), 'unidentified package missing from operator queue');
-  const candidates = apiData(await request('GET', `/v1/operator/unidentified-packages/${unidentified.packageId}/match-candidates`, { token: operator.token }), 200, 'unidentified match candidates');
+  const unidentifiedList = apiData(
+    await request('GET', '/v1/operator/unidentified-packages?page=1&pageSize=20', {
+      token: operator.token,
+    }),
+    200,
+    'list unidentified packages',
+  );
+  assert(
+    unidentifiedList.items.some((item) => item.packageId === unidentified.packageId),
+    'unidentified package missing from operator queue',
+  );
+  const candidates = apiData(
+    await request(
+      'GET',
+      `/v1/operator/unidentified-packages/${unidentified.packageId}/match-candidates`,
+      { token: operator.token },
+    ),
+    200,
+    'unidentified match candidates',
+  );
   assert(Array.isArray(candidates.items ?? candidates), 'unidentified candidates response invalid');
   const matched = apiData(
     await request('POST', `/v1/stations/parcels/unidentified/${unidentified.packageId}/match`, {
@@ -959,7 +1543,11 @@ async function main() {
     200,
     'supervisor matches unidentified package',
   );
-  assert(matched.matchedParcelId === parcels.identityMismatch.parcelId || matched.parcelId === parcels.identityMismatch.parcelId, 'unidentified package match failed');
+  assert(
+    matched.matchedParcelId === parcels.identityMismatch.parcelId ||
+      matched.parcelId === parcels.identityMismatch.parcelId,
+    'unidentified package match failed',
+  );
   pass('unidentified package queue/candidates/manual match');
 
   apiData(
@@ -978,13 +1566,22 @@ async function main() {
     'mark wrong-stop Parcel found',
   );
   const options = apiData(
-    await request('GET', `/v1/operator/parcel-incidents/${wrongIncident.incidentId}/forwarding-options`, { token: operator.token }),
+    await request(
+      'GET',
+      `/v1/operator/parcel-incidents/${wrongIncident.incidentId}/forwarding-options`,
+      { token: operator.token },
+    ),
     200,
     'get forwarding options',
   );
   const optionItems = options.items ?? options;
-  const targetOption = optionItems.find((item) => item.trip?.tripId === trip.targetTripId || item.tripId === trip.targetTripId);
-  assert(targetOption?.canReserve, `target forwarding trip missing/unreservable: ${JSON.stringify(optionItems)}`);
+  const targetOption = optionItems.find(
+    (item) => item.trip?.tripId === trip.targetTripId || item.tripId === trip.targetTripId,
+  );
+  assert(
+    targetOption?.canReserve,
+    `target forwarding trip missing/unreservable: ${JSON.stringify(optionItems)}`,
+  );
   const forwarded = apiData(
     await request('POST', `/v1/operator/parcel-incidents/${wrongIncident.incidentId}/forward`, {
       token: operator.token,
@@ -995,10 +1592,10 @@ async function main() {
     'plan forwarding leg',
   );
   assert(
-    forwarded.incident?.status === 'FORWARDING'
-      && forwarded.forwardingSummary
-      && forwarded.forwardingOperation?.targetTrip?.tripId === trip.targetTripId
-      && forwarded.forwardingOperation?.cargoTransferStatus === 'AWAITING_CREW_CONFIRMATION',
+    forwarded.incident?.status === 'FORWARDING' &&
+      forwarded.forwardingSummary &&
+      forwarded.forwardingOperation?.targetTrip?.tripId === trip.targetTripId &&
+      forwarded.forwardingOperation?.cargoTransferStatus === 'AWAITING_CREW_CONFIRMATION',
     `forward response lacks forwarding operation detail: ${JSON.stringify(forwarded)}`,
   );
   const confirmedTransfer = apiData(
@@ -1010,167 +1607,622 @@ async function main() {
     200,
     'crew confirms forwarding transfer',
   );
-  assert(confirmedTransfer.tripId === trip.targetTripId, 'forwarding transfer did not activate target trip');
-  assert(Number(parcelSql(`SELECT count(*) FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.wrongStop.parcelId}';`)) === 2, 'forwarding did not preserve old leg and create a new leg');
+  assert(
+    confirmedTransfer.tripId === trip.targetTripId,
+    'forwarding transfer did not activate target trip',
+  );
+  assert(
+    Number(
+      parcelSql(
+        `SELECT count(*) FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.wrongStop.parcelId}';`,
+      ),
+    ) === 2,
+    'forwarding did not preserve old leg and create a new leg',
+  );
   pass('wrong-stop found → forwarding option → new leg → crew handoff');
 
   await departStop(driver, trip.sourceTripId, trip.wrongStopId);
-  const staleUnload = await request('POST', `/v1/assistant/parcels/${parcels.happy.parcelId}/unload`, {
-    token: assistant.token,
-    key: randomUUID(),
-    body: { parcelCode: parcels.happy.parcelCode, actualLocation: { kind: 'ROUTE_STOP', id: trip.wrongStopId }, photoUrls: [] },
-  });
-  expectError(staleUnload, 409, 'PARCEL_CUSTODY_LOCATION_MISMATCH', 'unload at already-departed stop rejected');
+  const staleUnload = await request(
+    'POST',
+    `/v1/assistant/parcels/${parcels.happy.parcelId}/unload`,
+    {
+      token: assistant.token,
+      key: randomUUID(),
+      body: {
+        parcelCode: parcels.happy.parcelCode,
+        actualLocation: { kind: 'ROUTE_STOP', id: trip.wrongStopId },
+        photoUrls: [],
+      },
+    },
+  );
+  expectError(
+    staleUnload,
+    409,
+    'PARCEL_CUSTODY_LOCATION_MISMATCH',
+    'unload at already-departed stop rejected',
+  );
   await arriveStop(driver, trip.sourceTripId, trip.targetStopId);
   const unloadedHappy = apiData(
     await request('POST', `/v1/assistant/parcels/${parcels.happy.parcelId}/unload`, {
       token: assistant.token,
       key: randomUUID(),
-      body: { parcelCode: parcels.happy.parcelCode, actualLocation: { kind: 'ROUTE_STOP', id: trip.targetStopId }, photoUrls: [] },
+      body: {
+        parcelCode: parcels.happy.parcelCode,
+        actualLocation: { kind: 'ROUTE_STOP', id: trip.targetStopId },
+        photoUrls: [],
+      },
     }),
     200,
     'unload happy Parcel at target stop',
   );
-  assert(unloadedHappy.parcelState?.status === 'UNLOADED' && unloadedHappy.createdCustodyEvent?.eventType === 'UNLOADED', 'unload mutation response incomplete');
+  assert(
+    unloadedHappy.parcelState?.status === 'UNLOADED' &&
+      unloadedHappy.createdCustodyEvent?.eventType === 'UNLOADED',
+    'unload mutation response incomplete',
+  );
   await deliverAndConfirm(parcels.happy, assistant, recipient);
 
-  const reconciliation = apiData(
-    await request('POST', `/v1/assistant/trips/${trip.sourceTripId}/stops/${trip.targetStopId}/reconcile`, {
-      token: assistant.token,
-      key: randomUUID(),
-      body: {
-        scannedParcelIds: [parcels.happy.parcelId],
-        manualExceptionParcelIds: [],
-        departureOverrideReason: 'Supervisor authorizes departure after vehicle/station search starts',
-        supervisorApprovalUserId: operator.adminUserId,
+  const reconciliationRequestKey = randomUUID();
+  const pendingReconciliation = apiData(
+    await request(
+      'POST',
+      `/v1/assistant/trips/${trip.sourceTripId}/stops/${trip.targetStopId}/reconcile`,
+      {
+        token: assistant.token,
+        key: reconciliationRequestKey,
+        body: {
+          scannedParcelIds: [parcels.happy.parcelId],
+          manualExceptionParcelIds: [],
+          departureOverrideReason:
+            'Supervisor authorizes departure after vehicle/station search starts',
+        },
       },
-    }),
+    ),
     200,
     'reconcile target stop',
   );
-  const unresolvedMissing = reconciliation.unresolvedParcels.find((item) => item.parcelId === parcels.missing.parcelId);
-  const unresolvedRecovered = reconciliation.unresolvedParcels.find((item) => item.parcelId === parcels.recovered.parcelId);
-  assert(reconciliation.canDepart === true && reconciliation.requiresSupervisorApproval === false, 'supervisor reconciliation override not applied');
-  assert(unresolvedMissing?.parcelCode && unresolvedMissing.expectedDropoff && unresolvedMissing.lastCustody && unresolvedMissing.incidentId && unresolvedMissing.recommendedAction, 'unresolved screen model incomplete');
-  assert(unresolvedRecovered?.incidentId, 'recoverable Parcel was not included in reconciliation incident rows');
+  assert(
+    pendingReconciliation.canDepart === false &&
+      pendingReconciliation.requiresSupervisorApproval === true &&
+      pendingReconciliation.departureOverrideRequest?.status === 'PENDING_APPROVAL',
+    `unresolved stop departed without two-step approval: ${JSON.stringify(pendingReconciliation)}`,
+  );
+  const departureApproval = apiData(
+    await request(
+      'POST',
+      `/v1/crew/parcel-stop-departure-approvals/${pendingReconciliation.departureOverrideRequest.requestId}/decision`,
+      {
+        token: driver.token,
+        key: randomUUID(),
+        body: {
+          decision: 'APPROVE',
+          note: 'Assigned Driver reviewed unresolved manifest before departure',
+        },
+      },
+    ),
+    200,
+    'Driver approves stop departure after reconciliation',
+  );
+  assert(
+    departureApproval.status === 'APPROVED' && departureApproval.reviewedByUserId === driver.userId,
+    `departure approval did not use Driver JWT identity: ${JSON.stringify(departureApproval)}`,
+  );
+  const reconciliation = apiData(
+    await request(
+      'POST',
+      `/v1/assistant/trips/${trip.sourceTripId}/stops/${trip.targetStopId}/reconcile`,
+      {
+        token: assistant.token,
+        key: randomUUID(),
+        body: {
+          scannedParcelIds: [parcels.happy.parcelId],
+          manualExceptionParcelIds: [],
+          departureOverrideReason: null,
+        },
+      },
+    ),
+    200,
+    're-read approved target stop reconciliation',
+  );
+  const unresolvedMissing = reconciliation.unresolvedParcels.find(
+    (item) => item.parcelId === parcels.missing.parcelId,
+  );
+  const unresolvedRecovered = reconciliation.unresolvedParcels.find(
+    (item) => item.parcelId === parcels.recovered.parcelId,
+  );
+  assert(
+    reconciliation.canDepart === true && reconciliation.requiresSupervisorApproval === false,
+    'supervisor reconciliation override not applied',
+  );
+  assert(
+    unresolvedMissing?.parcelCode &&
+      unresolvedMissing.expectedDropoff &&
+      unresolvedMissing.lastCustody &&
+      unresolvedMissing.incidentId &&
+      unresolvedMissing.recommendedAction,
+    'unresolved screen model incomplete',
+  );
+  assert(
+    unresolvedRecovered?.incidentId,
+    'recoverable Parcel was not included in reconciliation incident rows',
+  );
   pass('stop reconciliation returns actionable unresolved Parcel rows');
 
   const recoveredBeforeFound = apiData(
-    await request('GET', `/v1/operator/parcel-incidents/${unresolvedRecovered.incidentId}`, { token: operator.token }),
+    await request('GET', `/v1/operator/parcel-incidents/${unresolvedRecovered.incidentId}`, {
+      token: operator.token,
+    }),
     200,
     'read recoverable missing incident',
   );
-  assert(recoveredBeforeFound.searchTasks.some((task) => ['OPEN', 'IN_PROGRESS'].includes(task.status)), 'recoverable incident has no active search task');
-  apiData(
-    await request('POST', `/v1/operator/parcel-incidents/${unresolvedRecovered.incidentId}/mark-found`, {
-      token: operator.token,
-      key: randomUUID(),
-      body: {
-        actualLocationType: 'VEHICLE',
-        actualLocationId: trip.vehicleId,
-        locationSnapshot: `VEHICLE:${trip.vehicleId}`,
-        evidenceReferences: [`${evidenceBase}/recovered-on-vehicle.jpg`],
-        note: 'Found during the same-vehicle cargo sweep',
+  assert(
+    recoveredBeforeFound.searchTasks.some((task) => ['OPEN', 'IN_PROGRESS'].includes(task.status)),
+    'recoverable incident has no active search task',
+  );
+  const recoveredOnVehicle = apiData(
+    await request(
+      'POST',
+      `/v1/assistant/parcels/${parcels.recovered.parcelId}/confirm-found-on-vehicle`,
+      {
+        token: assistant.token,
+        key: randomUUID(),
+        body: {
+          incidentId: unresolvedRecovered.incidentId,
+          parcelCode: parcels.recovered.parcelCode,
+          evidenceReferences: [],
+          note: 'Assistant physically rescanned the parcel during the same-vehicle cargo sweep',
+        },
       },
-    }),
+    ),
     200,
-    'mark missing Parcel found on same vehicle',
+    'Assistant confirms missing Parcel found on source vehicle',
+  );
+  assert(
+    ['LOADED', 'IN_TRANSIT'].includes(recoveredOnVehicle.parcelState?.status),
+    `same-vehicle recovery did not restore transport status: ${JSON.stringify(recoveredOnVehicle)}`,
   );
   const recoveredAfterFound = apiData(
-    await request('GET', `/v1/operator/parcel-incidents/${unresolvedRecovered.incidentId}`, { token: operator.token }),
-    200,
-    'read found incident with terminal search tasks',
-  );
-  assert(recoveredAfterFound.incident.status === 'FOUND', 'recoverable incident did not enter FOUND');
-  assert(
-    recoveredAfterFound.searchTasks.every((task) => !['OPEN', 'IN_PROGRESS'].includes(task.status))
-      && recoveredAfterFound.searchTasks.some((task) => task.status === 'CANCELLED'),
-    `found incident left active search tasks: ${JSON.stringify(recoveredAfterFound.searchTasks)}`,
-  );
-  apiData(
-    await request('POST', `/v1/operator/parcel-incidents/${unresolvedRecovered.incidentId}/resolve`, {
+    await request('GET', `/v1/operator/parcel-incidents/${unresolvedRecovered.incidentId}`, {
       token: operator.token,
-      key: randomUUID(),
-      body: { resolutionCode: 'FOUND_ON_SAME_VEHICLE', note: 'Cargo remains on the source Trip for normal delivery' },
     }),
     200,
-    'resolve same-vehicle recovery incident',
+    'read resolved same-vehicle incident',
   );
-  const recoveredLegBeforeUnload = parcelSql(`SELECT status FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.recovered.parcelId}' ORDER BY sequence DESC LIMIT 1;`);
-  assert(recoveredLegBeforeUnload === 'ACTIVE', `same-vehicle recovery should keep original leg ACTIVE, got ${recoveredLegBeforeUnload}`);
+  assert(
+    recoveredAfterFound.incident.status === 'RESOLVED',
+    'Assistant found-on-vehicle scan did not resolve incident',
+  );
+  assert(
+    recoveredAfterFound.searchTasks.every(
+      (task) => !['OPEN', 'IN_PROGRESS'].includes(task.status),
+    ) && recoveredAfterFound.searchTasks.some((task) => task.status === 'CANCELLED'),
+    `found incident left active search tasks: ${JSON.stringify(recoveredAfterFound.searchTasks)}`,
+  );
+  const recoveredLegBeforeUnload = parcelSql(
+    `SELECT status FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.recovered.parcelId}' ORDER BY sequence DESC LIMIT 1;`,
+  );
+  assert(
+    recoveredLegBeforeUnload === 'ACTIVE',
+    `same-vehicle recovery should keep original leg ACTIVE, got ${recoveredLegBeforeUnload}`,
+  );
   apiData(
     await request('POST', `/v1/assistant/parcels/${parcels.recovered.parcelId}/unload`, {
       token: assistant.token,
       key: randomUUID(),
-      body: { parcelCode: parcels.recovered.parcelCode, actualLocation: { kind: 'ROUTE_STOP', id: trip.targetStopId }, photoUrls: [] },
+      body: {
+        parcelCode: parcels.recovered.parcelCode,
+        actualLocation: { kind: 'ROUTE_STOP', id: trip.targetStopId },
+        photoUrls: [],
+      },
     }),
     200,
     'unload recovered Parcel at correct stop',
   );
   await deliverAndConfirm(parcels.recovered, assistant, recipient);
-  const recoveredLegAfterDelivery = parcelSql(`SELECT status || ':' || (ended_at IS NOT NULL)::text FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.recovered.parcelId}' ORDER BY sequence DESC LIMIT 1;`);
-  assert(recoveredLegAfterDelivery === 'COMPLETED:true', `recovered Parcel leg not completed after delivery: ${recoveredLegAfterDelivery}`);
-  assert(Number(parcelSql(`SELECT count(*) FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.recovered.parcelId}';`)) === 1, 'same-vehicle recovery created an unnecessary forwarding leg');
+  const recoveredLegAfterDelivery = parcelSql(
+    `SELECT status || ':' || (ended_at IS NOT NULL)::text FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.recovered.parcelId}' ORDER BY sequence DESC LIMIT 1;`,
+  );
+  assert(
+    recoveredLegAfterDelivery === 'COMPLETED:true',
+    `recovered Parcel leg not completed after delivery: ${recoveredLegAfterDelivery}`,
+  );
+  assert(
+    Number(
+      parcelSql(
+        `SELECT count(*) FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.recovered.parcelId}';`,
+      ),
+    ) === 1,
+    'same-vehicle recovery created an unnecessary forwarding leg',
+  );
   pass('missing → searching → found on same vehicle → normal delivery without forwarding');
 
+  const refreshedReconciliation = apiData(
+    await request(
+      'POST',
+      `/v1/assistant/trips/${trip.sourceTripId}/stops/${trip.targetStopId}/reconcile`,
+      {
+        token: assistant.token,
+        key: randomUUID(),
+        body: {
+          scannedParcelIds: [parcels.happy.parcelId, parcels.recovered.parcelId],
+          manualExceptionParcelIds: [],
+          departureOverrideReason:
+            'Driver reviews the reduced unresolved manifest after an on-vehicle recovery',
+        },
+      },
+    ),
+    200,
+    'refresh reconciliation after recovered Parcel delivery',
+  );
+  assert(
+    refreshedReconciliation.canDepart === false &&
+      refreshedReconciliation.departureOverrideRequest?.status === 'PENDING_APPROVAL',
+    `changed unresolved snapshot reused stale approval: ${JSON.stringify(refreshedReconciliation)}`,
+  );
+  apiData(
+    await request(
+      'POST',
+      `/v1/crew/parcel-stop-departure-approvals/${refreshedReconciliation.departureOverrideRequest.requestId}/decision`,
+      {
+        token: driver.token,
+        key: randomUUID(),
+        body: { decision: 'APPROVE', note: 'Driver approved the refreshed unresolved manifest' },
+      },
+    ),
+    200,
+    'Driver approves refreshed reconciliation snapshot',
+  );
+  const refreshedClearance = apiData(
+    await request(
+      'POST',
+      `/v1/assistant/trips/${trip.sourceTripId}/stops/${trip.targetStopId}/reconcile`,
+      {
+        token: assistant.token,
+        key: randomUUID(),
+        body: {
+          scannedParcelIds: [parcels.happy.parcelId, parcels.recovered.parcelId],
+          manualExceptionParcelIds: [],
+          departureOverrideReason: null,
+        },
+      },
+    ),
+    200,
+    'verify refreshed stop departure clearance',
+  );
+  assert(
+    refreshedClearance.canDepart === true,
+    'Driver approval did not clear the refreshed unresolved snapshot',
+  );
+
   await departStop(driver, trip.sourceTripId, trip.targetStopId);
-  apiData(await request('POST', `/v1/driver/trips/${trip.sourceTripId}/destination/arrive`, { token: driver.token, key: randomUUID() }), 200, 'arrive source destination');
-  apiData(await request('POST', `/v1/driver/trips/${trip.sourceTripId}/complete`, { token: driver.token, key: randomUUID() }), 200, 'complete source trip');
+  apiData(
+    await request('POST', `/v1/driver/trips/${trip.sourceTripId}/destination/arrive`, {
+      token: driver.token,
+      key: randomUUID(),
+    }),
+    200,
+    'arrive source destination',
+  );
+  const prematureComplete = await request(
+    'POST',
+    `/v1/driver/trips/${trip.sourceTripId}/complete`,
+    {
+      token: driver.token,
+      key: randomUUID(),
+    },
+  );
+  expectError(
+    prematureComplete,
+    409,
+    'PARCEL_DESTINATION_RECONCILIATION_REQUIRED',
+    'complete blocked before destination reconciliation',
+  );
+  const destinationReconciliation = apiData(
+    await request('POST', `/v1/assistant/trips/${trip.sourceTripId}/destination/reconcile`, {
+      token: assistant.token,
+      key: randomUUID(),
+      body: { scannedParcelIds: [], manualExceptionParcelIds: [] },
+    }),
+    200,
+    'reconcile destination manifest',
+  );
+  const unresolvedDestination = destinationReconciliation.unresolvedParcels.find(
+    (item) => item.parcelId === parcels.destinationUnresolved.parcelId,
+  );
+  assert(
+    destinationReconciliation.canComplete === true &&
+      destinationReconciliation.requiresDriverCompletion === true &&
+      unresolvedDestination?.incidentType === 'UNSCANNED_HANDOFF' &&
+      unresolvedDestination.incidentId,
+    `destination reconciliation did not acknowledge unresolved Parcel: ${JSON.stringify(destinationReconciliation)}`,
+  );
+  apiData(
+    await request('POST', `/v1/driver/trips/${trip.sourceTripId}/complete`, {
+      token: driver.token,
+      key: randomUUID(),
+    }),
+    200,
+    'complete source trip',
+  );
+  const destinationIncidentCount = Number(
+    parcelSql(
+      `SELECT count(*) FROM vietride_parcel.parcel_incidents WHERE parcel_id='${parcels.destinationUnresolved.parcelId}' AND type='UNSCANNED_HANDOFF' AND status='SEARCHING';`,
+    ),
+  );
+  const duplicateDestinationMissing = Number(
+    parcelSql(
+      `SELECT count(*) FROM vietride_parcel.parcel_incidents WHERE parcel_id='${parcels.destinationUnresolved.parcelId}' AND type IN ('MISSING','MISSING_AFTER_DEPARTURE');`,
+    ),
+  );
+  assert(
+    destinationIncidentCount === 1 && duplicateDestinationMissing === 0,
+    `trip.completed duplicated destination incident: unscanned=${destinationIncidentCount}, missing=${duplicateDestinationMissing}`,
+  );
+  pass(
+    'destination arrive does not create MISSING; reconciliation gates completion and prevents duplicate incident',
+  );
 
   await poll(
-    () => request('GET', `/v1/operator/parcel-incidents/${unresolvedMissing.incidentId}`, { token: operator.token }),
+    () =>
+      request('GET', `/v1/operator/parcel-incidents/${unresolvedMissing.incidentId}`, {
+        token: operator.token,
+      }),
     (result) => result.status === 200,
     'wait missing incident detail',
   );
-  const incidentQueue = apiData(await request('GET', `/v1/operator/parcel-incidents?search=${parcels.missing.parcelCode}&page=1&pageSize=20`, { token: operator.token }), 200, 'operator incident queue');
-  const incidentRow = incidentQueue.items.find((item) => item.incidentId === unresolvedMissing.incidentId);
-  assert(incidentQueue.totalItems >= 1 && incidentRow?.parcel && incidentRow.trip && incidentRow.expectedDropoff && incidentRow.lastCustody && incidentRow.taskSummary && incidentRow.sla && Array.isArray(incidentRow.availableActions), 'incident queue row not screen-ready');
-  const incidentDetail = apiData(await request('GET', `/v1/operator/parcel-incidents/${unresolvedMissing.incidentId}`, { token: operator.token }), 200, 'operator incident detail');
-  assert(incidentDetail.parcel && incidentDetail.sender && incidentDetail.recipient && incidentDetail.trip && incidentDetail.expectedDropoff && Array.isArray(incidentDetail.searchTasks) && Array.isArray(incidentDetail.availableActions), 'incident detail not screen-ready');
-  const foreignIncident = await request('GET', `/v1/operator/parcel-incidents/${unresolvedMissing.incidentId}`, { token: foreignOperator.token });
+  const incidentQueue = apiData(
+    await request(
+      'GET',
+      `/v1/operator/parcel-incidents?search=${parcels.missing.parcelCode}&page=1&pageSize=20`,
+      { token: operator.token },
+    ),
+    200,
+    'operator incident queue',
+  );
+  const incidentRow = incidentQueue.items.find(
+    (item) => item.incidentId === unresolvedMissing.incidentId,
+  );
+  assert(
+    incidentQueue.totalItems >= 1 &&
+      incidentRow?.parcel &&
+      incidentRow.trip &&
+      incidentRow.expectedDropoff &&
+      incidentRow.lastCustody &&
+      incidentRow.taskSummary &&
+      incidentRow.sla &&
+      Array.isArray(incidentRow.availableActions),
+    'incident queue row not screen-ready',
+  );
+  const incidentDetail = apiData(
+    await request('GET', `/v1/operator/parcel-incidents/${unresolvedMissing.incidentId}`, {
+      token: operator.token,
+    }),
+    200,
+    'operator incident detail',
+  );
+  assert(
+    incidentDetail.parcel &&
+      incidentDetail.sender &&
+      incidentDetail.recipient &&
+      incidentDetail.trip &&
+      incidentDetail.expectedDropoff &&
+      Array.isArray(incidentDetail.searchTasks) &&
+      Array.isArray(incidentDetail.availableActions),
+    'incident detail not screen-ready',
+  );
+  const foreignIncident = await request(
+    'GET',
+    `/v1/operator/parcel-incidents/${unresolvedMissing.incidentId}`,
+    { token: foreignOperator.token },
+  );
   expectError(foreignIncident, 403, 'FORBIDDEN', 'cross-tenant incident read blocked');
 
-  const senderTrace = apiData(await request('GET', `/v1/parcels/${parcels.missing.parcelId}/trace`, { token: sender.token }), 200, 'sender Parcel trace');
-  assert(senderTrace.parcelSummary && senderTrace.operator && senderTrace.trip && senderTrace.dropoffLocation && senderTrace.currentCustody && senderTrace.activeIncident && senderTrace.timeline?.items && Array.isArray(senderTrace.availableActions), 'sender trace is not screen-ready');
-  const recipientTrace = apiData(await request('GET', `/v1/parcels/${parcels.missing.parcelId}/trace`, { token: recipient.token }), 200, 'recipient Parcel trace');
+  const senderTrace = apiData(
+    await request('GET', `/v1/parcels/${parcels.missing.parcelId}/trace`, { token: sender.token }),
+    200,
+    'sender Parcel trace',
+  );
+  assert(
+    senderTrace.parcelSummary &&
+      senderTrace.operator &&
+      senderTrace.trip &&
+      senderTrace.dropoffLocation &&
+      senderTrace.currentCustody &&
+      senderTrace.activeIncident &&
+      senderTrace.timeline?.items &&
+      Array.isArray(senderTrace.availableActions),
+    'sender trace is not screen-ready',
+  );
+  const recipientTrace = apiData(
+    await request('GET', `/v1/parcels/${parcels.missing.parcelId}/trace`, {
+      token: recipient.token,
+    }),
+    200,
+    'recipient Parcel trace',
+  );
   assert(recipientTrace.claimSummary == null, 'recipient trace leaked sender claim');
   pass('Passenger tracking is complete in one request and claim privacy is enforced');
 
   const firstClaim = await createLostClaim(parcels.claim12m, sender, operator, 12_000_000);
+  const noProofClaim = await createLostClaim(parcels.claimNoProof, sender, operator, null, {
+    addEvidence: false,
+  });
+  const expiredClaimCase = await createLostClaim(parcels.claimExpired, sender, operator, null, {
+    addEvidence: false,
+    expireClaimWindow: true,
+  });
   const secondClaim = await createLostClaim(parcels.claim80m, sender, operator, 80_000_000);
   apiData(
     await request('POST', `/v1/admin/operators/${operator.operatorId}/wallet/adjust`, {
       token: system.token,
       key: randomUUID(),
-      body: { type: 'CREDIT', amount: 10_000_000, note: `Parcel Reliability payout funding ${runTag}` },
+      body: {
+        type: 'CREDIT',
+        amount: 10_000_000,
+        note: `Parcel Reliability payout funding ${runTag}`,
+      },
     }),
     200,
     'fund operator wallet for compensation',
   );
-  const decide = async (entry) => apiData(
-    await request('POST', `/v1/operator/claims/${entry.claim.claimId}/decision`, {
-      token: operator.token,
-      key: randomUUID(),
-      body: { decision: 'APPROVE', provenDirectLossVnd: entry.provenLossVnd, reason: 'Valid invoice and operator process breach confirmed' },
-    }),
-    200,
-    `approve claim ${entry.claim.claimId}`,
-  );
+  const decide = async (entry) =>
+    apiData(
+      await request('POST', `/v1/operator/claims/${entry.claim.claimId}/decision`, {
+        token: operator.token,
+        key: randomUUID(),
+        body: {
+          decision: 'APPROVE',
+          provenDirectLossVnd: entry.provenLossVnd,
+          reason:
+            entry.provenLossVnd == null
+              ? 'No valid proof was supplied; apply the snapshotted freight multiplier fallback'
+              : 'Valid invoice and operator process breach confirmed',
+        },
+      }),
+      200,
+      `approve claim ${entry.claim.claimId}`,
+    );
   const approved12 = await decide(firstClaim);
-  assert(approved12.claim?.cargoAwardVnd === 6_000_000, `12m claim cargo award expected 6m, got ${approved12.claim?.cargoAwardVnd}`);
+  assert(
+    approved12.claim?.cargoAwardVnd === 6_000_000,
+    `12m claim cargo award expected 6m, got ${approved12.claim?.cargoAwardVnd}`,
+  );
   const paid12 = await poll(
-    () => request('GET', `/v1/operator/claims/${firstClaim.claim.claimId}`, { token: operator.token }),
+    () =>
+      request('GET', `/v1/operator/claims/${firstClaim.claim.claimId}`, { token: operator.token }),
     (result) => result.json?.data?.claim?.status === 'PAID' || result.json?.data?.status === 'PAID',
     'wait first compensation payout',
   );
-  pass('12m × 50% compensation paid', `${approved12.claim.totalAwardVnd} VND`);
+  pass(
+    '12m × 50% cargo compensation paid',
+    `cargo=${approved12.claim.cargoAwardVnd} VND, freightRefund=${approved12.claim.freightRefundVnd} VND, total=${approved12.claim.totalAwardVnd} VND`,
+  );
+
+  const concurrentNoProofBody = {
+    decision: 'APPROVE',
+    provenDirectLossVnd: null,
+    reason: 'Concurrent no-proof decision must produce one durable award only',
+  };
+  const concurrentNoProofResults = await Promise.all([
+    request('POST', `/v1/operator/claims/${noProofClaim.claim.claimId}/decision`, {
+      token: operator.token,
+      key: randomUUID(),
+      body: concurrentNoProofBody,
+    }),
+    request('POST', `/v1/operator/claims/${noProofClaim.claim.claimId}/decision`, {
+      token: operator.token,
+      key: randomUUID(),
+      body: concurrentNoProofBody,
+    }),
+  ]);
+  const concurrentStatuses = concurrentNoProofResults
+    .map((result) => result.status)
+    .sort((left, right) => left - right);
+  assert(
+    concurrentStatuses[0] === 200 && concurrentStatuses[1] === 409,
+    `concurrent claim decisions expected HTTP 200/409, got ${concurrentStatuses.join('/')}`,
+  );
+  const approvedNoProof = apiData(
+    concurrentNoProofResults.find((result) => result.status === 200),
+    200,
+    'read successful concurrent no-proof decision',
+  );
+  expectError(
+    concurrentNoProofResults.find((result) => result.status === 409),
+    409,
+    'PARCEL_CLAIM_ALREADY_DECIDED',
+    'concurrent claim decision loser rejected',
+  );
+  assert(
+    approvedNoProof.claim?.cargoAwardVnd === 24_000_000,
+    `no-proof cargo award expected 4 × 6m freight = 24m, got ${approvedNoProof.claim?.cargoAwardVnd}`,
+  );
+  const paidNoProof = await poll(
+    () =>
+      request('GET', `/v1/operator/claims/${noProofClaim.claim.claimId}`, {
+        token: operator.token,
+      }),
+    (result) => result.json?.data?.claim?.status === 'PAID' || result.json?.data?.status === 'PAID',
+    'wait no-proof compensation payout',
+  );
+  assert(paidNoProof.status === 200, 'no-proof claim detail could not be read after payout');
+  pass(
+    'no-proof fallback compensation paid',
+    `cargo=4 × ${approvedNoProof.claim.freightRefundVnd} VND = ${approvedNoProof.claim.cargoAwardVnd} VND, freightRefund=${approvedNoProof.claim.freightRefundVnd} VND, total=${approvedNoProof.claim.totalAwardVnd} VND`,
+  );
+
+  const appealKey = randomUUID();
+  const appealBody = { reason: 'Sender requests a human review of the original paid decision' };
+  const appealed = apiData(
+    await request(
+      'POST',
+      `/v1/parcels/${parcels.claim12m.parcelId}/claims/${firstClaim.claim.claimId}/appeal`,
+      {
+        token: sender.token,
+        key: appealKey,
+        body: appealBody,
+      },
+    ),
+    200,
+    'submit paid claim appeal',
+  );
+  const appealReplay = apiData(
+    await request(
+      'POST',
+      `/v1/parcels/${parcels.claim12m.parcelId}/claims/${firstClaim.claim.claimId}/appeal`,
+      {
+        token: sender.token,
+        key: appealKey,
+        body: appealBody,
+      },
+    ),
+    200,
+    'replay paid claim appeal',
+  );
+  assert(
+    appealed.appeal?.appealId && appealReplay.appeal?.appealId === appealed.appeal.appealId,
+    'appeal replay changed appealId',
+  );
+  const appealQueue = apiData(
+    await request('GET', '/v1/operator/claim-appeals?status=SUBMITTED&page=1&pageSize=20', {
+      token: operator.token,
+    }),
+    200,
+    'read operator claim appeal queue',
+  );
+  assert(
+    appealQueue.items.some((item) => item.appealId === appealed.appeal.appealId),
+    'submitted appeal missing from operator queue',
+  );
+  const upheldAppeal = apiData(
+    await request('POST', `/v1/operator/claim-appeals/${appealed.appeal.appealId}/decision`, {
+      token: operator.token,
+      key: randomUUID(),
+      body: {
+        decision: 'UPHOLD',
+        revisedProvenDirectLossVnd: null,
+        reason: 'Original compensation calculation and evidence remain valid',
+      },
+    }),
+    200,
+    'uphold paid claim appeal',
+  );
+  assert(upheldAppeal.status === 'UPHELD', `appeal expected UPHELD, got ${upheldAppeal.status}`);
+  pass('paid claim appeal submit/replay/queue/operator decision');
 
   const settlementPage = await poll(
-    () => request('GET', `/v1/admin/trip-settlements?tripId=${trip.sourceTripId}&page=1&pageSize=20`, { token: system.token }),
-    (result) => result.status === 200 && result.json?.data?.items?.some((item) => item.tripId === trip.sourceTripId),
+    () =>
+      request('GET', `/v1/admin/trip-settlements?tripId=${trip.sourceTripId}&page=1&pageSize=20`, {
+        token: system.token,
+      }),
+    (result) =>
+      result.status === 200 &&
+      result.json?.data?.items?.some((item) => item.tripId === trip.sourceTripId),
     'wait source trip settlement projection',
   );
-  const sourceSettlement = settlementPage.json.data.items.find((item) => item.tripId === trip.sourceTripId);
+  const sourceSettlement = settlementPage.json.data.items.find(
+    (item) => item.tripId === trip.sourceTripId,
+  );
   const settled = apiData(
     await request('POST', `/v1/admin/trip-settlements/${sourceSettlement.settlementId}/settle`, {
       token: system.token,
@@ -1179,7 +2231,10 @@ async function main() {
     200,
     'manually settle source trip before second claim',
   );
-  assert(settled.status === 'SETTLED', `source trip settlement expected SETTLED, got ${settled.status}`);
+  assert(
+    settled.status === 'SETTLED',
+    `source trip settlement expected SETTLED, got ${settled.status}`,
+  );
   const operatorWallet = apiData(
     await request('GET', '/v1/operator/wallet', { token: operator.token }),
     200,
@@ -1204,28 +2259,70 @@ async function main() {
   pass('source trip settled and OperatorWallet prepared for insufficient-funding branch');
 
   const approved80 = await decide(secondClaim);
-  assert(approved80.claim?.cargoAwardVnd === 30_000_000, `80m claim cargo award expected cap 30m, got ${approved80.claim?.cargoAwardVnd}`);
+  assert(
+    approved80.claim?.cargoAwardVnd === 30_000_000,
+    `80m claim cargo award expected cap 30m, got ${approved80.claim?.cargoAwardVnd}`,
+  );
   const pending80 = await poll(
-    () => request('GET', `/v1/operator/claims/${secondClaim.claim.claimId}`, { token: operator.token }),
-    (result) => ['FUNDING_PENDING', 'PAID'].includes(result.json?.data?.claim?.status ?? result.json?.data?.status),
+    () =>
+      request('GET', `/v1/operator/claims/${secondClaim.claim.claimId}`, { token: operator.token }),
+    (result) =>
+      ['FUNDING_PENDING', 'PAID'].includes(
+        result.json?.data?.claim?.status ?? result.json?.data?.status,
+      ),
     'wait second compensation payout status',
   );
   const pending80Status = pending80.json?.data?.claim?.status ?? pending80.json?.data?.status;
-  assert(pending80Status === 'FUNDING_PENDING', `80m capped claim expected FUNDING_PENDING, got ${pending80Status}`);
-  const payoutCount = Number(paymentSql(`SELECT count(*) FROM vietride_payment.parcel_compensation_payouts WHERE claim_id='${firstClaim.claim.claimId}';`));
+  assert(
+    pending80Status === 'FUNDING_PENDING',
+    `80m capped claim expected FUNDING_PENDING, got ${pending80Status}`,
+  );
+  const payoutCount = Number(
+    paymentSql(
+      `SELECT count(*) FROM vietride_payment.parcel_compensation_payouts WHERE claim_id='${firstClaim.claim.claimId}';`,
+    ),
+  );
   assert(payoutCount === 1, `first claim payout duplicate count=${payoutCount}`);
-  const decisionReplay = await request('POST', `/v1/operator/claims/${firstClaim.claim.claimId}/decision`, {
-    token: operator.token,
-    key: randomUUID(),
-    body: { decision: 'APPROVE', provenDirectLossVnd: 12_000_000, reason: 'Duplicate decision must be rejected' },
-  });
-  expectError(decisionReplay, 409, 'PARCEL_CLAIM_ALREADY_DECIDED', 'duplicate claim decision rejected');
+  const decisionReplay = await request(
+    'POST',
+    `/v1/operator/claims/${firstClaim.claim.claimId}/decision`,
+    {
+      token: operator.token,
+      key: randomUUID(),
+      body: {
+        decision: 'APPROVE',
+        provenDirectLossVnd: 12_000_000,
+        reason: 'Duplicate decision must be rejected',
+      },
+    },
+  );
+  expectError(
+    decisionReplay,
+    409,
+    'PARCEL_CLAIM_ALREADY_DECIDED',
+    'duplicate claim decision rejected',
+  );
   pass('80m compensation capped at 30m and enters FUNDING_PENDING');
 
-  const claimQueue = apiData(await request('GET', '/v1/operator/claims?page=1&pageSize=20', { token: operator.token }), 200, 'operator claim queue');
+  const claimQueue = apiData(
+    await request('GET', '/v1/operator/claims?page=1&pageSize=20', { token: operator.token }),
+    200,
+    'operator claim queue',
+  );
   const claimRow = claimQueue.items.find((item) => item.claimId === secondClaim.claim.claimId);
-  assert(claimQueue.totalItems >= 2 && claimRow?.parcel && claimRow.sender && claimRow.incident && claimRow.policySnapshot && claimRow.fundingStatus && Array.isArray(claimRow.availableActions), 'claim queue not screen-ready');
-  const foreignClaim = await request('GET', `/v1/operator/claims/${secondClaim.claim.claimId}`, { token: foreignOperator.token });
+  assert(
+    claimQueue.totalItems >= 2 &&
+      claimRow?.parcel &&
+      claimRow.sender &&
+      claimRow.incident &&
+      claimRow.policySnapshot &&
+      claimRow.fundingStatus &&
+      Array.isArray(claimRow.availableActions),
+    'claim queue not screen-ready',
+  );
+  const foreignClaim = await request('GET', `/v1/operator/claims/${secondClaim.claim.claimId}`, {
+    token: foreignOperator.token,
+  });
   expectError(foreignClaim, 403, 'FORBIDDEN', 'cross-tenant claim read blocked');
 
   tripSql(`
@@ -1261,7 +2358,11 @@ async function main() {
     await request('POST', `/v1/assistant/parcels/${parcels.wrongStop.parcelId}/unload`, {
       token: assistant.token,
       key: randomUUID(),
-      body: { parcelCode: parcels.wrongStop.parcelCode, actualLocation: { kind: 'ROUTE_STOP', id: trip.targetStopId }, photoUrls: [] },
+      body: {
+        parcelCode: parcels.wrongStop.parcelCode,
+        actualLocation: { kind: 'ROUTE_STOP', id: trip.targetStopId },
+        photoUrls: [],
+      },
     }),
     200,
     'unload forwarded Parcel at correct stop',
@@ -1271,33 +2372,150 @@ async function main() {
     await request('POST', `/v1/operator/parcel-incidents/${wrongIncident.incidentId}/resolve`, {
       token: operator.token,
       key: randomUUID(),
-      body: { resolutionCode: 'FORWARDED_AND_DELIVERED', note: 'Forwarded Parcel delivered to correct stop' },
+      body: {
+        resolutionCode: 'FORWARDED_AND_DELIVERED',
+        note: 'Forwarded Parcel delivered to correct stop',
+      },
     }),
     200,
     'resolve forwarded wrong-stop incident',
   );
   pass('forwarded Parcel reached correct stop and recipient confirmed delivery');
 
-  const happyLegLifecycle = parcelSql(`SELECT status || ':' || (started_at IS NOT NULL)::text || ':' || (ended_at IS NOT NULL)::text FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.happy.parcelId}' ORDER BY sequence DESC LIMIT 1;`);
-  assert(happyLegLifecycle === 'COMPLETED:true:true', `happy Parcel leg lifecycle inconsistent: ${happyLegLifecycle}`);
-  const forwardingLegLifecycle = parcelSql(`SELECT string_agg(status || ':' || (ended_at IS NOT NULL)::text, ',' ORDER BY sequence) FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.wrongStop.parcelId}';`);
-  assert(forwardingLegLifecycle === 'FORWARDED:true,COMPLETED:true', `forwarding leg lifecycle inconsistent: ${forwardingLegLifecycle}`);
+  const happyLegLifecycle = parcelSql(
+    `SELECT status || ':' || (started_at IS NOT NULL)::text || ':' || (ended_at IS NOT NULL)::text FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.happy.parcelId}' ORDER BY sequence DESC LIMIT 1;`,
+  );
+  assert(
+    happyLegLifecycle === 'COMPLETED:true:true',
+    `happy Parcel leg lifecycle inconsistent: ${happyLegLifecycle}`,
+  );
+  const forwardingLegLifecycle = parcelSql(
+    `SELECT string_agg(status || ':' || (ended_at IS NOT NULL)::text, ',' ORDER BY sequence) FROM vietride_parcel.parcel_transit_legs WHERE parcel_id='${parcels.wrongStop.parcelId}';`,
+  );
+  assert(
+    forwardingLegLifecycle === 'FORWARDED:true,COMPLETED:true',
+    `forwarding leg lifecycle inconsistent: ${forwardingLegLifecycle}`,
+  );
   const currentRunParcelIds = Object.values(parcels)
     .map((parcel) => `'${parcel.parcelId}'`)
     .join(',');
-  const terminalIncidentTasks = Number(parcelSql(`SELECT count(*) FROM vietride_parcel.parcel_search_tasks task JOIN vietride_parcel.parcel_incidents incident ON incident.id=task.incident_id WHERE incident.parcel_id IN (${currentRunParcelIds}) AND incident.status IN ('RESOLVED','CLOSED','LOST_CONFIRMED') AND task.status IN ('OPEN','IN_PROGRESS');`));
-  assert(terminalIncidentTasks === 0, `terminal incidents left ${terminalIncidentTasks} outstanding search tasks`);
+  const terminalIncidentTasks = Number(
+    parcelSql(
+      `SELECT count(*) FROM vietride_parcel.parcel_search_tasks task JOIN vietride_parcel.parcel_incidents incident ON incident.id=task.incident_id WHERE incident.parcel_id IN (${currentRunParcelIds}) AND incident.status IN ('RESOLVED','CLOSED','LOST_CONFIRMED') AND task.status IN ('OPEN','IN_PROGRESS');`,
+    ),
+  );
+  assert(
+    terminalIncidentTasks === 0,
+    `terminal incidents left ${terminalIncidentTasks} outstanding search tasks`,
+  );
   pass('transit-leg lifecycle and terminal search-task invariants are consistent');
 
-  const custodyEvents = Number(parcelSql(`SELECT count(*) FROM vietride_parcel.parcel_custody_events WHERE parcel_id='${parcels.wrongStop.parcelId}';`));
-  const duplicateKeys = Number(parcelSql(`SELECT count(*) FROM (SELECT idempotency_key FROM vietride_parcel.parcel_custody_events WHERE parcel_id='${parcels.wrongStop.parcelId}' AND idempotency_key IS NOT NULL GROUP BY idempotency_key HAVING count(*)>1) duplicates;`));
-  assert(custodyEvents >= 6 && duplicateKeys === 0, 'custody append-only/idempotency invariant failed');
-  const negativeWallets = Number(paymentSql('SELECT count(*) FROM vietride_payment.wallets WHERE balance < 0;'));
+  const custodyEvents = Number(
+    parcelSql(
+      `SELECT count(*) FROM vietride_parcel.parcel_custody_events WHERE parcel_id='${parcels.wrongStop.parcelId}';`,
+    ),
+  );
+  const duplicateKeys = Number(
+    parcelSql(
+      `SELECT count(*) FROM (SELECT idempotency_key FROM vietride_parcel.parcel_custody_events WHERE parcel_id='${parcels.wrongStop.parcelId}' AND idempotency_key IS NOT NULL GROUP BY idempotency_key HAVING count(*)>1) duplicates;`,
+    ),
+  );
+  assert(
+    custodyEvents >= 6 && duplicateKeys === 0,
+    'custody append-only/idempotency invariant failed',
+  );
+  const negativeWallets = Number(
+    paymentSql('SELECT count(*) FROM vietride_payment.wallets WHERE balance < 0;'),
+  );
   assert(negativeWallets === 0, 'negative passenger wallet detected');
   pass('DB invariants: append-only custody, unique event keys, non-negative wallets');
 
+  state.resources = {
+    users: {
+      systemAdminUserId: system.userId,
+      senderUserId: sender.userId,
+      recipientUserId: recipient.userId,
+      operatorAdminUserId: operator.adminUserId,
+      driverUserId: driver.userId,
+      assistantUserId: assistant.userId,
+      foreignOperatorAdminUserId: foreignOperator.adminUserId,
+    },
+    operators: {
+      primaryOperatorId: operator.operatorId,
+      foreignOperatorId: foreignOperator.operatorId,
+    },
+    trips: {
+      sourceTripId: trip.sourceTripId,
+      forwardingTripId: trip.targetTripId,
+      routeId: trip.routeId,
+      vehicleId: trip.vehicleId,
+      wrongStopId: trip.wrongStopId,
+      targetStopId: trip.targetStopId,
+      destinationStationId: trip.destinationStationId,
+    },
+    bookings: {
+      linkedBookingId: booking.bookingId,
+    },
+    parcels: Object.fromEntries(
+      Object.entries(parcels).map(([label, parcel]) => [label, parcel.parcelId]),
+    ),
+    incidents: {
+      packageIdentityMismatchIncidentId: identityMismatchApproved.incidentId,
+      wrongStopIncidentId: wrongIncident.incidentId,
+      missingAfterStopReconciliationIncidentId: unresolvedMissing.incidentId,
+      recoveredOnVehicleIncidentId: unresolvedRecovered.incidentId,
+      destinationUnscannedHandoffIncidentId: unresolvedDestination.incidentId,
+      claim12mIncidentId: firstClaim.incident.incidentId,
+      claimNoProofIncidentId: noProofClaim.incident.incidentId,
+      claimExpiredIncidentId: expiredClaimCase.incident.incidentId,
+      claim80mIncidentId: secondClaim.incident.incidentId,
+    },
+    claims: {
+      claim12mId: firstClaim.claim.claimId,
+      claimNoProofId: noProofClaim.claim.claimId,
+      claim80mId: secondClaim.claim.claimId,
+    },
+    appeals: {
+      claim12mAppealId: appealed.appeal.appealId,
+    },
+    payoutReferences: {
+      claim12m: paymentSql(
+        `SELECT id FROM vietride_payment.parcel_compensation_payouts WHERE claim_id='${firstClaim.claim.claimId}' LIMIT 1;`,
+      ),
+      claimNoProof: paymentSql(
+        `SELECT id FROM vietride_payment.parcel_compensation_payouts WHERE claim_id='${noProofClaim.claim.claimId}' LIMIT 1;`,
+      ),
+      claim80m: paymentSql(
+        `SELECT id FROM vietride_payment.parcel_compensation_payouts WHERE claim_id='${secondClaim.claim.claimId}' LIMIT 1;`,
+      ),
+    },
+    databaseEvidence: {
+      custodyEventCount: Number(
+        parcelSql(
+          `SELECT count(*) FROM vietride_parcel.parcel_custody_events WHERE parcel_id IN (${currentRunParcelIds});`,
+        ),
+      ),
+      incidentStatusSummary: parcelSql(
+        `SELECT string_agg(type || ':' || status, ',' ORDER BY created_at) FROM vietride_parcel.parcel_incidents WHERE parcel_id IN (${currentRunParcelIds});`,
+      ),
+      transitLegStatusSummary: parcelSql(
+        `SELECT string_agg(status, ',' ORDER BY created_at) FROM vietride_parcel.parcel_transit_legs WHERE parcel_id IN (${currentRunParcelIds});`,
+      ),
+      searchTaskStatusSummary: parcelSql(
+        `SELECT string_agg(task.status, ',' ORDER BY task.created_at) FROM vietride_parcel.parcel_search_tasks task JOIN vietride_parcel.parcel_incidents incident ON incident.id=task.incident_id WHERE incident.parcel_id IN (${currentRunParcelIds});`,
+      ),
+      claimStatusSummary: parcelSql(
+        `SELECT string_agg(status, ',' ORDER BY created_at) FROM vietride_parcel.parcel_claims WHERE parcel_id IN (${currentRunParcelIds});`,
+      ),
+      negativeWalletCount: negativeWallets,
+    },
+  };
+  const reportPaths = writeAuditReport();
+
   console.log(`PARCEL_RELIABILITY_E2E_RUN_TAG=${runTag}`);
   console.log(`PARCEL_RELIABILITY_E2E_CHECKS=${state.checks.length}`);
+  console.log(`PARCEL_RELIABILITY_E2E_JSON=${reportPaths.jsonPath}`);
+  console.log(`PARCEL_RELIABILITY_E2E_MARKDOWN=${reportPaths.markdownPath}`);
   console.log('PARCEL_RELIABILITY_E2E=PASS');
 }
 

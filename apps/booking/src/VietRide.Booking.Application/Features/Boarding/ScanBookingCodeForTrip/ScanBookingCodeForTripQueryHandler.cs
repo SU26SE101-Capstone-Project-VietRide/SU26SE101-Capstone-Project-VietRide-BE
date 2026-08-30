@@ -79,8 +79,8 @@ public sealed class ScanBookingCodeForTripQueryHandler
         }
 
         var items = !string.IsNullOrWhiteSpace(request.TicketCode)
-            ? BuildTicketCodeItems(booking, request.TicketCode)
-            : BuildLegacyBookingCodeItems(booking);
+            ? BuildTicketCodeItems(booking, request.TicketCode, CanExposeBuyerContact(trip.Status))
+            : BuildLegacyBookingCodeItems(booking, CanExposeBuyerContact(trip.Status));
 
         if (items.Count == 0)
         {
@@ -92,7 +92,8 @@ public sealed class ScanBookingCodeForTripQueryHandler
 
     private static IReadOnlyList<ScanBookingCodePassengerItem> BuildTicketCodeItems(
         VietRide.Booking.Domain.Entities.Booking booking,
-        string ticketCode)
+        string ticketCode,
+        bool exposeBuyerContact)
     {
         var ticket = booking.Tickets.SingleOrDefault(candidate =>
             string.Equals(candidate.TicketCode.Value, ticketCode, StringComparison.OrdinalIgnoreCase));
@@ -114,12 +115,19 @@ public sealed class ScanBookingCodeForTripQueryHandler
                     ticket.Id,
                     ticket.TicketCode.Value,
                     passenger.SeatNumber!,
-                    passenger.BoardingStatus.ToString()),
+                    passenger.BoardingStatus.ToString(),
+                    booking.BookingCode.Value,
+                    GetBuyerName(booking.BuyerDisplayName, exposeBuyerContact),
+                    GetBuyerPhone(
+                        booking.BuyerDisplayName,
+                        booking.BuyerPhone,
+                        exposeBuyerContact)),
             ];
     }
 
     private static IReadOnlyList<ScanBookingCodePassengerItem> BuildLegacyBookingCodeItems(
-        VietRide.Booking.Domain.Entities.Booking booking)
+        VietRide.Booking.Domain.Entities.Booking booking,
+        bool exposeBuyerContact)
     {
         var passengersById = booking.Passengers.ToDictionary(passenger => passenger.Id);
 
@@ -140,9 +148,47 @@ public sealed class ScanBookingCodeForTripQueryHandler
                 entry.Ticket.Id,
                 entry.Ticket.TicketCode.Value,
                 entry.Passenger.SeatNumber!,
-                entry.Passenger.BoardingStatus.ToString()))
+                entry.Passenger.BoardingStatus.ToString(),
+                booking.BookingCode.Value,
+                GetBuyerName(booking.BuyerDisplayName, exposeBuyerContact),
+                GetBuyerPhone(
+                    booking.BuyerDisplayName,
+                    booking.BuyerPhone,
+                    exposeBuyerContact)))
             .ToArray();
     }
+
+    private static bool CanExposeBuyerContact(string tripStatus)
+        => tripStatus is "BOARDING" or "IN_PROGRESS";
+
+    private static string? GetBuyerName(string? buyerDisplayName, bool exposeBuyerContact)
+    {
+        if (!exposeBuyerContact
+            || string.IsNullOrWhiteSpace(buyerDisplayName)
+            || string.Equals(
+                buyerDisplayName,
+                BookingBuyerSnapshotProfile.DeletedDisplayName,
+                StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return buyerDisplayName;
+    }
+
+    private static string? GetBuyerPhone(
+        string? buyerDisplayName,
+        string? buyerPhone,
+        bool exposeBuyerContact)
+        => exposeBuyerContact && !IsRedactedBuyerSnapshot(buyerDisplayName)
+            ? buyerPhone
+            : null;
+
+    private static bool IsRedactedBuyerSnapshot(string? buyerDisplayName)
+        => string.Equals(
+            buyerDisplayName,
+            BookingBuyerSnapshotProfile.DeletedDisplayName,
+            StringComparison.Ordinal);
 
     private static bool IsBoardableTicket(TicketStatus status)
         => status is TicketStatus.ISSUED or TicketStatus.USED;

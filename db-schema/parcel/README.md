@@ -18,10 +18,12 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | `ParcelCargoRecoveryOperation` | Durable Day-32 transfer/return orchestration history. | Stable UUID-v4 Trip key, frozen source/target/refund facts, `PENDING|COMPLETED|FAILED`, one pending operation per Parcel |
 | `ParcelTransitLeg` | Một chặng vật lý của Parcel trên một Trip. | Sequence bất biến, expected/actual endpoints, vehicle snapshot, forwarding/multi-leg status |
 | `ParcelCustodyEvent` | Chain of custody append-only. | Expected/actual location, Trip/vehicle, actor role, evidence reference, source, idempotency key, sequence |
+| `ParcelStopDepartureApprovalRequest` | Phê duyệt cho xe rời stop khi reconciliation còn kiện unresolved. | Snapshot Parcel IDs, reason, Assistant requester và Driver/Operator reviewer lấy từ JWT |
 | `ParcelCurrentCustody` | Projection vị trí đã xác nhận gần nhất. | Last location/time, current Trip/vehicle, `CONFIRMED_SCAN|MANUAL_EXCEPTION|INFERRED_FROM_MANIFEST|UNKNOWN` |
 | `ParcelIncident` | Vụ việc missing/wrong-stop/unscanned/not-received/damage. | Search deadline, last known location, operational breach, recovery/loss state |
 | `ParcelSearchTask` | Checklist điều tra giao cho crew/station/operator. | Type/location/assignee/deadline/result/evidence/completedAt |
-| `ParcelClaim` | Claim do sender sở hữu, snapshot policy và award. | Rate/cap/fallback/version, direct loss, awards, decision actor/time, payout reference và appeal audit riêng |
+| `ParcelClaim` | Claim do sender sở hữu, snapshot policy và award. | Rate/cap/fallback/version, direct loss, awards, decision actor/time và payout reference bất biến |
+| `ParcelClaimAppeal` | Hồ sơ appeal riêng, không thay đổi trạng thái tài chính của claim gốc. | Original award, revised award, supplementary delta, reviewer và payout bổ sung |
 | `ParcelClaimEvidence` | Chứng từ claim. | Invoice/receipt/payment proof/photo/serial/biên bản reference và uploader |
 | `ParcelCompensationPolicy` | Active versioned policy per operator. | Default 50%/30m, fallback 4x freight, claim/search/decision/payout SLA |
 | `UnidentifiedParcelPackage` | Kiện không đọc được QR ở station. | Temporary tag, location, description/weight/evidence, matched Parcel audit |
@@ -52,6 +54,8 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 - **`parcel_custody_events` append-only** — trigger chặn cả UPDATE và DELETE. `ParcelStatusHistory` mô tả state machine; custody event mô tả bàn giao vật lý và không được dùng GPS để bịa vị trí.
 - **Transit leg/search terminalization** — `LOADED` chuyển leg sang `ACTIVE`, unload hợp lệ tại đích chuyển `COMPLETED`, forwarding giữ leg cũ `FORWARDED` và leg mới `ACTIVE`, còn `LOST_CONFIRMED` chuyển leg chưa kết thúc sang `LOST`. Khi tìm thấy hàng, task chưa xong chuyển `CANCELLED`; khi xác nhận mất, task chưa xong chuyển `FAILED`; task đã hoàn tất giữ nguyên result/evidence.
 - **`LOST` không thuộc ParcelStatus** — nhánh mất do `parcel_incidents.status=LOST_CONFIRMED` sở hữu. Custody exception tạm dùng `PENDING_OPERATOR_ACTION/CUSTODY_EXCEPTION` và giữ resume status.
+- **Stop departure fail-closed theo Parcel clearance** — Assistant không truyền reviewer UUID. Unresolved manifest tạo approval request; chỉ Driver được phân công hoặc same-tenant Operator duyệt bằng JWT. Trip phải đọc Internal-JWT clearance `CLEAR|APPROVED_OVERRIDE|BLOCKED_PENDING_APPROVAL` trước khi ghi actual departure.
+- **Appeal là aggregate riêng** — `ParcelClaim` giữ nguyên `PAID|REJECTED` và audit quyết định/payout gốc. Appeal được uphold hoặc duyệt mức mới; Payment chỉ chi `max(revisedTotal-originalPaid,0)` với unique reference theo `appealId`.
 - **Policy frozen per Parcel/claim** — default 50% thiệt hại trực tiếp, cap 30.000.000 VND; operator policy thay đổi không hồi tố. Sender là beneficiary duy nhất.
 - **`parcels` 1 mega-table thay vì split** — query "parcel detail page" lấy 1 row đủ; tránh N+1.
 - **2 CHECK constraints** cho weight: `estimated_weight_kg > 0` (bắt buộc), `actual_weight_kg > 0 OR NULL`.
@@ -94,7 +98,11 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | `idx_parcel_custody_exception_requests_operator_status` | `(operator_id, status, created_at)` | B-tree | Operator approval queue |
 | `idx_parcel_custody_exception_requests_trip_status` | `(trip_id, status, created_at)` | B-tree | Assigned Driver approval queue |
 | `idx_parcel_custody_exception_requests_approved_event` | `(approved_custody_event_id)` | B-tree | Audit link đến custody fact đã duyệt |
+| `uq_parcel_stop_departure_approval_pending` | `(trip_id,stop_id,status)` partial | unique | Một yêu cầu chờ duyệt cho mỗi Trip stop |
+| `uq_parcel_stop_departure_approval_idempotency` | `idempotency_key` | unique | Retry reconciliation không tạo approval trùng |
 | `uq_parcel_claims_incident` | `incident_id` | unique | Một claim cho mỗi lost incident |
+| `uq_parcel_claim_appeals_claim` | `claim_id` | unique | Một appeal case cho mỗi claim |
+| `uq_parcel_claim_appeals_idempotency` | `idempotency_key` | unique | Retry appeal không tạo case/payout trùng |
 | `uq_parcel_compensation_policies_operator` | `operator_id` | unique | Một active policy/version per operator |
 | `uq_parcel_status_history_migration_baseline` | `parcel_id` partial khi `source = 'MIGRATION_BASELINE'` | unique | Tối đa một baseline cho mỗi Parcel |
 | `idx_parcels_trip_snapshot_backfill` | `(created_at, id)` partial khi bất kỳ snapshot còn null | B-tree | Bounded application backfill không full scan |

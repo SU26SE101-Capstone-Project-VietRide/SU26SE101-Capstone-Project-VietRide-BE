@@ -491,7 +491,8 @@ public sealed class Day32ParcelRecoveryTests
             [],
             new TripSeatSummaryDto(40, 40),
             null,
-            null);
+            null,
+            AssistantUserId: Guid.NewGuid());
 
     private static ITripServiceClient SuccessfulIdempotentTripClient()
     {

@@ -19,12 +19,21 @@ Public tracking exposes only the latest confirmed business location and mileston
 
 Unload requires the requested actual location to equal both the Parcel destination and the Trip operational location. A route stop must be `ARRIVED` with no actual departure; terminal delivery requires the destination-arrival anchor. A mismatch returns `409 PARCEL_CUSTODY_LOCATION_MISMATCH` before Parcel or Trip cargo mutation.
 
-Manual handling is explicit. An unreadable/missing QR requires a photographed `MANUAL_CUSTODY_EXCEPTION` or an `UNIDENTIFIED_PACKAGE` with a temporary tag. A stop close reconciles expected, scanned, manual-exception, and unresolved Parcels. Departure with unresolved cargo opens a search incident; absence of a scan does not by itself confirm loss.
+Manual handling is explicit. An unreadable/missing QR requires a photographed `MANUAL_CUSTODY_EXCEPTION` or an `UNIDENTIFIED_PACKAGE` with a temporary tag. A stop close reconciles expected, scanned, manual-exception, and unresolved Parcels. When unresolved cargo remains, the Assistant may create a `PENDING_APPROVAL` stop-departure request but cannot name or impersonate its reviewer. The assigned Driver or a same-tenant Operator Staff/Admin decides it using identity from that reviewer's JWT. Trip calls the Parcel clearance endpoint before committing departure and fails closed unless it receives `CLEAR` or an approved override matching the exact current unresolved snapshot. Absence of a scan does not by itself confirm loss.
+
+Reconciliation trusts only persisted custody facts. Clients do not submit asserted scanned/manual
+Parcel lists: normal stop reconciliation has an empty body, an override request supplies only its
+reason, and destination reconciliation is bodyless. A Trip must have an assigned Assistant before
+it may accept a new Parcel or be selected as a transfer/forwarding target; Driver remains the
+supervisor and is not granted Assistant cargo mutations in v1.
 
 Trip emits `trip.stop.departed` for every committed stop departure, independently of the
 passenger-only `trip.stop.departed_with_pending` warning. Parcel consumes the operational fact to
-reconcile its own manifest and consumes `trip.destination.arrived` for terminal-bound parcels.
-Neither fact is treated as custody proof or used to infer a new physical location.
+reconcile its own manifest. `trip.destination.arrived` opens the normal terminal unload window; it
+does not classify a terminal-bound Parcel that is still on the vehicle as missing. The fallback
+missing search starts only when `trip.trip.completed` still finds the Parcel `LOADED|IN_TRANSIT`,
+or from an explicit report/reconciliation exception. Neither arrival/departure fact is treated as
+custody proof or used to infer a new physical location.
 
 ### Incident/search owns loss; ParcelStatus does not
 
@@ -33,6 +42,12 @@ Neither fact is treated as custody proof or used to infer a new physical locatio
 The default search SLA is 72 hours, with search tasks for vehicle/manifest, crew, station, lost-and-found, next Trip/substitution, and evidence reconciliation. Wrong-station recovery creates a new transit leg and paired `FORWARDED_OUT`/`FORWARDED_IN` custody facts. History is never rewritten and forwarding is not charged to the sender.
 
 A `LOADED` custody fact activates its transit leg. A validated destination unload completes that leg; a search that reaches `LOST_CONFIRMED` marks its active leg lost. When cargo is verified `FOUND`, remaining open/in-progress search tasks are cancelled. When loss is confirmed, remaining open/in-progress search tasks fail with the terminal search result. Completed task evidence is never overwritten.
+
+For a system-created `MISSING|MISSING_AFTER_DEPARTURE` false positive, the assigned Assistant may
+scan the Parcel QR and confirm it is physically still on the assigned Trip vehicle. The operation
+appends `FOUND@VEHICLE`, resolves the incident, cancels outstanding tasks, and restores the frozen
+`LOADED|IN_TRANSIT` resume status atomically. Assistant-reported manual exceptions still require
+Driver or Operator review and cannot use this shortcut while approval is pending.
 
 ### Compensation is operator policy, snapshotted per Parcel
 
@@ -52,13 +67,17 @@ Without acceptable proof, `cargoAward = min(fallbackMultiplier * parcelFreight, 
 
 ### Payout is durable and tenant-fenced
 
-Payment owns one `ParcelCompensationPayout` per `claimId`. Before Trip settlement it debits that operator/Trip's PlatformWallet holding; after settlement it debits that operator's OperatorWallet. It then credits the sender PassengerWallet and writes `PARCEL_COMPENSATION` wallet/ledger references atomically. Insufficient funds move the payout and claim to `FUNDING_PENDING`; a recurring job retries against future settlement funds. Operator wallets never become negative, funds never cross operator tenants, and replayed claim snapshots cannot create a second payout.
+Payment owns one `ParcelCompensationPayout` per compensation reference. The original approved claim uses `claimId`; an approved appeal adjustment uses `appealId` and only its positive supplementary delta. Before Trip settlement it debits that operator/Trip's PlatformWallet holding; after settlement it debits that operator's OperatorWallet. It then credits the sender PassengerWallet and writes `PARCEL_COMPENSATION` wallet/ledger references atomically. Insufficient funds move the payout and owning claim/appeal to `FUNDING_PENDING`; a recurring job retries against future settlement funds. Operator wallets never become negative, funds never cross operator tenants, and replayed decision snapshots cannot create a second payout.
 
 Cross-service changes use Internal JWT, Outbox, routing keys registered in the BSOT, UUID-v4 idempotency on public mutations, ADR 0004 envelopes, and tenant-masked reads.
 
-A sender appeal is allowed after a paid or rejected decision. Appeal reason, actor, and timestamp
-are stored separately so the original decision reason, decision maker, amount, and payout audit
-remain immutable.
+A sender may create one separate `ParcelClaimAppeal` after a paid or rejected decision. The
+original claim never transitions to `APPEALED`; its decision reason, reviewer, award and payout
+remain immutable. The appeal is `SUBMITTED -> UNDER_REVIEW -> UPHELD` or
+`SUBMITTED -> UNDER_REVIEW -> ADJUSTMENT_APPROVED -> FUNDING_PENDING -> PAID`.
+`OPERATOR_ADMIN` may uphold the original outcome or approve a recalculated award only when it is
+greater than the amount already paid. Payment credits only the positive supplementary delta and
+uses `appealId` as its unique compensation reference.
 
 ## Consequences
 

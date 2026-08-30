@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Routing;
 using NSubstitute;
 using VietRide.Parcel.Api.Controllers.Requests;
 using VietRide.Parcel.Application.Abstractions.Repositories;
@@ -25,6 +26,22 @@ public sealed class CustodyExceptionApprovalTests
         typeof(CustodyExceptionRequest).GetProperties()
             .Select(property => property.Name)
             .Should().NotContain("SupervisorApprovalUserId");
+    }
+
+    [Fact]
+    public void CrewController_ExposesDriverCustodyExceptionReadAndDecisionRoutes()
+    {
+        var read = typeof(VietRide.Parcel.Api.Controllers.CrewParcelsController)
+            .GetMethod("GetCustodyExceptionAsync")!;
+        var decision = typeof(VietRide.Parcel.Api.Controllers.CrewParcelsController)
+            .GetMethod("DecideCustodyExceptionAsync")!;
+
+        read.GetCustomAttributes(typeof(HttpMethodAttribute), inherit: true)
+            .Cast<HttpMethodAttribute>()
+            .Single().Template.Should().Be("{parcelId:guid}/custody-exception");
+        decision.GetCustomAttributes(typeof(HttpMethodAttribute), inherit: true)
+            .Cast<HttpMethodAttribute>()
+            .Single().Template.Should().Be("{parcelId:guid}/custody-exception-decision");
     }
 
     [Fact]
@@ -118,7 +135,8 @@ public sealed class CustodyExceptionApprovalTests
         addedRequest.IdempotencyKey.Should().Be(idempotencyKey);
         await reliability.DidNotReceiveWithAnyArgs().AddCustodyEventAsync(default!, default);
         await reliability.Received(1).AddIncidentAsync(
-            Arg.Is<ParcelIncident>(item => item.Status == ParcelIncidentStatus.OPEN),
+            Arg.Is<ParcelIncident>(item => item.Status == ParcelIncidentStatus.OPEN
+                && item.SearchDeadline == null),
             Arg.Any<CancellationToken>());
         await reliability.DidNotReceiveWithAnyArgs().AddSearchTaskAsync(default!, default);
     }
