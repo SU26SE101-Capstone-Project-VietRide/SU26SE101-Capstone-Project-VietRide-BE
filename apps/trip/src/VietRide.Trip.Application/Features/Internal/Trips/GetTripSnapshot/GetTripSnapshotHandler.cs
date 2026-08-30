@@ -59,12 +59,13 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
             .OrderBy(stop => stop.OrderIndex)
             .ToArray();
         var stopIds = tripStops.Select(stop => stop.StopId).ToArray();
-        var activeStops = stopRepository.QueryNoTracking()
+        var stopsById = stopRepository.QueryNoTracking()
             .Where(stop => stopIds.Contains(stop.Id))
-            .ToDictionary(stop => stop.Id, stop => stop.IsActive && stop.DeletedAt == null);
+            .ToDictionary(stop => stop.Id);
         var stops = tripStops
             .Select(stop =>
             {
+                stopsById.TryGetValue(stop.StopId, out var stopDefinition);
                 var originalFare = fares.TryGetValue(stop.StopId, out var fare)
                     ? fare
                     : request.PricingAt.HasValue ? trip.BaseFare.Amount : (long?)null;
@@ -81,7 +82,8 @@ public sealed class GetTripSnapshotHandler : IRequestHandler<GetTripSnapshotQuer
                 adjustment?.EffectiveFare,
                 stop.Status.ToString(),
                 stop.ActualArrivalTime,
-                activeStops.GetValueOrDefault(stop.StopId));
+                stopDefinition is not null && stopDefinition.IsActive && stopDefinition.DeletedAt == null,
+                stopDefinition?.Name);
 
                 return request.PricingAt.HasValue
                     ? snapshot with

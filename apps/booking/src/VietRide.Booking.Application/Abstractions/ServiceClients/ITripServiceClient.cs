@@ -51,7 +51,8 @@ public sealed record TripStopSnapshot(
     long? FareFromThisStop,
     bool IsActive = true,
     string? Status = null,
-    DateTimeOffset? ActualArrivalTime = null);
+    DateTimeOffset? ActualArrivalTime = null,
+    string? Name = null);
 
 /// <summary>Seat availability summary embedded in <see cref="TripSnapshot"/>.</summary>
 public sealed record TripSeatSummary(int TotalSeats, int AvailableSeats);

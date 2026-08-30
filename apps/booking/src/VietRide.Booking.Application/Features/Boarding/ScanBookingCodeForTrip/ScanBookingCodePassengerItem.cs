@@ -5,4 +5,7 @@ public sealed record ScanBookingCodePassengerItem(
     Guid TicketId,
     string TicketCode,
     string SeatNumber,
-    string BoardingStatus);
+    string BoardingStatus,
+    string BookingCode,
+    string? BuyerName,
+    string? BuyerPhone);

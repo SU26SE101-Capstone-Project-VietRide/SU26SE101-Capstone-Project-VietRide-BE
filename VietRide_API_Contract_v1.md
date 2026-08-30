@@ -2382,6 +2382,7 @@ Response `200` (raw):
   "stops": [
     {
       "stopId": "uuid",
+      "name": "Ngã tư Hàng Xanh",
       "isActive": true,
       "orderIndex": 1,
       "allowPickup": true,
@@ -9348,9 +9349,11 @@ returns `422 VALIDATION_ERROR`/`422 IDEMPOTENCY_KEY_REQUIRED` as applicable.
 Auth: `DRIVER` or `ASSISTANT`. The authenticated JWT `sub` must equal the Trip snapshot's
 `driverUserId` or `assistantUserId`; otherwise the endpoint returns `403 FORBIDDEN`.
 
-Returns only confirmed Booking passenger records and exposes no passenger or buyer PII. Items are
-ordered by the Trip snapshot stop `orderIndex`. A terminal pickup (`pickupStationId` set and
-`pickupStopId` null) is treated as the origin with `orderIndex = 0` and sorts first.
+Returns paid Booking passenger records without adding per-passenger identity. The assigned crew may
+see the Booking buyer snapshot only while the Trip is `BOARDING` or `IN_PROGRESS`; the buyer fields
+are null in every other Trip status. Items are ordered by the Trip snapshot stop `orderIndex`. A
+terminal pickup (`pickupStationId` set and `pickupStopId` null) is treated as the origin with
+`orderIndex = 0` and sorts first. The response sets `Cache-Control: private, no-store`.
 
 Response `200` in the ADR 0004 success envelope:
 
@@ -9367,7 +9370,10 @@ Response `200` in the ADR 0004 success envelope:
         "seatNumber": "A01",
         "bookingCode": "VR-20260630-ABCD1234",
         "pickupStop": "uuid-or-null",
-        "boardingStatus": "PENDING"
+        "boardingStatus": "PENDING",
+        "pickupPointName": "Ngã tư Hàng Xanh",
+        "buyerName": "Nguyễn Văn A",
+        "buyerPhone": "+84888151546"
       }
     ]
   },
@@ -9378,10 +9384,16 @@ Response `200` in the ADR 0004 success envelope:
 }
 ```
 
-Each manifest item contains `passengerRecordId`, `ticketId`, `ticketCode`, `seatNumber`,
-`bookingCode`, `pickupStop`, and `boardingStatus`, and only includes tickets in `ISSUED` or
-`USED` status. A trip with no confirmed active/used tickets returns `200` with `items: []`, not `404`.
-Unknown trip returns `404 TRIP_NOT_FOUND`; validation failures return `422 VALIDATION_ERROR`.
+`buyerName` and `buyerPhone` identify the Booking buyer/contact, not the individual occupying the
+seat; every seat under the same `bookingCode` therefore carries the same values. The phone remains
+canonical E.164. Missing/legacy/redacted buyer snapshots return null values, and a deleted-user
+display marker is never exposed. `pickupPointName` is the Trip Stop name, or the origin Station name
+when `pickupStop` is null; it may be null during a rolling deployment from an older Trip service.
+
+The manifest includes Booking status `CONFIRMED`, `PARTIAL_NO_SHOW`, or `NO_SHOW` and only Ticket
+status `ISSUED` or `USED`. It does not fabricate an item or buyer contact for an unmatched Trip
+`BOOKED` seat. No eligible ticket returns `200` with `items: []`, not `404`. Unknown trip returns
+`404 TRIP_NOT_FOUND`; validation failures return `422 VALIDATION_ERROR`.
 
 ### POST `/v1/bookings/trips/{tripId}/boarding/passenger/{passengerRecordId}`
 
@@ -9492,7 +9504,10 @@ Response `200` in the ADR 0004 success envelope:
         "ticketId": "uuid",
         "ticketCode": "VT-20260630-ABCDEFGH",
         "seatNumber": "A01",
-        "boardingStatus": "PENDING"
+        "boardingStatus": "PENDING",
+        "bookingCode": "VR-20260630-ABCD1234",
+        "buyerName": "Nguyễn Văn A",
+        "buyerPhone": "+84888151546"
       }
     ]
   },
@@ -9505,7 +9520,10 @@ Response `200` in the ADR 0004 success envelope:
 
 With `ticketCode`, the response contains exactly one passenger item. Legacy `bookingCode` may
 return multiple issued/used ticket items for the booking. The scan is read-only; ticking a
-passenger uses the separate boarding-passenger endpoint.
+passenger uses the separate boarding-passenger endpoint. `buyerName` and `buyerPhone` follow the
+same Booking-buyer meaning, `BOARDING|IN_PROGRESS` visibility window, null/redaction rules, and
+E.164/no-store policy as the manifest endpoint. Because the scan is read-only, it does not require
+an `Idempotency-Key` header.
 
 Error responses use the ADR 0004 envelope:
 

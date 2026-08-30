@@ -40,7 +40,78 @@ public sealed class GetTripManifestQueryHandlerTests
         result.Items.Select(item => item.SeatNumber)
             .Should().Equal("T01", "A01", "B01");
         result.Items[0].PickupStop.Should().BeNull();
+        result.Items[0].PickupPointName.Should().Be("Origin");
         result.Items[1].PickupStop.Should().Be(FirstStopId);
+        result.Items[1].PickupPointName.Should().Be("First stop");
+    }
+
+    [Fact]
+    public async Task Handle_OperationalTrip_ReturnsBookingBuyerContactForEverySeat()
+    {
+        var booking = CreateConfirmedBooking(
+            "VR-20260518-ABCD1234",
+            FirstStopId,
+            "A01",
+            buyerName: "Nguyen Van Buyer",
+            buyerPhone: "+84888151546");
+        booking.AddTicketedPassenger(
+            "A02",
+            TicketCode.Generate(DateTimeOffset.UtcNow),
+            Money.FromRaw(200_000),
+            Money.Zero,
+            Money.FromRaw(200_000));
+        booking.Tickets.Last().Issue(DateTimeOffset.UtcNow);
+        Arrange([booking], CreateTripSnapshot(DriverUserId, "BOARDING"));
+
+        var result = await CreateHandler().Handle(
+            new GetTripManifestQuery(TripId, DriverUserId),
+            CancellationToken.None);
+
+        result.Items.Should().HaveCount(2);
+        result.Items.Should().OnlyContain(item =>
+            item.BuyerName == "Nguyen Van Buyer"
+            && item.BuyerPhone == "+84888151546");
+    }
+
+    [Theory]
+    [InlineData("SCHEDULED")]
+    [InlineData("COMPLETED")]
+    [InlineData("CANCELLED")]
+    public async Task Handle_NonOperationalTrip_RedactsBuyerContact(string tripStatus)
+    {
+        var booking = CreateConfirmedBooking(
+            "VR-20260518-ABCD1234",
+            FirstStopId,
+            "A01",
+            buyerName: "Nguyen Van Buyer",
+            buyerPhone: "+84888151546");
+        Arrange([booking], CreateTripSnapshot(DriverUserId, tripStatus));
+
+        var result = await CreateHandler().Handle(
+            new GetTripManifestQuery(TripId, DriverUserId),
+            CancellationToken.None);
+
+        result.Items.Single().BuyerName.Should().BeNull();
+        result.Items.Single().BuyerPhone.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Handle_RedactedBuyerSnapshot_DoesNotExposeDeletedMarker()
+    {
+        var booking = CreateConfirmedBooking(
+            "VR-20260518-ABCD1234",
+            FirstStopId,
+            "A01",
+            buyerName: BookingBuyerSnapshotProfile.DeletedDisplayName,
+            buyerPhone: "+84888151546");
+        Arrange([booking], CreateTripSnapshot(DriverUserId, "IN_PROGRESS"));
+
+        var result = await CreateHandler().Handle(
+            new GetTripManifestQuery(TripId, DriverUserId),
+            CancellationToken.None);
+
+        result.Items.Single().BuyerName.Should().BeNull();
+        result.Items.Single().BuyerPhone.Should().BeNull();
     }
 
     [Fact]
@@ -97,7 +168,22 @@ public sealed class GetTripManifestQueryHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ItemSerialization_ContainsExactlyFourOperationalFields()
+    public async Task Handle_NoShowBooking_RemainsInOperationalManifest()
+    {
+        var noShow = CreateConfirmedBooking("VR-20260518-ABCD1234", FirstStopId, "A01");
+        noShow.MarkPendingPassengersNoShow().Should().ContainSingle();
+        Arrange([noShow], CreateTripSnapshot(AssistantUserId, "IN_PROGRESS"));
+
+        var result = await CreateHandler().Handle(
+            new GetTripManifestQuery(TripId, AssistantUserId),
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle();
+        result.Items.Single().BoardingStatus.Should().Be("NO_SHOW");
+    }
+
+    [Fact]
+    public async Task Handle_ItemSerialization_ContainsOperationalAndBuyerContactFields()
     {
         var booking = CreateConfirmedBooking("VR-20260518-ABCD1234", FirstStopId, "A01");
         Arrange([booking], CreateTripSnapshot(DriverUserId));
@@ -120,12 +206,14 @@ public sealed class GetTripManifestQueryHandlerTests
                 "bookingCode",
                 "pickupStop",
                 "boardingStatus",
+                "pickupPointName",
+                "buyerName",
+                "buyerPhone",
             ]);
-        document.RootElement.EnumerateObject().Should().HaveCount(7);
+        document.RootElement.EnumerateObject().Should().HaveCount(10);
         JsonSerializer.Serialize(result).Should().NotContainAny(
             "passengerUserId",
             "fullName",
-            "phoneNumber",
             "idNumber");
     }
 
@@ -142,9 +230,16 @@ public sealed class GetTripManifestQueryHandlerTests
     private static BookingEntity CreateConfirmedBooking(
         string bookingCode,
         Guid? pickupStopId,
-        string seatNumber)
+        string seatNumber,
+        string? buyerName = null,
+        string? buyerPhone = null)
     {
-        var booking = CreatePendingBooking(bookingCode, pickupStopId, seatNumber);
+        var booking = CreatePendingBooking(
+            bookingCode,
+            pickupStopId,
+            seatNumber,
+            buyerName,
+            buyerPhone);
         booking.Confirm(DateTimeOffset.UtcNow);
         return booking;
     }
@@ -152,7 +247,9 @@ public sealed class GetTripManifestQueryHandlerTests
     private static BookingEntity CreatePendingBooking(
         string bookingCode,
         Guid? pickupStopId,
-        string seatNumber)
+        string seatNumber,
+        string? buyerName = null,
+        string? buyerPhone = null)
     {
         var booking = BookingEntity.CreatePendingPayment(
             bookingCode: BookingCode.Parse(bookingCode),
@@ -165,7 +262,9 @@ public sealed class GetTripManifestQueryHandlerTests
             dropoffStopId: null,
             baseFare: Money.FromRaw(200_000),
             discountAmount: Money.Zero,
-            totalAmount: Money.FromRaw(200_000));
+            totalAmount: Money.FromRaw(200_000),
+            buyerDisplayName: buyerName,
+            buyerPhone: buyerPhone);
         booking.AddTicketedPassenger(
             seatNumber,
             TicketCode.Generate(DateTimeOffset.UtcNow),
@@ -175,13 +274,13 @@ public sealed class GetTripManifestQueryHandlerTests
         return booking;
     }
 
-    private static TripSnapshot CreateTripSnapshot(Guid assignedUserId)
+    private static TripSnapshot CreateTripSnapshot(Guid assignedUserId, string status = "BOARDING")
         => new(
             TripId,
             OperatorId,
             Guid.NewGuid(),
             Guid.NewGuid(),
-            "SCHEDULED",
+            status,
             DateTimeOffset.UtcNow.AddHours(1),
             DateTimeOffset.UtcNow.AddHours(5),
             200_000,
@@ -195,7 +294,8 @@ public sealed class GetTripManifestQueryHandlerTests
                     true,
                     DateTimeOffset.UtcNow.AddHours(3),
                     20,
-                    null),
+                    null,
+                    Name: "Second stop"),
                 new TripStopSnapshot(
                     FirstStopId,
                     1,
@@ -203,7 +303,8 @@ public sealed class GetTripManifestQueryHandlerTests
                     true,
                     DateTimeOffset.UtcNow.AddHours(2),
                     10,
-                    null),
+                    null,
+                    Name: "First stop"),
             ],
             new TripSeatSummary(40, 37),
             DriverUserId: assignedUserId == DriverUserId ? assignedUserId : null,

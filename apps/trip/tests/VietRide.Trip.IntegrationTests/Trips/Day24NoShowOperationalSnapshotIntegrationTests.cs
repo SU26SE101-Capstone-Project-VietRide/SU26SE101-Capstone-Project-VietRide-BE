@@ -78,8 +78,10 @@ public sealed class Day24NoShowOperationalSnapshotIntegrationTests
             "status",
             "actualArrivalTime",
             "isActive",
+            "name",
         ]);
         stop.GetProperty("stopId").GetGuid().Should().Be(stopId);
+        stop.GetProperty("name").GetString().Should().Be("Pickup stop");
         stop.GetProperty("status").GetString().Should().Be("ARRIVED");
         stop.GetProperty("actualArrivalTime").GetDateTimeOffset().Should().Be(ActualArrivalTime);
         mediator.LastRequest.Should().Be(new GetTripSnapshotQuery(tripId));
@@ -125,7 +127,8 @@ public sealed class Day24NoShowOperationalSnapshotIntegrationTests
                 50d,
                 200000,
                 "ARRIVED",
-                ActualArrivalTime),
+                ActualArrivalTime,
+                Name: "Pickup stop"),
         ],
         new InternalTripSeatSummaryDto(40, 10),
         null,

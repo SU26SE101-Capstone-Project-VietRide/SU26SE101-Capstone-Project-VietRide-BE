@@ -12,7 +12,8 @@ public sealed record InternalTripStopSnapshotDto(
     long? FareFromThisStop,
     string Status,
     DateTimeOffset? ActualArrivalTime,
-    bool IsActive = true)
+    bool IsActive = true,
+    string? Name = null)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? OriginalFareFromThisStop { get; init; }
