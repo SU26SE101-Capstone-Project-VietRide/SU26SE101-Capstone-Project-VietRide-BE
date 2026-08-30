@@ -83,6 +83,6 @@ describe('AssistantParcelManifestSchema', () => {
     });
 
     expect(parsed.pagination.totalItems).toBe(1);
-    expect(parsed.items[0].custodyExceptionApproval?.status).toBe('PENDING_APPROVAL');
+    expect(parsed.items[0]?.custodyExceptionApproval?.status).toBe('PENDING_APPROVAL');
   });
 });
