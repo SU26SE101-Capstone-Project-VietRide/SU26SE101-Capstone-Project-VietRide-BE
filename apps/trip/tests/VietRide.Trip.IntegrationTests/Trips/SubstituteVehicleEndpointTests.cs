@@ -851,8 +851,9 @@ public sealed class SubstituteVehicleEndpointTests
                 trip.Id,
                 "A01",
                 upgradeStandardSeat ? TripSeatType.STANDARD : TripSeatType.VIP);
+            var bookingId = Guid.NewGuid();
             bookedSeat.MarkHeld();
-            bookedSeat.MarkBooked(Guid.NewGuid());
+            bookedSeat.MarkBooked(bookingId);
             var otherSeat = TripSeat.Create(
                 trip.Id,
                 "A02",
@@ -913,6 +914,7 @@ public sealed class SubstituteVehicleEndpointTests
                 oldEstimatedArrival,
                 pendingStop.Id,
                 pendingStopEta,
+                bookingId,
                 Guid.NewGuid(),
                 Guid.NewGuid());
         }
@@ -1064,7 +1066,7 @@ public sealed class SubstituteVehicleEndpointTests
                     seed.OperatorId,
                     [
                         new VehicleSubstitutionImpactProjection.Booking(
-                            Guid.NewGuid(),
+                            seed.BookingId,
                             "CONFIRMED",
                             passengers),
                     ]));
@@ -1115,6 +1117,7 @@ public sealed class SubstituteVehicleEndpointTests
             DateTimeOffset OldEstimatedArrival,
             Guid PendingStopId,
             DateTimeOffset PendingStopEta,
+            Guid BookingId,
             Guid FirstPassengerId,
             Guid SecondPassengerId);
 
