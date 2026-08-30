@@ -409,6 +409,7 @@ public sealed class SubstituteVehicleEndpointTests
             nameof(OperatorTripsController.PreviewSubstituteVehicleAsync))!;
         preview.GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_ADMIN");
         preview.GetCustomAttribute<RequireIdempotencyAttribute>().Should().BeNull();
+        preview.GetCustomAttribute<SkipIdempotencyAttribute>().Should().NotBeNull();
         preview.GetCustomAttributes<ProducesResponseTypeAttribute>()
             .Select(attribute => attribute.StatusCode)
             .Should().BeEquivalentTo([200, 403, 404, 409, 422]);
@@ -810,7 +811,7 @@ public sealed class SubstituteVehicleEndpointTests
                     ? CreateLayout(("A01", "STANDARD"), ("A02", "STANDARD"), ("C01", "STANDARD"))
                     : upgradeStandardSeat
                         ? CreateLayout(("A01", "VIP"), ("A02", "VIP"), ("C01", "VIP"))
-                    : CreateLayout(("A01", "STANDARD"), ("A02", "VIP"), ("C01", "STANDARD")),
+                    : CreateLayout(("A01", "VIP"), ("A02", "STANDARD"), ("C01", "STANDARD")),
                 3,
                 120m,
                 12m);

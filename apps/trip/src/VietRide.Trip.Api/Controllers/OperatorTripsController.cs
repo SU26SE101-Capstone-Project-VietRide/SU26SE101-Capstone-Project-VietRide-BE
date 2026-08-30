@@ -170,6 +170,7 @@ public sealed class OperatorTripsController : ControllerBase
     }
 
     [HttpPost("{tripId:guid}/substitute-vehicle/preview")]
+    [SkipIdempotency("This POST is a read-only vehicle substitution seat preview.")]
     [Authorize(Roles = OperatorWriteRoles)]
     [ProducesResponseType(typeof(ApiResponse<SubstituteVehiclePreviewResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
