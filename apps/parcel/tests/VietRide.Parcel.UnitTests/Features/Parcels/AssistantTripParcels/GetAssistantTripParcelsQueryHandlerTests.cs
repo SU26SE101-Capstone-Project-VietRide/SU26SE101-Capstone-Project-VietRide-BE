@@ -54,12 +54,14 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
                 [parcel.Id] = CreateScreen(parcel),
             });
 
-        var result = await new GetAssistantTripParcelsQueryHandler(repository, tripClient, screenModels)
+        var result = await new GetAssistantTripParcelsQueryHandler(
+                repository, tripClient, screenModels, Substitute.For<IParcelCustodyExceptionRequestRepository>())
             .Handle(new GetAssistantTripParcelsQuery(TripId, UserId, OperatorId, 1, 20), default);
 
         result.Items.Should().ContainSingle();
         result.Items[0].AvailableActions.Should().Contain("REWEIGH");
         result.Items[0].AvailableActions.Should().NotContain("CHECK_IN");
+        result.Items[0].AvailableActions.Should().NotContain("CUSTODY_SCAN");
         result.Items[0].Should().BeEquivalentTo(new
         {
             ParcelId = parcel.Id,
@@ -100,7 +102,8 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
         tripClient.AuthorizeAssistantForTripAsync(TripId, UserId, OperatorId, Arg.Any<CancellationToken>())
             .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Denied));
 
-        var action = () => new GetAssistantTripParcelsQueryHandler(repository, tripClient, screenModels)
+        var action = () => new GetAssistantTripParcelsQueryHandler(
+                repository, tripClient, screenModels, Substitute.For<IParcelCustodyExceptionRequestRepository>())
             .Handle(new GetAssistantTripParcelsQuery(TripId, UserId, OperatorId, 1, 20), default);
 
         await action.Should().ThrowAsync<ForbiddenException>()
@@ -138,7 +141,8 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
         screenModels.BuildAsync(Arg.Any<IReadOnlyCollection<ParcelEntity>>(), UserId, false, Arg.Any<CancellationToken>())
             .Returns(new Dictionary<Guid, ParcelScreenReadModel> { [parcel.Id] = CreateScreen(parcel) });
 
-        var result = await new GetAssistantTripParcelsQueryHandler(repository, tripClient, screenModels)
+        var result = await new GetAssistantTripParcelsQueryHandler(
+                repository, tripClient, screenModels, Substitute.For<IParcelCustodyExceptionRequestRepository>())
             .Handle(new GetAssistantTripParcelsQuery(TripId, UserId, OperatorId, 1, 20), default);
 
         result.Items.Should().ContainSingle();
@@ -168,7 +172,8 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
         screenModels.BuildAsync(Arg.Any<IReadOnlyCollection<ParcelEntity>>(), UserId, false, Arg.Any<CancellationToken>())
             .Returns(new Dictionary<Guid, ParcelScreenReadModel> { [parcel.Id] = CreateScreen(parcel) });
 
-        var result = await new GetAssistantTripParcelsQueryHandler(repository, tripClient, screenModels)
+        var result = await new GetAssistantTripParcelsQueryHandler(
+                repository, tripClient, screenModels, Substitute.For<IParcelCustodyExceptionRequestRepository>())
             .Handle(new GetAssistantTripParcelsQuery(TripId, UserId, OperatorId, 1, 20), default);
 
         result.Items.Should().ContainSingle();
@@ -195,13 +200,174 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
         screenModels.BuildAsync(Arg.Any<IReadOnlyCollection<ParcelEntity>>(), UserId, false, Arg.Any<CancellationToken>())
             .Returns(new Dictionary<Guid, ParcelScreenReadModel>());
 
-        var result = await new GetAssistantTripParcelsQueryHandler(repository, tripClient, screenModels)
+        var result = await new GetAssistantTripParcelsQueryHandler(
+                repository, tripClient, screenModels, Substitute.For<IParcelCustodyExceptionRequestRepository>())
             .Handle(new GetAssistantTripParcelsQuery(
                 TripId, UserId, OperatorId, 1, 20, Role: "DRIVER"), default);
 
         result.Items.Should().BeEmpty();
         await tripClient.Received(1).AuthorizeCrewForTripAsync(
             TripId, UserId, OperatorId, "DRIVER", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_AssignedDriver_ReturnsPendingApprovalActionsWithoutAssistantActions()
+    {
+        var parcel = CreateParcel();
+        var incidentId = Guid.NewGuid();
+        var approval = VietRide.Parcel.Domain.Entities.ParcelCustodyExceptionRequest.Create(
+            parcel.Id,
+            incidentId,
+            OperatorId,
+            TripId,
+            ParcelIncidentType.WRONG_STOP,
+            ParcelCustodyLocationType.ROUTE_STOP,
+            Guid.NewGuid(),
+            "Wrong stop",
+            null,
+            null,
+            null,
+            "[]",
+            "Assistant reported a wrong stop",
+            Guid.NewGuid(),
+            "ASSISTANT",
+            DateTimeOffset.UtcNow,
+            Guid.NewGuid());
+        var repository = Substitute.For<IParcelRepository>();
+        var approvals = Substitute.For<IParcelCustodyExceptionRequestRepository>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        var screenModels = Substitute.For<IParcelReliabilityReadModelService>();
+        tripClient.AuthorizeCrewForTripAsync(
+                TripId, UserId, OperatorId, "DRIVER", Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+        repository.ListByTripAndOperatorFilteredAsync(
+                TripId, OperatorId, null, null, null, null, 1, 20, Arg.Any<CancellationToken>())
+            .Returns(PagedResult<ParcelEntity>.Create([parcel], 1, 20, 1));
+        repository.GetAssistantManifestCountsAsync(TripId, OperatorId, null, Arg.Any<CancellationToken>())
+            .Returns(new AssistantParcelManifestCounts(1, 1, 0, 0, 0, 1, 1));
+        approvals.ListLatestByParcelsAsync(
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Arg.Any<CancellationToken>())
+            .Returns([approval]);
+        screenModels.BuildAsync(Arg.Any<IReadOnlyCollection<ParcelEntity>>(), UserId, false, Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<Guid, ParcelScreenReadModel>
+            {
+                [parcel.Id] = CreateScreen(
+                    parcel,
+                    new ReliabilityIncidentSummaryResponse(
+                        incidentId,
+                        "WRONG_STOP",
+                        "OPEN",
+                        null,
+                        null,
+                        "NOT_STARTED",
+                        false)),
+            });
+
+        var result = await new GetAssistantTripParcelsQueryHandler(
+                repository, tripClient, screenModels, approvals)
+            .Handle(new GetAssistantTripParcelsQuery(
+                TripId, UserId, OperatorId, 1, 20, Role: "DRIVER"), default);
+
+        var item = result.Items.Should().ContainSingle().Subject;
+        item.AvailableActions.Should().BeEquivalentTo(
+            "VIEW_INCIDENT",
+            "APPROVE_CUSTODY_EXCEPTION",
+            "REJECT_CUSTODY_EXCEPTION");
+        item.AvailableActions.Should().NotContain(["CHECK_IN", "REWEIGH", "LOAD", "CUSTODY_SCAN"]);
+        item.CustodyExceptionApproval.Should().NotBeNull();
+        item.CustodyExceptionApproval!.Status.Should().Be("PENDING_APPROVAL");
+        item.CustodyExceptionApproval.RequestId.Should().Be(approval.Id);
+    }
+
+    [Fact]
+    public async Task Handle_UnscannedHandoffOnVehicle_OffersCrewRecoveryAction()
+    {
+        var parcel = CreateParcel();
+        typeof(ParcelEntity).GetProperty(nameof(ParcelEntity.Status))!
+            .SetValue(parcel, ParcelStatus.PENDING_OPERATOR_ACTION);
+        typeof(ParcelEntity).GetProperty(nameof(ParcelEntity.PendingActionType))!
+            .SetValue(parcel, PendingActionType.CUSTODY_EXCEPTION);
+        typeof(ParcelEntity).GetProperty(nameof(ParcelEntity.PendingActionResumeStatus))!
+            .SetValue(parcel, ParcelStatus.IN_TRANSIT);
+        var repository = Substitute.For<IParcelRepository>();
+        var approvals = Substitute.For<IParcelCustodyExceptionRequestRepository>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        var screenModels = Substitute.For<IParcelReliabilityReadModelService>();
+        tripClient.AuthorizeAssistantForTripAsync(TripId, UserId, OperatorId, Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+        repository.ListByTripAndOperatorFilteredAsync(
+                TripId, OperatorId, null, null, null, null, 1, 20, Arg.Any<CancellationToken>())
+            .Returns(PagedResult<ParcelEntity>.Create([parcel], 1, 20, 1));
+        repository.GetAssistantManifestCountsAsync(TripId, OperatorId, null, Arg.Any<CancellationToken>())
+            .Returns(new AssistantParcelManifestCounts(1, 0, 0, 0, 0, 1, 1));
+        screenModels.BuildAsync(Arg.Any<IReadOnlyCollection<ParcelEntity>>(), UserId, false, Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<Guid, ParcelScreenReadModel>
+            {
+                [parcel.Id] = CreateScreen(
+                    parcel,
+                    new ReliabilityIncidentSummaryResponse(
+                        Guid.NewGuid(),
+                        "UNSCANNED_HANDOFF",
+                        "SEARCHING",
+                        DateTimeOffset.UtcNow.AddHours(1),
+                        DateTimeOffset.UtcNow.AddMinutes(30),
+                        "ON_TRACK",
+                        true)),
+            });
+
+        var result = await new GetAssistantTripParcelsQueryHandler(
+                repository, tripClient, screenModels, approvals)
+            .Handle(new GetAssistantTripParcelsQuery(TripId, UserId, OperatorId, 1, 20), default);
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].AvailableActions.Should().Contain("CONFIRM_FOUND_ON_VEHICLE");
+    }
+
+    [Fact]
+    public async Task Handle_InTransitAtCurrentStop_OffersOptionalDirectCustodyScan()
+    {
+        var parcel = CreateParcel();
+        typeof(ParcelEntity).GetProperty(nameof(ParcelEntity.Status))!
+            .SetValue(parcel, ParcelStatus.IN_TRANSIT);
+        var repository = Substitute.For<IParcelRepository>();
+        var approvals = Substitute.For<IParcelCustodyExceptionRequestRepository>();
+        var tripClient = Substitute.For<ITripServiceClient>();
+        var screenModels = Substitute.For<IParcelReliabilityReadModelService>();
+        tripClient.AuthorizeAssistantForTripAsync(TripId, UserId, OperatorId, Arg.Any<CancellationToken>())
+            .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+        repository.ListByTripAndOperatorFilteredAsync(
+                TripId, OperatorId, null, null, null, null, 1, 20, Arg.Any<CancellationToken>())
+            .Returns(PagedResult<ParcelEntity>.Create([parcel], 1, 20, 1));
+        repository.GetAssistantManifestCountsAsync(TripId, OperatorId, Arg.Any<Guid?>(), Arg.Any<CancellationToken>())
+            .Returns(new AssistantParcelManifestCounts(1, 0, 1, 1, 0, 0, 0));
+        var screen = CreateScreen(parcel);
+        screen = screen with
+        {
+            Trip = screen.Trip with
+            {
+                Stops =
+                [
+                    new ReliabilityTripStopResponse(
+                        Guid.NewGuid(),
+                        "Current stop",
+                        1,
+                        DateTimeOffset.UtcNow,
+                        "ARRIVED",
+                        DateTimeOffset.UtcNow,
+                        null),
+                ],
+            },
+        };
+        screenModels.BuildAsync(Arg.Any<IReadOnlyCollection<ParcelEntity>>(), UserId, false, Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<Guid, ParcelScreenReadModel> { [parcel.Id] = screen });
+
+        var result = await new GetAssistantTripParcelsQueryHandler(
+                repository, tripClient, screenModels, approvals)
+            .Handle(new GetAssistantTripParcelsQuery(TripId, UserId, OperatorId, 1, 20), default);
+
+        result.Items.Should().ContainSingle();
+        result.Items[0].AvailableActions.Should().Contain("CUSTODY_SCAN");
     }
 
     [Theory]
@@ -261,7 +427,9 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
         return parcel;
     }
 
-    private static ParcelScreenReadModel CreateScreen(ParcelEntity parcel)
+    private static ParcelScreenReadModel CreateScreen(
+        ParcelEntity parcel,
+        ReliabilityIncidentSummaryResponse? incident = null)
         => new(
             new ReliabilityParcelSummaryResponse(
                 parcel.Id,
@@ -282,7 +450,7 @@ public sealed class GetAssistantTripParcelsQueryHandlerTests
                 []),
             null,
             new ReliabilityLocationResponse("ROUTE_STOP", parcel.DropoffStopId, null),
-            new ParcelReliabilitySummaryResponse(null, null, null, null, []));
+            new ParcelReliabilitySummaryResponse(null, incident, null, null, []));
 
     private static TripSummarySnapshot CreateTripSummary()
         => new(

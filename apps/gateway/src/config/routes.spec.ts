@@ -927,6 +927,7 @@ describe('buildRouteTable', () => {
       '/v1/crew/parcels/11111111-1111-4111-8111-111111111111/resend-delivery-email',
       '/v1/crew/parcels/11111111-1111-4111-8111-111111111111/manual-confirm',
       '/v1/crew/parcels/11111111-1111-4111-8111-111111111111/confirm-transfer',
+      '/v1/crew/parcels/11111111-1111-4111-8111-111111111111/custody-exception-decision',
     ] as const;
 
     cases.forEach((path) => {
@@ -952,6 +953,11 @@ describe('buildRouteTable', () => {
       routes,
       '/v1/assistant/trips/11111111-1111-4111-8111-111111111111/manifest',
     );
+    const destinationReconcileRoute = matchRoute(
+      routes,
+      '/v1/assistant/trips/11111111-1111-4111-8111-111111111111/destination/reconcile',
+      'POST',
+    );
 
     expect(parcelListRoute).toMatchObject({
       prefix: '/v1/assistant/trips/{tripId}/parcels',
@@ -961,6 +967,12 @@ describe('buildRouteTable', () => {
     });
     expect(parcelQrScanRoute).toMatchObject({
       prefix: '/v1/assistant/trips/{tripId}/parcels',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['ASSISTANT'],
+    });
+    expect(destinationReconcileRoute).toMatchObject({
+      prefix: '/v1/assistant/trips/{tripId}/destination/reconcile',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['ASSISTANT'],

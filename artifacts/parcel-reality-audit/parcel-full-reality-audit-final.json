@@ -1,0 +1,61 @@
+{
+  "generatedAt": "2026-08-30T02:50:14.3115757Z",
+  "result": "PASS_WITH_DOCUMENTED_P2_P3_GAPS",
+  "primaryRunId": "PCL-E2E-mtf6q2gv2hk",
+  "evidence": {
+    "markdown": "artifacts/parcel-reality-audit/mtf6q2gv2hk.md",
+    "json": "artifacts/parcel-reality-audit/mtf6q2gv2hk.json"
+  },
+  "verification": {
+    "liveBusinessChecks": { "passed": 43, "total": 43 },
+    "parcelUnit": { "passed": 556, "total": 556 },
+    "parcelIntegration": { "passed": 87, "total": 87 },
+    "tripUnit": { "passed": 873, "total": 873 },
+    "tripIntegration": { "passed": 383, "total": 383 },
+    "identityUnit": { "passed": 403, "total": 403 },
+    "gatewayJest": { "passed": 234, "total": 234 },
+    "routeFareAvailabilityAssertions": { "passed": 70, "total": 70 },
+    "parcelSettlementAssertions": { "passed": 652, "total": 652 },
+    "cargoRecoveryScenarios": { "passed": 4, "total": 4 }
+  },
+  "environment": {
+    "healthyContainers": 13,
+    "expectedContainers": 13,
+    "healthEndpointsPassed": 9,
+    "healthEndpointsTotal": 9,
+    "rabbitMqRunning": true,
+    "rabbitMqLocalAlarms": 0,
+    "routingProviderObserved": "GOONG"
+  },
+  "outbox": {
+    "identity": { "published": 533, "dlq": 0 },
+    "trip": { "published": 1576, "dlq": 0 },
+    "booking": { "published": 247, "dlq": 0 },
+    "payment": { "published": 1483, "dlq": 0 },
+    "parcel": { "published": 2923, "dlq": 0 },
+    "tracking": { "published": 1, "dlq": 0 }
+  },
+  "retainedData": {
+    "operatorId": "dd72c2a3-ff0e-4e89-8421-4219cd5f0f21",
+    "sourceTripId": "1f57c66a-730f-4b3a-ae4a-6c9027f6d97e",
+    "forwardingTripId": "2c7e87b0-6418-4fcf-a067-3931158ad032",
+    "bookingId": "62de9f30-2858-4da5-a711-53dc944b1e17",
+    "wrongStopParcelId": "fc4e4489-444c-4d3d-a586-7138c650e807",
+    "recoveredOnVehicleParcelId": "7da3bf87-2de6-432e-8900-485c10ed25be",
+    "claim12mId": "ace50d1f-ae89-47fe-b7ab-948e36348c8c",
+    "claimNoProofId": "b98283b6-b35e-449b-87f4-f49b8d713c92",
+    "claim80mId": "72a09532-ae6a-42e8-bf92-5ed9494ac6c6"
+  },
+  "documentedGaps": [
+    "Parcel create/detail responses do not expose bookingId.",
+    "DAMAGED and PARTIAL_LOSS do not yet have the complete Phase 4 compensation workflow.",
+    "Future-settlement automatic offset from FUNDING_PENDING to PAID was not exercised in the primary live run.",
+    "Every cancel, return and vehicle-substitution UI flow was not executed as an independent live scenario.",
+    "The 72-hour SLA was verified through controlled test time, not a real-time 72-hour wait."
+  ],
+  "preexistingEnvironmentIssue": {
+    "classification": "ENV_PREEXISTING_DATA",
+    "service": "booking",
+    "detail": "A historical Hangfire job references deleted Trip 00000000-0000-4000-8000-000000000013."
+  }
+}

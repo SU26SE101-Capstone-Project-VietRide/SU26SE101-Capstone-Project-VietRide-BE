@@ -8,6 +8,7 @@ using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.DriverTrips.CompleteTrip;
 using VietRide.Trip.Domain.Constants;
 using VietRide.Trip.Domain.Entities;
+using VietRide.Trip.UnitTests.TestDoubles;
 
 namespace VietRide.Trip.UnitTests.Features.DriverTrips;
 
@@ -101,7 +102,8 @@ public sealed class CompleteTripCommandHandlerTests
                 Audit,
                 Outbox,
                 UnitOfWork,
-                new FrozenClock(now));
+                new FrozenClock(now),
+                new ClearParcelImpactClient());
         }
 
         public RecordingAuditRepository Audit { get; }

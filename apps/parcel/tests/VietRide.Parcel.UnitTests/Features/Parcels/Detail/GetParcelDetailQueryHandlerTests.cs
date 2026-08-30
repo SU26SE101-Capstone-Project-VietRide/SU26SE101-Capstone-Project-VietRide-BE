@@ -43,6 +43,7 @@ public sealed class GetParcelDetailQueryHandlerTests
         result.PhotoUrl.Should().Be(PhotoUrl);
         result.CheckInPhotoUrls.Should().Equal(CheckInPhotoUrl);
         result.DeliveryPhotoUrls.Should().Equal(DeliveryPhotoUrl);
+        result.BookingId.Should().Be(parcel.BookingId);
         result.SettlementPolicyVersion.Should().Be(2);
         result.EstimatedSizeCategory.Should().Be("SMALL");
         result.EstimatedGrossPriceVnd.Should().Be(50_000);
@@ -67,6 +68,7 @@ public sealed class GetParcelDetailQueryHandlerTests
 
     private static ParcelEntity CreateParcel()
     {
+        var bookingId = Guid.NewGuid();
         var parcel = ParcelEntity.CreatePendingPayment(
             "VR-PCL-DETAIL",
             Guid.NewGuid(),
@@ -77,7 +79,7 @@ public sealed class GetParcelDetailQueryHandlerTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             null,
-            null,
+            bookingId,
             "Fragile",
             PhotoUrl,
             ParcelSizeCategory.SMALL,

@@ -455,6 +455,17 @@ public sealed class Day24DepartStopWarningTests
             Guid operatorId,
             CancellationToken cancellationToken)
             => throw new NotSupportedException();
+
+        public Task<ParcelTripCompletionClearanceProjection> GetTripCompletionClearanceAsync(
+            Guid tripId,
+            Guid operatorId,
+            CancellationToken cancellationToken)
+            => Task.FromResult(new ParcelTripCompletionClearanceProjection(
+                tripId,
+                operatorId,
+                "CLEAR",
+                [],
+                []));
     }
 
     private sealed class RecordingOutbox : IIntegrationEventOutbox

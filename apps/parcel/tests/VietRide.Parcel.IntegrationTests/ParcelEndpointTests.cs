@@ -244,6 +244,27 @@ public sealed class ParcelEndpointTests : IClassFixture<VietRideWebApplicationFa
     }
 
     [Fact]
+    public async Task StopReconciliation_RejectsClientAssertedCustodyIds()
+    {
+        using var assistant = CreateAuthenticatedClient("ASSISTANT", NewId.ToString());
+        assistant.DefaultRequestHeaders.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await assistant.PostAsJsonAsync(
+            $"/v1/assistant/trips/{Guid.NewGuid():D}/stops/{Guid.NewGuid():D}/reconcile",
+            new
+            {
+                scannedParcelIds = new[] { Guid.NewGuid() },
+                manualExceptionParcelIds = Array.Empty<Guid>(),
+            });
+
+        await AssertValidationEnvelope(response, HttpStatusCode.UnprocessableEntity);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be("VALIDATION_ERROR");
+    }
+
+    [Fact]
     public async Task AssistantParcelQrScan_RejectsPassengerRole()
     {
         using var passenger = CreateAuthenticatedClient("PASSENGER");

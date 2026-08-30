@@ -8,6 +8,7 @@ using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.Trips.Operations;
 using VietRide.Trip.Domain.Entities;
+using VietRide.Trip.UnitTests.TestDoubles;
 using TripEntity = VietRide.Trip.Domain.Entities.Trip;
 
 namespace VietRide.Trip.UnitTests.Features.Trips.Operations;
@@ -77,7 +78,8 @@ public sealed class CompleteTripCommandHandlerTests
             new FakeTripRepository(trip),
             outbox,
             new FrozenClock(Now),
-            NullLogger<CompleteTripCommandHandler>.Instance);
+            NullLogger<CompleteTripCommandHandler>.Instance,
+            new ClearParcelImpactClient());
 
     private static TripEntity CreateInProgressTrip(Guid driverId, Guid? assistantId)
     {

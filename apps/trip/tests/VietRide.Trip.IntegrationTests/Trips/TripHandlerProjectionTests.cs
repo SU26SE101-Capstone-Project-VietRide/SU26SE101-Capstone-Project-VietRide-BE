@@ -1078,6 +1078,17 @@ public sealed class TripHandlerProjectionTests
             Guid operatorId,
             CancellationToken cancellationToken) =>
             Task.FromResult(projection);
+
+        public Task<ParcelTripCompletionClearanceProjection> GetTripCompletionClearanceAsync(
+            Guid tripId,
+            Guid operatorId,
+            CancellationToken cancellationToken)
+            => Task.FromResult(new ParcelTripCompletionClearanceProjection(
+                tripId,
+                operatorId,
+                "CLEAR",
+                [],
+                []));
     }
 
     private sealed class ParcelImpactResponseHandler(object response) : HttpMessageHandler

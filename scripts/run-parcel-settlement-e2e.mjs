@@ -364,10 +364,10 @@ function seedFixtures() {
       ('${ids.recipient}','recipient-${runTag}@parcel-settlement.test','+84910000006','Recipient ${runTag}','PASSENGER','ACTIVE',NULL);
     INSERT INTO operator_subscriptions
       (id,operator_id,active_plan_id,status,started_at,expires_at,current_vehicles,
-       current_routes,current_trips_this_month,last_reset_at)
+       current_routes,current_trips_this_month,last_reset_at,cycle_price_amount)
     VALUES
       ('${ids.subscription}','${ids.operator}','${ids.subscriptionPlan}','ACTIVE',
-       now()-interval '1 day',now()+interval '30 days',0,0,0,now());
+       now()-interval '1 day',now()+interval '30 days',0,0,0,now(),0);
   `);
 
   tripSql(`
@@ -506,8 +506,9 @@ async function createParcel(token, tripId, estimatedWeightKg, suffix) {
   });
   const parcel = assertEnvelope(response, 201);
   assert(
-    scalar(parcelSql(`SELECT recipient_user_id::text FROM parcels WHERE id='${parcel.parcelId}';`))
-      === ids.recipient,
+    scalar(
+      parcelSql(`SELECT recipient_user_id::text FROM parcels WHERE id='${parcel.parcelId}';`),
+    ) === ids.recipient,
     `Recipient logical link missing for ${suffix}`,
   );
   return parcel;
@@ -536,7 +537,10 @@ async function checkIn(parcel, passengerToken, assistantToken) {
     body: { tripId: ids.trip, parcelCode: parcel.parcelCode },
   });
   const data = assertEnvelope(response, 200);
-  assert(data.status === 'CHECKED_IN', `Expected CHECKED_IN, got ${data.status}`);
+  assert(
+    data.parcelState?.status === 'CHECKED_IN',
+    `Expected CHECKED_IN, got ${data.parcelState?.status}`,
+  );
   return getParcel(parcel.parcelId, passengerToken);
 }
 
@@ -561,7 +565,7 @@ async function load(parcel, assistantToken) {
     body: { tripId: ids.trip, parcelCode: parcel.parcelCode },
   });
   const data = assertEnvelope(response, 200);
-  assert(data.status === 'LOADED', `Expected LOADED, got ${data.status}`);
+  assert(data.parcelState?.status === 'LOADED', `Expected LOADED, got ${data.parcelState?.status}`);
 }
 
 async function runJourney() {

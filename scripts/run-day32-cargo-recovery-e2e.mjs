@@ -207,6 +207,7 @@ async function userJwt() {
     role: 'OPERATOR_ADMIN',
     operatorId: ids.operator,
     operator_id: ids.operator,
+    operatorStatus: 'APPROVED',
     email: 'admin@day32.test',
     hasPhone: true,
   })
@@ -281,7 +282,10 @@ async function directTripTransfer(operationId, parcelId, sourceTripId, targetTri
     },
   );
   const json = await response.json().catch(() => null);
-  assert(response.status === 200, `Direct Trip transfer failed: ${response.status} ${JSON.stringify(json)}`);
+  assert(
+    response.status === 200,
+    `Direct Trip transfer failed: ${response.status} ${JSON.stringify(json)}`,
+  );
   return json;
 }
 
@@ -365,6 +369,7 @@ function seed() {
       operator_id: ids.operator,
       route_id: ids.route,
       vehicle_id: ids.vehicle,
+      seat_layout_snapshot_json: '{}',
       driver_user_id: ids.driver,
       assistant_user_id: ids.assistant,
       departure_date_time: new Date(now + (index + 1) * 60_000).toISOString(),
@@ -438,33 +443,49 @@ function seed() {
 
 function assertTransferred(parcelId, sourceTripId, targetTripId, operationId) {
   assert(
-    scalar(parcelSql(`SELECT status::text || ':' || trip_id::text FROM parcels WHERE id='${parcelId}'`)) ===
-      `RESERVED:${targetTripId}`,
+    scalar(
+      parcelSql(`SELECT status::text || ':' || trip_id::text FROM parcels WHERE id='${parcelId}'`),
+    ) === `RESERVED:${targetTripId}`,
     `Parcel ${parcelId} was not finalized on target Trip`,
   );
   assert(
-    scalar(parcelSql(`SELECT status || ':' || operation_type FROM parcel_cargo_recovery_operations WHERE id='${operationId}'`)) ===
-      'COMPLETED:TRANSFER',
+    scalar(
+      parcelSql(
+        `SELECT status || ':' || operation_type FROM parcel_cargo_recovery_operations WHERE id='${operationId}'`,
+      ),
+    ) === 'COMPLETED:TRANSFER',
     `Transfer operation ${operationId} was not completed`,
   );
   assert(
-    scalar(tripSql(`SELECT state FROM trip_cargo_parcels WHERE trip_id='${sourceTripId}' AND parcel_id='${parcelId}'`)) ===
-      'RELEASED',
+    scalar(
+      tripSql(
+        `SELECT state FROM trip_cargo_parcels WHERE trip_id='${sourceTripId}' AND parcel_id='${parcelId}'`,
+      ),
+    ) === 'RELEASED',
     `Source cargo ${parcelId} was not released`,
   );
   assert(
-    scalar(tripSql(`SELECT state FROM trip_cargo_parcels WHERE trip_id='${targetTripId}' AND parcel_id='${parcelId}'`)) ===
-      'RESERVED',
+    scalar(
+      tripSql(
+        `SELECT state FROM trip_cargo_parcels WHERE trip_id='${targetTripId}' AND parcel_id='${parcelId}'`,
+      ),
+    ) === 'RESERVED',
     `Target cargo ${parcelId} was not reserved`,
   );
   assert(
-    scalar(tripSql(`SELECT reserved_parcel_weight_kg::text || ':' || reserved_parcel_volume_m3::text FROM trips WHERE id='${sourceTripId}'`)) ===
-      '0.00:0.0000',
+    scalar(
+      tripSql(
+        `SELECT reserved_parcel_weight_kg::text || ':' || reserved_parcel_volume_m3::text FROM trips WHERE id='${sourceTripId}'`,
+      ),
+    ) === '0.00:0.0000',
     `Source Trip counters are incoherent for ${parcelId}`,
   );
   assert(
-    scalar(tripSql(`SELECT reserved_parcel_weight_kg::text || ':' || reserved_parcel_volume_m3::text FROM trips WHERE id='${targetTripId}'`)) ===
-      '10.00:0.5000',
+    scalar(
+      tripSql(
+        `SELECT reserved_parcel_weight_kg::text || ':' || reserved_parcel_volume_m3::text FROM trips WHERE id='${targetTripId}'`,
+      ),
+    ) === '10.00:0.5000',
     `Target Trip counters are incoherent for ${parcelId}`,
   );
 }
@@ -498,31 +519,44 @@ async function runAcceptance() {
   await scenario(1, 'Public transfer is atomic, idempotent and exactly-once', async () => {
     const key = idemKey('success-transfer');
     const body = { targetTripId: ids.successTarget, reason: 'Move to recovery Trip' };
-    const first = await api(
-      'POST',
-      `/v1/operator/parcels/${ids.successParcel}/request-transfer`,
-      { token, key, body },
-    );
+    const first = await api('POST', `/v1/operator/parcels/${ids.successParcel}/request-transfer`, {
+      token,
+      key,
+      body,
+    });
     assert(first.status === 200, `Transfer failed: ${JSON.stringify(first)}`);
-    assert(first.json?.data?.status === 'RESERVED', `Unexpected transfer response: ${JSON.stringify(first.json)}`);
+    assert(
+      first.json?.data?.status === 'RESERVED',
+      `Unexpected transfer response: ${JSON.stringify(first.json)}`,
+    );
     assertTransferred(ids.successParcel, ids.successSource, ids.successTarget, key);
 
-    const replay = await api(
-      'POST',
-      `/v1/operator/parcels/${ids.successParcel}/request-transfer`,
-      { token, key, body },
-    );
+    const replay = await api('POST', `/v1/operator/parcels/${ids.successParcel}/request-transfer`, {
+      token,
+      key,
+      body,
+    });
     assert(replay.status === 200, `Transfer replay failed: ${JSON.stringify(replay)}`);
     assert(
-      count(parcelSql(`SELECT count(*) FROM parcel_cargo_recovery_operations WHERE parcel_id='${ids.successParcel}'`)) === 1,
+      count(
+        parcelSql(
+          `SELECT count(*) FROM parcel_cargo_recovery_operations WHERE parcel_id='${ids.successParcel}'`,
+        ),
+      ) === 1,
       'Transfer replay created a duplicate recovery operation',
     );
     assert(
-      count(tripSql(`SELECT count(*) FROM trip_cargo_parcels WHERE parcel_id='${ids.successParcel}'`)) === 2,
+      count(
+        tripSql(`SELECT count(*) FROM trip_cargo_parcels WHERE parcel_id='${ids.successParcel}'`),
+      ) === 2,
       'Transfer replay created a duplicate cargo ledger',
     );
     assert(
-      count(parcelSql(`SELECT count(*) FROM outbox_events WHERE event_type='parcel.parcel.transfer_initiated' AND payload->>'parcelId'='${ids.successParcel}'`)) === 1,
+      count(
+        parcelSql(
+          `SELECT count(*) FROM outbox_events WHERE event_type='parcel.parcel.transfer_initiated' AND payload->>'parcelId'='${ids.successParcel}'`,
+        ),
+      ) === 1,
       'Transfer replay emitted duplicate outbox events',
     );
   });
@@ -541,24 +575,27 @@ async function runAcceptance() {
     `);
     await directTripTransfer(operationId, ids.crashParcel, ids.crashSource, ids.crashTarget);
     assert(
-      scalar(parcelSql(`SELECT status::text || ':' || trip_id::text FROM parcels WHERE id='${ids.crashParcel}'`)) ===
-        `PENDING_OPERATOR_ACTION:${ids.crashSource}`,
+      scalar(
+        parcelSql(
+          `SELECT status::text || ':' || trip_id::text FROM parcels WHERE id='${ids.crashParcel}'`,
+        ),
+      ) === `PENDING_OPERATOR_ACTION:${ids.crashSource}`,
       'Crash precondition did not leave Parcel behind Trip',
     );
 
-    const replay = await api(
-      'POST',
-      `/v1/operator/parcels/${ids.crashParcel}/request-transfer`,
-      {
-        token,
-        key: idemKey('crash-public-retry'),
-        body: { targetTripId: ids.crashTarget, reason: 'Crash replay' },
-      },
-    );
+    const replay = await api('POST', `/v1/operator/parcels/${ids.crashParcel}/request-transfer`, {
+      token,
+      key: idemKey('crash-public-retry'),
+      body: { targetTripId: ids.crashTarget, reason: 'Crash replay' },
+    });
     assert(replay.status === 200, `Crash replay failed: ${JSON.stringify(replay)}`);
     assertTransferred(ids.crashParcel, ids.crashSource, ids.crashTarget, operationId);
     assert(
-      count(parcelSql(`SELECT count(*) FROM outbox_events WHERE event_type='parcel.parcel.transfer_initiated' AND payload->>'parcelId'='${ids.crashParcel}'`)) === 1,
+      count(
+        parcelSql(
+          `SELECT count(*) FROM outbox_events WHERE event_type='parcel.parcel.transfer_initiated' AND payload->>'parcelId'='${ids.crashParcel}'`,
+        ),
+      ) === 1,
       'Crash replay did not preserve exactly-once Parcel side effects',
     );
   });
@@ -585,38 +622,69 @@ async function runAcceptance() {
       `Expected one winner and one conflict: transfer=${JSON.stringify(transfer)}, return=${JSON.stringify(returned)}`,
     );
     assert(
-      count(parcelSql(`SELECT count(*) FROM parcel_cargo_recovery_operations WHERE parcel_id='${ids.raceParcel}' AND status='COMPLETED'`)) === 1,
+      count(
+        parcelSql(
+          `SELECT count(*) FROM parcel_cargo_recovery_operations WHERE parcel_id='${ids.raceParcel}' AND status='COMPLETED'`,
+        ),
+      ) === 1,
       'Race did not produce exactly one completed operation',
     );
     assert(
-      count(parcelSql(`SELECT count(*) FROM parcel_cargo_recovery_operations WHERE parcel_id='${ids.raceParcel}' AND status='PENDING'`)) === 0,
+      count(
+        parcelSql(
+          `SELECT count(*) FROM parcel_cargo_recovery_operations WHERE parcel_id='${ids.raceParcel}' AND status='PENDING'`,
+        ),
+      ) === 0,
       'Race left a pending operation',
     );
 
     const winner = scalar(
-      parcelSql(`SELECT operation_type || ':' || refund_amount_vnd::text || ':' || refund_due_vnd::text FROM parcel_cargo_recovery_operations WHERE parcel_id='${ids.raceParcel}' AND status='COMPLETED'`),
+      parcelSql(
+        `SELECT operation_type || ':' || refund_amount_vnd::text || ':' || refund_due_vnd::text FROM parcel_cargo_recovery_operations WHERE parcel_id='${ids.raceParcel}' AND status='COMPLETED'`,
+      ),
     );
     if (winner.startsWith('TRANSFER:')) {
       assertTransferred(ids.raceParcel, ids.raceSource, ids.raceTarget, transferKey);
       assert(
-        count(parcelSql(`SELECT count(*) FROM outbox_events WHERE event_type='parcel.refund.initiated' AND payload->>'parcelId'='${ids.raceParcel}'`)) === 0,
+        count(
+          parcelSql(
+            `SELECT count(*) FROM outbox_events WHERE event_type='parcel.refund.initiated' AND payload->>'parcelId'='${ids.raceParcel}'`,
+          ),
+        ) === 0,
         'Transfer winner emitted a refund',
       );
     } else {
-      assert(winner === 'RETURN:175000:200000', `Return did not freeze the authoritative refund: ${winner}`);
       assert(
-        scalar(parcelSql(`SELECT status::text || ':' || refund_due_vnd::text FROM parcels WHERE id='${ids.raceParcel}'`)) ===
-          'RETURNED:200000',
+        winner === 'RETURN:175000:200000',
+        `Return did not freeze the authoritative refund: ${winner}`,
+      );
+      assert(
+        scalar(
+          parcelSql(
+            `SELECT status::text || ':' || refund_due_vnd::text FROM parcels WHERE id='${ids.raceParcel}'`,
+          ),
+        ) === 'RETURNED:200000',
         'Return winner did not finalize Parcel/refund due',
       );
       assert(
-        scalar(tripSql(`SELECT state FROM trip_cargo_parcels WHERE trip_id='${ids.raceSource}' AND parcel_id='${ids.raceParcel}'`)) ===
-          'RELEASED',
+        scalar(
+          tripSql(
+            `SELECT state FROM trip_cargo_parcels WHERE trip_id='${ids.raceSource}' AND parcel_id='${ids.raceParcel}'`,
+          ),
+        ) === 'RELEASED',
         'Return winner did not release source cargo',
       );
       assert(
-        count(parcelSql(`SELECT count(*) FROM outbox_events WHERE event_type='parcel.parcel.returned' AND payload->>'parcelId'='${ids.raceParcel}'`)) === 1 &&
-          count(parcelSql(`SELECT count(*) FROM outbox_events WHERE event_type='parcel.refund.initiated' AND payload->>'parcelId'='${ids.raceParcel}'`)) === 1,
+        count(
+          parcelSql(
+            `SELECT count(*) FROM outbox_events WHERE event_type='parcel.parcel.returned' AND payload->>'parcelId'='${ids.raceParcel}'`,
+          ),
+        ) === 1 &&
+          count(
+            parcelSql(
+              `SELECT count(*) FROM outbox_events WHERE event_type='parcel.refund.initiated' AND payload->>'parcelId'='${ids.raceParcel}'`,
+            ),
+          ) === 1,
         'Return winner did not emit exactly-once return/refund events',
       );
     }
@@ -624,12 +692,17 @@ async function runAcceptance() {
 
   await scenario(4, 'Database constraints and migrations match the recovery contract', async () => {
     assert(
-      scalar(parcelSql(`SELECT count(*) FILTER (WHERE indexname='uq_parcel_cargo_recovery_operations_active_parcel')::text || ':' || count(*) FILTER (WHERE indexname='idx_parcel_cargo_recovery_operations_stale')::text FROM pg_indexes WHERE schemaname='vietride_parcel' AND tablename='parcel_cargo_recovery_operations'`)) ===
-        '1:1',
+      scalar(
+        parcelSql(
+          `SELECT count(*) FILTER (WHERE indexname='uq_parcel_cargo_recovery_operations_active_parcel')::text || ':' || count(*) FILTER (WHERE indexname='idx_parcel_cargo_recovery_operations_stale')::text FROM pg_indexes WHERE schemaname='vietride_parcel' AND tablename='parcel_cargo_recovery_operations'`,
+        ),
+      ) === '1:1',
       'Recovery indexes are missing or duplicated',
     );
     assert(
-      count(parcelSql(`SELECT count(*) FROM parcel_cargo_recovery_operations WHERE status='PENDING'`)) === 0,
+      count(
+        parcelSql(`SELECT count(*) FROM parcel_cargo_recovery_operations WHERE status='PENDING'`),
+      ) === 0,
       'Acceptance run left pending recovery work',
     );
     const raceStatus = scalar(
@@ -642,7 +715,11 @@ async function runAcceptance() {
       `Cargo ledger has an unexpected number of active rows for race winner ${raceStatus}`,
     );
     assert(
-      count(tripSql(`SELECT count(*) FROM (SELECT parcel_id FROM trip_cargo_parcels WHERE state <> 'RELEASED' GROUP BY parcel_id HAVING count(*) > 1) duplicates`)) === 0,
+      count(
+        tripSql(
+          `SELECT count(*) FROM (SELECT parcel_id FROM trip_cargo_parcels WHERE state <> 'RELEASED' GROUP BY parcel_id HAVING count(*) > 1) duplicates`,
+        ),
+      ) === 0,
       'A Parcel has more than one active Trip cargo ledger',
     );
   });
@@ -689,5 +766,4 @@ console.log(
     2,
   ),
 );
-process.exitCode =
-  failed || results.length < 4 || results.some((result) => !result.passed) ? 1 : 0;
+process.exitCode = failed || results.length < 4 || results.some((result) => !result.passed) ? 1 : 0;

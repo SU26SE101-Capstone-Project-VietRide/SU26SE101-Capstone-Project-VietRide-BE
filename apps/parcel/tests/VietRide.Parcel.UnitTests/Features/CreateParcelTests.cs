@@ -497,6 +497,29 @@ public sealed class CreateParcelTests
     }
 
     [Fact]
+    public async Task Create_Returns_AssistantRequired_WhenTripHasNoAssignedAssistant()
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
+            userRole: "PASSENGER",
+            userStatus: "ACTIVE",
+            tripStatus: "SCHEDULED",
+            hasBooking: false,
+            hasFare: true);
+        trip.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(
+                TripSnapshotOutcomeKind.Success,
+                CreateTripSnapshot("SCHEDULED", hasAssistant: false),
+                null));
+
+        var action = () => CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow)
+            .Handle(BuildCommand(), CancellationToken.None);
+
+        var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
+        exception.ErrorCode.Should().Be("PARCEL_ASSISTANT_REQUIRED");
+        await parcelRepo.DidNotReceive().AddAsync(Arg.Any<ParcelEntity>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task Create_Returns_FareNotConfigured_WhenNoFareForRoute()
     {
         var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks(
@@ -742,6 +765,7 @@ public sealed class CreateParcelTests
 
         result.Status.Should().Be("PENDING_PAYMENT");
         result.ParcelId.Should().NotBeEmpty();
+        result.BookingId.Should().Be(BookingId);
         result.ParcelCode.Should().NotBeNullOrEmpty();
         result.DepositRequiredVnd.Should().Be(30_000);
 
@@ -901,7 +925,7 @@ public sealed class CreateParcelTests
     private static IParcelStatsRepository Stats()
         => Substitute.For<IParcelStatsRepository>();
 
-    private static TripParcelSnapshot CreateTripSnapshot(string status)
+    private static TripParcelSnapshot CreateTripSnapshot(string status, bool hasAssistant = true)
     {
         var station = new TripStationDto(Guid.NewGuid(), "Station");
         return new TripParcelSnapshot(
@@ -913,6 +937,7 @@ public sealed class CreateParcelTests
                 new(DropoffStopId, 1, false, true, EstimatedArrival, 10, null, "PENDING", null),
             },
             new TripSeatSummaryDto(40, 35),
-            null);
+            null,
+            AssistantUserId: hasAssistant ? Guid.NewGuid() : null);
     }
 }

@@ -33,8 +33,6 @@ public sealed class ReconcileParcelStopTests
                 StopId,
                 AssistantId,
                 OperatorId,
-                Array.Empty<Guid>(),
-                Array.Empty<Guid>(),
                 null,
                 Guid.NewGuid()),
             CancellationToken.None);
@@ -92,8 +90,6 @@ public sealed class ReconcileParcelStopTests
                 StopId,
                 AssistantId,
                 OperatorId,
-                new[] { ParcelId },
-                Array.Empty<Guid>(),
                 null,
                 Guid.NewGuid()),
             CancellationToken.None);
@@ -105,7 +101,7 @@ public sealed class ReconcileParcelStopTests
     }
 
     [Fact]
-    public async Task Handle_RejectsClientAssertedScanWithoutMatchingCustodyEvent()
+    public async Task Handle_NoPersistedCustodyFact_ReturnsParcelAsUnresolved()
     {
         var parcel = CreateManifestParcel(ParcelStatus.IN_TRANSIT);
         var (handler, parcels, reliability, _) = CreateHandler();
@@ -116,20 +112,19 @@ public sealed class ReconcileParcelStopTests
                 Arg.Any<CancellationToken>())
             .Returns(Array.Empty<ParcelCustodyEvent>());
 
-        var action = () => handler.Handle(
+        var result = await handler.Handle(
             new ReconcileParcelStopCommand(
                 TripId,
                 StopId,
                 AssistantId,
                 OperatorId,
-                new[] { ParcelId },
-                Array.Empty<Guid>(),
                 null,
                 Guid.NewGuid()),
             CancellationToken.None);
 
-        var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
-        exception.ErrorCode.Should().Be("PARCEL_CUSTODY_EVENT_NOT_FOUND");
+        result.ScannedCount.Should().Be(0);
+        result.UnresolvedParcelIds.Should().ContainSingle().Which.Should().Be(ParcelId);
+        result.CanDepart.Should().BeFalse();
     }
 
     [Fact]
@@ -158,8 +153,6 @@ public sealed class ReconcileParcelStopTests
                 StopId,
                 AssistantId,
                 OperatorId,
-                Array.Empty<Guid>(),
-                Array.Empty<Guid>(),
                 "Vehicle must leave for an emergency.",
                 Guid.NewGuid()),
             CancellationToken.None);
@@ -170,6 +163,14 @@ public sealed class ReconcileParcelStopTests
         result.DepartureOverrideRequest!.Status.Should().Be("PENDING_APPROVAL");
         result.DepartureOverrideRequest.RequestedByUserId.Should().Be(AssistantId);
         result.DepartureOverrideRequest.ReviewedByUserId.Should().BeNull();
+        await parcels.Received(1).TrySetPendingOperatorActionAsync(
+            ParcelId,
+            PendingActionType.CUSTODY_EXCEPTION,
+            Arg.Any<string>(),
+            null,
+            Arg.Any<DateTimeOffset>(),
+            Arg.Any<CancellationToken>(),
+            ParcelStatus.IN_TRANSIT);
         await approvals.Received(1).AddAsync(
             Arg.Is<ParcelStopDepartureApprovalRequest>(request =>
                 request.TripId == TripId

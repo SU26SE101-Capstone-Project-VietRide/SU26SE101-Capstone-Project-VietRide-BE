@@ -7,6 +7,7 @@ import { importPKCS8, SignJWT } from 'jose';
 const root = process.cwd();
 const gatewayBaseUrl = process.env.GATEWAY_BASE_URL || 'http://localhost:3000';
 const envFile = fs.existsSync(path.join(root, '.env')) ? '.env' : '.env.example';
+const localEnv = loadEnv(path.join(root, envFile));
 const compose = [
   'compose',
   '--env-file',
@@ -53,6 +54,26 @@ let seeded = false;
 let assertions = 0;
 let runError;
 let cleanupError;
+
+function loadEnv(file) {
+  const values = {};
+  for (const rawLine of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const separator = line.indexOf('=');
+    if (separator < 1) continue;
+    const key = line.slice(0, separator).trim();
+    let value = line.slice(separator + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    values[key] = value.replaceAll('\\n', '\n');
+  }
+  return values;
+}
 
 function run(command, args, options = {}) {
   const value = execFileSync(command, args, {
@@ -117,7 +138,9 @@ async function mintToken(subject, role, operatorId = null) {
     ),
   );
   const privateKey = await importPKCS8(
-    process.env.USER_JWT_PRIVATE_KEY || settings.IdentityJwt.PrivateKey,
+    process.env.USER_JWT_PRIVATE_KEY ||
+      localEnv.USER_JWT_PRIVATE_KEY ||
+      settings.IdentityJwt.PrivateKey,
     'RS256',
   );
   const claims = {
@@ -125,11 +148,14 @@ async function mintToken(subject, role, operatorId = null) {
     email: `${role.toLowerCase()}-${runTag}@parcel-route-fare.test`,
     hasPhone: 'true',
   };
-  if (operatorId) claims.operatorId = operatorId;
+  if (operatorId) {
+    claims.operatorId = operatorId;
+    claims.operatorStatus = 'APPROVED';
+  }
   return new SignJWT(claims)
     .setProtectedHeader({
       alg: 'RS256',
-      kid: process.env.USER_JWT_KID || settings.IdentityJwt.Kid,
+      kid: process.env.USER_JWT_KID || localEnv.USER_JWT_KID || settings.IdentityJwt.Kid,
     })
     .setIssuer('vietride-identity')
     .setAudience('vietride-api')
@@ -171,14 +197,14 @@ async function gatewayRequest(method, pathname, token, traceId, body, idempotenc
 }
 
 function assertEnvelope(result, expectedStatus, traceId, errorCode = null) {
-  assert(result.status === expectedStatus, `Expected HTTP ${expectedStatus}, got ${result.status}`);
+  assert(
+    result.status === expectedStatus,
+    `Expected HTTP ${expectedStatus}, got ${result.status}: ${JSON.stringify(result.body)}`,
+  );
   assert(result.responseTraceId === traceId, `Response X-Request-Id mismatch for ${traceId}`);
   assert(result.body?.statusCode === expectedStatus, `Envelope statusCode mismatch for ${traceId}`);
   assert(result.body?.meta?.traceId === traceId, `Envelope traceId mismatch for ${traceId}`);
-  assert(
-    result.body?.success === (errorCode === null),
-    `Envelope success mismatch for ${traceId}`,
-  );
+  assert(result.body?.success === (errorCode === null), `Envelope success mismatch for ${traceId}`);
   if (errorCode) {
     assert(
       result.body?.error?.code === errorCode,
@@ -319,7 +345,10 @@ function assertClean() {
     parcelCount === '0' && tripCount === '0' && identityCount === '0',
     `Fixture rows remain parcel=${parcelCount}, trip=${tripCount}, identity=${identityCount}`,
   );
-  assert(taggedCount.every((count) => count === '0'), `Run-tag rows remain: ${taggedCount}`);
+  assert(
+    taggedCount.every((count) => count === '0'),
+    `Run-tag rows remain: ${taggedCount}`,
+  );
   for (const key of idempotencyKeys) {
     const hash = crypto.createHash('sha256').update(key).digest('hex').toUpperCase();
     for (const redisKey of [
@@ -350,10 +379,10 @@ function seedFixture() {
   );
   psql(
     'vietride_trip',
-    `INSERT INTO vietride_trip.stations (id,name,slug,city,province,is_active)
+    `INSERT INTO vietride_trip.stations (id,name,slug,city,is_active)
      VALUES
-       ('${ids.originStation}','Bến đi ${runTag}','parcel-fare-origin-${runTag.toLowerCase()}','Ho Chi Minh','Ho Chi Minh',true),
-       ('${ids.destinationStation}','Bến đến ${runTag}','parcel-fare-destination-${runTag.toLowerCase()}','Da Nang','Da Nang',true);
+       ('${ids.originStation}','Bến đi ${runTag}','parcel-fare-origin-${runTag.toLowerCase()}','Ho Chi Minh',true),
+       ('${ids.destinationStation}','Bến đến ${runTag}','parcel-fare-destination-${runTag.toLowerCase()}','Da Nang',true);
      INSERT INTO vietride_trip.vehicle_types
        (id,code,display_name,default_seat_count,is_system_defined,is_active)
      VALUES ('${ids.vehicleType}','PFA_${runTag}','Parcel Fare Vehicle ${runTag}',4,false,true);
@@ -368,9 +397,9 @@ function seedFixture() {
        ('${ids.inactiveRouteA}','${ids.operatorA}','Inactive Route A ${runTag}','${ids.originStation}','${ids.destinationStation}',150000,480,false),
        ('${ids.activeRouteB}','${ids.operatorB}','Active Route B ${runTag}','${ids.originStation}','${ids.destinationStation}',150000,480,true);
      INSERT INTO vietride_trip.trips
-       (id,operator_id,route_id,vehicle_id,driver_user_id,departure_date_time,estimated_arrival_time,status,source,base_fare,max_cargo_weight_kg,max_cargo_volume_m3,estimated_passenger_luggage_kg,reserved_parcel_weight_kg,reserved_parcel_volume_m3,total_loaded_weight_kg,total_loaded_volume_m3)
+       (id,operator_id,route_id,vehicle_id,driver_user_id,departure_date_time,estimated_arrival_time,status,source,base_fare,max_cargo_weight_kg,max_cargo_volume_m3,estimated_passenger_luggage_kg,reserved_parcel_weight_kg,reserved_parcel_volume_m3,total_loaded_weight_kg,total_loaded_volume_m3,seat_layout_snapshot_json)
      VALUES
-       ('${ids.trip}','${ids.operatorA}','${ids.activeRouteA}','${ids.vehicle}','${ids.operatorAdminA}','${departureDateTime}','${estimatedArrivalTime}','SCHEDULED','MANUAL',150000,100,10,0,0,0,0,0);`,
+       ('${ids.trip}','${ids.operatorA}','${ids.activeRouteA}','${ids.vehicle}','${ids.operatorAdminA}','${departureDateTime}','${estimatedArrivalTime}','SCHEDULED','MANUAL',150000,100,10,0,0,0,0,0,'{"version":1,"totalSeats":4,"rows":2,"cols":2,"decks":1,"aisles":[],"seats":[{"seatNumber":"A01","row":1,"col":1,"deck":1}]}');`,
   );
   psql(
     'vietride_parcel',
@@ -461,8 +490,7 @@ async function runJourney() {
   assert(trip.operatorId === ids.operatorA, 'Available trip operatorId mismatch');
   assert(trip.operatorName === `Parcel Fare Operator A ${runTag}`, 'Operator name mismatch');
   assert(
-    trip.originStation?.id === ids.originStation &&
-      trip.originStation?.name === `Bến đi ${runTag}`,
+    trip.originStation?.id === ids.originStation && trip.originStation?.name === `Bến đi ${runTag}`,
     'Origin station projection mismatch',
   );
   assert(
@@ -470,7 +498,10 @@ async function runJourney() {
       trip.destinationStation?.name === `Bến đến ${runTag}`,
     'Destination station projection mismatch',
   );
-  assert(Date.parse(trip.departureDateTime) === Date.parse(departureDateTime), 'Departure mismatch');
+  assert(
+    Date.parse(trip.departureDateTime) === Date.parse(departureDateTime),
+    'Departure mismatch',
+  );
   assert(
     Date.parse(trip.estimatedArrivalTime) === Date.parse(estimatedArrivalTime),
     'Estimated arrival mismatch',

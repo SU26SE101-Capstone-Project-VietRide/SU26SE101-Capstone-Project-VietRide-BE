@@ -18,6 +18,7 @@ using VietRide.Shared.Persistence.Outbox;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
+using VietRide.Trip.IntegrationTests.TestDoubles;
 using TripEntity = VietRide.Trip.Domain.Entities.Trip;
 
 namespace VietRide.Trip.IntegrationTests.Trips.Operations;
@@ -475,6 +476,8 @@ public sealed class Day24DepartStopWebApplicationFactory : WebApplicationFactory
                         warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning)));
             services.RemoveAll<IBookingImpactClient>();
             services.AddSingleton<IBookingImpactClient>(Booking);
+            services.RemoveAll<IParcelImpactClient>();
+            services.AddSingleton<IParcelImpactClient, ClearParcelImpactClient>();
         });
     }
 }
