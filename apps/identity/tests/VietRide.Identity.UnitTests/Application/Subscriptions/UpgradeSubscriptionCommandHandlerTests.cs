@@ -515,8 +515,8 @@ public sealed class UpgradeSubscriptionCommandHandlerTests
                 PlanName = "Pro",
                 BillingPeriod = "MONTHLY",
                 SucceededAt = Now,
-                PeriodFrom = Now,
-                PeriodTo = Now.AddMonths(1),
+                PeriodFrom = Now.AddTicks(8),
+                PeriodTo = Now.AddMonths(1).AddTicks(8),
                 BuyerSnapshot = new VietRide.Identity.Infrastructure.Messaging.SubscriptionBuyerSnapshot
                 {
                     Name = "VietRide Bus",
