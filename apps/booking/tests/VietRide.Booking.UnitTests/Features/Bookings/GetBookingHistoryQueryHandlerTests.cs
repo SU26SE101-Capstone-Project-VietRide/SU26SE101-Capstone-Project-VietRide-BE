@@ -52,6 +52,7 @@ public sealed class GetBookingHistoryQueryHandlerTests
             Money.FromRaw(350_000),
             Money.Zero,
             Money.FromRaw(350_000));
+        booking.Passengers.Single().ApplyVehicleSubstitutionSeat("A10");
         booking.Confirm(createdAt);
         var repository = Substitute.For<IBookingRepository>();
         repository.ListPassengerHistoryAsync(
@@ -95,9 +96,10 @@ public sealed class GetBookingHistoryQueryHandlerTests
         item.Tickets[0].Should().BeEquivalentTo(new BookingHistoryTicketDto(
             booking.Tickets[0].Id,
             "VT-20260701-ABCDEFGH",
-            "A01",
+            "A10",
             "ISSUED",
             350_000));
+        booking.Tickets.Single().SeatNumber.Should().Be("A01");
         item.PaymentRedirectUrl.Should().BeNull();
         item.ShuttleRequests.Should().BeEmpty();
         item.Vehicle.Should().BeEquivalentTo(new BookingHistoryVehicleDto(

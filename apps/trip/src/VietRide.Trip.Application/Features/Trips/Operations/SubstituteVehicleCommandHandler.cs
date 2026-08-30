@@ -160,7 +160,7 @@ public sealed class SubstituteVehicleCommandHandler
                 .Count();
             var usableSeats = passengerLayout.Count;
             var missingSeats = Math.Max(0, passengersToTransfer - usableSeats);
-            if (missingSeats > 0 && !request.AcknowledgeInsufficientSeats)
+            if (missingSeats > 0)
             {
                 throw new CodedConflictException(
                     "REPLACEMENT_VEHICLE_INSUFFICIENT_SEATS",
@@ -189,6 +189,23 @@ public sealed class SubstituteVehicleCommandHandler
             var oldFares = await tripStopFares.QueryNoTracking()
                 .Where(fare => fare.TripId == oldTrip.Id)
                 .ToArrayAsync(cancellationToken);
+
+            var seatNumbers = passengerLayout.Select(seat => seat.SeatNumber).ToArray();
+            var expectedPreviewToken = VehicleSubstitutionPreviewToken.Create(
+                oldTrip.Id,
+                oldTrip.RowVersion,
+                oldTrip.UpdatedAt,
+                replacementVehicle.Id,
+                replacementVehicle.RowVersion,
+                replacementVehicle.UpdatedAt,
+                impact,
+                seatNumbers);
+            var seatAssignments = VehicleSubstitutionSeatAssignmentPolicy.Resolve(
+                impact,
+                seatNumbers,
+                request.SeatAssignments,
+                request.PreviewToken,
+                expectedPreviewToken);
 
             var recoveryDelay = request.EstimatedRecoveryDepartureAt - disruptedAt;
             var newTrip = Domain.Entities.Trip.Create(
@@ -222,6 +239,7 @@ public sealed class SubstituteVehicleCommandHandler
                 passengerLayout,
                 oldSeats,
                 impact,
+                seatAssignments,
                 cancellationToken);
             await CopyPendingStopsAndFaresAsync(
                 newTrip.Id,
@@ -339,6 +357,7 @@ public sealed class SubstituteVehicleCommandHandler
         IReadOnlyList<LayoutSeat> layout,
         IReadOnlyCollection<TripSeat> oldSeats,
         VehicleSubstitutionImpactProjection impact,
+        IReadOnlyDictionary<Guid, string> seatAssignments,
         CancellationToken cancellationToken)
     {
         var newSeats = layout
@@ -350,7 +369,6 @@ public sealed class SubstituteVehicleCommandHandler
         }
 
         var oldSeatsByNumber = oldSeats.ToDictionary(seat => seat.SeatNumber, StringComparer.Ordinal);
-        var available = layout.ToList();
         var mappings = new List<TripVehicleSubstitutedIntegrationEvent.Mapping>();
         foreach (var booking in impact.Bookings.OrderBy(item => item.BookingId))
         {
@@ -361,26 +379,19 @@ public sealed class SubstituteVehicleCommandHandler
                     && oldSeatsByNumber.TryGetValue(originalSeatNumber, out var oldSeat)
                         ? oldSeat.SeatType
                         : (TripSeatType?)null;
-                var selected = preferredType.HasValue
-                    ? available.FirstOrDefault(seat => seat.SeatType == preferredType.Value)
-                    : null;
-                selected ??= available.FirstOrDefault();
-                if (selected is not null)
-                {
-                    available.Remove(selected);
-                    newSeats[selected.SeatNumber].MarkHeld();
-                    newSeats[selected.SeatNumber].MarkBooked(booking.BookingId);
-                }
+                var selected = newSeats[seatAssignments[passenger.PassengerId]];
+                selected.MarkHeld();
+                selected.MarkBooked(booking.BookingId);
 
                 mappings.Add(new TripVehicleSubstitutedIntegrationEvent.Mapping(
                     booking.BookingId,
                     passenger.PassengerId,
                     originalSeatNumber,
-                    selected?.SeatNumber,
+                    selected.SeatNumber,
                     passenger.BoardingStatus,
                     preferredType?.ToString(),
-                    selected?.SeatType.ToString(),
-                    IsSeatDowngrade(preferredType, selected?.SeatType)));
+                    selected.SeatType.ToString(),
+                    IsSeatDowngrade(preferredType, selected.SeatType)));
             }
         }
 

@@ -65,14 +65,20 @@ public sealed class GetBookingHistoryQueryHandler
             booking.TripDirection?.ToString(),
             booking.TripSnapshotRouteName,
             booking.Tickets
-                .OrderBy(ticket => ticket.SeatNumber, StringComparer.Ordinal)
-                .ThenBy(ticket => ticket.Id)
-                .Select(ticket => new BookingHistoryTicketDto(
-                    ticket.Id,
-                    ticket.TicketCode.Value,
-                    ticket.SeatNumber,
-                    ticket.Status.ToString(),
-                    ticket.PaidAmount.Amount))
+                .Select(ticket => new
+                {
+                    Ticket = ticket,
+                    OperationalSeatNumber = booking.Passengers
+                        .SingleOrDefault(passenger => passenger.Id == ticket.PassengerId)?.SeatNumber!,
+                })
+                .OrderBy(item => item.OperationalSeatNumber, StringComparer.Ordinal)
+                .ThenBy(item => item.Ticket.Id)
+                .Select(item => new BookingHistoryTicketDto(
+                    item.Ticket.Id,
+                    item.Ticket.TicketCode.Value,
+                    item.OperationalSeatNumber,
+                    item.Ticket.Status.ToString(),
+                    item.Ticket.PaidAmount.Amount))
                 .ToList(),
             booking.DropoffStationId,
             booking.DropoffStopId,

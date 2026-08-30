@@ -10,4 +10,6 @@ public sealed record SubstituteVehicleRequest(
     Guid? IncidentId,
     bool NotifyPassengers = true,
     ReplacementCrewRequest? ReplacementCrew = null,
-    bool AcknowledgeInsufficientSeats = false);
+    bool AcknowledgeInsufficientSeats = false,
+    string? PreviewToken = null,
+    IReadOnlyList<SubstituteVehicleSeatAssignmentRequest>? SeatAssignments = null);

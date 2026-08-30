@@ -45,6 +45,19 @@ public sealed class ScanBookingCodeForTripQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_AfterVehicleSubstitution_ReturnsPassengerOperationalSeatAndKeepsTicketSeatImmutable()
+    {
+        var booking = CreateBooking(TripId, confirmed: true, ["A01"]);
+        booking.Passengers.Single().ApplyVehicleSubstitutionSeat("A10");
+        Arrange(booking, booking, CreateTripSnapshot());
+
+        var result = await CreateHandler().Handle(CreateQuery(), CancellationToken.None);
+
+        result.Items.Single().SeatNumber.Should().Be("A10");
+        booking.Tickets.Single().SeatNumber.Should().Be("A01");
+    }
+
+    [Fact]
     public async Task Handle_BookingForDifferentTrip_ThrowsBookingNotForThisTrip()
     {
         var booking = CreateBooking(OtherTripId, confirmed: true);

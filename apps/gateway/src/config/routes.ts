@@ -331,6 +331,15 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN'],
     },
     {
+      prefix: '/v1/operator/trips/{tripId}/substitute-vehicle/preview',
+      pathPattern:
+        /^\/v1\/operator\/trips\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/substitute-vehicle\/preview$/,
+      method: 'POST',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
       prefix: '/v1/operator/trips/{tripId}/substitute-vehicle',
       pathPattern:
         /^\/v1\/operator\/trips\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/substitute-vehicle$/,

@@ -57,6 +57,21 @@ public sealed class GetTripManifestQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_AfterVehicleSubstitution_ReturnsPassengerOperationalSeatInsteadOfImmutableTicketSeat()
+    {
+        var booking = CreateConfirmedBooking("VR-20260518-ABCD1234", FirstStopId, "A01");
+        booking.Passengers.Single().ApplyVehicleSubstitutionSeat("A10");
+        Arrange([booking], CreateTripSnapshot(DriverUserId));
+
+        var result = await CreateHandler().Handle(
+            new GetTripManifestQuery(TripId, DriverUserId),
+            CancellationToken.None);
+
+        result.Items.Single().SeatNumber.Should().Be("A10");
+        booking.Tickets.Single().SeatNumber.Should().Be("A01");
+    }
+
+    [Fact]
     public async Task Handle_CallerNotAssignedToTrip_ThrowsForbidden()
     {
         Arrange([], CreateTripSnapshot(DriverUserId));

@@ -16,4 +16,6 @@ public sealed record SubstituteVehicleCommand(
     Guid? ReplacementDriverId,
     Guid? ReplacementAssistantId,
     bool ReplacementCrewSpecified,
-    bool AcknowledgeInsufficientSeats = false) : IRequest<SubstituteVehicleResponse>;
+    bool AcknowledgeInsufficientSeats = false,
+    string? PreviewToken = null,
+    IReadOnlyList<SubstituteVehicleSeatAssignment>? SeatAssignments = null) : IRequest<SubstituteVehicleResponse>;
