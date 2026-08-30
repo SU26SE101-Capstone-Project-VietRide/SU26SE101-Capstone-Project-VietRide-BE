@@ -83,6 +83,7 @@ public sealed class GetParcelDetailQueryHandler
             parcel.RecipientPhone.ToString(),
             parcel.OperatorId,
             parcel.TripId,
+            parcel.BookingId,
             parcel.DropoffStopId,
             parcel.Description,
             parcel.Quantity,

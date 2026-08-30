@@ -174,8 +174,7 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                         WHEN paid_at IS NOT NULL OR payout_reference_id IS NOT NULL THEN 'PAID'
                         ELSE 'REJECTED'
                     END,
-                    updated_at = now(),
-                    row_version = row_version + 1
+                    updated_at = now()
                 WHERE status = 'APPEALED';
                 """);
         }
@@ -187,8 +186,7 @@ namespace VietRide.Parcel.Infrastructure.Migrations
                 """
                 UPDATE vietride_parcel.parcel_claims AS claims
                 SET status = 'APPEALED',
-                    updated_at = now(),
-                    row_version = claims.row_version + 1
+                    updated_at = now()
                 FROM vietride_parcel.parcel_claim_appeals AS appeals
                 WHERE appeals.claim_id = claims.id
                   AND appeals.idempotency_key = appeals.claim_id;

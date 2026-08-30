@@ -79,6 +79,7 @@ public interface IParcelReliabilityRepository
         Guid? tripId,
         Guid? assigneeId,
         string? slaState,
+        ParcelCustodyExceptionRequestStatus? approvalStatus,
         DateTimeOffset? from,
         DateTimeOffset? toExclusive,
         DateTimeOffset now,

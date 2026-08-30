@@ -35,7 +35,7 @@ public sealed class DecideParcelClaimCommandHandler
         if (string.IsNullOrWhiteSpace(command.Reason))
             throw new CodedValidationException("PARCEL_CLAIM_EVIDENCE_REQUIRED", "A decision reason is required.");
 
-        var claim = await _reliability.GetClaimByIdAsync(command.ClaimId, cancellationToken)
+        var claim = await _reliability.GetClaimByIdForUpdateAsync(command.ClaimId, cancellationToken)
             ?? throw new CodedNotFoundException("PARCEL_CLAIM_NOT_FOUND", "Claim was not found.");
         if (claim.OperatorId != command.OperatorId)
             throw new ForbiddenException("FORBIDDEN", "Claim does not belong to this operator.");

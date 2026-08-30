@@ -307,7 +307,8 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
         CancellationToken ct);
 
     /// <summary>
-    /// Bulk: LOADED/IN_TRANSIT -> PENDING_OPERATOR_ACTION for all unresolved parcels on a trip (trip.completed).
+    /// Bulk: LOADED/IN_TRANSIT -> PENDING_OPERATOR_ACTION/CUSTODY_EXCEPTION for all unresolved
+    /// parcels on a trip (trip.completed), freezing the source status for incident recovery.
     /// </summary>
     Task<IReadOnlyList<ParcelEventSnapshot>> TryBulkSetPendingOperatorActionByTripIdAsync(Guid tripId, DateTimeOffset now, CancellationToken ct);
 
@@ -522,6 +523,10 @@ public interface IParcelRepository : IRepository<ParcelEntity, Guid>
     Task<IReadOnlyList<ParcelEntity>> ListDropoffManifestByTripAndStopAsync(
         Guid tripId,
         Guid stopId,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<ParcelEntity>> ListTerminalDropoffManifestByTripAsync(
+        Guid tripId,
         CancellationToken ct = default);
 
     Task<PagedResult<ParcelEntity>> ListByOperatorAsync(

@@ -24,7 +24,7 @@ internal sealed class ParcelIncidentConfiguration : IEntityTypeConfiguration<Par
         builder.Property(x => x.ReporterSource).HasColumnName("reporter_source").HasMaxLength(32).IsRequired();
         builder.Property(x => x.Description).HasColumnName("description").HasColumnType("text");
         builder.Property(x => x.EvidenceJson).HasColumnName("evidence_json").HasColumnType("jsonb");
-        builder.Property(x => x.SearchDeadline).HasColumnName("search_deadline").IsRequired();
+        builder.Property(x => x.SearchDeadline).HasColumnName("search_deadline");
         builder.Property(x => x.EscalatedAt).HasColumnName("escalated_at");
         builder.Property(x => x.ResolvedAt).HasColumnName("resolved_at");
         builder.Property(x => x.ResolutionCode).HasColumnName("resolution_code").HasMaxLength(64);

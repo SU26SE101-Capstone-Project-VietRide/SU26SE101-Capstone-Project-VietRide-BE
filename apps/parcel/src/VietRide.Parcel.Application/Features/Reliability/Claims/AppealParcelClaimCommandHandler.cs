@@ -107,6 +107,7 @@ public sealed class AppealParcelClaimCommandHandler
             cancellationToken,
             parcel,
             operatorView: false,
-            now: now);
+            now: now,
+            appealOverride: appeal);
     }
 }

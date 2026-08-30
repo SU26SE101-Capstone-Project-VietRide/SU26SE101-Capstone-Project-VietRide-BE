@@ -680,7 +680,7 @@ CREATE TABLE parcel_incidents (
     reporter_source VARCHAR(32) NOT NULL,
     description TEXT NULL,
     evidence_json JSONB NULL,
-    search_deadline TIMESTAMPTZ NOT NULL,
+    search_deadline TIMESTAMPTZ,
     escalated_at TIMESTAMPTZ NULL,
     resolved_at TIMESTAMPTZ NULL,
     resolution_code VARCHAR(64) NULL,

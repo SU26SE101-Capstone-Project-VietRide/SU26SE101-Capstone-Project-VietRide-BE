@@ -143,6 +143,12 @@ public sealed class RequestTransferCommandHandler
                 "FORBIDDEN",
                 "Target trip does not belong to this operator.");
         }
+        if (!targetTrip.Snapshot.AssistantUserId.HasValue)
+        {
+            throw new CodedConflictException(
+                "PARCEL_ASSISTANT_REQUIRED",
+                "The target Trip must have an assigned Assistant.");
+        }
     }
 
     private async Task<ParcelCargoRecoveryOperationSnapshot> ClaimTransferAsync(

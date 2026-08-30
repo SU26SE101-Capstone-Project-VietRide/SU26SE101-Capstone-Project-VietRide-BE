@@ -91,9 +91,7 @@ public sealed class ReportCustodyExceptionCommandHandler
             parcel.Id,
             parcel.OperatorId,
             incidentType,
-            now.AddHours(parcel.SearchSlaHoursSnapshot > 0
-                ? parcel.SearchSlaHoursSnapshot
-                : ParcelCompensationPolicy.DefaultSearchSlaHours),
+            null,
             parcel.TripId,
             activeLeg?.Id,
             command.ActorUserId,

@@ -1,6 +1,7 @@
+using System.Text.Json.Serialization;
+
 namespace VietRide.Parcel.Api.Controllers.Requests;
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ReconcileParcelStopRequest(
-    IReadOnlyCollection<Guid>? ScannedParcelIds,
-    IReadOnlyCollection<Guid>? ManualExceptionParcelIds,
     string? DepartureOverrideReason);

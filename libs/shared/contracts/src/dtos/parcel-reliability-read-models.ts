@@ -63,7 +63,7 @@ export const ParcelReliabilityIncidentSummarySchema = z.object({
   incidentId: z.string().uuid(),
   type: z.string(),
   status: z.string(),
-  searchDeadline: z.string().datetime({ offset: true }),
+  searchDeadline: nullableDateTime,
   nextUpdateAt: nullableDateTime,
   slaState: z.string(),
   operatorProcessBreach: z.boolean(),
@@ -163,16 +163,28 @@ export const AssistantParcelManifestSchema = z.object({
         dropoffLocation: ParcelReliabilityLocationSchema.nullable(),
         currentCustody: ParcelReliabilityCustodySchema.nullable(),
         activeIncident: ParcelReliabilityIncidentSummarySchema.nullable(),
+        custodyExceptionApproval: z
+          .object({
+            requestId: z.string().uuid(),
+            incidentId: z.string().uuid(),
+            incidentType: z.string(),
+            status: z.string(),
+            reason: z.string(),
+            reportedAt: z.string().datetime({ offset: true }),
+          })
+          .nullable(),
         availableActions: z.array(z.string()).nullable(),
       })
       .passthrough(),
   ),
-  page: z.number().int().positive(),
-  pageSize: z.number().int().positive(),
-  totalItems: z.number().int().nonnegative(),
-  totalPages: z.number().int().nonnegative(),
-  hasNextPage: z.boolean(),
-  hasPreviousPage: z.boolean(),
+  pagination: z.object({
+    page: z.number().int().positive(),
+    pageSize: z.number().int().positive(),
+    totalItems: z.number().int().nonnegative(),
+    totalPages: z.number().int().nonnegative(),
+    hasNextPage: z.boolean(),
+    hasPreviousPage: z.boolean(),
+  }),
 });
 
 export const OperatorParcelIncidentListItemSchema = z

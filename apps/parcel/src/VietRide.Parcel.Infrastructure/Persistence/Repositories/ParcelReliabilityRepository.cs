@@ -198,6 +198,7 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
         Guid? tripId,
         Guid? assigneeId,
         string? slaState,
+        ParcelCustodyExceptionRequestStatus? approvalStatus,
         DateTimeOffset? from,
         DateTimeOffset? toExclusive,
         DateTimeOffset now,
@@ -222,6 +223,11 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
         {
             query = query.Where(incident => _db.ParcelSearchTasks.Any(task =>
                 task.IncidentId == incident.Id && task.AssigneeId == assigneeId.Value));
+        }
+        if (approvalStatus.HasValue)
+        {
+            query = query.Where(incident => _db.ParcelCustodyExceptionRequests.Any(request =>
+                request.IncidentId == incident.Id && request.Status == approvalStatus.Value));
         }
         if (from.HasValue)
             query = query.Where(incident => incident.CreatedAt >= from.Value);
@@ -248,14 +254,18 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
 
         query = slaState?.ToUpperInvariant() switch
         {
-            "BREACHED" => query.Where(incident => incident.SearchDeadline < now
+            "NOT_STARTED" => query.Where(incident => !incident.SearchDeadline.HasValue
+                && incident.Status == ParcelIncidentStatus.OPEN),
+            "BREACHED" => query.Where(incident => incident.SearchDeadline.HasValue
+                && incident.SearchDeadline < now
                 && !_db.ParcelCustodyExceptionRequests.Any(request =>
                     request.IncidentId == incident.Id
                     && request.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL)
                 && incident.Status != ParcelIncidentStatus.CLOSED
                 && incident.Status != ParcelIncidentStatus.RESOLVED
                 && incident.Status != ParcelIncidentStatus.LOST_CONFIRMED),
-            "DUE_SOON" => query.Where(incident => incident.SearchDeadline >= now
+            "DUE_SOON" => query.Where(incident => incident.SearchDeadline.HasValue
+                && incident.SearchDeadline >= now
                 && incident.SearchDeadline <= now.AddHours(2)
                 && !_db.ParcelCustodyExceptionRequests.Any(request =>
                     request.IncidentId == incident.Id
@@ -263,7 +273,8 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
                 && incident.Status != ParcelIncidentStatus.CLOSED
                 && incident.Status != ParcelIncidentStatus.RESOLVED
                 && incident.Status != ParcelIncidentStatus.LOST_CONFIRMED),
-            "ON_TRACK" => query.Where(incident => incident.SearchDeadline > now.AddHours(2)
+            "ON_TRACK" => query.Where(incident => incident.SearchDeadline.HasValue
+                && incident.SearchDeadline > now.AddHours(2)
                 && !_db.ParcelCustodyExceptionRequests.Any(request =>
                     request.IncidentId == incident.Id
                     && request.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL)
@@ -406,7 +417,8 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
         int maxBatch,
         CancellationToken ct = default)
         => await _db.ParcelIncidents
-            .Where(x => x.SearchDeadline <= now
+            .Where(x => x.SearchDeadline.HasValue
+                && x.SearchDeadline <= now
                 && (x.Status == ParcelIncidentStatus.SEARCHING
                     || x.Status == ParcelIncidentStatus.ESCALATED
                     || x.Status == ParcelIncidentStatus.SEARCH_EXPIRED))

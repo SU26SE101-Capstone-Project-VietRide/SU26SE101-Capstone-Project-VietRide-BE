@@ -85,6 +85,24 @@ internal sealed class ParcelCustodyExceptionRequestRepository
         return ids.ToHashSet();
     }
 
+    public async Task<IReadOnlyList<ParcelCustodyExceptionRequest>> ListLatestByParcelsAsync(
+        IReadOnlyCollection<Guid> parcelIds,
+        CancellationToken ct = default)
+    {
+        if (parcelIds.Count == 0)
+            return [];
+        var requests = await _db.ParcelCustodyExceptionRequests
+            .AsNoTracking()
+            .Where(item => parcelIds.Contains(item.ParcelId))
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.Id)
+            .ToArrayAsync(ct);
+        return requests
+            .GroupBy(item => item.ParcelId)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
     public async Task AddAsync(
         ParcelCustodyExceptionRequest entity,
         CancellationToken ct = default)

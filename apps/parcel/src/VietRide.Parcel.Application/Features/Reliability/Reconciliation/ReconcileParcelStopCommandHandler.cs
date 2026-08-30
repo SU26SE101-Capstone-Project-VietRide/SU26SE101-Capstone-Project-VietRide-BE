@@ -97,14 +97,7 @@ public sealed class ReconcileParcelStopCommandHandler
             throw new ForbiddenException("FORBIDDEN", "Parcel manifest does not belong to this operator.");
 
         var expected = manifest.ToArray();
-        var assertedScanned = command.ScannedParcelIds.ToHashSet();
-        var assertedManual = command.ManualExceptionParcelIds.ToHashSet();
         var expectedIds = expected.Select(x => x.Id).ToHashSet();
-        if (assertedScanned.Except(expectedIds).Any()
-            || assertedManual.Except(expectedIds).Any())
-            throw new CodedConflictException(
-                "PARCEL_CUSTODY_LOCATION_MISMATCH",
-                "One or more reconciled parcels are not expected at this stop.");
 
         var allEvents = await _reliability.ListCustodyEventsByParcelsAsync(expectedIds, cancellationToken);
         var eventsByParcel = allEvents.ToLookup(custodyEvent => custodyEvent.ParcelId);
@@ -125,12 +118,6 @@ public sealed class ReconcileParcelStopCommandHandler
                 manual.Add(parcel.Id);
         }
 
-        if (assertedScanned.Except(scanned).Any()
-            || assertedManual.Except(manual).Any())
-            throw new CodedConflictException(
-                "PARCEL_CUSTODY_EVENT_NOT_FOUND",
-                "One or more reconciled parcels have no matching custody event at this stop.");
-
         var unresolved = expectedIds.Except(scanned).Except(manual).ToArray();
         if (unresolved.Length > 0)
         {
@@ -146,6 +133,15 @@ public sealed class ReconcileParcelStopCommandHandler
             .ToDictionary(group => group.Key, group => group.OrderByDescending(incident => incident.CreatedAt).First());
         foreach (var parcel in expected.Where(x => unresolved.Contains(x.Id)))
         {
+            await _parcels.TrySetPendingOperatorActionAsync(
+                parcel.Id,
+                PendingActionType.CUSTODY_EXCEPTION,
+                "Parcel was unresolved during stop close reconciliation.",
+                null,
+                now,
+                cancellationToken,
+                parcel.Status);
+
             if (incidentByParcel.TryGetValue(parcel.Id, out var existing))
                 continue;
 

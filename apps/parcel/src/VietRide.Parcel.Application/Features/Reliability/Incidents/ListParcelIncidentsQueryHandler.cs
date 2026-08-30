@@ -47,8 +47,11 @@ public sealed class ListParcelIncidentsQueryHandler
             throw new CodedValidationException("VALIDATION_ERROR", "search must not exceed 100 characters.");
         var parsedStatus = ParseEnum<ParcelIncidentStatus>(request.Status, "status");
         var parsedType = ParseEnum<ParcelIncidentType>(request.Type, "type");
+        var parsedApprovalStatus = ParseEnum<ParcelCustodyExceptionRequestStatus>(
+            request.ApprovalStatus,
+            "approvalStatus");
         if (!string.IsNullOrWhiteSpace(request.SlaState)
-            && request.SlaState.ToUpperInvariant() is not ("ON_TRACK" or "DUE_SOON" or "BREACHED" or "CLOSED"))
+            && request.SlaState.ToUpperInvariant() is not ("NOT_STARTED" or "ON_TRACK" or "DUE_SOON" or "BREACHED" or "CLOSED"))
             throw new CodedValidationException("VALIDATION_ERROR", "slaState is invalid.");
         var toExclusive = request.To?.AddTicks(1);
         var now = _clock.UtcNow;
@@ -78,6 +81,7 @@ public sealed class ListParcelIncidentsQueryHandler
             request.TripId,
             request.AssigneeId,
             request.SlaState,
+            parsedApprovalStatus,
             request.From,
             toExclusive,
             now,
@@ -143,7 +147,9 @@ public sealed class ListParcelIncidentsQueryHandler
                 .Distinct()
                 .Select(id => MapUser(id, userById, null))
                 .ToArray();
-            var remaining = (long)Math.Ceiling((incident.SearchDeadline - now).TotalMinutes);
+            var remaining = incident.SearchDeadline.HasValue
+                ? (long)Math.Ceiling((incident.SearchDeadline.Value - now).TotalMinutes)
+                : 0;
             return new ParcelIncidentListItem(
                 incident.Id,
                 incident.ParcelId,
@@ -167,10 +173,10 @@ public sealed class ListParcelIncidentsQueryHandler
                     incidentTasks.Length,
                     assignees),
                 parcel is null ? null : ParcelReliabilityReadModelService.MapClaim(claim, parcel, now),
-                pendingCustodyApprovals.Contains(incident.Id)
+                pendingCustodyApprovals.Contains(incident.Id) || !incident.SearchDeadline.HasValue
                     ? null
                     : new ParcelIncidentSlaResponse(
-                        incident.SearchDeadline,
+                        incident.SearchDeadline.Value,
                         remaining,
                         ParcelReliabilityReadModelService.MapIncident(incident, now)!.SlaState),
                 pendingCustodyApprovals.Contains(incident.Id)

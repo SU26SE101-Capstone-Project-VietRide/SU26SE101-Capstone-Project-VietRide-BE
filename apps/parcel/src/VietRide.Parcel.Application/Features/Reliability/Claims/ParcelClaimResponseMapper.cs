@@ -17,10 +17,12 @@ internal static class ParcelClaimResponseMapper
         ParcelEntity? parcel = null,
         ParcelIncident? incident = null,
         bool operatorView = false,
-        DateTimeOffset? now = null)
+        DateTimeOffset? now = null,
+        ParcelClaimAppeal? appealOverride = null)
     {
         var evidence = await reliability.ListClaimEvidenceAsync(claim.Id, cancellationToken);
-        var appeal = await reliability.GetClaimAppealByClaimAsync(claim.Id, cancellationToken);
+        var appeal = appealOverride
+            ?? await reliability.GetClaimAppealByClaimAsync(claim.Id, cancellationToken);
         incident ??= await reliability.GetIncidentAsync(claim.IncidentId, cancellationToken);
         var at = now ?? DateTimeOffset.UtcNow;
         DateTimeOffset? decisionDeadline = parcel is not null

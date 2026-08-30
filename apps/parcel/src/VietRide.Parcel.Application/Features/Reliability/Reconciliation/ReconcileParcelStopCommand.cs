@@ -8,8 +8,6 @@ public sealed record ReconcileParcelStopCommand(
     Guid StopId,
     Guid ActorUserId,
     Guid OperatorId,
-    IReadOnlyCollection<Guid> ScannedParcelIds,
-    IReadOnlyCollection<Guid> ManualExceptionParcelIds,
     string? DepartureOverrideReason,
     Guid IdempotencyKey) : IRequest<ReconcileParcelStopResponse>;
 

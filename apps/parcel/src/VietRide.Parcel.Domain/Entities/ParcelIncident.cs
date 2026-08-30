@@ -17,7 +17,7 @@ public sealed class ParcelIncident : BaseEntity<Guid>
     public string ReporterSource { get; private set; } = "SYSTEM";
     public string? Description { get; private set; }
     public string? EvidenceJson { get; private set; }
-    public DateTimeOffset SearchDeadline { get; private set; }
+    public DateTimeOffset? SearchDeadline { get; private set; }
     public DateTimeOffset? EscalatedAt { get; private set; }
     public DateTimeOffset? ResolvedAt { get; private set; }
     public string? ResolutionCode { get; private set; }
@@ -32,7 +32,7 @@ public sealed class ParcelIncident : BaseEntity<Guid>
         Guid parcelId,
         Guid operatorId,
         ParcelIncidentType type,
-        DateTimeOffset searchDeadline,
+        DateTimeOffset? searchDeadline,
         Guid? tripId,
         Guid? legId,
         Guid? reporterId,
@@ -70,9 +70,11 @@ public sealed class ParcelIncident : BaseEntity<Guid>
     {
         if (Status != ParcelIncidentStatus.OPEN)
             throw new InvalidOperationException("Only open incidents can enter search.");
-        Status = ParcelIncidentStatus.SEARCHING;
         if (searchDeadline.HasValue)
             SearchDeadline = searchDeadline.Value;
+        if (!SearchDeadline.HasValue)
+            throw new InvalidOperationException("A search deadline is required before search can start.");
+        Status = ParcelIncidentStatus.SEARCHING;
     }
 
     public void MarkFound(string? note)

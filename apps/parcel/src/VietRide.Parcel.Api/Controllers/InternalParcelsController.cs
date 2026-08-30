@@ -158,4 +158,18 @@ public sealed class InternalParcelsController : ControllerBase
             new GetParcelStopDepartureClearanceQuery(tripId, stopId, operatorId),
             cancellationToken));
     }
+
+    [HttpGet("trips/{tripId:guid}/completion-clearance")]
+    [ProducesResponseType(typeof(ApiResponse<ParcelTripCompletionClearanceResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<ParcelTripCompletionClearanceResponse>> GetTripCompletionClearanceAsync(
+        Guid tripId,
+        [FromQuery] Guid operatorId,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await _mediator.Send(
+            new GetParcelTripCompletionClearanceQuery(tripId, operatorId),
+            cancellationToken));
+    }
 }

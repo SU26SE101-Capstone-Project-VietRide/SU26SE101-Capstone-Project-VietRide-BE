@@ -50,6 +50,17 @@ public sealed class ReportParcelIncidentCommandHandler
         if (!Enum.TryParse<ParcelIncidentType>(command.IncidentType, true, out var type))
             throw new CodedValidationException("VALIDATION_ERROR", "IncidentType is invalid.");
 
+        var isSameTenantOperator = command.OperatorId == parcel.OperatorId;
+        if (!isSameTenantOperator
+            && type is not (ParcelIncidentType.DELIVERY_NOT_RECEIVED
+                or ParcelIncidentType.DAMAGED
+                or ParcelIncidentType.PARTIAL_LOSS))
+        {
+            throw new CodedValidationException(
+                "PARCEL_INCIDENT_TYPE_NOT_REPORTABLE",
+                "Passengers can only report delivery-not-received, damaged, or partial-loss incidents.");
+        }
+
         var existing = await _reliability.GetOpenIncidentAsync(parcel.Id, type, cancellationToken);
         if (existing is not null)
             throw new CodedConflictException("PARCEL_INCIDENT_ALREADY_OPEN", "An open incident already exists for this Parcel.");
@@ -136,6 +147,6 @@ public sealed class ReportParcelIncidentCommandHandler
             parcel.Id,
             incident.Type.ToString(),
             incident.Status.ToString(),
-            incident.SearchDeadline);
+            incident.SearchDeadline!.Value);
     }
 }

@@ -490,6 +490,14 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['ASSISTANT'],
     },
     {
+      prefix: '/v1/assistant/trips/{tripId}/destination/reconcile',
+      pathPattern: /^\/v1\/assistant\/trips\/[0-9a-fA-F-]{36}\/destination\/reconcile$/,
+      method: 'POST',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['ASSISTANT'],
+    },
+    {
       prefix: '/v1/assistant/parcels',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',

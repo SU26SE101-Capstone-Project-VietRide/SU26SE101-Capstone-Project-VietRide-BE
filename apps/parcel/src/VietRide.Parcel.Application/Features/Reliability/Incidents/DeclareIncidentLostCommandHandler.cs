@@ -43,7 +43,7 @@ public sealed class DeclareIncidentLostCommandHandler
             cancellationToken);
 
         var now = _clock.UtcNow;
-        if (now < incident.SearchDeadline)
+        if (!incident.SearchDeadline.HasValue || now < incident.SearchDeadline.Value)
             throw new CodedConflictException("PARCEL_SEARCH_SLA_NOT_EXPIRED", "Search SLA has not expired.");
 
         if (incident.Status is ParcelIncidentStatus.OPEN or ParcelIncidentStatus.SEARCHING)

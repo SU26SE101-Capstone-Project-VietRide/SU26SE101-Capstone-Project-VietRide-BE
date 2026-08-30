@@ -266,8 +266,10 @@ public sealed class ParcelReliabilityReadModelService : IParcelReliabilityReadMo
     {
         if (IsIncidentClosed(incident.Status))
             return "CLOSED";
-        if (incident.SearchDeadline < now)
+        if (!incident.SearchDeadline.HasValue)
+            return "NOT_STARTED";
+        if (incident.SearchDeadline.Value < now)
             return "BREACHED";
-        return incident.SearchDeadline <= now.AddHours(2) ? "DUE_SOON" : "ON_TRACK";
+        return incident.SearchDeadline.Value <= now.AddHours(2) ? "DUE_SOON" : "ON_TRACK";
     }
 }

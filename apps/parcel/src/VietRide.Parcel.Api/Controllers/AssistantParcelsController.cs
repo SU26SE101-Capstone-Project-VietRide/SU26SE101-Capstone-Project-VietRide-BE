@@ -15,6 +15,7 @@ using VietRide.Parcel.Application.Features.Parcels.Reweigh;
 using VietRide.Parcel.Application.Features.Parcels.Unload;
 using VietRide.Parcel.Application.Features.Reliability.CustodyException;
 using VietRide.Parcel.Application.Features.Reliability.CustodyScan;
+using VietRide.Parcel.Application.Features.Reliability.Incidents;
 using VietRide.Parcel.Application.Features.Reliability.Reconciliation;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
@@ -316,6 +317,42 @@ public sealed class AssistantParcelsController : ControllerBase
         return Ok(await GetActionStateAsync(parcelId, operatorId, true, null, cancellationToken));
     }
 
+    [HttpPost("{parcelId:guid}/confirm-found-on-vehicle")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<AssistantParcelActionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<AssistantParcelActionResponse>> ConfirmFoundOnVehicleAsync(
+        Guid parcelId,
+        [FromBody] ConfirmParcelFoundOnVehicleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        await _mediator.Send(
+            new ConfirmParcelFoundOnVehicleCommand(
+                parcelId,
+                request.IncidentId,
+                operatorId,
+                CurrentUserClaims.GetUserId(User),
+                request.ParcelCode,
+                request.EvidenceReferences,
+                request.Note,
+                ReadIdempotencyKey(parcelId)),
+            cancellationToken);
+
+        return Ok(await GetActionStateAsync(
+            parcelId,
+            operatorId,
+            true,
+            "Parcel was confirmed on the vehicle and restored to its transport flow.",
+            cancellationToken));
+    }
+
     [HttpPost("~/v1/assistant/trips/{tripId:guid}/stops/{stopId:guid}/reconcile")]
     [RequireIdempotencyKey]
     [ProducesResponseType(typeof(ApiResponse<ReconcileParcelStopResponse>), StatusCodes.Status200OK)]
@@ -324,7 +361,7 @@ public sealed class AssistantParcelsController : ControllerBase
     public async Task<ActionResult<ReconcileParcelStopResponse>> ReconcileStopAsync(
         Guid tripId,
         Guid stopId,
-        [FromBody] ReconcileParcelStopRequest request,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] ReconcileParcelStopRequest? request,
         CancellationToken cancellationToken)
     {
         var operatorId = CurrentUserClaims.GetOperatorId(User)
@@ -335,12 +372,34 @@ public sealed class AssistantParcelsController : ControllerBase
                 stopId,
                 CurrentUserClaims.GetUserId(User),
                 operatorId,
-                request.ScannedParcelIds ?? Array.Empty<Guid>(),
-                request.ManualExceptionParcelIds ?? Array.Empty<Guid>(),
-                request.DepartureOverrideReason,
+                request?.DepartureOverrideReason,
                 Guid.Parse(Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString())),
             cancellationToken);
         return Ok(result);
+    }
+
+    [HttpPost("~/v1/assistant/trips/{tripId:guid}/destination/reconcile")]
+    [RequireIdempotencyKey]
+    [ProducesResponseType(typeof(ApiResponse<ReconcileParcelDestinationResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<ReconcileParcelDestinationResponse>> ReconcileDestinationAsync(
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new ReconcileParcelDestinationCommand(
+                tripId,
+                CurrentUserClaims.GetUserId(User),
+                operatorId,
+                Guid.Parse(Request.Headers[RequireIdempotencyKeyAttribute.HeaderName].ToString())),
+            cancellationToken));
     }
 
     [HttpPost("{parcelId:guid}/deliver")]
