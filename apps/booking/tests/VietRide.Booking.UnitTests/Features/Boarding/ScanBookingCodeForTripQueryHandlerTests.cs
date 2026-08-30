@@ -39,9 +39,42 @@ public sealed class ScanBookingCodeForTripQueryHandlerTests
             .Should().Equal(
                 (TicketCodeA01, "A01", "PENDING"),
                 (TicketCodeB02, "B02", "PENDING"));
+        result.Items.Should().OnlyContain(item =>
+            item.BookingCode == BookingCodeValue
+            && item.BuyerName == "Nguyen Van Buyer"
+            && item.BuyerPhone == "+84888151546");
         booking.Status.Should().Be(BookingStatus.CONFIRMED);
         booking.Passengers.Should().OnlyContain(
             passenger => passenger.BoardingStatus == PassengerBoardingStatus.PENDING);
+    }
+
+    [Fact]
+    public async Task Handle_ScheduledTrip_RedactsBuyerContact()
+    {
+        var booking = CreateBooking(TripId, confirmed: true);
+        Arrange(booking, booking, CreateTripSnapshot("SCHEDULED"));
+
+        var result = await CreateHandler().Handle(CreateQuery(), CancellationToken.None);
+
+        result.Items.Single().BookingCode.Should().Be(BookingCodeValue);
+        result.Items.Single().BuyerName.Should().BeNull();
+        result.Items.Single().BuyerPhone.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Handle_RedactedBuyerSnapshot_DoesNotExposeStalePhone()
+    {
+        var booking = CreateBooking(
+            TripId,
+            confirmed: true,
+            buyerName: BookingBuyerSnapshotProfile.DeletedDisplayName,
+            buyerPhone: "+84888151546");
+        Arrange(booking, booking, CreateTripSnapshot("IN_PROGRESS"));
+
+        var result = await CreateHandler().Handle(CreateQuery(), CancellationToken.None);
+
+        result.Items.Single().BuyerName.Should().BeNull();
+        result.Items.Single().BuyerPhone.Should().BeNull();
     }
 
     [Fact]
@@ -140,7 +173,9 @@ public sealed class ScanBookingCodeForTripQueryHandlerTests
     private static BookingEntity CreateBooking(
         Guid tripId,
         bool confirmed,
-        IReadOnlyList<string>? seatNumbers = null)
+        IReadOnlyList<string>? seatNumbers = null,
+        string? buyerName = "Nguyen Van Buyer",
+        string? buyerPhone = "+84888151546")
     {
         var booking = BookingEntity.CreatePendingPayment(
             bookingCode: BookingCode.Parse(BookingCodeValue),
@@ -153,7 +188,9 @@ public sealed class ScanBookingCodeForTripQueryHandlerTests
             dropoffStopId: null,
             baseFare: Money.FromRaw(200_000),
             discountAmount: Money.Zero,
-            totalAmount: Money.FromRaw(200_000));
+            totalAmount: Money.FromRaw(200_000),
+            buyerDisplayName: buyerName,
+            buyerPhone: buyerPhone);
 
         foreach (var seatNumber in seatNumbers ?? ["A01"])
         {
@@ -177,13 +214,13 @@ public sealed class ScanBookingCodeForTripQueryHandlerTests
         return booking;
     }
 
-    private static TripSnapshot CreateTripSnapshot()
+    private static TripSnapshot CreateTripSnapshot(string status = "BOARDING")
         => new(
             TripId,
             OperatorId,
             Guid.NewGuid(),
             Guid.NewGuid(),
-            "BOARDING",
+            status,
             Now.AddHours(1),
             Now.AddHours(5),
             200_000,

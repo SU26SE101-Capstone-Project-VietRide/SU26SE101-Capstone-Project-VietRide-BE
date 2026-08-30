@@ -27,6 +27,7 @@ public sealed class Day24NoShowOperationalSnapshotTests
         result.DestinationArrivedAt.Should().Be(Departure.AddHours(3));
         result.Stops.Should().ContainSingle().Which.Should().Match<InternalTripStopSnapshotDto>(stop =>
             stop.Status == nameof(TripStopStatus.ARRIVED) &&
+            stop.Name == "Stop" &&
             stop.ActualArrivalTime == Departure.AddHours(1));
     }
 

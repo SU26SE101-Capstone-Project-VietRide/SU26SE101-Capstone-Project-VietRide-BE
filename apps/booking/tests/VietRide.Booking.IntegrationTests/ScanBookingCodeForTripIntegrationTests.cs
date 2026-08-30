@@ -51,12 +51,13 @@ public sealed class ScanBookingCodeForTripIntegrationTests
         {
             Content = JsonContent.Create(new { bookingCode = BookingCodeValue }),
         };
-        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString())
-            .Should().BeTrue();
         var response = await client.SendAsync(request);
         var json = await response.Content.ReadAsStringAsync();
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.CacheControl.Should().NotBeNull();
+        response.Headers.CacheControl!.Private.Should().BeTrue();
+        response.Headers.CacheControl.NoStore.Should().BeTrue();
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         root.GetProperty("success").GetBoolean().Should().BeTrue();
@@ -67,23 +68,68 @@ public sealed class ScanBookingCodeForTripIntegrationTests
         item.GetProperty("seatNumber").GetString().Should().Be("A01");
         item.GetProperty("boardingStatus").GetString().Should().Be("PENDING");
         item.GetProperty("ticketCode").GetString().Should().StartWith("VT-");
-        item.EnumerateObject().Should().HaveCount(5);
+        item.GetProperty("bookingCode").GetString().Should().Be(BookingCodeValue);
+        item.GetProperty("buyerName").GetString().Should().Be("Nguyen Van Buyer");
+        item.GetProperty("buyerPhone").GetString().Should().Be("+84888151546");
+        item.EnumerateObject().Should().HaveCount(8);
     }
 
-    private static BookingEntity CreateConfirmedBooking(Guid tripId, Guid operatorId)
+    [Fact]
+    public async Task GetManifest_AssignedCrew_ReturnsBuyerContactPickupNameAndNoStore()
+    {
+        _factory.ResetCalls();
+        var assistantUserId = Guid.NewGuid();
+        var tripId = Guid.NewGuid();
+        var operatorId = Guid.NewGuid();
+        var pickupStopId = Guid.NewGuid();
+        var booking = CreateConfirmedBooking(tripId, operatorId, pickupStopId);
+
+        _factory.BookingRepository.QueryNoTracking().Returns(new[] { booking }.AsQueryable());
+        _factory.TripClient.GetTripSnapshotAsync(tripId, Arg.Any<CancellationToken>())
+            .Returns(CreateTripSnapshot(
+                tripId,
+                operatorId,
+                assistantUserId,
+                pickupStopId,
+                assignedAsAssistant: true));
+
+        using var client = _factory.CreateAuthenticatedClient(assistantUserId, "ASSISTANT");
+        using var response = await client.GetAsync($"/v1/bookings/trips/{tripId}/manifest");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.CacheControl.Should().NotBeNull();
+        response.Headers.CacheControl!.Private.Should().BeTrue();
+        response.Headers.CacheControl.NoStore.Should().BeTrue();
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var item = document.RootElement
+            .GetProperty("data")
+            .GetProperty("items")[0];
+        item.GetProperty("seatNumber").GetString().Should().Be("A01");
+        item.GetProperty("pickupStop").GetGuid().Should().Be(pickupStopId);
+        item.GetProperty("pickupPointName").GetString().Should().Be("Pickup stop");
+        item.GetProperty("buyerName").GetString().Should().Be("Nguyen Van Buyer");
+        item.GetProperty("buyerPhone").GetString().Should().Be("+84888151546");
+    }
+
+    private static BookingEntity CreateConfirmedBooking(
+        Guid tripId,
+        Guid operatorId,
+        Guid? pickupStopId = null)
     {
         var booking = BookingEntity.CreatePendingPayment(
             bookingCode: BookingCode.Parse(BookingCodeValue),
             passengerUserId: Guid.NewGuid(),
             tripId: tripId,
             operatorId: operatorId,
-            pickupStationId: Guid.NewGuid(),
-            pickupStopId: null,
+            pickupStationId: pickupStopId.HasValue ? null : Guid.NewGuid(),
+            pickupStopId: pickupStopId,
             dropoffStationId: Guid.NewGuid(),
             dropoffStopId: null,
             baseFare: Money.FromRaw(200_000),
             discountAmount: Money.Zero,
-            totalAmount: Money.FromRaw(200_000));
+            totalAmount: Money.FromRaw(200_000),
+            buyerDisplayName: "Nguyen Van Buyer",
+            buyerPhone: "+84888151546");
         booking.AddTicketedPassenger(
             "A01",
             TicketCode.Generate(Now),
@@ -97,7 +143,9 @@ public sealed class ScanBookingCodeForTripIntegrationTests
     private static TripSnapshot CreateTripSnapshot(
         Guid tripId,
         Guid operatorId,
-        Guid driverUserId)
+        Guid assignedUserId,
+        Guid? pickupStopId = null,
+        bool assignedAsAssistant = false)
         => new(
             TripId: tripId,
             OperatorId: operatorId,
@@ -109,7 +157,21 @@ public sealed class ScanBookingCodeForTripIntegrationTests
             BaseFare: 200_000,
             OriginStation: new TripStationSnapshot(Guid.NewGuid(), "Origin"),
             DestinationStation: new TripStationSnapshot(Guid.NewGuid(), "Destination"),
-            Stops: [],
+            Stops: pickupStopId.HasValue
+                ?
+                [
+                    new TripStopSnapshot(
+                        pickupStopId.Value,
+                        1,
+                        true,
+                        true,
+                        Now.AddHours(2),
+                        10,
+                        150_000,
+                        Name: "Pickup stop"),
+                ]
+                : [],
             SeatSummary: new TripSeatSummary(40, 39),
-            DriverUserId: driverUserId);
+            DriverUserId: assignedAsAssistant ? null : assignedUserId,
+            AssistantUserId: assignedAsAssistant ? assignedUserId : null);
 }
