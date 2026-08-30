@@ -21,10 +21,19 @@ Unload requires the requested actual location to equal both the Parcel destinati
 
 Manual handling is explicit. An unreadable/missing QR requires a photographed `MANUAL_CUSTODY_EXCEPTION` or an `UNIDENTIFIED_PACKAGE` with a temporary tag. A stop close reconciles expected, scanned, manual-exception, and unresolved Parcels. When unresolved cargo remains, the Assistant may create a `PENDING_APPROVAL` stop-departure request but cannot name or impersonate its reviewer. The assigned Driver or a same-tenant Operator Staff/Admin decides it using identity from that reviewer's JWT. Trip calls the Parcel clearance endpoint before committing departure and fails closed unless it receives `CLEAR` or an approved override matching the exact current unresolved snapshot. Absence of a scan does not by itself confirm loss.
 
+Reconciliation trusts only persisted custody facts. Clients do not submit asserted scanned/manual
+Parcel lists: normal stop reconciliation has an empty body, an override request supplies only its
+reason, and destination reconciliation is bodyless. A Trip must have an assigned Assistant before
+it may accept a new Parcel or be selected as a transfer/forwarding target; Driver remains the
+supervisor and is not granted Assistant cargo mutations in v1.
+
 Trip emits `trip.stop.departed` for every committed stop departure, independently of the
 passenger-only `trip.stop.departed_with_pending` warning. Parcel consumes the operational fact to
-reconcile its own manifest and consumes `trip.destination.arrived` for terminal-bound parcels.
-Neither fact is treated as custody proof or used to infer a new physical location.
+reconcile its own manifest. `trip.destination.arrived` opens the normal terminal unload window; it
+does not classify a terminal-bound Parcel that is still on the vehicle as missing. The fallback
+missing search starts only when `trip.trip.completed` still finds the Parcel `LOADED|IN_TRANSIT`,
+or from an explicit report/reconciliation exception. Neither arrival/departure fact is treated as
+custody proof or used to infer a new physical location.
 
 ### Incident/search owns loss; ParcelStatus does not
 
@@ -33,6 +42,12 @@ Neither fact is treated as custody proof or used to infer a new physical locatio
 The default search SLA is 72 hours, with search tasks for vehicle/manifest, crew, station, lost-and-found, next Trip/substitution, and evidence reconciliation. Wrong-station recovery creates a new transit leg and paired `FORWARDED_OUT`/`FORWARDED_IN` custody facts. History is never rewritten and forwarding is not charged to the sender.
 
 A `LOADED` custody fact activates its transit leg. A validated destination unload completes that leg; a search that reaches `LOST_CONFIRMED` marks its active leg lost. When cargo is verified `FOUND`, remaining open/in-progress search tasks are cancelled. When loss is confirmed, remaining open/in-progress search tasks fail with the terminal search result. Completed task evidence is never overwritten.
+
+For a system-created `MISSING|MISSING_AFTER_DEPARTURE` false positive, the assigned Assistant may
+scan the Parcel QR and confirm it is physically still on the assigned Trip vehicle. The operation
+appends `FOUND@VEHICLE`, resolves the incident, cancels outstanding tasks, and restores the frozen
+`LOADED|IN_TRANSIT` resume status atomically. Assistant-reported manual exceptions still require
+Driver or Operator review and cannot use this shortcut while approval is pending.
 
 ### Compensation is operator policy, snapshotted per Parcel
 

@@ -3159,6 +3159,10 @@ không expose UUID nội bộ, và nhất quán với booking QR dùng plain boo
   `TRIP_NOT_ACCEPTING_PARCEL` ("Chuyến xe không còn nhận bưu kiện mới. Vui lòng chọn chuyến khác.").
 - `BOARDING` bắt đầu tại T-30, đúng lúc cửa check-in Parcel đã đóng; vì vậy Trip search và create
   đều phải loại trạng thái này để không tạo Parcel không thể check-in.
+- Trip phải có `assistantUserId`; nếu chưa phân công Assistant thì create trả
+  `409 PARCEL_ASSISTANT_REQUIRED`. Forwarding/transfer cũng không được chọn target Trip thiếu
+  Assistant. V1 giữ Driver là supervisor và không mở rộng các mutation check-in/load/unload cho
+  Driver, nên không được nhận hàng vào một Trip không có người đủ quyền vận hành hàng hóa.
 
 **Deadline trước giờ đóng tải:**
 
@@ -3237,9 +3241,14 @@ Operator override (exception handling only):
   → Không dùng override cho bulk action — phải per-parcel
 
 Arrival Outbox facts không trực tiếp đổi `ParcelStatus`: `trip.stop.arrived` chỉ có Notification
-consumer; `trip.destination.arrived` kích hoạt Parcel search cho terminal-bound parcel vẫn
-`LOADED|IN_TRANSIT`. Custody projection chỉ update từ custody event và không suy diễn vị trí từ
-arrival/departure fact.
+consumer; `trip.destination.arrived` chỉ thiết lập cửa sổ unload tại bến cuối và không được xem
+terminal-bound parcel còn `LOADED|IN_TRANSIT` là thất lạc. Nếu Trip đã chuyển `COMPLETED` mà kiện
+vẫn chưa unload, Parcel mới chuyển sang `PENDING_OPERATOR_ACTION/CUSTODY_EXCEPTION`, giữ
+`pendingActionResumeStatus=LOADED|IN_TRANSIT` và mở search incident hệ thống. Custody projection
+chỉ update từ custody event và không suy diễn vị trí từ arrival/departure fact. Assigned Assistant
+có thể quét đúng QR để xác nhận kiện của system-created `MISSING|MISSING_AFTER_DEPARTURE` vẫn ở
+trên xe; thao tác ghi `FOUND@VEHICLE`, resolve incident và khôi phục resume status trong cùng
+transaction.
 ```
 
 **Parcel behavior khi Trip CANCELLED (SCHEDULED hoặc BOARDING):**
@@ -3630,6 +3639,9 @@ cân nặng, kích thước và serial/IMEI.
 
 Không scan không đồng nghĩa mất. QR hỏng phải dùng `MANUAL_CUSTODY_EXCEPTION`; kiện chưa định danh
 nhận temporary tag và `UNIDENTIFIED_PACKAGE`. Stop close đối soát expected/scanned/manual/unresolved.
+Các count được derive hoàn toàn từ custody event đã persist; FE không gửi danh sách Parcel tự khai
+đã scan/manual. Request stop reconciliation chỉ có optional `departureOverrideReason`, còn
+destination reconciliation là bodyless.
 Assistant không được tự khai UUID người duyệt. Khi còn unresolved và có lý do xin rời bến, Parcel
 tạo `ParcelStopDepartureApprovalRequest=PENDING_APPROVAL` với snapshot chính xác danh sách kiện.
 Assigned Driver hoặc cùng-tenant `OPERATOR_STAFF|OPERATOR_ADMIN` duyệt/từ chối bằng danh tính lấy

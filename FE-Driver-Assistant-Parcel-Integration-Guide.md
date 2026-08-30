@@ -1,284 +1,855 @@
-# Hướng dẫn sửa FE Driver/Assistant — Parcel check-in, custody, load và duyệt sự cố
+# FE Driver/Assistant — Parcel API Integration Guide
 
-> Backend contract áp dụng: commit `c6306059` trở lên, ngày 2026-08-28.
+> Source-verified against the current backend working tree on 2026-08-29, including the JWT-based stop-departure approval flow. Do not invent request fields or derive a separate FE state machine.
 
-## 1. Mục đích
+## Đọc nhanh trước khi nối API
 
-Tài liệu này hướng dẫn Driver/Assistant Mobile tích hợp đúng luồng nhận kiện, cân đo, chất hàng, ghi nhận custody, xử lý vị trí vận hành và quy trình Assistant báo cáo — Driver phê duyệt custody exception.
+Luồng happy case bắt buộc theo đúng thứ tự:
 
-Phạm vi tập trung vào lỗi FE đang hiển thị:
+```text
+Driver mở BOARDING
+→ Assistant lấy manifest
+→ quét QR để tra cứu
+→ check-in
+→ cân/đo bằng reweigh
+→ chờ thanh toán bổ sung nếu có
+→ load hàng lên xe
+→ Driver start chuyến
+→ Parcel sang IN_TRANSIT
+→ Driver arrive đúng stop
+→ Assistant unload
+→ deliver
+→ đối soát stop
+→ Driver depart
+```
 
-> Chưa biết xe đang ở đâu. Chưa có vị trí vận hành của chuyến nên không ghi nhận được lần quét này.
+Luồng sai bến/thất lạc:
 
-Kết luận: thông báo trên là validation do FE tự đặt sai ngữ cảnh. `currentOperationalLocation` không bắt buộc cho check-in tại bến đầu, cân đo hoặc chất hàng. FE không được dùng field này để chặn các thao tác tại bến đầu.
+```text
+Quét sai nhưng hàng còn trên xe
+→ không tạo sự cố, giữ hàng trên xe và đi tiếp.
 
-## 2. Kết luận cần sửa ngay
+Hàng đã nằm sai vị trí vật lý
+→ Assistant custody-exception
+→ chờ Driver/Operator duyệt bằng JWT của người duyệt
+→ Operator tìm kiếm
+→ tìm thấy trên xe thì tiếp tục chuyến cũ
+→ tìm thấy ở bến sai thì Operator chọn chuyến forwarding
+→ crew chuyến mới confirm-transfer.
+```
 
-1. Không dùng `currentOperationalLocation` để xác định bến đầu.
-2. Bến đầu phải lấy từ:
+Ba lỗi FE tuyệt đối không được lặp lại:
 
-   ```text
-   data.tripContext.trip.route.origin
-   ```
+1. Không lấy `currentOperationalLocation` làm vị trí kiện hàng; vị trí kiện nằm ở `currentCustody`.
+2. Đường dẫn stop hiện tại là `tripContext.currentOperationalLocation.location.id`, không phải `currentOperationalLocation.id`.
+3. Sau check-in không gọi thêm `custody-scan`; bước kế tiếp là `reweigh`.
 
-3. Vị trí custody gần nhất của kiện phải lấy từ:
+Các phần bên dưới giữ tên field, enum và error code bằng tiếng Anh đúng như source để agent FE có thể copy trực tiếp.
 
-   ```text
-   item.currentCustody
-   ```
+## Table of contents
 
-   hoặc:
+1. [Purpose and non-negotiable rules](#1-purpose-and-non-negotiable-rules)
+2. [Base URL, authentication, headers and response envelope](#2-base-url-authentication-headers-and-response-envelope)
+3. [Role boundaries](#3-role-boundaries)
+4. [Parcel states and action mapping](#4-parcel-states-and-action-mapping)
+5. [Location fields — use the correct source](#5-location-fields--use-the-correct-source)
+6. [Endpoint overview](#6-endpoint-overview)
+7. [Flow A — origin happy path: receive, weigh and load](#7-flow-a--origin-happy-path-receive-weigh-and-load)
+8. [Flow B — trip start and route-stop delivery](#8-flow-b--trip-start-and-route-stop-delivery)
+9. [Flow C — delivery at destination station](#9-flow-c--delivery-at-destination-station)
+10. [Flow D — wrong QR or wrong stop while the package remains on vehicle](#10-flow-d--wrong-qr-or-wrong-stop-while-the-package-remains-on-vehicle)
+11. [Flow E — package was physically unloaded at the wrong stop](#11-flow-e--package-was-physically-unloaded-at-the-wrong-stop)
+12. [Flow F — stop reconciliation finds an unresolved package](#12-flow-f--stop-reconciliation-finds-an-unresolved-package)
+13. [Flow G — package has no readable QR or is unidentified](#13-flow-g--package-has-no-readable-qr-or-is-unidentified)
+14. [Flow H — found package is forwarded to another trip](#14-flow-h--found-package-is-forwarded-to-another-trip)
+15. [Direct custody scan — when it is and is not appropriate](#15-direct-custody-scan--when-it-is-and-is-not-appropriate)
+16. [Delivery confirmation and fallback](#16-delivery-confirmation-and-fallback)
+17. [Response handling and local state updates](#17-response-handling-and-local-state-updates)
+18. [Idempotency and retry rules](#18-idempotency-and-retry-rules)
+19. [Error handling](#19-error-handling)
+20. [Suggested FE state and API client](#20-suggested-fe-state-and-api-client)
+21. [Integration acceptance checklist](#21-integration-acceptance-checklist)
+22. [Known backend contract gaps](#22-known-backend-contract-gaps)
 
-   ```text
-   response.data.currentCustody
-   ```
+## 1. Purpose and non-negotiable rules
 
-4. `currentOperationalLocation = null` khi chuyến còn `SCHEDULED`, xe chưa đến route stop, xe đã rời stop hoặc đang chạy giữa hai stop là hợp lệ.
-5. Sau khi check-in thành công, backend đã tự tạo custody event `CHECKED_IN` tại `ORIGIN_STATION`. FE không cần bắt người dùng quét thêm để “ghi nhận vị trí”.
-6. Sau `CHECKED_IN`, thao tác tiếp theo đúng là cân/đo thực tế bằng API `reweigh`, không phải custody scan.
-7. Backend đã trả action `REWEIGH` khi parcel ở `CHECKED_IN`. FE nên ưu tiên `availableActions`; fallback theo status tại mục 9 chỉ dùng để tương thích với backend cũ trong thời gian rollout.
-8. Assistant không còn gửi `supervisorApprovalUserId` khi báo cáo sự cố.
-9. Assistant chỉ tạo báo cáo `PENDING_APPROVAL`; Driver được phân công mới được approve/reject bằng JWT của chính Driver.
-10. Trong lúc chờ duyệt, `searchDeadline = null`; FE không được hiển thị đang tìm kiếm, SLA 72 giờ hoặc cho mở claim.
-11. Chỉ sau khi approve, incident mới sang `SEARCHING`, tạo custody event và bắt đầu SLA tìm kiếm.
+This guide is for the Driver/Assistant Mobile team. It explains the exact order of actions and APIs from receiving a Parcel at the origin station until delivery, including wrong QR, wrong stop, missing scan, custody exception approval and forwarding.
 
-## 3. Phân biệt các loại dữ liệu vị trí
+The FE must follow these rules:
 
-| Field | Ý nghĩa thực tế | Dùng cho |
+1. `currentOperationalLocation` is not the origin station, vehicle GPS or current Parcel custody.
+2. `currentOperationalLocation = null` is valid before the trip starts, between stops and after a stop has departed.
+3. Check-in, reweigh and load do not require `currentOperationalLocation`.
+4. Check-in automatically creates `CHECKED_IN` custody at `ORIGIN_STATION`; do not call `custody-scan` immediately afterward.
+5. Load is performed before Driver starts the trip. Driver start changes `LOADED` Parcels to `IN_TRANSIT` asynchronously through `trip.started`.
+6. Normal unload always requires the real Parcel QR and the actual operational stop/destination.
+7. A rejected unload does not mean the package was physically moved. If it remains on the vehicle, keep it there and continue to the correct stop.
+8. Use `custody-exception` only when physical custody no longer matches the normal system flow, for example the package is already at the wrong stop.
+9. Assistant reports a custody exception; Driver or Operator approves/rejects with the approver's own JWT. Never send reviewer UUID in the exception request.
+10. Use backend `availableActions` as the source for available operations, but select the primary CTA by Parcel status. `CUSTODY_SCAN` is an optional supporting action, not the primary action for every card.
+
+## 2. Base URL, authentication, headers and response envelope
+
+### Base URLs
+
+```text
+Production Gateway: https://api.vietride.online
+Local Gateway:      http://localhost:3000
+Swagger:            https://api.vietride.online/docs
+```
+
+All mobile calls must go through Gateway. Do not call Parcel Service port `5005` or Trip Service port `5002` directly from the app.
+
+### Authentication
+
+```http
+Authorization: Bearer <accessToken>
+```
+
+The token role must match the endpoint:
+
+```text
+ASSISTANT → /v1/assistant/**
+DRIVER    → Driver-only /v1/driver/** and custody-exception decision
+DRIVER or ASSISTANT → permitted /v1/crew/** endpoints
+```
+
+When the API returns `401`, the FE must run the application's existing token refresh/login flow and must not retry indefinitely with the expired token.
+
+### Idempotency
+
+Every mutation in this guide requires this header except QR lookup:
+
+```http
+Idempotency-Key: <uuid-v4>
+```
+
+Rules:
+
+- generate one UUID for one user action;
+- reuse that UUID when retrying the same uncertain request;
+- generate a different UUID for a different action;
+- do not generate a new key on every automatic network retry.
+
+`POST /v1/assistant/trips/{tripId}/parcels/qr-scan` is read-only and does not require `Idempotency-Key`.
+
+### Response envelope
+
+Success:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {},
+  "meta": {
+    "traceId": "...",
+    "timestamp": "2026-08-29T05:00:00Z"
+  }
+}
+```
+
+Error:
+
+```json
+{
+  "success": false,
+  "statusCode": 409,
+  "error": {
+    "code": "PARCEL_CUSTODY_LOCATION_MISMATCH",
+    "message": "...",
+    "fields": [
+      {
+        "field": "expectedStop",
+        "message": "uuid"
+      },
+      {
+        "field": "actualStop",
+        "message": "uuid"
+      },
+      {
+        "field": "requiredAction",
+        "message": "KEEP_ON_VEHICLE_OR_REPORT_CUSTODY_EXCEPTION"
+      }
+    ]
+  },
+  "meta": {
+    "traceId": "...",
+    "timestamp": "2026-08-29T05:00:00Z"
+  }
+}
+```
+
+`error.fields` is an array of `{ field, message }`, not a JSON object. Convert it to a map only inside the FE adapter if convenient. Always log `meta.traceId` in FE diagnostics.
+
+## 3. Role boundaries
+
+| Action | Assistant | Driver | Operator Web |
+|---|:---:|:---:|:---:|
+| Read Parcel manifest for assigned trip | Yes | Yes, through `/v1/crew/trips/{tripId}/parcels` | No |
+| QR lookup, check-in, reweigh, load, unload, deliver | Yes | No | No |
+| Start boarding/start trip | No | Yes | Separate Operator APIs |
+| Arrive/depart/complete trip | Allowed by current Trip controller for assigned crew | Yes | Separate Operator APIs |
+| Report Parcel custody exception | Yes | No | No |
+| Approve/reject Assistant exception | No | Yes, assigned Driver | Yes, Staff/Admin |
+| Record Operator search result/mark found/choose forwarding trip | No | No | Yes |
+| Confirm receiving a forwarded Parcel | Yes, target crew | Yes, target crew | No |
+| Register/match unidentified package | No | No | Operator Staff/Admin |
+
+Important: Driver cannot call `/v1/assistant/**` with Driver JWT. Assistant cannot approve their own custody exception.
+
+## 4. Parcel states and action mapping
+
+### Happy-path state sequence
+
+```text
+RESERVED
+  → CHECKED_IN
+  → READY_TO_LOAD or PENDING_FINAL_PAYMENT
+  → READY_TO_LOAD
+  → LOADED
+  → IN_TRANSIT
+  → UNLOADED
+  → DELIVERED_PENDING_CONFIRM
+  → DELIVERY_CONFIRMED
+```
+
+### Primary FE action by status
+
+| Parcel status | Primary UI action | API/action |
 |---|---|---|
-| `tripContext.trip.route.origin` | Bến xuất phát của chuyến | Check-in, nhận kiện, hiển thị bến đầu |
-| `tripContext.trip.route.destination` | Bến kết thúc của chuyến | Hiển thị bến cuối |
-| `tripContext.currentOperationalLocation` | Route stop mà chuyến đang `ARRIVED` và chưa `DEPARTED` | Unload hoặc custody tại một route stop đang hoạt động |
-| `currentCustody` | Vị trí đã được xác nhận gần nhất của kiện hàng | Tracking kiện, hiển thị lần quét cuối |
-| GPS của xe | Vị trí hỗ trợ vận hành, không phải bằng chứng bàn giao kiện | Bản đồ; không dùng thay custody event |
+| `RESERVED` | Receive/check-in | `POST .../check-in` |
+| `CHECKED_IN` | Enter actual dimensions/weight | `POST .../reweigh` |
+| `PENDING_FINAL_PAYMENT` | Waiting for sender payment | No Assistant mutation |
+| `READY_TO_LOAD` | Load onto vehicle | `POST .../load` |
+| `LOADED` | Show “On vehicle” | Wait for Driver start; exception only if needed |
+| `IN_TRANSIT` | Unload at correct location | `POST .../unload` |
+| `UNLOADED` | Handoff/deliver | `POST .../deliver` |
+| `DELIVERED_PENDING_CONFIRM` | Waiting for recipient confirmation | Resend email or manual confirm only when required |
+| `PENDING_TRANSFER_CONFIRM` | Target crew confirms transfer | `POST /v1/crew/.../confirm-transfer` |
+| `PENDING_OPERATOR_ACTION` | Show incident/approval state | Do not continue normal flow |
 
-### `currentOperationalLocation` không phải là gì?
+The backend currently calculates Assistant actions as follows:
 
-Nó không phải:
+```text
+RESERVED: CHECK_IN
+CHECKED_IN: REWEIGH
+READY_TO_LOAD: LOAD
+LOADED: CUSTODY_EXCEPTION
+IN_TRANSIT: UNLOAD, CUSTODY_EXCEPTION
+UNLOADED: DELIVER
+Active incident: VIEW_INCIDENT
+Valid supplemental physical scan at the current arrived stop: CUSTODY_SCAN
+Eligible MISSING/MISSING_AFTER_DEPARTURE/UNSCANNED_HANDOFF: CONFIRM_FOUND_ON_VEHICLE
+```
 
-- bến xuất phát;
-- vị trí GPS liên tục của xe;
-- vị trí hiện tại của kiện hàng;
-- điều kiện bắt buộc để check-in, reweigh hoặc load.
+Do not display `CUSTODY_SCAN` unless it is present in `availableActions`. Check-in, load, unload,
+deliver, and confirm-found already write their own custody facts, so FE must not call a second
+custody scan after those mutations.
 
-Backend chỉ trả `currentOperationalLocation` khi có một route stop đang ở trạng thái `ARRIVED` và chưa có thời điểm rời stop. Vì vậy giá trị `null` trước khi chuyến bắt đầu là đúng.
+## 5. Location fields — use the correct source
 
-## 4. API lấy dữ liệu cho màn hình Hàng hóa
+### Exact manifest shape
 
-### Driver/Assistant manifest
+```json
+{
+  "tripContext": {
+    "trip": {
+      "tripId": "uuid",
+      "status": "SCHEDULED",
+      "departureAt": "2026-08-29T02:00:00Z",
+      "eta": "2026-08-29T08:00:00Z",
+      "route": {
+        "routeId": "uuid",
+        "name": "HCMC - Can Tho",
+        "origin": {
+          "type": "ORIGIN_STATION",
+          "id": "uuid",
+          "name": "Ben xe Mien Tay",
+          "orderIndex": null,
+          "eta": null
+        },
+        "destination": {
+          "type": "DESTINATION_STATION",
+          "id": "uuid",
+          "name": "Ben xe Can Tho",
+          "orderIndex": null,
+          "eta": null
+        }
+      },
+      "vehicle": {
+        "vehicleId": "uuid",
+        "licensePlate": "51B-12345",
+        "status": "ACTIVE"
+      },
+      "stops": []
+    },
+    "currentOperationalLocation": {
+      "location": {
+        "type": "ROUTE_STOP",
+        "id": "uuid",
+        "name": "Stop B",
+        "orderIndex": 2,
+        "eta": "2026-08-29T05:00:00Z"
+      },
+      "status": "ARRIVED",
+      "actualArrivalAt": "2026-08-29T05:02:00Z",
+      "actualDepartureAt": null
+    },
+    "orderedStops": []
+  }
+}
+```
+
+The correct path is:
+
+```text
+tripContext.currentOperationalLocation.location.id
+tripContext.currentOperationalLocation.location.name
+```
+
+The following old access is wrong:
+
+```text
+tripContext.currentOperationalLocation.id
+tripContext.currentOperationalLocation.name
+```
+
+### Location source matrix
+
+| Business meaning | Correct data source |
+|---|---|
+| Origin station for check-in/load display | `tripContext.trip.route.origin` |
+| Destination station | `tripContext.trip.route.destination` |
+| Route stop where the vehicle is currently arrived and not departed | `tripContext.currentOperationalLocation.location` |
+| Last confirmed physical location of one Parcel | `item.currentCustody.lastConfirmedLocation` |
+| Expected Parcel drop-off | `item.dropoffLocation` |
+| Vehicle GPS | Tracking feature only; never custody proof |
+
+### What `currentOperationalLocation = null` means
+
+It can mean any of these valid conditions:
+
+- trip is still `SCHEDULED`/boarding at origin;
+- vehicle is travelling between two route stops;
+- current route stop has already departed;
+- no route stop is currently in `ARRIVED` without departure state.
+
+It does not mean that the Parcel location is unknown. Use `currentCustody` for Parcel tracking.
+
+## 6. Endpoint overview
+
+| Order/context | Role | Method and path | Body | Idempotency |
+|---:|---|---|---|---|
+| 1 | Assistant | `GET /v1/assistant/trips/{tripId}/parcels` | None | No |
+| 1 | Driver | `GET /v1/crew/trips/{tripId}/parcels` | None | No |
+| 2 | Driver | `POST /v1/driver/trips/{tripId}/boarding` | No body | Yes |
+| 3 | Assistant | `POST /v1/assistant/trips/{tripId}/parcels/qr-scan` | `parcelCode` | No |
+| 4 | Assistant | `POST /v1/assistant/parcels/{parcelId}/check-in` | `tripId`, `parcelCode`, `photoUrls` | Yes |
+| 5 | Assistant | `POST /v1/assistant/parcels/{parcelId}/reweigh` | actual dimensions/weight | Yes |
+| 6 | Assistant | `POST /v1/assistant/parcels/{parcelId}/load` | `tripId`, `parcelCode` | Yes |
+| 7 | Driver | `POST /v1/driver/trips/{tripId}/start` | No body | Yes |
+| 8 | Driver/assigned crew | `POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive` | No body | Yes |
+| 9 | Assistant | `POST /v1/assistant/parcels/{parcelId}/unload` | QR, actual location, photos | Yes |
+| 10 | Assistant | `POST /v1/assistant/parcels/{parcelId}/deliver` | photos or empty body | Yes |
+| 11 | Assistant | `POST /v1/assistant/trips/{tripId}/stops/{stopId}/reconcile` | scanned/manual IDs, override fields | Yes |
+| 12 | Driver/assigned crew | `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart` | No body | Yes |
+| Destination | Driver/assigned crew | `POST /v1/driver/trips/{tripId}/destination/arrive` | No body | Yes |
+| Exception report | Assistant | `POST /v1/assistant/parcels/{parcelId}/custody-exception` | incident and actual location | Yes |
+| Exception review | Driver | `GET /v1/crew/parcels/{parcelId}/custody-exception` | None | No |
+| Exception decision | Driver | `POST /v1/crew/parcels/{parcelId}/custody-exception-decision` | decision, note | Yes |
+| Stop-departure approval read | Driver | `GET /v1/crew/parcel-stop-departure-approvals/{requestId}` | None | No |
+| Stop-departure approval decision | Driver | `POST /v1/crew/parcel-stop-departure-approvals/{requestId}/decision` | decision, note | Yes |
+| Transfer receive | Driver/Assistant target crew | `POST /v1/crew/parcels/{parcelId}/confirm-transfer` | `parcelCode` | Yes |
+| Optional custody | Assistant | `POST /v1/assistant/parcels/{parcelId}/custody-scan` | event/location | Yes |
+| Manual delivery confirmation | Driver/Assistant | `POST /v1/crew/parcels/{parcelId}/manual-confirm` | note | Yes |
+
+## 7. Flow A — origin happy path: receive, weigh and load
+
+```text
+Driver opens boarding
+  → Assistant loads manifest
+  → QR lookup
+  → check-in
+  → reweigh
+  → wait for final payment when required
+  → load
+  → Parcel LOADED
+```
+
+### A1. Driver opens boarding
+
+```http
+POST /v1/driver/trips/{tripId}/boarding
+Authorization: Bearer <driverAccessToken>
+Idempotency-Key: <uuid-v4>
+```
+
+No request body.
+
+This is a Trip operation. Current Parcel backend does not require Trip `BOARDING` for check-in/reweigh/load, but this is the expected operational order for the app.
+
+### A2. Assistant loads the whole manifest screen
 
 ```http
 GET /v1/assistant/trips/{tripId}/parcels?page=1&pageSize=100
-Authorization: Bearer <accessToken>
+Authorization: Bearer <assistantAccessToken>
 ```
 
-Các nguồn dữ liệu FE cần giữ trong state của màn hình:
+Optional filters:
 
-```text
-data.tripContext.trip
-data.tripContext.trip.route.origin
-data.tripContext.trip.route.destination
-data.tripContext.currentOperationalLocation
-data.summary
-data.items[]
+| Query | Type | Default | Description |
+|---|---|---:|---|
+| `stopId` | UUID | `null` | Parcels expected at a stop |
+| `status` | string | `null` | Parcel status filter |
+| `hasException` | boolean | `null` | Filter active exception |
+| `search` | string | `null` | Search supported by backend read query |
+| `page` | integer >= 1 | `1` | Page number |
+| `pageSize` | integer 1–100 | `20` | Page size |
+
+Use this one response to render trip, route, vehicle, ordered stops, counts and Parcel cards. Do not call Parcel detail/trace once per row.
+
+Driver can load the same screen-ready manifest with Driver JWT through:
+
+```http
+GET /v1/crew/trips/{tripId}/parcels?page=1&pageSize=100
+Authorization: Bearer <driverAccessToken>
 ```
 
-Mỗi item đã có các dữ liệu dùng để dựng card:
+The Driver endpoint uses the same filters and response type but authorizes the caller as assigned
+Driver instead of assigned Assistant. Driver rows do not receive check-in/load/unload/deliver
+actions. A pending Assistant report is discoverable directly on its Parcel row.
+
+Each item contains:
 
 ```text
-parcelId
-parcelCode
-status
-dropoffLocation
-currentCustody
-activeIncident
-paymentState
-identityCheckHints
+parcelId, parcelCode, status
+recipientName, recipientPhone
+dropoffStopId, dropoffLocation
+sizeCategory, estimatedSizeCategory, actualSizeCategory
+estimatedWeightKg, actualWeightKg
+balanceRequiredVnd, balancePaidVnd, finalPaymentDeadline
+description, photoUrl
+currentCustody, activeIncident
+paymentState, identityCheckHints
 availableActions
+custodyExceptionApproval
 ```
 
-Không gọi trace hoặc parcel detail riêng cho từng item trong manifest.
-
-## 5. Luồng đúng từ nhận kiện đến chất hàng
-
-```text
-QR scan
-  → CHECK_IN
-  → REWEIGH
-  → chờ thanh toán bổ sung nếu có
-  → READY_TO_LOAD
-  → LOAD
-  → LOADED
-```
-
-### Theo trạng thái Parcel
-
-| Parcel status | FE cần hiển thị | API chính |
-|---|---|---|
-| `RESERVED` | Quét nhận kiện | `check-in` |
-| `CHECKED_IN` | Cân/đo thực tế | `reweigh` |
-| `PENDING_FINAL_PAYMENT` | Chờ khách thanh toán phần chênh lệch | Không cho load |
-| `READY_TO_LOAD` | Chất kiện lên xe | `load` |
-| `LOADED` | Đã ở trên xe | Không gọi load lại |
-| `IN_TRANSIT` | Theo dõi đến stop cần dỡ | `unload`/custody exception theo màn hình tương ứng |
-
-### Theo trạng thái Trip
-
-```text
-SCHEDULED → BOARDING → IN_PROGRESS
-```
-
-- `SCHEDULED`: check-in tại bến đầu có thể thực hiện nếu chưa quá deadline.
-- `BOARDING`: giai đoạn phù hợp để hoàn tất cân/đo, thanh toán chênh lệch và chất hàng.
-- `IN_PROGRESS`: chuyến đã chạy; `currentOperationalLocation` chỉ có giá trị khi xe đang dừng tại một route stop được ghi nhận `ARRIVED`.
-
-Không yêu cầu driver start chuyến mới cho phép assistant check-in. FE cũng không được tự buộc `trip.status === IN_PROGRESS` cho check-in, reweigh hoặc load.
-
-> Lưu ý contract hiện tại: backend đang kiểm soát check-in/reweigh/load bằng trạng thái Parcel, phân công assistant và các deadline; handler load hiện chưa bắt buộc Trip phải ở `BOARDING`. FE không nên tự tạo một state machine khác với backend.
-
-## 6. Request chính xác cho từng thao tác
-
-Tất cả URL dưới đây dùng base URL của môi trường FE đang cấu hình. Các mutation phải gửi access token; các endpoint được đánh dấu idempotent phải có một UUID mới cho mỗi thao tác nghiệp vụ mới và tái sử dụng cùng UUID khi retry đúng thao tác đó.
-
-### 6.1. Quét QR để đọc kiện thuộc chuyến
+### A3. QR lookup
 
 ```http
 POST /v1/assistant/trips/{tripId}/parcels/qr-scan
-Authorization: Bearer <accessToken>
+Authorization: Bearer <assistantAccessToken>
 Content-Type: application/json
 ```
 
 ```json
 {
-  "parcelCode": "VRP-..."
+  "parcelCode": "VR-PCL-20260829-ABCDEFG2"
 }
 ```
 
-Endpoint này dùng để đọc/xác thực kiện theo chuyến, không thay thế check-in.
+Accepted Parcel code formats in current validator:
 
-### 6.2. Check-in nhận kiện tại bến đầu
+```text
+VR-PCL-YYYYMMDD-8 characters excluding I/O/1/0
+VRP-YYYYMMDD-8 uppercase alphanumeric characters
+```
+
+This endpoint is lookup-only. It does not check in, weigh, load or create a custody event.
+
+Use its `data.parcelState.parcelId` as the path ID for the next action. Never derive `parcelId` from the QR string.
+
+### A4. Check-in at origin
+
+Precondition:
+
+```text
+Parcel status = RESERVED
+Caller = assigned ASSISTANT
+Check-in deadline has not passed
+```
 
 ```http
 POST /v1/assistant/parcels/{parcelId}/check-in
-Authorization: Bearer <accessToken>
-Idempotency-Key: <uuid>
+Authorization: Bearer <assistantAccessToken>
+Idempotency-Key: <uuid-v4>
 Content-Type: application/json
 ```
 
 ```json
 {
   "tripId": "89136f0c-2f83-479a-9009-e92bf7a6c755",
-  "parcelCode": "VRP-...",
+  "parcelCode": "VR-PCL-20260829-ABCDEFG2",
   "photoUrls": [
-    "https://example.com/parcel-check-in.jpg"
+    "https://<firebase-storage>/parcel-ops/<operatorId>/<assistantUserId>/<parcelId>/check-in-1.jpg"
   ]
 }
 ```
 
-Kết quả đúng:
+Validation:
 
-- Parcel chuyển từ `RESERVED` sang `CHECKED_IN`.
-- Backend tự tạo custody event `CHECKED_IN`.
-- Custody có location type `ORIGIN_STATION` và snapshot tên bến đầu.
-- FE cập nhật card trực tiếp từ response mutation, không bắt buộc refetch manifest.
+- `tripId` required UUID;
+- `parcelCode` required;
+- `photoUrls` optional, maximum 3;
+- every photo URL must be an owned Firebase Parcel evidence URL under `parcel-ops/{operatorId}/{assistantUserId}/{parcelId}/`.
 
-FE không gọi `custody-scan` với event type `CHECKED_IN`. Event này do endpoint check-in tạo.
+Success:
 
-### 6.3. Cân/đo thực tế
+```text
+RESERVED → CHECKED_IN
+Custody event → CHECKED_IN at ORIGIN_STATION
+```
+
+Apply the returned `AssistantParcelActionResponse` directly to the card. Do not call `custody-scan` for `CHECKED_IN`.
+
+### A5. Reweigh and measure
+
+Precondition:
+
+```text
+Parcel status = CHECKED_IN
+Load cutoff has not passed
+```
 
 ```http
 POST /v1/assistant/parcels/{parcelId}/reweigh
-Authorization: Bearer <accessToken>
-Idempotency-Key: <uuid>
+Authorization: Bearer <assistantAccessToken>
+Idempotency-Key: <uuid-v4>
 Content-Type: application/json
 ```
 
 ```json
 {
-  "actualLengthCm": 40,
-  "actualWidthCm": 30,
-  "actualHeightCm": 20,
-  "actualWeightKg": 5.5
+  "actualLengthCm": 42.5,
+  "actualWidthCm": 31,
+  "actualHeightCm": 21,
+  "actualWeightKg": 6.2
 }
 ```
 
-Các giá trị trên phải lớn hơn `0`.
+All four decimal values are required and must be greater than `0`.
 
-Sau reweigh:
+This endpoint does not return `AssistantParcelActionResponse`. It returns:
 
-- nếu không phát sinh tiền chênh lệch, Parcel có thể chuyển sang `READY_TO_LOAD`;
-- nếu có tiền chênh lệch, Parcel chuyển `PENDING_FINAL_PAYMENT` và chỉ được load sau khi hoàn tất thanh toán để trở thành `READY_TO_LOAD`.
+```json
+{
+  "parcelId": "uuid",
+  "parcelCode": "VR-PCL-20260829-ABCDEFG2",
+  "status": "PENDING_FINAL_PAYMENT",
+  "actualSizeCategory": "MEDIUM",
+  "actualChargeableWeightKg": 6.2,
+  "finalGrossPriceVnd": 180000,
+  "discountAmountVnd": 0,
+  "finalTotalPriceVnd": 180000,
+  "depositPaidVnd": 30000,
+  "balanceRequiredVnd": 150000,
+  "refundDueVnd": 0,
+  "finalPaymentDeadline": "2026-08-29T01:40:00Z"
+}
+```
 
-### 6.4. Chất kiện lên xe
+FE branches:
+
+```text
+status = PENDING_FINAL_PAYMENT
+  → disable LOAD
+  → show balanceRequiredVnd and finalPaymentDeadline
+  → wait for Passenger payment/event or refresh manifest
+
+status = READY_TO_LOAD
+  → show LOAD
+
+status = PENDING_OPERATOR_ACTION
+  → capacity exception; show operator handling state
+```
+
+Do not pass this response through the `AssistantParcelActionResponse` mapper; the shapes are different.
+
+### A6. Load onto vehicle
+
+Precondition:
+
+```text
+Parcel status = READY_TO_LOAD
+Caller = assigned ASSISTANT
+```
 
 ```http
 POST /v1/assistant/parcels/{parcelId}/load
-Authorization: Bearer <accessToken>
-Idempotency-Key: <uuid>
+Authorization: Bearer <assistantAccessToken>
+Idempotency-Key: <uuid-v4>
 Content-Type: application/json
 ```
 
 ```json
 {
   "tripId": "89136f0c-2f83-479a-9009-e92bf7a6c755",
-  "parcelCode": "VRP-..."
+  "parcelCode": "VR-PCL-20260829-ABCDEFG2"
 }
 ```
 
-Chỉ gọi khi Parcel là `READY_TO_LOAD`. Thành công sẽ chuyển Parcel sang `LOADED` và tạo custody event tương ứng.
+The request disallows unknown JSON fields. Do not send location, reviewer ID or client-computed status.
 
-### 6.5. Custody scan bổ sung
+Success:
+
+```text
+READY_TO_LOAD → LOADED
+Trip cargo → loaded
+Custody event → LOADED at origin
+```
+
+Driver does not need to start the trip before Assistant loads the package.
+
+## 8. Flow B — trip start and route-stop delivery
+
+```text
+All expected packages LOADED
+  → Driver starts trip
+  → Parcel IN_TRANSIT
+  → Driver arrives at route stop
+  → currentOperationalLocation becomes available
+  → Assistant unloads correct Parcel
+  → Assistant delivers/handoffs
+  → Assistant reconciles stop
+  → Driver departs stop
+```
+
+### B1. Driver starts the trip
 
 ```http
-POST /v1/assistant/parcels/{parcelId}/custody-scan
-Authorization: Bearer <accessToken>
-Idempotency-Key: <uuid>
+POST /v1/driver/trips/{tripId}/start
+Authorization: Bearer <driverAccessToken>
+Idempotency-Key: <uuid-v4>
+```
+
+No request body.
+
+Trip Service emits `trip.started`. Parcel Service consumes that event and moves loaded Parcels:
+
+```text
+LOADED → IN_TRANSIT
+```
+
+The change is asynchronous. The FE should refresh manifest/state after the trip start response or when returning to the Parcel tab; do not assume the Parcel event has already been consumed in the same millisecond.
+
+### B2. Driver arrives at route stop
+
+```http
+POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive
+Authorization: Bearer <driverAccessToken>
+Idempotency-Key: <uuid-v4>
+```
+
+No request body.
+
+After success, reload the manifest once. The expected operational location is then:
+
+```text
+tripContext.currentOperationalLocation.location.id = stopId
+tripContext.currentOperationalLocation.status = ARRIVED
+tripContext.currentOperationalLocation.actualDepartureAt = null
+```
+
+### B3. Assistant unloads at the correct route stop
+
+Preconditions:
+
+```text
+Parcel status = IN_TRANSIT
+Parcel dropoffStopId = current stopId
+Trip current stop = ARRIVED
+actualDepartureAt = null
+Caller = assigned ASSISTANT
+```
+
+```http
+POST /v1/assistant/parcels/{parcelId}/unload
+Authorization: Bearer <assistantAccessToken>
+Idempotency-Key: <uuid-v4>
 Content-Type: application/json
 ```
 
-Body contract:
-
 ```json
 {
-  "parcelCode": "VRP-...",
-  "eventType": "ACCEPTED",
-  "actualLocationType": "ORIGIN_STATION",
-  "actualLocationId": "3ce01b86-713a-4c44-bc65-6e6f2ef4640a",
-  "locationSnapshot": "Bến xe Miền Tây",
-  "evidenceReferences": [],
-  "reason": "Accepted at origin station"
+  "parcelCode": "VR-PCL-20260829-ABCDEFG2",
+  "actualLocation": {
+    "kind": "ROUTE_STOP",
+    "id": "<tripContext.currentOperationalLocation.location.id>"
+  },
+  "photoUrls": [
+    "https://..."
+  ]
 }
 ```
 
-Các `eventType` được endpoint này chấp nhận trực tiếp:
+Success:
 
 ```text
-ACCEPTED
-ARRIVED_AT_STOP
-HANDOFF
-RETURNED_TO_STATION
+IN_TRANSIT → UNLOADED
+Trip cargo released
+Custody event → UNLOADED at ROUTE_STOP
 ```
 
-Các `actualLocationType` hợp lệ:
+Never send `tripContext.currentOperationalLocation.id`; that path does not exist.
+
+### B4. Assistant hands the package to recipient
+
+```http
+POST /v1/assistant/parcels/{parcelId}/deliver
+Authorization: Bearer <assistantAccessToken>
+Idempotency-Key: <uuid-v4>
+Content-Type: application/json
+```
+
+Body may be omitted, `{}`, or:
+
+```json
+{
+  "photoUrls": [
+    "https://<firebase-storage>/parcel-ops/<operatorId>/<assistantUserId>/<parcelId>/delivery-1.jpg"
+  ]
+}
+```
+
+`photoUrls` is optional, maximum 3, and must follow the same owned Firebase prefix rule.
+
+Success:
 
 ```text
-ORIGIN_STATION
-DESTINATION_STATION
-ROUTE_STOP
-VEHICLE
-WAREHOUSE
+UNLOADED → DELIVERED_PENDING_CONFIRM
+Custody event → HANDOFF
 ```
 
-Quy tắc `actualLocationId`:
+Recipient confirmation is a Passenger/public delivery-token flow, not the next normal Assistant scan.
 
-- bắt buộc với mọi loại location trừ `VEHICLE`;
-- có thể để `null` với `VEHICLE`.
+### B5. Reconcile before departure
 
-Custody scan là thao tác nghiệp vụ bổ sung. Nó không phải bước bắt buộc ngay sau check-in.
+Call the reconciliation flow in section 12. Only show the Driver depart CTA when the FE has a successful reconciliation result with `canDepart = true`.
 
-### 6.6. Assistant báo cáo custody exception
+### B6. Driver departs route stop
 
-Endpoint này dành riêng cho Assistant đã được phân công vào Trip của Parcel:
+```http
+POST /v1/driver/trips/{tripId}/stops/{stopId}/depart
+Authorization: Bearer <driverAccessToken>
+Idempotency-Key: <uuid-v4>
+```
+
+No request body.
+
+After departure, `currentOperationalLocation` can become `null`; that is expected.
+
+## 9. Flow C — delivery at destination station
+
+This applies when the Parcel was created with `dropoffStopId = null`.
+
+### C1. Driver marks destination arrival
+
+```http
+POST /v1/driver/trips/{tripId}/destination/arrive
+Authorization: Bearer <driverAccessToken>
+Idempotency-Key: <uuid-v4>
+```
+
+No request body.
+
+### C2. Assistant unloads at destination station
+
+```http
+POST /v1/assistant/parcels/{parcelId}/unload
+Authorization: Bearer <assistantAccessToken>
+Idempotency-Key: <uuid-v4>
+Content-Type: application/json
+```
+
+```json
+{
+  "parcelCode": "VR-PCL-20260829-ABCDEFG2",
+  "actualLocation": {
+    "kind": "DESTINATION_STATION",
+    "id": "<tripContext.trip.route.destination.id>"
+  },
+  "photoUrls": []
+}
+```
+
+Backend requires the Trip destination to have actually arrived. Do not use `currentOperationalLocation` for destination-station unload.
+
+Then call `/deliver` as described in B4.
+
+### C3. Reconcile terminal cargo before completing the Trip
+
+After all terminal unload attempts, Assistant calls the bodyless reconciliation endpoint:
+
+```http
+POST /v1/assistant/trips/{tripId}/destination/reconcile
+Authorization: Bearer <assistantAccessToken>
+Idempotency-Key: <uuid-v4>
+```
+
+Do not send `scannedParcelIds` or `manualExceptionParcelIds`. Backend reads persisted custody
+events and returns `expectedCount`, `scannedCount`, `manualExceptionCount`,
+`unresolvedParcels[]`, `canComplete`, and `requiresDriverCompletion`. The Driver completes the Trip
+only after this reconciliation; unresolved cargo remains in search and is not declared lost
+automatically.
+
+## 10. Flow D — wrong QR or wrong stop while the package remains on vehicle
+
+### Case D1. Scanned QR belongs to another Parcel
+
+The lookup/action can return:
+
+```text
+SCAN_IDENTITY_MISMATCH
+requiredAction = VERIFY_PARCEL_IDENTITY
+```
+
+FE behavior:
+
+1. do not mutate the local card;
+2. show the identity mismatch;
+3. compare `identityCheckHints.photoUrl`, description, weight and dimensions;
+4. keep the physical package under current custody;
+5. scan the correct QR.
+
+Do not automatically create an incident merely because the operator scanned the wrong label once.
+
+### Case D2. Correct Parcel is scanned at the wrong stop
+
+Unload returns `409 PARCEL_CUSTODY_LOCATION_MISMATCH` with:
+
+```text
+expectedStop
+actualStop
+requiredAction = KEEP_ON_VEHICLE_OR_REPORT_CUSTODY_EXCEPTION
+```
+
+If the package is still on the vehicle:
+
+```text
+do not call custody-exception
+do not call unload again with a fake stop
+keep the Parcel IN_TRANSIT
+continue to expected stop
+unload normally at the expected stop
+```
+
+This is a prevented mistake, not yet a physical custody exception.
+
+## 11. Flow E — package was physically unloaded at the wrong stop
+
+```text
+Normal unload rejected or was bypassed physically
+  → package is already at wrong stop
+  → Assistant reports custody exception
+  → PENDING_APPROVAL
+  → assigned Driver or Operator approves/rejects
+  → approved: SEARCHING and search tasks start
+  → Operator marks found and chooses recovery/forwarding
+```
+
+### E1. Assistant reports the physical exception
 
 ```http
 POST /v1/assistant/parcels/{parcelId}/custody-exception
@@ -287,118 +858,104 @@ Idempotency-Key: <uuid-v4>
 Content-Type: application/json
 ```
 
-Request mẫu:
-
 ```json
 {
   "incidentType": "WRONG_STOP",
   "actualLocationType": "ROUTE_STOP",
-  "actualLocationId": "3ce01b86-713a-4c44-bc65-6e6f2ef4640a",
-  "locationSnapshot": "Bến xe Miền Đông",
+  "actualLocationId": "wrong-stop-uuid",
+  "locationSnapshot": "Ben B",
   "temporaryExceptionTag": null,
-  "description": "Kiện đã bị đặt xuống ngoài luồng unload chuẩn",
-  "observedWeightKg": 5.5,
+  "description": "Package was physically removed from the vehicle at Ben B",
+  "observedWeightKg": 6.2,
   "evidenceUrls": [
-    "https://example.com/wrong-stop-photo.jpg"
+    "https://..."
   ],
-  "reason": "Phát hiện kiện nằm tại bến không đúng điểm trả"
+  "reason": "Physical custody no longer matches the normal unload flow"
 }
 ```
 
-Tuyệt đối không gửi các field sau:
+Request validation:
+
+| Field | Required | Rule |
+|---|:---:|---|
+| `incidentType` | Yes | One current `ParcelIncidentType` enum value |
+| `actualLocationType` | Yes | `ORIGIN_STATION`, `DESTINATION_STATION`, `ROUTE_STOP`, `VEHICLE`, `WAREHOUSE` |
+| `actualLocationId` | No | Nullable UUID; current exception validator does not enforce a per-location ID rule |
+| `locationSnapshot` | No | string or `null` |
+| `temporaryExceptionTag` | No | maximum 100 characters |
+| `description` | No | maximum 2000 characters |
+| `observedWeightKg` | No | greater than `0` when present |
+| `evidenceUrls` | No | string array |
+| `reason` | Yes | non-empty, maximum 1000 characters |
+
+Supported incident types in current domain:
+
+```text
+MISSING
+WRONG_STOP
+DELIVERY_NOT_RECEIVED
+PARTIAL_LOSS
+DAMAGED
+SCAN_IDENTITY_MISMATCH
+PACKAGE_IDENTITY_MISMATCH
+UNSCANNED_HANDOFF
+MISSING_AFTER_DEPARTURE
+```
+
+Do not send any of these fields:
 
 ```text
 supervisorApprovalUserId
 reviewedByUserId
 reviewerUserId
+approvedByUserId
 ```
 
-Backend lấy người báo cáo từ Assistant JWT. Response thành công là HTTP `202`:
+The backend gets `reportedByUserId` from Assistant JWT.
 
-```json
-{
-  "success": true,
-  "statusCode": 202,
-  "data": {
-    "requestId": "uuid",
-    "parcelId": "uuid",
-    "incidentId": "uuid",
-    "incidentType": "WRONG_STOP",
-    "incidentStatus": "OPEN",
-    "status": "PENDING_APPROVAL",
-    "actualLocationType": "ROUTE_STOP",
-    "actualLocationId": "uuid",
-    "locationSnapshot": "Bến xe Miền Đông",
-    "temporaryExceptionTag": null,
-    "description": "Kiện đã bị đặt xuống ngoài luồng unload chuẩn",
-    "observedWeightKg": 5.5,
-    "evidenceReferences": [
-      "https://example.com/wrong-stop-photo.jpg"
-    ],
-    "reason": "Phát hiện kiện nằm tại bến không đúng điểm trả",
-    "reportedByUserId": "uuid",
-    "reportedByRole": "ASSISTANT",
-    "reportedAt": "2026-08-28T10:00:00+00:00",
-    "reviewedByUserId": null,
-    "reviewedAt": null,
-    "reviewedByRole": null,
-    "reviewNote": null,
-    "approvedCustodyEventId": null,
-    "searchDeadline": null,
-    "availableActions": [
-      "WAIT_FOR_APPROVAL"
-    ]
-  },
-  "meta": {
-    "traceId": "..."
-  }
-}
+Success is HTTP `202`:
+
+```text
+request.status = PENDING_APPROVAL
+incidentStatus = OPEN
+searchDeadline = null
+availableActions = [WAIT_FOR_APPROVAL]
+Parcel = PENDING_OPERATOR_ACTION
 ```
 
-Sau response này, Assistant UI cần:
+At this stage:
 
-- khóa nút gửi lại cùng sự cố;
-- hiển thị “Đang chờ Driver/nhà xe phê duyệt”;
-- không hiển thị “Đang tìm kiếm hàng hóa”;
-- không tự tạo custody event tại máy;
-- retry request lỗi mạng bằng đúng `Idempotency-Key` cũ.
+- no manual custody event has been approved yet;
+- search tasks have not started;
+- FE must not show the 72-hour search SLA;
+- FE must not allow mark found, forwarding or lost actions.
 
-### 6.7. Driver đọc báo cáo đang chờ duyệt
+### E2. Driver reads the pending request
+
+The Driver needs the `parcelId`. Current backend does not provide a Driver approval queue.
 
 ```http
 GET /v1/crew/parcels/{parcelId}/custody-exception
 Authorization: Bearer <driverAccessToken>
 ```
 
-Chỉ Driver được phân công đúng Trip mới đọc được. Khi request còn pending:
+Only the Driver assigned to the Parcel's Trip can read it.
 
-```json
-{
-  "success": true,
-  "statusCode": 200,
-  "data": {
-    "requestId": "uuid",
-    "parcelId": "uuid",
-    "incidentId": "uuid",
-    "incidentStatus": "OPEN",
-    "status": "PENDING_APPROVAL",
-    "searchDeadline": null,
-    "availableActions": [
-      "APPROVE",
-      "REJECT"
-    ]
-  },
-  "meta": {
-    "traceId": "..."
-  }
-}
+Pending response includes:
+
+```text
+requestId, parcelId, incidentId
+incidentType, incidentStatus, status
+actualLocationType, actualLocationId, locationSnapshot
+temporaryExceptionTag, description, observedWeightKg
+evidenceReferences, reason
+reportedByUserId, reportedByRole, reportedAt
+reviewedByUserId, reviewedAt, reviewedByRole, reviewNote
+approvedCustodyEventId, searchDeadline
+availableActions = [APPROVE, REJECT]
 ```
 
-Driver phải xem location, mô tả, cân nặng và evidence trước khi quyết định. Không nhận UUID người duyệt từ Assistant và không cho người dùng chọn một user bất kỳ làm người duyệt.
-
-> Giới hạn contract hiện tại: endpoint Driver cần biết `parcelId`; backend chưa có Driver approval queue riêng. Không gọi `/v1/assistant/...` bằng Driver JWT. Nếu màn hình Driver chưa có nguồn `parcelId`, dùng luồng Operator Web phê duyệt hoặc tạo backlog BE cho Driver pending-approval queue; không tự bypass role.
-
-### 6.8. Driver approve hoặc reject
+### E3. Driver approves or rejects
 
 ```http
 POST /v1/crew/parcels/{parcelId}/custody-exception-decision
@@ -412,7 +969,7 @@ Approve:
 ```json
 {
   "decision": "APPROVE",
-  "note": "Đã đối chiếu ảnh và xác nhận kiện đang ở bến được báo cáo"
+  "note": "Verified the package and wrong-stop evidence"
 }
 ```
 
@@ -421,417 +978,731 @@ Reject:
 ```json
 {
   "decision": "REJECT",
-  "note": "Ảnh camera cho thấy kiện vẫn nằm trên xe"
+  "note": "Vehicle inspection confirms the package is still onboard"
 }
 ```
 
-Không gửi `reviewerUserId`: backend lấy `reviewedByUserId` và `reviewedByRole` từ Driver JWT.
+Validation:
 
-Kết quả approve:
+- `decision`: exactly `APPROVE` or `REJECT` after backend normalization;
+- `note`: optional, maximum 2000 characters;
+- reviewer identity and role come from Driver JWT.
+
+Approve result:
 
 ```text
-status = APPROVED
-incidentStatus = SEARCHING
+approval status = APPROVED
+incident status = SEARCHING
 approvedCustodyEventId != null
 searchDeadline != null
+custody event = MANUAL_CUSTODY_EXCEPTION
 availableActions = [CONTINUE_SEARCH]
 ```
 
-Kết quả reject:
+Reject result:
 
 ```text
-status = REJECTED
-incidentStatus = RESOLVED
+approval status = REJECTED
+incident status = RESOLVED
 approvedCustodyEventId = null
-searchDeadline = giá trị audit nhưng không còn hiệu lực vì incident đã RESOLVED
+no MANUAL_CUSTODY_EXCEPTION event
 availableActions = []
 ```
 
-Khi approve, backend mới ghi `MANUAL_CUSTODY_EXCEPTION`, tạo search tasks, bắt đầu SLA và gửi thông báo tìm kiếm. Khi reject, backend không ghi custody event và khôi phục Parcel khỏi trạng thái chờ xử lý.
+The Driver app stops here. Incident assignment, search results, mark-found and forwarding selection belong to Operator Web.
 
-Operator Staff/Admin có endpoint tương đương trên Operator Web:
+## 12. Flow F — stop reconciliation finds an unresolved package
+
+Run this after the expected unload operations and before presenting the Driver depart action.
 
 ```http
-POST /v1/operator/parcel-incidents/{incidentId}/custody-exception-decision
+POST /v1/assistant/trips/{tripId}/stops/{stopId}/reconcile
+Authorization: Bearer <assistantAccessToken>
+Idempotency-Key: <uuid-v4>
+Content-Type: application/json
 ```
 
-Driver/Assistant Mobile không gọi endpoint Operator này.
+Normal request:
 
-### 6.9. State machine FE cho custody exception
-
-```text
-Assistant report
-  → PENDING_APPROVAL / incident OPEN / searchDeadline null
-      ├─ Driver hoặc Operator APPROVE
-      │    → APPROVED / incident SEARCHING / custody event đã tạo / SLA bắt đầu
-      └─ Driver hoặc Operator REJECT
-           → REJECTED / incident RESOLVED / không có custody event
+```json
+{}
 ```
 
-FE không được cho phép `MARK_FOUND`, `DECLARE_LOST`, forwarding hoặc claim trong `PENDING_APPROVAL`. Nếu cố gọi, backend trả `409 PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED`.
+Meaning:
 
-## 7. Cách chọn location đúng trên FE
+- FE does not send `scannedParcelIds` or `manualExceptionParcelIds`;
+- backend derives both counts from persisted `UNLOADED` and approved
+  `MANUAL_CUSTODY_EXCEPTION` custody events;
+- `{}` and an omitted body are both valid for normal reconciliation.
 
-```ts
-type LocationInput = {
-  actualLocationType: string;
-  actualLocationId: string | null;
-  locationSnapshot: string | null;
-};
-
-function getOriginLocation(manifest: any): LocationInput {
-  const origin = manifest.tripContext.trip.route.origin;
-
-  return {
-    actualLocationType: 'ORIGIN_STATION',
-    actualLocationId: origin.id,
-    locationSnapshot: origin.name,
-  };
-}
-
-function getCurrentRouteStopLocation(manifest: any): LocationInput | null {
-  const current = manifest.tripContext.currentOperationalLocation;
-
-  if (!current) return null;
-
-  return {
-    actualLocationType: 'ROUTE_STOP',
-    actualLocationId: current.id,
-    locationSnapshot: current.name,
-  };
-}
-```
-
-Quy tắc gọi:
-
-| Tình huống | Location source |
-|---|---|
-| Nhận/check-in ở bến đầu | `trip.route.origin` |
-| Scan custody `ACCEPTED` tại bến đầu | `trip.route.origin` |
-| Dỡ tại route stop hiện tại | `currentOperationalLocation` |
-| Handoff ở bến cuối | `trip.route.destination` |
-| Hiển thị nơi kiện được xác nhận gần nhất | `currentCustody.lastConfirmedLocation` |
-
-Nếu `currentOperationalLocation` là `null`:
-
-- không chặn check-in;
-- không chặn reweigh;
-- không chặn load chỉ vì field này null;
-- chỉ chặn thao tác thật sự cần một route stop hiện tại, ví dụ unload tại route stop.
-
-## 8. Xử lý response mutation
-
-Các mutation Parcel Reliability trả screen-ready state theo cấu trúc chung:
+Response:
 
 ```json
 {
-  "success": true,
-  "statusCode": 200,
-  "data": {
-    "parcelState": {},
-    "currentCustody": {},
-    "activeIncident": null,
-    "createdCustodyEvent": {},
-    "availableActions": [],
-    "warning": null
-  },
-  "meta": {
-    "traceId": "..."
+  "expectedCount": 3,
+  "scannedCount": 2,
+  "manualExceptionCount": 0,
+  "unresolvedParcels": [
+    {
+      "parcelId": "uuid",
+      "parcelCode": "VR-PCL-20260829-ABCDEFG2",
+      "photoUrl": "https://...",
+      "expectedDropoff": {
+        "type": "ROUTE_STOP",
+        "id": "uuid",
+        "name": "Stop B",
+        "orderIndex": 2,
+        "eta": "2026-08-29T05:00:00Z"
+      },
+      "lastCustody": null,
+      "incidentId": "uuid",
+      "incidentType": "UNSCANNED_HANDOFF",
+      "reason": "No verified unload or manual custody event exists for this stop.",
+      "recommendedAction": "SEARCH_VEHICLE_OR_STATION"
+    }
+  ],
+  "canDepart": false,
+  "requiresSupervisorApproval": true,
+  "departureOverrideRequest": null,
+  "unresolvedParcelIds": [
+    "uuid"
+  ]
+}
+```
+
+If unresolved Parcels exist, backend opens `UNSCANNED_HANDOFF` incidents and creates vehicle/station search tasks.
+
+### F1. Normal reconciliation result
+
+```text
+canDepart = true
+  → enable Driver depart CTA
+
+canDepart = false
+  → show unresolvedParcels[]
+  → direct crew to search vehicle/station
+  → do not send client-asserted scan IDs
+  → do not call Driver depart yet
+```
+
+If the missing Parcel is found and a verified `UNLOADED` or approved `MANUAL_CUSTODY_EXCEPTION` event is created, run reconciliation again with a new idempotency key. The new response can return `canDepart = true`.
+
+### F2. Assistant requests permission to depart with unresolved Parcels
+
+Only use this branch when the operation must depart before the unresolved Parcels are physically resolved.
+
+Assistant calls the same endpoint again with a reason:
+
+```http
+POST /v1/assistant/trips/{tripId}/stops/{stopId}/reconcile
+Authorization: Bearer <assistantAccessToken>
+Idempotency-Key: <new-uuid-v4>
+Content-Type: application/json
+```
+
+```json
+{
+  "departureOverrideReason": "Vehicle must leave the stop; unresolved package search continues at station"
+}
+```
+
+Do not send `supervisorApprovalUserId`. The field no longer exists in this request contract.
+
+When unresolved Parcels remain, backend creates or replays a departure approval request and returns it in:
+
+```json
+{
+  "canDepart": false,
+  "requiresSupervisorApproval": true,
+  "departureOverrideRequest": {
+    "requestId": "uuid",
+    "tripId": "uuid",
+    "stopId": "uuid",
+    "operatorId": "uuid",
+    "unresolvedParcelIds": ["uuid"],
+    "departureOverrideReason": "Vehicle must leave the stop; unresolved package search continues at station",
+    "status": "PENDING_APPROVAL",
+    "requestedByUserId": "assistant-uuid",
+    "requestedByRole": "ASSISTANT",
+    "requestedAt": "2026-08-29T05:10:00Z",
+    "reviewedByUserId": null,
+    "reviewedByRole": null,
+    "reviewedAt": null,
+    "reviewNote": null,
+    "availableActions": ["APPROVE", "REJECT"]
   }
 }
 ```
 
-Sau mutation thành công, FE cần merge các field sau vào card hiện tại:
+Assistant stores `departureOverrideRequest.requestId` and passes that ID to the Driver UI. It must not pass a user UUID as approval.
+
+### F3. Driver reads the departure request
+
+```http
+GET /v1/crew/parcel-stop-departure-approvals/{requestId}
+Authorization: Bearer <driverAccessToken>
+```
+
+Only the Driver assigned to that Trip can read the request.
+
+### F4. Driver approves or rejects departure
+
+```http
+POST /v1/crew/parcel-stop-departure-approvals/{requestId}/decision
+Authorization: Bearer <driverAccessToken>
+Idempotency-Key: <uuid-v4>
+Content-Type: application/json
+```
+
+Approve:
+
+```json
+{
+  "decision": "APPROVE",
+  "note": "Approved departure; station staff continue the Parcel search"
+}
+```
+
+Reject:
+
+```json
+{
+  "decision": "REJECT",
+  "note": "Vehicle must remain until the cargo compartment is checked again"
+}
+```
+
+Reviewer identity comes from Driver JWT. Supported decisions are `APPROVE` and `REJECT`.
+
+### F5. Driver departs only after clearance
+
+After approval, Driver can call:
+
+```http
+POST /v1/driver/trips/{tripId}/stops/{stopId}/depart
+Authorization: Bearer <driverAccessToken>
+Idempotency-Key: <uuid-v4>
+```
+
+Trip Service asks Parcel Service for stop-departure clearance. Outcomes:
+
+```text
+No unresolved Parcel
+  → CLEAR
+  → departure allowed
+
+Unresolved Parcels + matching approved request
+  → APPROVED_OVERRIDE
+  → departure allowed
+
+Unresolved Parcels without approval or rejected request
+  → BLOCKED_PENDING_APPROVAL
+  → 409 PARCEL_STOP_RECONCILIATION_REQUIRED
+```
+
+The `409` fields can contain:
+
+```text
+approvalRequestId
+unresolvedParcelIds
+requiredAction = RECONCILE_OR_APPROVE_STOP_DEPARTURE
+```
+
+FE must open the existing approval request from `approvalRequestId`; it must not create a fake local approval.
+
+## 13. Flow G — package has no readable QR or is unidentified
+
+### Known Parcel but unreadable QR
+
+Normal unload requires `parcelCode`; an empty code returns `PARCEL_SCAN_REQUIRED`.
+
+If the package can be tied to a known `parcelId` but physical custody is abnormal, Assistant can report `/custody-exception` with:
+
+```json
+{
+  "incidentType": "PACKAGE_IDENTITY_MISMATCH",
+  "actualLocationType": "WAREHOUSE",
+  "actualLocationId": "station-uuid",
+  "locationSnapshot": "Lost-and-found warehouse",
+  "temporaryExceptionTag": "TEMP-B-001",
+  "description": "QR label is damaged",
+  "observedWeightKg": 6.2,
+  "evidenceUrls": ["https://..."],
+  "reason": "Package cannot use the normal QR unload flow"
+}
+```
+
+### Unknown package with no known `parcelId`
+
+Driver/Assistant cannot register it through an Assistant endpoint. Operator Staff/Admin must use:
+
+```text
+POST /v1/stations/parcels/unidentified
+GET  /v1/operator/unidentified-packages/{packageId}/match-candidates
+POST /v1/stations/parcels/unidentified/{packageId}/match
+```
+
+Driver/Assistant UI must:
+
+1. assign/display a temporary physical tag according to operator procedure;
+2. capture description, weight and photo evidence;
+3. send the case to Operator Staff/Admin;
+4. not guess a Parcel match locally;
+5. not call normal unload with another Parcel's QR.
+
+## 14. Flow H — found package is forwarded to another trip
+
+Operator Web performs search, marks the Parcel found, gets forwarding options and selects a target Trip. Driver/Assistant app only handles the target-crew confirmation step.
+
+Expected state before crew confirmation:
+
+```text
+Incident = FORWARDING
+Parcel status = PENDING_TRANSFER_CONFIRM
+Parcel transferTargetTripId = target Trip
+```
+
+Target Driver or Assistant scans the physical QR:
+
+```http
+POST /v1/crew/parcels/{parcelId}/confirm-transfer
+Authorization: Bearer <targetDriverOrAssistantAccessToken>
+Idempotency-Key: <uuid-v4>
+Content-Type: application/json
+```
+
+```json
+{
+  "parcelCode": "VR-PCL-20260829-ABCDEFG2"
+}
+```
+
+Rules:
+
+- caller must be Driver/Assistant assigned to target Trip;
+- scanned code must match the pending transfer;
+- confirmation window is 30 minutes from transfer request;
+- wrong target/QR/status returns `PARCEL_NOT_TRANSFERABLE`;
+- expired confirmation returns `PARCEL_TRANSFER_CONFIRMATION_DEADLINE_PASSED`.
+
+Success response data:
+
+```json
+{
+  "parcelId": "uuid",
+  "parcelCode": "VR-PCL-20260829-ABCDEFG2",
+  "status": "LOADED",
+  "tripId": "target-trip-uuid",
+  "transferTargetTripId": "target-trip-uuid",
+  "transferConfirmedAt": "2026-08-29T06:00:00Z",
+  "returnReason": null,
+  "returnedAt": null,
+  "refundChoice": null,
+  "refundAmount": null
+}
+```
+
+Backend records:
+
+```text
+old leg → FORWARDED
+custody → FORWARDED_OUT
+new leg → ACTIVE
+custody → FORWARDED_IN on target vehicle
+Parcel → LOADED on target Trip
+```
+
+When the target Trip starts, Parcel becomes `IN_TRANSIT`, then follows the normal unload/deliver flow.
+
+## 15. Direct custody scan — when it is and is not appropriate
+
+```http
+POST /v1/assistant/parcels/{parcelId}/custody-scan
+Authorization: Bearer <assistantAccessToken>
+Idempotency-Key: <uuid-v4>
+Content-Type: application/json
+```
+
+```json
+{
+  "parcelCode": "VR-PCL-20260829-ABCDEFG2",
+  "eventType": "ARRIVED_AT_STOP",
+  "actualLocationType": "ROUTE_STOP",
+  "actualLocationId": "stop-uuid",
+  "locationSnapshot": "Stop B",
+  "evidenceReferences": [],
+  "reason": "Inventory scan at stop"
+}
+```
+
+Allowed direct event types:
+
+```text
+ACCEPTED
+ARRIVED_AT_STOP
+HANDOFF
+RETURNED_TO_STATION
+```
+
+Allowed location types:
+
+```text
+ORIGIN_STATION
+DESTINATION_STATION
+ROUTE_STOP
+VEHICLE
+WAREHOUSE
+```
+
+`actualLocationId` is required except when `actualLocationType = VEHICLE`.
+
+Use direct custody scan only for a real additional custody observation. Do not use it instead of:
+
+```text
+check-in → creates CHECKED_IN
+load → creates LOADED
+unload → creates UNLOADED
+deliver → creates HANDOFF
+confirm-transfer → creates FORWARDED_OUT and FORWARDED_IN
+recipient/manual confirmation → completes delivery
+```
+
+## 16. Delivery confirmation and fallback
+
+### Normal path
+
+After Assistant calls `/deliver`, the Parcel becomes `DELIVERED_PENDING_CONFIRM`. Recipient uses the delivery token flow outside Driver/Assistant app.
+
+### Resend recipient email
+
+```http
+POST /v1/crew/parcels/{parcelId}/resend-delivery-email
+Authorization: Bearer <driverOrAssistantAccessToken>
+Idempotency-Key: <uuid-v4>
+```
+
+No request body.
+
+### Manual fallback confirmation
+
+Use only when the recipient cannot use the normal token flow and operator procedure permits manual evidence.
+
+```http
+POST /v1/crew/parcels/{parcelId}/manual-confirm
+Authorization: Bearer <driverOrAssistantAccessToken>
+Idempotency-Key: <uuid-v4>
+Content-Type: application/json
+```
+
+```json
+{
+  "confirmNote": "Recipient ID checked and signed at Stop B"
+}
+```
+
+The backend also accepts legacy field `note`, but FE should standardize on `confirmNote`.
+
+Validation:
+
+- resolved note is required and not whitespace;
+- maximum 500 characters;
+- Parcel must be `DELIVERED_PENDING_CONFIRM`;
+- caller must be assigned Driver/Assistant for the Trip.
+
+Success:
+
+```text
+DELIVERED_PENDING_CONFIRM → DELIVERY_CONFIRMED
+```
+
+## 17. Response handling and local state updates
+
+### Screen-ready action response
+
+QR lookup, check-in, load, unload, custody-scan and deliver return:
 
 ```ts
-function applyParcelMutation(card: any, response: any) {
-  const result = response.data;
+type AssistantParcelActionResponse = {
+  parcelState: {
+    parcelId: string;
+    parcelCode: string;
+    status: string;
+    dropoffLocation: ReliabilityLocation;
+    paymentState: AssistantParcelPaymentState;
+    identityCheckHints: AssistantParcelIdentityHints;
+  };
+  currentCustody: ReliabilityCustodySummary | null;
+  activeIncident: ReliabilityIncidentSummary | null;
+  createdCustodyEvent: {
+    eventId: string;
+    eventType: string;
+    actualLocationType: string | null;
+    actualLocationId: string | null;
+    locationSnapshot: string | null;
+    occurredAt: string;
+    sequence: number;
+  } | null;
+  availableActions: string[];
+  warning: string | null;
+};
+```
 
+Update the current card without refetching the whole manifest:
+
+```ts
+function applyActionResponse(
+  card: AssistantTripParcel,
+  data: AssistantParcelActionResponse,
+): AssistantTripParcel {
   return {
     ...card,
-    ...result.parcelState,
-    currentCustody: result.currentCustody,
-    activeIncident: result.activeIncident,
-    availableActions: result.availableActions,
-    warning: result.warning,
+    parcelId: data.parcelState.parcelId,
+    parcelCode: data.parcelState.parcelCode,
+    status: data.parcelState.status,
+    dropoffLocation: data.parcelState.dropoffLocation,
+    paymentState: data.parcelState.paymentState,
+    identityCheckHints: data.parcelState.identityCheckHints,
+    currentCustody: data.currentCustody,
+    activeIncident: data.activeIncident,
+    availableActions: data.availableActions,
   };
 }
 ```
 
-Không refetch toàn bộ manifest sau mỗi lần scan nếu response đã chứa state mới.
+### Reweigh response is different
 
-## 9. Xử lý `availableActions` trong thời gian rollout
-
-Backend mới đã thêm `REWEIGH` cho trạng thái `CHECKED_IN` và không còn quảng cáo `CHECK_IN` cho trạng thái legacy `PENDING`. FE cần dựng CTA từ `availableActions` kết hợp thứ tự ưu tiên nghiệp vụ, không lấy phần tử đầu tiên làm CTA chính.
-
-Trong thời gian production có thể còn chạy phiên bản backend cũ, FE có thể giữ fallback tương thích sau:
-
-```ts
-function getAssistantActions(parcel: {
-  status: string;
-  availableActions?: string[];
-}) {
-  const actions = new Set(parcel.availableActions ?? []);
-
-  if (parcel.status === 'CHECKED_IN') {
-    actions.add('REWEIGH');
-  }
-
-  return [...actions];
-}
-```
-
-Ưu tiên CTA theo status:
-
-```ts
-function getPrimaryParcelAction(status: string) {
-  switch (status) {
-    case 'RESERVED':
-      return 'CHECK_IN';
-    case 'CHECKED_IN':
-      return 'REWEIGH';
-    case 'PENDING_FINAL_PAYMENT':
-      return 'WAIT_FOR_PAYMENT';
-    case 'READY_TO_LOAD':
-      return 'LOAD';
-    case 'LOADED':
-      return 'NONE';
-    case 'IN_TRANSIT':
-      return 'UNLOAD_WHEN_AT_EXPECTED_STOP';
-    default:
-      return 'NONE';
-  }
-}
-```
-
-Không biến `CUSTODY_SCAN` thành CTA chính cho mọi Parcel. Nó chỉ là thao tác bổ sung khi nghiệp vụ thực tế cần ghi nhận một custody event.
-
-## 10. Xử lý `currentCustody` có location ID null
-
-Backend mới resolve bến đầu từ Trip trước khi chuyển trạng thái và lưu cả station ID vào custody `CHECKED_IN`/`LOADED`. Dữ liệu được tạo bởi phiên bản cũ vẫn có thể có `lastConfirmedLocation.id = null`.
-
-Ví dụ hợp lệ:
-
-```json
-{
-  "lastEventType": "CHECKED_IN",
-  "lastConfirmedLocation": {
-    "type": "ORIGIN_STATION",
-    "id": null,
-    "name": "Bến xe Miền Tây"
-  },
-  "trackingConfidence": "CONFIRMED_SCAN",
-  "hasTrackingGap": false
-}
-```
-
-FE phải xử lý như sau:
-
-- không hiển thị “không biết kiện ở đâu” chỉ vì `id` null;
-- nếu `trackingConfidence === 'CONFIRMED_SCAN'`, hiển thị tên snapshot và thời gian xác nhận;
-- khi cần gửi một custody scan mới ở origin, lấy ID từ `tripContext.trip.route.origin.id`, không copy ID null từ `currentCustody`.
-
-Không bắt người dùng scan lại để sửa dữ liệu lịch sử. FE tiếp tục hỗ trợ bản ghi legacy bằng snapshot và `trackingConfidence`.
-
-## 11. Mapping lỗi FE cần hiển thị
-
-Response lỗi chuẩn:
-
-```json
-{
-  "success": false,
-  "statusCode": 409,
-  "error": {
-    "code": "ERROR_CODE",
-    "message": "...",
-    "fields": {}
-  },
-  "meta": {
-    "traceId": "..."
-  }
-}
-```
-
-| `error.code` | Cách xử lý FE |
-|---|---|
-| `FORBIDDEN` | Không được phân công cho chuyến/kiện này; đóng action và tải lại quyền hoặc manifest |
-| `PARCEL_NOT_FOUND` | Không tìm thấy kiện trong phạm vi được phép; không tiết lộ dữ liệu tenant khác |
-| `INVALID_STATUS` | State trên máy đã cũ hoặc gọi sai bước; cập nhật card/refetch manifest một lần |
-| `PARCEL_CHECK_IN_CLOSED` | Đã quá hạn check-in; hướng dẫn liên hệ operator |
-| `PARCEL_LOAD_CUTOFF_PASSED` | Đã quá hạn cân/load; hướng dẫn liên hệ operator |
-| `SCAN_IDENTITY_MISMATCH` | QR không khớp kiện/chuyến; giữ kiện, yêu cầu xác minh danh tính kiện |
-| `PARCEL_CUSTODY_LOCATION_REQUIRED` | Request custody thiếu location hoặc location ID bắt buộc |
-| `PARCEL_CUSTODY_LOCATION_MISMATCH` | Đang thao tác ở sai stop; hiển thị expected/actual stop từ `error.fields` nếu backend trả |
-| `PARCEL_INCIDENT_ALREADY_OPEN` | Parcel đã có incident cùng loại đang hoạt động; mở trạng thái incident hiện có thay vì tạo report mới |
-| `PARCEL_CUSTODY_EXCEPTION_REQUEST_NOT_FOUND` | Không có report để Driver duyệt, sai parcel, sai tenant hoặc Driver không còn thấy request |
-| `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED` | Người khác đã approve/reject trước; đóng modal và GET lại trạng thái một lần |
-| `PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED` | Đang cố tìm kiếm/found/lost/claim trước khi report được duyệt; quay về màn hình phê duyệt |
-| `TRIP_CARGO_CAPACITY_EXCEEDED` | Xe không đủ sức chứa; không retry liên tục, chuyển operator xử lý |
-| `TRIP_SERVICE_UNAVAILABLE` | Lỗi upstream tạm thời; cho phép retry an toàn bằng cùng `Idempotency-Key` |
-| `RACE_LOST` | Có thao tác đồng thời; refetch state một lần trước khi hiển thị hành động tiếp theo |
-
-Không tự suy ra lỗi từ `currentOperationalLocation === null`. Chỉ hiển thị lỗi location khi backend thực sự trả error response tương ứng hoặc thao tác đang yêu cầu một route stop hiện tại.
-
-## 12. Logic màn hình đề xuất
-
-```ts
-function buildParcelCard(parcel: any, tripContext: any) {
-  const primaryAction = getPrimaryParcelAction(parcel.status);
-  const currentStop = tripContext.currentOperationalLocation;
-
-  return {
-    ...parcel,
-    primaryAction,
-    origin: tripContext.trip.route.origin,
-    currentOperationalLocation: currentStop,
-    canCheckIn: parcel.status === 'RESERVED',
-    canReweigh: parcel.status === 'CHECKED_IN',
-    canLoad: parcel.status === 'READY_TO_LOAD',
-    canUnloadAtRouteStop:
-      parcel.status === 'IN_TRANSIT' && currentStop !== null,
-  };
-}
-```
-
-Nội dung UI cho case trong ảnh cần đổi từ:
+`reweigh` returns price/recalculation fields, not `parcelState/currentCustody/availableActions`. Use a separate DTO and update at least:
 
 ```text
-Quét ghi nhận vị trí
-→ Chưa biết xe đang ở đâu
+status
+actualSizeCategory
+actualChargeableWeightKg
+finalTotalPriceVnd
+balanceRequiredVnd
+refundDueVnd
+finalPaymentDeadline
 ```
 
-thành:
+If the payment completes asynchronously, refresh the manifest/card once to discover `READY_TO_LOAD`.
 
-```text
-Parcel CHECKED_IN
-Vị trí xác nhận: Bến xe Miền Tây
-CTA chính: Cân/đo thực tế
-```
+### Custody exception response is different
 
-## 13. Các khoảng hở backend FE cần biết
+Use a separate `CustodyExceptionApproval` DTO. Do not pass it to the Parcel card action mapper.
 
-### 13.1. Tương thích action list khi rollout
+## 18. Idempotency and retry rules
 
-Backend mới đã sửa resolver. FE có thể giữ fallback tại mục 9 cho đến khi tất cả môi trường đã deploy cùng phiên bản.
-
-### 13.2. Dữ liệu custody legacy có thể thiếu origin ID
-
-Check-in/load mới lưu origin ID. Với dữ liệu cũ, FE dùng `route.origin.id` khi cần tạo custody scan origin và vẫn coi custody có `trackingConfidence = CONFIRMED_SCAN` là hợp lệ.
-
-### 13.3. Action response không chứa toàn bộ trip context
-
-FE cần giữ `tripContext` lấy từ manifest trong store/screen state. Không gọi API trip hoặc manifest theo từng parcel sau mỗi mutation.
-
-### 13.4. Load chưa bị backend khóa theo Trip `BOARDING`
-
-Contract thực tế hiện tại cho phép handler quyết định bằng Parcel status, assignment, deadline và cargo state. FE không được yêu cầu Trip phải `IN_PROGRESS`. Nếu đội sản phẩm muốn chỉ load trong `BOARDING`, backend cần được sửa trước để FE và backend có cùng rule.
-
-## 14. Checklist nghiệm thu cho FE Driver/Assistant
-
-- [ ] Mở manifest của trip `SCHEDULED` có `currentOperationalLocation = null` mà màn hình không báo lỗi.
-- [ ] Parcel `RESERVED` cho phép quét và check-in tại `route.origin`.
-- [ ] Check-in thành công cập nhật card sang `CHECKED_IN` mà không refetch toàn trang.
-- [ ] Sau check-in, CTA chính là `REWEIGH`, không phải “Quét ghi nhận vị trí”.
-- [ ] `currentCustody.lastConfirmedLocation.id = null` nhưng có snapshot/confidence vẫn hiển thị đúng bến.
-- [ ] Reweigh có chênh lệch tiền chuyển UI sang chờ thanh toán.
-- [ ] Chỉ hiện nút load khi Parcel là `READY_TO_LOAD`.
-- [ ] Load thành công cập nhật card sang `LOADED` từ mutation response.
-- [ ] Không yêu cầu driver start chuyến để assistant check-in/reweigh/load.
-- [ ] Chỉ yêu cầu `currentOperationalLocation` cho thao tác ở route stop như unload.
-- [ ] Custody scan origin dùng `route.origin.id`, không dùng `currentOperationalLocation`.
-- [ ] Retry mutation dùng lại cùng `Idempotency-Key`; thao tác mới dùng UUID mới.
-- [ ] `INVALID_STATUS` hoặc `RACE_LOST` chỉ refetch một lần, không tạo vòng lặp retry.
-- [ ] Không hiển thị actor/evidence nội bộ hoặc dữ liệu parcel ngoài trip được phân công.
-- [ ] Assistant report không gửi `supervisorApprovalUserId` hoặc UUID người duyệt.
-- [ ] Report thành công HTTP `202` hiển thị `PENDING_APPROVAL`, không hiển thị đang tìm kiếm.
-- [ ] `searchDeadline = null` khi pending không bị FE thay bằng deadline tự tính.
-- [ ] Assistant không thấy nút `APPROVE`/`REJECT`.
-- [ ] Driver dùng JWT của chính mình để GET và quyết định report.
-- [ ] Driver không được phân công nhận `403 FORBIDDEN` và không thấy evidence.
-- [ ] Approve cập nhật `APPROVED`, `SEARCHING`, `approvedCustodyEventId` và deadline thật.
-- [ ] Reject cập nhật `REJECTED`, `RESOLVED` và không tạo custody event.
-- [ ] Hai thiết bị quyết định đồng thời: thiết bị thua handle `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED`.
-- [ ] Retry cùng thao tác dùng lại idempotency key; approve và reject mới phải dùng key khác nhau.
-
-## 15. Case đã xác minh trước khi backend fix được deploy
-
-Case kiểm tra có:
-
-```text
-parcelId: cb1f063d-e5e8-437f-9d63-10382775935b
-tripId: 89136f0c-2f83-479a-9009-e92bf7a6c755
-tripStatus: SCHEDULED
-origin: Bến xe Miền Tây
-currentOperationalLocation: null
-parcelStatus: CHECKED_IN
-currentCustody.lastEventType: CHECKED_IN
-currentCustody.trackingConfidence: CONFIRMED_SCAN
-currentCustody.hasTrackingGap: false
-```
-
-Kết quả lịch sử này chứng minh:
-
-- check-in đã thành công tại bến đầu;
-- `currentOperationalLocation = null` không có nghĩa là mất vị trí kiện;
-- popup trong ảnh là do FE dùng sai field và chặn sai luồng;
-- bước tiếp theo phải là reweigh, không phải bắt custody scan để tạo `ORIGIN_STATION` lần nữa.
-
-## 16. Phân công cụ thể cho agent FE Driver/Assistant
-
-### Phần Assistant cần sửa
-
-1. Xóa `supervisorApprovalUserId` khỏi DTO, form, validation và API client của custody exception.
-2. Gắn Assistant access token và UUID v4 `Idempotency-Key` vào report mutation.
-3. Nhận đúng HTTP `202`, lưu `requestId`, `incidentId`, `status` và `availableActions`.
-4. Dựng UI `PENDING_APPROVAL`; không gọi custody scan để giả lập approval.
-5. Disable report trùng và chỉ retry cùng idempotency key khi request trước chưa biết kết quả.
-6. Khi API trả request đã `APPROVED` hoặc `REJECTED` qua replay/refetch, đồng bộ card theo response thay vì giữ state pending cũ.
-
-### Phần Driver cần sửa
-
-1. Tạo model `CustodyExceptionApproval` theo response tại mục 6.6–6.8.
-2. Khi đã có `parcelId`, gọi GET `/v1/crew/parcels/{parcelId}/custody-exception` bằng Driver JWT.
-3. Chỉ render hai CTA từ `availableActions`: `APPROVE`, `REJECT`.
-4. Bắt nhập `note` theo yêu cầu UX nội bộ; backend cho phép optional nhưng nên có lý do audit rõ ràng.
-5. Gọi decision endpoint bằng UUID v4 idempotency key và không gửi reviewer UUID.
-6. Sau mutation, dùng response để đóng modal/cập nhật incident; không cần refetch nếu response đã đủ.
-7. Handle `403`, `404`, `409` theo bảng lỗi; tuyệt đối không fallback sang Assistant hoặc Operator endpoint.
-
-### Phần shared API/store cần sửa
+Recommended client behavior:
 
 ```ts
-export type CustodyExceptionApprovalStatus =
-  | 'PENDING_APPROVAL'
-  | 'APPROVED'
-  | 'REJECTED'
-  | 'CANCELLED';
-
-export type CustodyExceptionApproval = {
-  requestId: string;
-  parcelId: string;
-  incidentId: string;
-  incidentType: string;
-  incidentStatus: string;
-  status: CustodyExceptionApprovalStatus;
-  actualLocationType: string;
-  actualLocationId: string | null;
-  locationSnapshot: string | null;
-  temporaryExceptionTag: string | null;
-  description: string | null;
-  observedWeightKg: number | null;
-  evidenceReferences: string[];
-  reason: string;
-  reportedByUserId: string;
-  reportedByRole: string;
-  reportedAt: string;
-  reviewedByUserId: string | null;
-  reviewedAt: string | null;
-  reviewedByRole: string | null;
-  reviewNote: string | null;
-  approvedCustodyEventId: string | null;
-  searchDeadline: string | null;
-  availableActions: string[];
+type PendingMutation = {
+  operation: string;
+  resourceId: string;
+  idempotencyKey: string;
+  bodyHash: string;
 };
 ```
 
-Không đổi tên field, không dùng snake_case và không tự dựng `reviewedByUserId` từ state đăng nhập để gửi lên backend. JWT là nguồn reviewer identity duy nhất.
+Examples:
+
+```text
+User taps Check in once
+  → create key K1
+  → request times out
+  → retry same check-in body with K1
+
+User later taps Reweigh
+  → create key K2
+
+Driver approves exception
+  → create key K3
+
+Driver changes mind and tries Reject
+  → this is not a retry; backend will reject because decision already exists
+```
+
+Never reuse one idempotency key across different endpoints or different request bodies.
+
+## 19. Error handling
+
+| Error code | FE action |
+|---|---|
+| `FORBIDDEN` | User is not assigned/tenant-scoped; close action and refresh permissions/manifest |
+| `PARCEL_NOT_FOUND` | Remove stale local result or refetch once; do not reveal cross-tenant data |
+| `TRIP_NOT_FOUND` | Trip no longer exists/visible; leave Parcel flow and refresh schedule |
+| `INVALID_STATUS` | Local state is stale or API order is wrong; refetch manifest once |
+| `PARCEL_CHECK_IN_CLOSED` | Check-in deadline passed; show Operator escalation |
+| `PARCEL_LOAD_CUTOFF_PASSED` | Reweigh/load cutoff passed; show Operator escalation |
+| `PARCEL_SCAN_REQUIRED` | Normal unload requires QR; do not send an empty code |
+| `SCAN_IDENTITY_MISMATCH` | Stop mutation, retain custody, verify physical package |
+| `PARCEL_CUSTODY_LOCATION_REQUIRED` | Request location kind/id missing or invalid |
+| `PARCEL_CUSTODY_LOCATION_MISMATCH` | Show expected/actual; keep on vehicle or report physical exception |
+| `DROP_OFF_STOP_NOT_ARRIVED` | Driver must arrive at the expected stop first |
+| `DESTINATION_TERMINAL_NOT_ARRIVED` | Driver must call destination arrival first |
+| `PARCEL_CUSTODY_EVENT_NOT_FOUND` | Reconciliation IDs do not have matching verified custody events |
+| `PARCEL_STOP_RECONCILIATION_REQUIRED` | Driver departure is blocked; open `approvalRequestId` or reconcile unresolved Parcels |
+| `PARCEL_STOP_DEPARTURE_APPROVAL_NOT_FOUND` | Approval request is missing, wrong tenant or unavailable to this Driver |
+| `PARCEL_STOP_DEPARTURE_ALREADY_DECIDED` | Another reviewer decided; GET the request once and use server state |
+| `PARCEL_INCIDENT_ALREADY_OPEN` | Show existing active incident instead of creating another report |
+| `PARCEL_CUSTODY_EXCEPTION_REQUEST_NOT_FOUND` | No readable pending request for this Driver/Parcel |
+| `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED` | Another reviewer won; GET latest request once |
+| `PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED` | Exception is still pending; do not continue search/forward/lost actions |
+| `PARCEL_NOT_TRANSFERABLE` | Wrong QR/target/status for transfer; refresh assigned target Trip |
+| `PARCEL_TRANSFER_CONFIRMATION_DEADLINE_PASSED` | 30-minute transfer window expired; Operator must replan |
+| `TRIP_CARGO_CAPACITY_EXCEEDED` | Target vehicle capacity exceeded; Operator must select another option |
+| `TRIP_SERVICE_UNAVAILABLE` | Temporary upstream failure; allow retry using the same key |
+| `RACE_LOST` / `RESOURCE_CONFLICT` | Concurrent change; refetch once and rebuild CTA from server state |
+| `VALIDATION_ERROR` / `VALIDATION_FAILED` | Highlight returned fields; do not retry unchanged body |
+
+For `PARCEL_CUSTODY_LOCATION_MISMATCH`, render `error.fields` instead of replacing it with the generic message “vehicle location unknown”.
+
+## 20. Suggested FE state and API client
+
+### Correct operational-location helper
+
+```ts
+type ReliabilityLocation = {
+  type: string | null;
+  id: string | null;
+  name: string | null;
+  orderIndex: number | null;
+  eta: string | null;
+};
+
+function getCurrentRouteStop(manifest: AssistantTripManifest) {
+  const operational = manifest.tripContext.currentOperationalLocation;
+
+  if (
+    !operational ||
+    operational.status !== 'ARRIVED' ||
+    operational.actualDepartureAt !== null ||
+    !operational.location.id
+  ) {
+    return null;
+  }
+
+  return operational.location;
+}
+```
+
+### Primary CTA resolver
+
+```ts
+function getPrimaryParcelAction(parcel: AssistantTripParcel) {
+  const actions = new Set(parcel.availableActions ?? []);
+
+  if (parcel.activeIncident) return 'VIEW_INCIDENT';
+  if (parcel.status === 'RESERVED' && actions.has('CHECK_IN')) return 'CHECK_IN';
+  if (parcel.status === 'CHECKED_IN' && actions.has('REWEIGH')) return 'REWEIGH';
+  if (parcel.status === 'PENDING_FINAL_PAYMENT') return 'WAIT_FOR_PAYMENT';
+  if (parcel.status === 'READY_TO_LOAD' && actions.has('LOAD')) return 'LOAD';
+  if (parcel.status === 'IN_TRANSIT' && actions.has('UNLOAD')) return 'UNLOAD';
+  if (parcel.status === 'UNLOADED' && actions.has('DELIVER')) return 'DELIVER';
+  if (parcel.status === 'LOADED') return 'ON_VEHICLE';
+
+  return 'NONE';
+}
+```
+
+### Build unload request
+
+```ts
+function buildUnloadRequest(
+  parcel: AssistantTripParcel,
+  manifest: AssistantTripManifest,
+  parcelCode: string,
+  photoUrls: string[],
+) {
+  if (parcel.dropoffStopId) {
+    const currentStop = getCurrentRouteStop(manifest);
+    if (!currentStop?.id) throw new Error('NO_CURRENT_ROUTE_STOP');
+
+    return {
+      parcelCode,
+      actualLocation: {
+        kind: 'ROUTE_STOP',
+        id: currentStop.id,
+      },
+      photoUrls,
+    };
+  }
+
+  const destination = manifest.tripContext.trip.route?.destination;
+  if (!destination?.id) throw new Error('NO_DESTINATION_STATION');
+
+  return {
+    parcelCode,
+    actualLocation: {
+      kind: 'DESTINATION_STATION',
+      id: destination.id,
+    },
+    photoUrls,
+  };
+}
+```
+
+The FE may pre-check location for UX, but backend response remains authoritative. Never change Parcel status locally before API success.
+
+## 21. Integration acceptance checklist
+
+### Origin flow
+
+- [ ] A `SCHEDULED` Trip with `currentOperationalLocation = null` opens without an error dialog.
+- [ ] `RESERVED` card shows check-in.
+- [ ] QR lookup does not mutate Parcel state.
+- [ ] Check-in uses `tripId`, `parcelCode`, maximum 3 owned Firebase photos.
+- [ ] Check-in response moves card to `CHECKED_IN` without an extra custody scan.
+- [ ] `CHECKED_IN` card shows reweigh, not “scan location”.
+- [ ] Reweigh uses a separate response DTO.
+- [ ] `PENDING_FINAL_PAYMENT` disables load and shows real deadline/balance.
+- [ ] `READY_TO_LOAD` allows load before Driver starts Trip.
+- [ ] Load sends only `tripId` and `parcelCode`.
+
+### Route operation
+
+- [ ] Driver start uses no request body and an idempotency key.
+- [ ] FE allows asynchronous delay before Parcel becomes `IN_TRANSIT`.
+- [ ] Driver arrive is called before route-stop unload.
+- [ ] Unload reads stop ID from `currentOperationalLocation.location.id`.
+- [ ] Destination unload reads station ID from `trip.route.destination.id`.
+- [ ] Wrong-stop error leaves Parcel unchanged and presents expected/actual locations.
+- [ ] Deliver is available only from `UNLOADED`.
+- [ ] Reconciliation displays full `unresolvedParcels[]`.
+- [ ] FE never sends `scannedParcelIds` or `manualExceptionParcelIds`; backend derives them.
+- [ ] Reconciliation request no longer sends `supervisorApprovalUserId`.
+- [ ] When override is needed, Assistant stores `departureOverrideRequest.requestId`.
+- [ ] Driver reads/decides stop departure approval using Driver JWT.
+- [ ] Driver departure handles `PARCEL_STOP_RECONCILIATION_REQUIRED` and opens the returned request ID.
+- [ ] After depart, a null operational location is treated as normal.
+
+### Exception flow
+
+- [ ] Assistant report contains no reviewer/supervisor UUID.
+- [ ] HTTP `202` is handled as success.
+- [ ] Pending report shows `WAIT_FOR_APPROVAL` and no search deadline.
+- [ ] Assistant cannot approve their own report.
+- [ ] Driver GET/decision uses Driver JWT and assigned Trip authorization.
+- [ ] Approve creates real search state; reject resolves without custody event.
+- [ ] Concurrent decision error reloads the request once.
+- [ ] Driver app does not call Operator search/mark-found/forward endpoints.
+
+### Forwarding and delivery
+
+- [ ] Target crew confirms transfer using physical QR within 30 minutes.
+- [ ] Successful transfer updates Parcel to `LOADED` on target Trip.
+- [ ] Manual delivery confirmation requires a non-empty note up to 500 characters.
+- [ ] Every retry uses the original idempotency key for that same action.
+
+## 22. Known backend contract gaps
+
+These are current implementation facts that FE must not hide with invented logic:
+
+1. Driver has no separate custody-exception queue endpoint. Use the shared crew manifest as the
+   queue: a pending row contains `custodyExceptionApproval` plus
+   `APPROVE_CUSTODY_EXCEPTION|REJECT_CUSTODY_EXCEPTION` in `availableActions`; pass that row's
+   `parcelId` to the existing Driver GET/decision endpoint.
+2. Driver stop-departure approval requires a known `requestId`; there is no list/queue endpoint for pending departure approvals. The ID currently comes from reconciliation response or the `PARCEL_STOP_RECONCILIATION_REQUIRED` error fields.
+3. `reweigh` does not return the common `AssistantParcelActionResponse`. Keep a dedicated DTO and refresh the manifest only when asynchronous payment state must be observed.
+4. Trip start and Parcel `LOADED → IN_TRANSIT` are connected by an integration event, so a short eventual-consistency delay is valid.
+5. Existing legacy custody rows can have a location snapshot with `id = null`. If `trackingConfidence = CONFIRMED_SCAN`, display the snapshot/time; do not force another scan solely to repair historical data.
+6. `CUSTODY_SCAN` is intentionally absent before Trip operation and after normal automatic custody
+   mutations. Its absence is not an error and must not block check-in/load.

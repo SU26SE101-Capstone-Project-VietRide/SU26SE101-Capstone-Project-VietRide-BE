@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.82.0
+> **Phiên bản:** 1.83.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-28
+> **Cập nhật lần cuối:** 2026-08-30
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1281,7 +1281,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
 endpoint có behavior-idempotent hay không, trừ đúng 21 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `217 mutation surfaces / 196 required / 21 exempt`;
+bảng sau. Inventory executable phải giữ tổng `218 mutation surfaces / 197 required / 21 exempt`;
 thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
 
 **Canonical 21 exemptions (không yêu cầu `Idempotency-Key`):**
@@ -1356,6 +1356,7 @@ Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable
 | 22 | `POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive` | Trip |
 | 23 | `POST /v1/driver/trips/{tripId}/destination/arrive` | Trip |
 | 24 | `POST /v1/assistant/parcels/{parcelId}/unload` | Parcel |
+| 24a | `POST /v1/assistant/parcels/{parcelId}/confirm-found-on-vehicle` | Parcel |
 | 25 | `POST /v1/assistant/parcels/{parcelId}/deliver` | Parcel |
 | 26 | `POST /v1/admin/users/{userId}/lock` | Identity |
 | 27 | `POST /v1/admin/users/{userId}/unlock` | Identity |
@@ -1749,6 +1750,7 @@ phát integration event.
 | | `PARCEL_CARGO_RECOVERY_IN_PROGRESS` | 409 | Parcel already has a durable `TRANSFER|RETURN|RELEASE` cargo-recovery operation pending |
 | | `PARCEL_ADDITIONAL_PAYMENT_REQUIRED` | 402 | Cân lại > ước lượng |
 | | `PARCEL_REVIEW_TIMEOUT` | 409 | Timeout review 24h cho record legacy `PENDING_OPERATOR_REVIEW` |
+| | `PARCEL_ASSISTANT_REQUIRED` | 409 | Trip nguồn hoặc Trip forwarding/transfer chưa có Assistant được phân công để vận hành hàng hóa |
 | | `PARCEL_CUSTODY_LOCATION_REQUIRED` | 422 | Custody/unload request thiếu hoặc sai actual location type/id bắt buộc |
 | | `PARCEL_SCAN_REQUIRED` | 422 | Normal unload thiếu QR/parcel code; phải dùng manual custody exception nếu không quét được |
 | | `PARCEL_CUSTODY_LOCATION_MISMATCH` | 409 | Requested actual location không phải Trip operational location, stop đã departed, hoặc không khớp Parcel destination |
@@ -2467,7 +2469,7 @@ Parcel custody reconciliation; a positive exact Booking pending-count result add
 | `trip.stop.departed` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, departedAt }`; emitted for every committed stop departure. Parcel never infers a new location from it; it opens `MISSING_AFTER_DEPARTURE` only for manifest parcels whose expected stop lacks a confirmed unload. |
 | `trip.stop.departed_with_pending` | Trip | Notification (Driver App boarding warning) | `{ eventId: Guid, occurredAt: DateTime (UTC), eventType: "trip.stop.departed_with_pending", tripId: Guid, stopId: Guid, stopName: string, pendingPassengerCount: int (> 0), driverUserId: Guid, assistantUserId: Guid?, departedAt: DateTimeOffset (UTC ISO-8601) }`. |
 | `trip.stop.arrived` | Trip | Notification | `{ eventId, occurredAt, eventType, tripId, stopId, operatorId, actorUserId, actualArrivalTime }`; Trip và TripStop lock theo thứ tự, `PENDING -> ARRIVED`, static ETA không đổi, business row + Outbox commit atomic; Parcel reads the Trip snapshot synchronously and has no arrival projection |
-| `trip.destination.arrived` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ; Parcel opens a search incident only for terminal-bound parcels still `LOADED|IN_TRANSIT`. |
+| `trip.destination.arrived` | Trip | Parcel | `{ eventId, occurredAt, eventType, tripId, destinationStationId, operatorId, actorUserId, actualArrivalTime }`; destination Station derive từ Route, anchor độc lập `completedAt`, express Trip zero-stop vẫn hợp lệ; Parcel treats this as terminal-unload readiness only and does not open a missing incident until `trip.trip.completed` still observes `LOADED|IN_TRANSIT`. |
 | `trip.trip.delayed` | Tracking | Notification | `{ eventId, occurredAt, tripId, stopId, delayMinutes, etaNew, staticEstimatedArrivalTime, dynamicEstimatedArrivalTime, userIds? }`; one durable Outbox fact per `tripId/stopId/5-minute-window`, deduped by unique `dedupeKey`; Notification resolves active passengers and operator admins |
 | `trip.incident.reported` | Trip | Notification | `{ eventId, occurredAt, incidentId, tripId, operatorId, reporterUserId, category, description?, photoUrls?, latitude?, longitude?, reportedAt }`; optional fields được omit khi null; Notification resolve active `OPERATOR_ADMIN` theo `operatorId` |
 | `trip.cargo.threshold_crossed` | Trip | Notification | Exact `{ eventId, occurredAt, tripId, operatorId, loadedWeightKg, maxCargoWeightKg, percentFull }`; `eventId == OutboxEvent.id == RabbitMQ MessageId` |
@@ -4377,6 +4379,8 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.84.0** | 2026-08-30 | Codex | **MINOR** — Simplify Parcel FE operation contracts after the reality audit. Require an assigned Assistant before Parcel create/forward/transfer; make crew manifests role-aware with inline custody-exception approval context; expose `CUSTODY_SCAN` only for a valid operational context and recovery-on-vehicle for `UNSCANNED_HANDOFF`; derive stop/destination reconciliation exclusively from persisted custody rather than client Parcel-ID assertions; add an operator `approvalStatus` queue filter; and expose nullable `bookingId` in create/detail. Correct the shared manifest contract to use nested pagination. No schema, dependency, Gateway family or routing key is added. |
+| **1.83.0** | 2026-08-30 | Codex | **MINOR** — Correct terminal Parcel recovery: `trip.destination.arrived` now opens the normal unload window without prematurely quarantining `LOADED|IN_TRANSIT`; `trip.trip.completed` freezes `pendingActionResumeStatus` when opening the fallback system search. Add the assigned-Assistant `confirm-found-on-vehicle` mutation to QR-verify an active system missing incident, append `FOUND@VEHICLE`, cancel search tasks, resolve it and atomically restore transport state. Inventory becomes 218/197/21; no schema, dependency, Gateway family or routing key is added. |
 | **1.82.0** | 2026-08-29 | Codex | **MINOR** — Close two Parcel Reliability control gaps. Stop reconciliation no longer accepts an Assistant-supplied supervisor UUID: it creates a JWT-attributed departure-approval request, and Trip now fails closed on Parcel clearance before persisting stop departure. Claim appeal is now a separate one-per-claim aggregate; the original claim/payout remain immutable, Operator Admin may uphold or approve a higher recalculated award, and Payment pays only the idempotent supplementary delta keyed by `appealId`. Add four public approval/appeal reads or mutations, one Internal clearance read, two reversible Parcel tables, one Payment consumer, two event contracts and seven reliability error codes; no dependency is added. |
 | **1.81.0** | 2026-08-28 | Codex | **MINOR** — Replace the unsafe assistant-supplied `supervisorApprovalUserId` custody exception contract with a two-step, JWT-attributed approval aggregate. Assistant submission quarantines the Parcel in approval-pending state without a custody fact, search SLA/tasks, passenger search notification, or lost/claim eligibility; the assigned Driver or same-tenant Operator Staff/Admin can inspect and approve/reject. Approval appends `MANUAL_CUSTODY_EXCEPTION`, starts search/tasks and publishes `parcel.incident.opened`; rejection restores the frozen Parcel state. A transactional row lock plus concurrency token prevents double decisions. Adds two mutations, one Driver read, one reversible Parcel migration, and three error codes; no dependency or Gateway family is added. |
 | **1.80.0** | 2026-08-25 | Codex | **MINOR** — Freeze migration of Vietnam routing runtime from Google Routes to Goong Directions plus Local fallback. Require ordered target chains, configurable chunks defaulting to 10, cumulative leg metrics, strict whole-batch validation and secret-safe logging. Tracking retains fallback/cooldown; Trip planned ETA retains Route-baseline fallback while Shuttle distance and reposition remain fail closed. Add public `ROUTE_BASED`, preserve persisted historical `GOOGLE_ROUTES → TRAFFIC_AWARE`, and map `GOONG → ROUTE_BASED`, `ROUTE_BASELINE`/Local → `FALLBACK`. No endpoint, event, error code, Gateway family or dependency is added; Google OAuth and Google Maps display SDK remain unchanged. |
@@ -4580,4 +4584,4 @@ BookingStats additionally persists `total_no_show_passengers`. The no-show detec
 only by passengers newly transitioned to `NO_SHOW`, atomically with its existing writes. Replays
 with no new passenger transition add zero. Existing `total_no_show` remains the booking count.
 
-**End of Backend Source of Truth v1.82.0**
+**End of Backend Source of Truth v1.83.0**

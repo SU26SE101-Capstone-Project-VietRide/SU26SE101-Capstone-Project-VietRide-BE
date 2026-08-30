@@ -3468,7 +3468,8 @@ under settlement policy v2 and is snapshotted on creation. The public item does 
 Parcel obtains this page through internal
 `POST /internal/v1/trips/parcel-availability/search`. The read-only POST accepts the existing
 availability filters plus `eligibleRouteIds`; Trip applies that filter before count/pagination and
-returns the existing raw `PagedResult<ParcelTripAvailabilityItemDto>`. The legacy internal GET
+also excludes Trips without an assigned Assistant before count/pagination. It returns the existing
+raw `PagedResult<ParcelTripAvailabilityItemDto>`. The legacy internal GET
 `/internal/v1/trips/parcel-availability` remains available during rollout.
 
 ### POST `/v1/parcels`
@@ -3477,7 +3478,9 @@ Auth: `PASSENGER`. Idempotency: required.
 
 The selected Trip must still be `SCHEDULED` when the command executes. Any other status, including
 `BOARDING`, returns `409 TRIP_NOT_ACCEPTING_PARCEL`; this closes the race between availability
-search and creation when a Trip starts boarding.
+search and creation when a Trip starts boarding. The Trip must also have an assigned Assistant;
+otherwise creation returns `409 PARCEL_ASSISTANT_REQUIRED`. This prevents accepting cargo for a
+Trip that has no crew member authorized to check in, load, unload, reconcile, or deliver it.
 
 Request:
 ```json
@@ -3521,6 +3524,7 @@ Response `201`:
   "statusCode": 201,
   "data": {
     "parcelId": "uuid",
+    "bookingId": "uuid|null",
     "parcelCode": "VR-PCL-20260518-P7K3D9Q2",
     "status": "PENDING_PAYMENT",
     "estimatedSizeCategory": "MEDIUM",
@@ -3740,7 +3744,14 @@ as an empty page. Validation failures return `422 VALIDATION_ERROR`.
 
 Auth: sender, recipient account, or authorized operator.
 
-Response `200`: parcel detail with sender, recipient, trip, transfer, optional sender `photoUrl`, optional `checkInPhotoUrls` and `deliveryPhotoUrls`, delivery token state excluding raw token, estimated/actual cargo snapshots, and the canonical settlement fields: `estimatedGrossPriceVnd`, `finalGrossPriceVnd`, `discountAmountVnd`, `estimatedTotalPriceVnd`, `finalTotalPriceVnd`, `depositPercent`, `depositRequiredVnd`, `depositPaidVnd`, `balanceRequiredVnd`, `balancePaidVnd`, `refundDueVnd`, `refundedAmountVnd`, `forfeitedDepositVnd`, payment IDs, `finalPaymentDeadline`, check-in/reweigh timestamps, fare snapshots, and `settlementPolicyVersion`.
+Response `200`: parcel detail with `parcelId`, nullable `bookingId`, sender, recipient, trip,
+transfer, optional sender `photoUrl`, optional `checkInPhotoUrls` and `deliveryPhotoUrls`, delivery
+token state excluding raw token, estimated/actual cargo snapshots, and the canonical settlement
+fields: `estimatedGrossPriceVnd`, `finalGrossPriceVnd`, `discountAmountVnd`,
+`estimatedTotalPriceVnd`, `finalTotalPriceVnd`, `depositPercent`, `depositRequiredVnd`,
+`depositPaidVnd`, `balanceRequiredVnd`, `balancePaidVnd`, `refundDueVnd`, `refundedAmountVnd`,
+`forfeitedDepositVnd`, payment IDs, `finalPaymentDeadline`, check-in/reweigh timestamps, fare
+snapshots, and `settlementPolicyVersion`.
 
 ### POST `/internal/v1/emails`
 
@@ -3926,7 +3937,10 @@ Auth: `ASSISTANT`. Read-only; Idempotency-Key is not required.
 
 The caller must be the Assistant currently assigned to `tripId`. Results include all
 non-deleted parcels whose current `tripId` and `operatorId` match the authorized trip
-crew context. Query: `page` (default `1`) and `pageSize` (default `20`, maximum `100`).
+crew context. Query: `stopId?`, `status?`, `hasException?`, `search?`, `page` (default `1`) and
+`pageSize` (default `20`, maximum `100`). The response is the screen-ready manifest described in
+Parcel Reliability v2 below; pagination metadata is nested under `data.pagination`, not at the
+top level of `data`.
 
 Response `200`:
 ```json
@@ -3977,7 +3991,11 @@ it includes incoming parcels where `transferTargetTripId=tripId` and
 `status=PENDING_TRANSFER_CONFIRM`. Incoming items expose
 `transferContext="TRANSFER_IN"`, `sourceTripId`, and `targetTripId`; they remain physically owned
 by the source Trip until assigned replacement crew confirms transfer. The legacy Assistant route
-remains available for backward compatibility.
+remains available for backward compatibility. Actions are role-aware: Assistant rows expose
+physical Parcel operations; Driver rows expose incident viewing and
+`APPROVE_CUSTODY_EXCEPTION|REJECT_CUSTODY_EXCEPTION` only when the row's
+`custodyExceptionApproval.status=PENDING_APPROVAL`. Driver does not receive Assistant cargo
+mutation actions.
 
 ### POST `/v1/assistant/trips/{tripId}/parcels/qr-scan`
 
@@ -4704,7 +4722,11 @@ payoutReferenceId,paidAt,availableActions`. One claim may have at most one appea
 `GET /v1/assistant/trips/{tripId}/parcels` accepts `stopId,status,hasException,search,page,pageSize`
 and returns one manifest screen model: `tripContext {trip,status,route,vehicle,
 currentOperationalLocation,orderedStops},summary,items,pagination`. Each item includes named
-`dropoffLocation,currentCustody,activeIncident,paymentState,identityCheckHints,availableActions`.
+`dropoffLocation,currentCustody,activeIncident,paymentState,identityCheckHints,availableActions,
+custodyExceptionApproval?`. The shared `GET /v1/crew/trips/{tripId}/parcels` uses the caller role:
+Assistant gets physical cargo actions; Driver gets approval actions and the pending report summary.
+`pagination` is always the nested object `{page,pageSize,totalItems,totalPages,hasNextPage,
+hasPreviousPage}`.
 
 QR scan, check-in, load, unload, custody scan, custody exception and deliver return the common
 `{parcelState,currentCustody,activeIncident,createdCustodyEvent,availableActions,warning}` model so
@@ -4716,10 +4738,43 @@ Body `{ parcelCode, eventType, actualLocationType, actualLocationId?, locationSn
 evidenceReferences?, reason? }`. Direct scan event type is limited to
 `ACCEPTED|ARRIVED_AT_STOP|HANDOFF|RETURNED_TO_STATION`. QR mismatch returns
 `409 SCAN_IDENTITY_MISMATCH`; invalid/missing location returns
-`422 PARCEL_CUSTODY_LOCATION_REQUIRED`.
+`422 PARCEL_CUSTODY_LOCATION_REQUIRED`. `ARRIVED_AT_STOP` and stop `HANDOFF` must match the Trip's
+current `ARRIVED`, not-yet-departed operational stop. `ACCEPTED` must be at the Trip origin before
+load. A supplied `VEHICLE` identity must match the Trip vehicle. Normal check-in, load, unload,
+deliver, and confirm-found mutations already append their own custody facts, so FE must not call
+`custody-scan` again after those actions. The backend exposes `CUSTODY_SCAN` only when a direct
+supplemental custody fact is valid in the current operational context.
 
 `POST /v1/stations/parcels/{parcelId}/handoff` is a station-facing alias with the same body and
 custody semantics.
+
+#### POST `/v1/assistant/parcels/{parcelId}/confirm-found-on-vehicle`
+
+Assigned Assistant only. Requires an `Idempotency-Key` UUID and a fresh QR scan:
+
+```json
+{
+  "incidentId": "uuid",
+  "parcelCode": "VR-PCL-20260830-ABC123",
+  "evidenceReferences": ["https://..."],
+  "note": "Found in the vehicle cargo bay"
+}
+```
+
+`evidenceReferences` and `note` are optional. This recovery is limited to an active,
+system-created `MISSING|MISSING_AFTER_DEPARTURE` incident whose Parcel is
+`PENDING_OPERATOR_ACTION/CUSTODY_EXCEPTION` with frozen resume status `LOADED|IN_TRANSIT`.
+It verifies the assigned Assistant and QR, reads the Trip vehicle, appends `FOUND` at `VEHICLE`,
+cancels outstanding search tasks, resolves the incident with
+`CREW_CONFIRMED_ON_VEHICLE`, and restores the frozen Parcel status atomically. It does not apply
+to Assistant-reported custody exceptions awaiting supervisor approval.
+
+Response `200` is the common
+`{parcelState,currentCustody,activeIncident,createdCustodyEvent,availableActions,warning}` model.
+The restored card can immediately expose `UNLOAD` when the prior status was `IN_TRANSIT`.
+Errors: `403 FORBIDDEN`, `404 PARCEL_NOT_FOUND|PARCEL_INCIDENT_NOT_FOUND|TRIP_NOT_FOUND`,
+`409 SCAN_IDENTITY_MISMATCH|PARCEL_INCIDENT_INVALID_STATUS|INVALID_STATUS|IDEMPOTENCY_KEY_REUSED`,
+`422 VALIDATION_ERROR`, `503 TRIP_SERVICE_UNAVAILABLE`.
 
 #### POST `/v1/assistant/parcels/{parcelId}/custody-exception`
 
@@ -4774,8 +4829,10 @@ request.
 
 #### POST `/v1/assistant/trips/{tripId}/stops/{stopId}/reconcile`
 
-Body `{ scannedParcelIds?, manualExceptionParcelIds?, departureOverrideReason? }`. The Assistant
-cannot submit a reviewer UUID. Response data:
+Body is optional. Use `{}` for normal reconciliation or
+`{ "departureOverrideReason": "..." }` only to request permission to leave with unresolved cargo.
+The Assistant cannot submit scan IDs, manual-exception IDs, or a reviewer UUID. Parcel derives all
+counts from persisted append-only custody facts. Response data:
 
 ```json
 {
@@ -4819,9 +4876,16 @@ With unresolved Parcels, `departureOverrideReason` creates or replays a `PENDING
 request for the exact unresolved snapshot. It does not authorize departure. Each unresolved Parcel
 opens `UNSCANNED_HANDOFF`; a committed Trip departure event may additionally open
 `MISSING_AFTER_DEPARTURE`. No scan gap directly confirms loss.
-`scannedParcelIds` and `manualExceptionParcelIds` are assertions only: Parcel derives the counts
-from matching append-only `UNLOADED` or `MANUAL_CUSTODY_EXCEPTION` facts for the same Trip and stop.
-An asserted id without that custody fact returns `409 PARCEL_CUSTODY_EVENT_NOT_FOUND`.
+`scannedCount` and `manualExceptionCount` come only from matching append-only `UNLOADED` or
+approved `MANUAL_CUSTODY_EXCEPTION` facts for the same Trip and stop. FE cannot manufacture a
+successful reconciliation by sending Parcel IDs.
+
+#### POST `/v1/assistant/trips/{tripId}/destination/reconcile`
+
+Bodyless. The assigned Assistant calls this after terminal unload attempts and before Driver
+completion. Parcel derives terminal `scannedCount`, `manualExceptionCount`, and
+`unresolvedParcels` from persisted custody facts. It returns `canComplete` and
+`requiresDriverCompletion`; the client does not submit Parcel ID lists.
 
 #### Stop-departure approval APIs
 
@@ -4880,7 +4944,7 @@ incident resource at `/v1/operator/incidents`.
 
 | Endpoint | Body/semantics |
 |---|---|
-| `GET /v1/operator/parcel-incidents?status=&type=&search=&tripId=&assigneeId=&slaState=&from=&to=&page=&pageSize=` | Paged same-tenant screen rows with Parcel, Trip/route/vehicle, expected dropoff, last custody, reporter, task/assignee summary, claim summary, SLA and actions |
+| `GET /v1/operator/parcel-incidents?status=&type=&search=&tripId=&assigneeId=&slaState=&approvalStatus=&from=&to=&page=&pageSize=` | Paged same-tenant screen rows with Parcel, Trip/route/vehicle, expected dropoff, last custody, reporter, task/assignee summary, claim summary, SLA and actions. `approvalStatus` accepts `PENDING_APPROVAL|APPROVED|REJECTED|CANCELLED`. |
 | `GET /v1/operator/parcel-incidents/{incidentId}?beforeSequence=&limit=` | Incident, Parcel parties, Trip, current custody, cursor timeline (50 default), enriched assignees, forwarding summary, linked claim and actions |
 | `GET .../{incidentId}/forwarding-options?limit=` | Trip-owned route/cargo-compatible choices; returns `503 UPSTREAM_UNAVAILABLE` when Trip cannot calculate |
 | `POST .../{incidentId}/assign` | `{ assigneeUserId }`; creates the standard search task set |
@@ -9791,8 +9855,10 @@ fact; unload eligibility is read synchronously from the Trip snapshot.
 ### `trip.destination.arrived`
 
 Producer: Trip. Consumer: Parcel. Exchange: `vietride.events`. Terminal unload reads the dedicated
-Trip operational-location endpoint synchronously; independently, Parcel consumes this fact to open
-a search incident for terminal-bound parcels still `LOADED|IN_TRANSIT`.
+Trip operational-location endpoint synchronously. Parcel consumes this fact as a delivery-readiness
+anchor only: arrival opens the normal terminal unload window and must not quarantine a terminal-bound
+parcel that is still `LOADED|IN_TRANSIT`. If `trip.trip.completed` later observes the Parcel still
+loaded/in transit, Parcel freezes the resume status and opens the system missing-search workflow.
 
 ```json
 {
