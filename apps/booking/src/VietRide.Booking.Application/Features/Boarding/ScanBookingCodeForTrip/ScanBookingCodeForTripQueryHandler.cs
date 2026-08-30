@@ -114,7 +114,7 @@ public sealed class ScanBookingCodeForTripQueryHandler
                     passenger.Id,
                     ticket.Id,
                     ticket.TicketCode.Value,
-                    ticket.SeatNumber,
+                    passenger.SeatNumber!,
                     passenger.BoardingStatus.ToString(),
                     booking.BookingCode.Value,
                     GetBuyerName(booking.BuyerDisplayName, exposeBuyerContact),
@@ -133,7 +133,9 @@ public sealed class ScanBookingCodeForTripQueryHandler
 
         return booking.Tickets
             .Where(ticket => IsBoardableTicket(ticket.Status))
-            .OrderBy(ticket => ticket.SeatNumber, StringComparer.Ordinal)
+            .OrderBy(ticket => passengersById.TryGetValue(ticket.PassengerId, out var passenger)
+                ? passenger.SeatNumber
+                : null, StringComparer.Ordinal)
             .Select(ticket => new
             {
                 Ticket = ticket,
@@ -145,7 +147,7 @@ public sealed class ScanBookingCodeForTripQueryHandler
                 entry.Passenger!.Id,
                 entry.Ticket.Id,
                 entry.Ticket.TicketCode.Value,
-                entry.Ticket.SeatNumber,
+                entry.Passenger.SeatNumber!,
                 entry.Passenger.BoardingStatus.ToString(),
                 booking.BookingCode.Value,
                 GetBuyerName(booking.BuyerDisplayName, exposeBuyerContact),

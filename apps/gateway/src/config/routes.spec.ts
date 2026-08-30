@@ -212,9 +212,20 @@ describe('buildRouteTable', () => {
       routes,
       '/v1/operator/trips/11111111-1111-4111-8111-111111111111',
     );
+    const previewRoute = matchRoute(
+      routes,
+      '/v1/operator/trips/11111111-1111-4111-8111-111111111111/substitute-vehicle/preview',
+    );
 
     expect(route).toMatchObject({
       prefix: '/v1/operator/trips/{tripId}/substitute-vehicle',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    });
+    expect(previewRoute).toMatchObject({
+      prefix: '/v1/operator/trips/{tripId}/substitute-vehicle/preview',
+      method: 'POST',
       target: env.TRIP_BASE_URL,
       authRequired: 'user',
       requiredRoles: ['OPERATOR_ADMIN'],

@@ -159,7 +159,34 @@ public sealed class OperatorTripsController : ControllerBase
                 request.ReplacementCrew?.DriverId,
                 request.ReplacementCrew?.AssistantId,
                 request.ReplacementCrew is not null,
-                request.AcknowledgeInsufficientSeats),
+                request.AcknowledgeInsufficientSeats,
+                request.PreviewToken,
+                request.SeatAssignments?
+                    .Select(assignment => new SubstituteVehicleSeatAssignment(
+                        assignment.PassengerId,
+                        assignment.NewSeatNumber))
+                    .ToArray()),
+            cancellationToken));
+    }
+
+    [HttpPost("{tripId:guid}/substitute-vehicle/preview")]
+    [SkipIdempotency("This POST is a read-only vehicle substitution seat preview.")]
+    [Authorize(Roles = OperatorWriteRoles)]
+    [ProducesResponseType(typeof(ApiResponse<SubstituteVehiclePreviewResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<SubstituteVehiclePreviewResponse>> PreviewSubstituteVehicleAsync(
+        Guid tripId,
+        [FromBody] PreviewSubstituteVehicleRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new PreviewSubstituteVehicleQuery(
+                tripId,
+                GetRequiredOperatorId(),
+                request.ReplacementVehicleId),
             cancellationToken));
     }
 

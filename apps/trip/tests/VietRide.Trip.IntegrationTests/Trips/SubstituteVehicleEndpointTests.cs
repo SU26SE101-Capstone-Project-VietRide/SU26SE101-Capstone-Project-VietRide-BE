@@ -39,7 +39,7 @@ namespace VietRide.Trip.IntegrationTests.Trips;
 public sealed class SubstituteVehicleEndpointTests
 {
     [Fact]
-    public async Task InsufficientSeatsRequireExplicitAcknowledgementBeforeAnyWrite()
+    public async Task InsufficientSeatsAlwaysRejectBeforeAnyWrite()
     {
         await using var harness = await SubstitutionHarness.CreateAsync(insufficientSeats: true);
         var unchanged = await harness.CaptureSnapshotAsync();
@@ -65,29 +65,12 @@ public sealed class SubstituteVehicleEndpointTests
         }
         await harness.AssertUnchangedAsync(unchanged);
 
-        using var accepted = await harness.SendAsync(
+        using var stillRejected = await harness.SendAsync(
             acknowledgeInsufficientSeats: true,
             idempotencyKey: Guid.NewGuid().ToString("D"));
-
-        accepted.StatusCode.Should().Be(HttpStatusCode.OK);
-        await using var db = harness.OpenDb();
-        var acceptedBody = await accepted.Content
-            .ReadFromJsonAsync<ApiResponse<SubstituteVehicleResponse>>();
-        acceptedBody!.Data!.PendingSeatAssignmentCount.Should().Be(1);
-        var audit = await db.TripAuditLogs.AsNoTracking().SingleAsync();
-        var metadata = audit.Metadata!.Value;
-        metadata.GetProperty("acknowledgedInsufficientSeats").GetBoolean()
-            .Should().BeTrue();
-        metadata.GetProperty("usableSeats").GetInt32().Should().Be(3);
-        metadata.GetProperty("passengersToTransfer").GetInt32().Should().Be(4);
-        metadata.GetProperty("missingSeats").GetInt32().Should().Be(1);
-        var outbox = await db.OutboxEvents.AsNoTracking()
-            .SingleAsync(row => row.EventType == "trip.trip.vehicle_substituted");
-        using var eventPayload = JsonDocument.Parse(outbox.Payload);
-        var unseated = eventPayload.RootElement.GetProperty("mappings").EnumerateArray()
-            .Single(mapping => mapping.GetProperty("newSeatNumber").ValueKind == JsonValueKind.Null);
-        unseated.GetProperty("newSeatType").ValueKind.Should().Be(JsonValueKind.Null);
-        unseated.GetProperty("isSeatDowngrade").GetBoolean().Should().BeFalse();
+        stillRejected.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        await AssertErrorAsync(stillRejected, "REPLACEMENT_VEHICLE_INSUFFICIENT_SEATS");
+        await harness.AssertUnchangedAsync(unchanged);
     }
 
     [Fact]
@@ -127,7 +110,7 @@ public sealed class SubstituteVehicleEndpointTests
             .OrderBy(seat => seat.SeatNumber)
             .ToArrayAsync();
         seats.Should().HaveCount(3);
-        seats.Single(seat => seat.SeatNumber == "B01").Status.Should().Be(TripSeatStatus.BOOKED);
+        seats.Single(seat => seat.SeatNumber == "A02").Status.Should().Be(TripSeatStatus.BOOKED);
         seats.Single(seat => seat.SeatNumber == "A01").Status.Should().Be(TripSeatStatus.BOOKED);
         seats.Single(seat => seat.SeatNumber == "C01").Status.Should().Be(TripSeatStatus.AVAILABLE);
 
@@ -368,21 +351,44 @@ public sealed class SubstituteVehicleEndpointTests
     }
 
     [Fact]
-    public async Task ChainedSubstitutionMapsNullOriginalSeatWithoutBlockingSafetyFlow()
+    public async Task MissingOriginalSeatRequiresAdminAssignmentBeforeAnyWrite()
     {
         await using var harness = await SubstitutionHarness.CreateAsync(nullOriginalSeat: true);
+        var unchanged = await harness.CaptureSnapshotAsync();
 
         using var response = await harness.SendAsync();
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        await using var assertionDb = harness.OpenDb();
-        var row = await assertionDb.OutboxEvents.AsNoTracking()
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        await AssertErrorAsync(response, "REPLACEMENT_SEAT_ASSIGNMENT_REQUIRED");
+        await harness.AssertUnchangedAsync(unchanged);
+    }
+
+    [Fact]
+    public async Task PreviewThenConfirmAllowsAdminToAssignMissingSeat()
+    {
+        await using var harness = await SubstitutionHarness.CreateAsync(nullOriginalSeat: true);
+
+        using var previewResponse = await harness.SendPreviewAsync();
+        previewResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var preview = await previewResponse.Content
+            .ReadFromJsonAsync<ApiResponse<SubstituteVehiclePreviewResponse>>();
+        var passenger = preview!.Data!.Passengers.Should().ContainSingle().Subject;
+        passenger.PassengerId.Should().Be(harness.FirstPassengerId);
+        passenger.RequiresAdminSelection.Should().BeTrue();
+        passenger.AlternativeSeatNumbers.Should().Contain("A02");
+
+        using var confirmResponse = await harness.SendAsync(
+            previewToken: preview.Data.PreviewToken,
+            assignedPassengerId: harness.FirstPassengerId,
+            assignedSeatNumber: "A02");
+
+        confirmResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        await using var db = harness.OpenDb();
+        var outbox = await db.OutboxEvents.AsNoTracking()
             .SingleAsync(item => item.EventType == "trip.trip.vehicle_substituted");
-        using var payload = JsonDocument.Parse(row.Payload);
-        var mappings = payload.RootElement.GetProperty("mappings").EnumerateArray().ToArray();
-        mappings.Should().ContainSingle();
-        mappings[0].GetProperty("originalSeatNumber").ValueKind.Should().Be(JsonValueKind.Null);
-        mappings[0].GetProperty("newSeatNumber").GetString().Should().Be("A01");
+        using var payload = JsonDocument.Parse(outbox.Payload);
+        payload.RootElement.GetProperty("mappings").EnumerateArray()
+            .Single().GetProperty("newSeatNumber").GetString().Should().Be("A02");
     }
 
     [Fact]
@@ -398,6 +404,15 @@ public sealed class SubstituteVehicleEndpointTests
         typeof(OperatorTripsController)
             .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
             .Should().ContainSingle(field => field.FieldType == typeof(IMediator));
+
+        var preview = typeof(OperatorTripsController).GetMethod(
+            nameof(OperatorTripsController.PreviewSubstituteVehicleAsync))!;
+        preview.GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_ADMIN");
+        preview.GetCustomAttribute<RequireIdempotencyAttribute>().Should().BeNull();
+        preview.GetCustomAttribute<SkipIdempotencyAttribute>().Should().NotBeNull();
+        preview.GetCustomAttributes<ProducesResponseTypeAttribute>()
+            .Select(attribute => attribute.StatusCode)
+            .Should().BeEquivalentTo([200, 403, 404, 409, 422]);
     }
 
     [Fact]
@@ -477,6 +492,7 @@ public sealed class SubstituteVehicleEndpointTests
             ReplacementDriverId = seed.ReplacementDriverId;
             ReplacementAssistantId = seed.ReplacementAssistantId;
             IncidentId = seed.IncidentId;
+            FirstPassengerId = seed.FirstPassengerId;
             OldEstimatedArrival = seed.OldEstimatedArrival;
             PendingStopId = seed.PendingStopId;
             PendingStopEta = seed.PendingStopEta;
@@ -493,6 +509,7 @@ public sealed class SubstituteVehicleEndpointTests
         public Guid ReplacementDriverId { get; }
         public Guid ReplacementAssistantId { get; }
         public Guid IncidentId { get; }
+        public Guid FirstPassengerId { get; }
         public DateTimeOffset OldEstimatedArrival { get; }
         public Guid PendingStopId { get; }
         public DateTimeOffset PendingStopEta { get; }
@@ -533,7 +550,10 @@ public sealed class SubstituteVehicleEndpointTests
             Guid? replacementDriverId = null,
             Guid? replacementAssistantId = null,
             Guid? incidentId = null,
-            bool acknowledgeInsufficientSeats = false) =>
+            bool acknowledgeInsufficientSeats = false,
+            string? previewToken = null,
+            Guid? assignedPassengerId = null,
+            string? assignedSeatNumber = null) =>
             SendRawAsync(
                 $$"""
                 {
@@ -543,6 +563,11 @@ public sealed class SubstituteVehicleEndpointTests
                   "reason":{{JsonSerializer.Serialize(reason)}},
                   "notifyPassengers":true,
                   "acknowledgeInsufficientSeats":{{acknowledgeInsufficientSeats.ToString().ToLowerInvariant()}},
+                  "previewToken":{{JsonSerializer.Serialize(previewToken)}},
+                  "seatAssignments":{{JsonSerializer.Serialize(
+                      assignedPassengerId.HasValue && assignedSeatNumber is not null
+                          ? new object[] { new { passengerId = assignedPassengerId.Value, newSeatNumber = assignedSeatNumber } }
+                          : Array.Empty<object>())}},
                   "replacementCrew":{"driverId":"{{(replacementDriverId ?? ReplacementDriverId):D}}","assistantId":"{{(replacementAssistantId ?? ReplacementAssistantId):D}}"}
                 }
                 """,
@@ -550,6 +575,19 @@ public sealed class SubstituteVehicleEndpointTests
                 operatorId,
                 actorId,
                 authenticated);
+
+        public Task<HttpResponseMessage> SendPreviewAsync()
+        {
+            var client = factory.CreateClient();
+            var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"/v1/operator/trips/{OldTripId:D}/substitute-vehicle/preview");
+            request.Headers.TryAddWithoutValidation(
+                "X-Internal-Auth",
+                $"Bearer {CreateInternalJwt(OperatorId, ActorId)}");
+            request.Content = JsonContent.Create(new { replacementVehicleId = ReplacementVehicleId });
+            return client.SendAsync(request);
+        }
 
         public Task<HttpResponseMessage> SendRawAsync(
             string body,
@@ -770,10 +808,10 @@ public sealed class SubstituteVehicleEndpointTests
                 vehicleType.Id,
                 $"NEW-{Guid.NewGuid():N}"[..20],
                 downgradeVipSeat
-                    ? CreateLayout(("A01", "STANDARD"), ("B01", "STANDARD"), ("C01", "STANDARD"))
+                    ? CreateLayout(("A01", "STANDARD"), ("A02", "STANDARD"), ("C01", "STANDARD"))
                     : upgradeStandardSeat
-                        ? CreateLayout(("A01", "VIP"), ("B01", "VIP"), ("C01", "VIP"))
-                    : CreateLayout(("A01", "STANDARD"), ("B01", "VIP"), ("C01", "STANDARD")),
+                        ? CreateLayout(("A01", "VIP"), ("A02", "VIP"), ("C01", "VIP"))
+                    : CreateLayout(("A01", "VIP"), ("A02", "STANDARD"), ("C01", "STANDARD")),
                 3,
                 120m,
                 12m);
@@ -813,8 +851,9 @@ public sealed class SubstituteVehicleEndpointTests
                 trip.Id,
                 "A01",
                 upgradeStandardSeat ? TripSeatType.STANDARD : TripSeatType.VIP);
+            var bookingId = Guid.NewGuid();
             bookedSeat.MarkHeld();
-            bookedSeat.MarkBooked(Guid.NewGuid());
+            bookedSeat.MarkBooked(bookingId);
             var otherSeat = TripSeat.Create(
                 trip.Id,
                 "A02",
@@ -875,6 +914,7 @@ public sealed class SubstituteVehicleEndpointTests
                 oldEstimatedArrival,
                 pendingStop.Id,
                 pendingStopEta,
+                bookingId,
                 Guid.NewGuid(),
                 Guid.NewGuid());
         }
@@ -1019,14 +1059,14 @@ public sealed class SubstituteVehicleEndpointTests
                         new VehicleSubstitutionImpactProjection.Passenger(
                             seed.SecondPassengerId,
                             "PENDING",
-                            null),
+                            "A02"),
                     ];
                 return Task.FromResult(new VehicleSubstitutionImpactProjection(
                     seed.OldTripId,
                     seed.OperatorId,
                     [
                         new VehicleSubstitutionImpactProjection.Booking(
-                            Guid.NewGuid(),
+                            seed.BookingId,
                             "CONFIRMED",
                             passengers),
                     ]));
@@ -1077,6 +1117,7 @@ public sealed class SubstituteVehicleEndpointTests
             DateTimeOffset OldEstimatedArrival,
             Guid PendingStopId,
             DateTimeOffset PendingStopEta,
+            Guid BookingId,
             Guid FirstPassengerId,
             Guid SecondPassengerId);
 

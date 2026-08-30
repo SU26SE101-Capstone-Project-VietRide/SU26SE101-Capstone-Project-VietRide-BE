@@ -1368,6 +1368,7 @@ Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable
 | 30 | `POST /v1/bookings/{bookingId}/pending-action/{actionId}/accept-fallback` | Booking |
 | 31 | `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart` | Trip |
 | 32 | `POST /v1/operator/trips/{tripId}/substitute-vehicle` | Trip |
+| 32a | `POST /v1/operator/trips/{tripId}/substitute-vehicle/preview` (read-only seat-preservation preview; no idempotency key) | Trip |
 | 33 | `POST /v1/bookings/trips/{newTripId}/transfers/passengers/{passengerId}/confirm` | Booking |
 | 34 | `POST /v1/admin/policies` | RAG |
 | 35 | `PATCH /v1/admin/policies/{policyId}` | RAG |

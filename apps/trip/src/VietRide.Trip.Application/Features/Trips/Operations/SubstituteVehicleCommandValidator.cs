@@ -24,5 +24,17 @@ public sealed class SubstituteVehicleCommandValidator : AbstractValidator<Substi
             .WithMessage("replacementCrew is required.");
         RuleFor(command => command.ReplacementDriverId).NotNull().NotEmpty();
         RuleFor(command => command.ReplacementAssistantId).NotNull().NotEmpty();
+        RuleFor(command => command.PreviewToken)
+            .Length(64)
+            .Matches("^[0-9A-F]{64}$")
+            .When(command => command.PreviewToken is not null);
+        RuleForEach(command => command.SeatAssignments)
+            .ChildRules(assignment =>
+            {
+                assignment.RuleFor(item => item.PassengerId).NotEmpty();
+                assignment.RuleFor(item => item.NewSeatNumber)
+                    .Must(value => !string.IsNullOrWhiteSpace(value))
+                    .MaximumLength(20);
+            });
     }
 }

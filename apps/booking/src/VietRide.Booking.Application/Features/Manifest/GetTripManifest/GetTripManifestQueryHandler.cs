@@ -73,7 +73,6 @@ public sealed class GetTripManifestQueryHandler
                         ticket.Id,
                         ticket.PassengerId,
                         ticket.TicketCode,
-                        ticket.SeatNumber,
                     })
                     .ToArray(),
             })
@@ -96,7 +95,7 @@ public sealed class GetTripManifestQueryHandler
                                 passenger.Id,
                                 ticket.Id,
                                 ticket.TicketCode.Value,
-                                ticket.SeatNumber,
+                                passenger.SeatNumber!,
                                 booking.BookingCode.Value,
                                 booking.PickupStopId,
                                 passenger.BoardingStatus.ToString(),

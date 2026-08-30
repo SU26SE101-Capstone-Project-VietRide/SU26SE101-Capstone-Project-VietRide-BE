@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -5,12 +6,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Messaging.Abstractions;
 using VietRide.Shared.Messaging.Outbox;
 using VietRide.Shared.Messaging.RabbitMq;
 using VietRide.Shared.Persistence;
 using VietRide.Shared.Persistence.Outbox;
 using VietRide.Trip.Application.Events;
+using VietRide.Trip.Application.Features.Trips.Operations;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
 using VietRide.Trip.IntegrationTests.Trips;
@@ -134,7 +137,14 @@ public sealed class TripVehicleSubstitutedIntegrationEventTests
         await using var harness =
             await SubstituteVehicleEndpointTests.SubstitutionHarness.CreateAsync(
                 nullOriginalSeat: true);
-        using var response = await harness.SendAsync();
+        using var previewResponse = await harness.SendPreviewAsync();
+        previewResponse.EnsureSuccessStatusCode();
+        var preview = await previewResponse.Content
+            .ReadFromJsonAsync<ApiResponse<SubstituteVehiclePreviewResponse>>();
+        using var response = await harness.SendAsync(
+            previewToken: preview!.Data!.PreviewToken,
+            assignedPassengerId: harness.FirstPassengerId,
+            assignedSeatNumber: "A02");
         response.EnsureSuccessStatusCode();
 
         await using var db = harness.OpenDb();

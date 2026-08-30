@@ -3075,6 +3075,41 @@ Statuses: `200`, `401`, `403`, `404`, `409`, `422`. Missing/cross-tenant proposa
 `409 ROUTE_CHANGE_PROPOSAL_NOT_PENDING`; invalid body/length/UUID/idempotency returns the shared
 `422` response.
 
+### POST `/v1/operator/trips/{tripId}/substitute-vehicle/preview`
+
+Auth: `OPERATOR_ADMIN`-only for the Trip's operator. This is a read-only preview; no
+`Idempotency-Key` is required.
+
+Request is exactly `{ "replacementVehicleId": "uuid" }`. The old Trip must be `IN_PROGRESS`; the
+replacement vehicle must be active, operator-owned, and different from the old vehicle.
+
+Response `200` data is:
+
+```jsonc
+{
+  "tripId": "uuid",
+  "replacementVehicleId": "uuid",
+  "previewToken": "64-character uppercase SHA-256 hex",
+  "passengers": [{
+    "bookingId": "uuid",
+    "passengerId": "uuid",
+    "originalSeatNumber": "A2",
+    "proposedSeatNumber": null,
+    "requiresAdminSelection": true,
+    "alternativeSeatNumbers": ["A5", "A10"]
+  }],
+  "availableSeatNumbers": ["A1", "A5", "A10"]
+}
+```
+
+The preview reserves each exact usable seat number first (`A1 -> A1`, `A2 -> A2`). A Passenger
+whose original seat is absent or disabled has `requiresAdminSelection=true` and must be assigned
+an alternative by the Operator Admin. Preview never writes a Trip, Booking, seat, audit, or
+Outbox row. If total usable capacity cannot seat every eligible Passenger, it returns
+`409 REPLACEMENT_VEHICLE_INSUFFICIENT_SEATS`.
+
+Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
+
 ### POST `/v1/operator/trips/{tripId}/substitute-vehicle`
 
 Auth: `OPERATOR_ADMIN`-only for the Trip's operator. `Idempotency-Key` is required UUID v4.
@@ -3087,7 +3122,10 @@ Request is exactly:
   "estimatedRecoveryDepartureAt": "2026-07-25T08:30:00Z",
   "reason": "Vehicle breakdown",
   "notifyPassengers": true,
-  "acknowledgeInsufficientSeats": false,
+  "previewToken": "64-character uppercase SHA-256 hex",
+  "seatAssignments": [
+    { "passengerId": "uuid", "newSeatNumber": "A5" }
+  ],
   "replacementCrew": {
     "driverId": "uuid",
     "assistantId": "uuid"
@@ -3097,7 +3135,11 @@ Request is exactly:
 
 `replacementVehicleId` is a required UUID. `estimatedRecoveryDepartureAt` is a required absolute UTC timestamp.
 `reason` is required, trimmed, and at most 500 characters. `notifyPassengers` is optional and defaults to `true`.
-`acknowledgeInsufficientSeats` is optional and defaults to `false`.
+`previewToken` and `seatAssignments` are optional only when every Passenger's exact original seat
+can be preserved. If any original seat is absent or disabled, `previewToken` must be the latest
+token returned by preview and `seatAssignments` must contain exactly one valid available seat for
+each affected Passenger. The legacy additive `acknowledgeInsufficientSeats` field remains accepted
+for client compatibility but no longer permits an unseated transfer.
 `incidentId` is a required UUID belonging to the same Trip and operator. `replacementCrew` is
 required and exactly `{driverId,assistantId}`; both are required, non-null UUIDs. The replacement
 driver and assistant must be active, operator-owned, conflict-free, and different from the old
@@ -3115,7 +3157,7 @@ endpoint returns `409 TRIP_NOT_SUBSTITUTABLE`.
 
 After locking and revalidating the old Trip, incident, old Vehicle, and replacement Vehicle, the service compares the
 replacement layout's usable seats with the distinct eligible passengers in the Booking impact
-snapshot. When seats are insufficient and `acknowledgeInsufficientSeats=false`, it returns
+snapshot. When seats are insufficient, it returns
 `409 REPLACEMENT_VEHICLE_INSUFFICIENT_SEATS` before creating a Trip, changing resources, writing
 audit, or enqueueing Outbox rows. The ADR 0004 error uses `error.fields` (not `error.details`):
 
@@ -3136,8 +3178,11 @@ audit, or enqueueing Outbox rows. The ADR 0004 error uses `error.fields` (not `e
 }
 ```
 
-The Operator may retry with `acknowledgeInsufficientSeats=true`; because the request body changes,
-that retry MUST use a new UUID-v4 `Idempotency-Key`.
+The Operator cannot acknowledge a true capacity shortage; another replacement vehicle is required.
+When capacity is sufficient but an exact seat is absent, missing assignments return
+`409 REPLACEMENT_SEAT_ASSIGNMENT_REQUIRED`, invalid/duplicate/unavailable assignments return
+`409 REPLACEMENT_SEAT_NOT_AVAILABLE`, and a changed Trip/Vehicle/Booking/layout snapshot returns
+`409 REPLACEMENT_SEAT_PREVIEW_STALE`. All failures occur before substitution writes.
 
 On success the old Trip is `DISRUPTED` with `hasSubstitution=true`, and the old Vehicle transitions
 from `ACTIVE` to `MAINTENANCE`. The dedicated replacement Trip
@@ -3160,7 +3205,7 @@ Response `200`:
     "transferStatus": "QUEUED",
     "affectedBookingCount": 2,
     "affectedPassengerCount": 5,
-    "pendingSeatAssignmentCount": 1
+    "pendingSeatAssignmentCount": 0
   },
   "meta": { "traceId": "req-abc123", "timestamp": "2026-07-25T15:00:00+07:00" }
 }
@@ -3169,7 +3214,7 @@ Response `200`:
 `substitutionId` equals the canonical `trip.trip.vehicle_substituted` eventId.
 `affectedBookingCount` counts eligible Booking entries represented in the mapping,
 `affectedPassengerCount` counts mapped `BOARDED|PENDING` Passengers, and
-`pendingSeatAssignmentCount` counts mapped Passengers whose `newSeatNumber` is null. No Parcel
+`pendingSeatAssignmentCount` is `0` because confirm cannot create an unseated Passenger. No Parcel
 count is returned. A same-key replay returns the persisted response as idempotent `200`.
 
 Statuses: `200`, `401`, `403`, `404`, `409`, `422`.
@@ -10307,7 +10352,8 @@ require `Idempotency-Key`. Internal successes are raw DTOs and require Internal 
 - `GET /v1/admin/operators` is unchanged; no `BE-ADM-02` projection is added.
 - Admin Station endpoints and frontend changes are outside this scope.
 - Existing single-size Parcel fare endpoints are unchanged. The substitution endpoint follows its
-  later additive `acknowledgeInsufficientSeats` contract above.
+  later seat-preserving preview/confirm contract above; the legacy acknowledgement cannot bypass
+  a true capacity shortage.
 - Release A introduces nullable `tripCode` and Route `code` additively; fare-history versioning is
   still outside scope.
 - Additive objects do not remove, rename or retype existing response fields.
