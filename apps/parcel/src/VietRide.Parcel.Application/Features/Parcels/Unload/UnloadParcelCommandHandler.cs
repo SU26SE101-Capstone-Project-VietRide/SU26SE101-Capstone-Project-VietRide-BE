@@ -4,6 +4,7 @@ using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Application.Services;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -19,19 +20,22 @@ public sealed class UnloadParcelCommandHandler
     private readonly IParcelCustodyService? _custody;
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IParcelReliabilityRepository? _reliability;
 
     public UnloadParcelCommandHandler(
         IParcelRepository parcelRepository,
         ITripServiceClient tripClient,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
-        IParcelCustodyService? custody = null)
+        IParcelCustodyService? custody = null,
+        IParcelReliabilityRepository? reliability = null)
     {
         _parcelRepository = parcelRepository;
         _tripClient = tripClient;
         _outbox = outbox;
         _unitOfWork = unitOfWork;
         _custody = custody;
+        _reliability = reliability;
     }
 
     public async Task<UnloadParcelResponse> Handle(
@@ -186,6 +190,22 @@ public sealed class UnloadParcelCommandHandler
                     command.PhotoUrls,
                     null,
                     cancellationToken);
+            }
+
+            if (_reliability is not null)
+            {
+                var forwardingIncident = await _reliability.GetForwardingIncidentForUpdateAsync(
+                    parcel.Id,
+                    cancellationToken);
+                if (forwardingIncident is not null)
+                {
+                    await ForwardingIncidentResolution.ResolveAsync(
+                        forwardingIncident,
+                        _reliability,
+                        _outbox,
+                        now,
+                        cancellationToken);
+                }
             }
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);

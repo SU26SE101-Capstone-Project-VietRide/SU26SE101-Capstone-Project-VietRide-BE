@@ -20,11 +20,13 @@ using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Shared.Persistence.Outbox;
+using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.Internal.Trips.GetTripSnapshot;
 using VietRide.Trip.Application.Features.Trips.Operations;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
+using VietRide.Trip.IntegrationTests.TestDoubles;
 
 namespace VietRide.Trip.IntegrationTests.DriverTrips;
 
@@ -32,6 +34,125 @@ public sealed class TripArrivalEndpointTests
 {
     private const string TestSecret = "test-secret-at-least-32-chars-long-xxxxx";
     private static readonly DateTimeOffset Now = new(2026, 7, 16, 6, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public async Task OrderedStopFlow_RejectsNextLocationUntilCurrentStopIsDeparted()
+    {
+        var databaseName = $"vietride_trip_ordered_stop_flow_{Guid.NewGuid():N}";
+        await using var setup = CreateDbContext(databaseName);
+        try
+        {
+            await setup.Database.MigrateAsync();
+            var seeded = await SeedTripAsync(setup, includeStop: false);
+            var firstStop = Stop.Create(
+                seeded.Trip.OperatorId,
+                "Ordered stop 1",
+                10.9m,
+                107.1m);
+            var secondStop = Stop.Create(
+                seeded.Trip.OperatorId,
+                "Ordered stop 2",
+                11.1m,
+                107.3m);
+            var firstTripStop = TripStop.Create(
+                seeded.Trip.Id,
+                firstStop.Id,
+                1,
+                Now.AddMinutes(30),
+                allowPickup: true,
+                allowDropoff: true,
+                distanceFromOriginKm: 50m);
+            var secondTripStop = TripStop.Create(
+                seeded.Trip.Id,
+                secondStop.Id,
+                2,
+                Now.AddMinutes(60),
+                allowPickup: true,
+                allowDropoff: true,
+                distanceFromOriginKm: 100m);
+            setup.AddRange(firstStop, secondStop, firstTripStop, secondTripStop);
+            await setup.SaveChangesAsync();
+
+            using var factory = new ArrivalWebApplicationFactory(new ArrivalDatabaseMediator(databaseName));
+            using var client = factory.CreateClient();
+            var assistantId = seeded.Trip.AssistantUserId!.Value;
+
+            var prematureSecondArrival = await client.SendAsync(CreateRequest(
+                $"/v1/driver/trips/{seeded.Trip.Id}/stops/{secondStop.Id}/arrive",
+                "ASSISTANT",
+                assistantId,
+                NewKey()));
+            await AssertConflictCodeAsync(prematureSecondArrival, "TRIP_STOP_SEQUENCE_VIOLATION");
+
+            var firstArrival = await client.SendAsync(CreateRequest(
+                $"/v1/driver/trips/{seeded.Trip.Id}/stops/{firstStop.Id}/arrive",
+                "ASSISTANT",
+                assistantId,
+                NewKey()));
+            firstArrival.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var stillPrematureSecondArrival = await client.SendAsync(CreateRequest(
+                $"/v1/driver/trips/{seeded.Trip.Id}/stops/{secondStop.Id}/arrive",
+                "ASSISTANT",
+                assistantId,
+                NewKey()));
+            await AssertConflictCodeAsync(stillPrematureSecondArrival, "TRIP_STOP_SEQUENCE_VIOLATION");
+
+            var firstDeparture = await client.SendAsync(CreateRequest(
+                $"/v1/driver/trips/{seeded.Trip.Id}/stops/{firstStop.Id}/depart",
+                "ASSISTANT",
+                assistantId,
+                NewKey(),
+                seeded.Trip.OperatorId));
+            firstDeparture.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var secondArrival = await client.SendAsync(CreateRequest(
+                $"/v1/driver/trips/{seeded.Trip.Id}/stops/{secondStop.Id}/arrive",
+                "ASSISTANT",
+                assistantId,
+                NewKey()));
+            secondArrival.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var prematureDestinationArrival = await client.SendAsync(CreateRequest(
+                $"/v1/driver/trips/{seeded.Trip.Id}/destination/arrive",
+                "DRIVER",
+                seeded.Trip.DriverUserId,
+                NewKey()));
+            await AssertConflictCodeAsync(prematureDestinationArrival, "TRIP_STOP_SEQUENCE_VIOLATION");
+
+            var secondDeparture = await client.SendAsync(CreateRequest(
+                $"/v1/driver/trips/{seeded.Trip.Id}/stops/{secondStop.Id}/depart",
+                "DRIVER",
+                seeded.Trip.DriverUserId,
+                NewKey(),
+                seeded.Trip.OperatorId));
+            secondDeparture.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var destinationArrival = await client.SendAsync(CreateRequest(
+                $"/v1/driver/trips/{seeded.Trip.Id}/destination/arrive",
+                "DRIVER",
+                seeded.Trip.DriverUserId,
+                NewKey()));
+            destinationArrival.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            await using var assertionDb = CreateDbContext(databaseName);
+            var persistedStops = await assertionDb.TripStops
+                .Where(item => item.TripId == seeded.Trip.Id)
+                .OrderBy(item => item.OrderIndex)
+                .ToListAsync();
+            persistedStops.Should().HaveCount(2);
+            persistedStops.Should().OnlyContain(item =>
+                item.Status == TripStopStatus.ARRIVED
+                && item.ActualArrivalTime.HasValue
+                && item.ActualDepartureTime.HasValue);
+            var persistedTrip = await assertionDb.Trips.SingleAsync(item => item.Id == seeded.Trip.Id);
+            persistedTrip.DestinationArrivedAt.Should().Be(Now);
+        }
+        finally
+        {
+            await setup.Database.EnsureDeletedAsync();
+        }
+    }
 
     [Fact]
     public async Task ConcurrentStopArrivalRequests_ProduceOne200One409AndOneTimestampEvent()
@@ -199,6 +320,16 @@ public sealed class TripArrivalEndpointTests
             .Should().Be(conflictCode);
     }
 
+    private static async Task AssertConflictCodeAsync(
+        HttpResponseMessage response,
+        string conflictCode)
+    {
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("error").GetProperty("code").GetString()
+            .Should().Be(conflictCode);
+    }
+
     private static void AssertStopArrivedPayload(
         string payloadJson,
         Guid tripId,
@@ -241,24 +372,34 @@ public sealed class TripArrivalEndpointTests
         string path,
         string role,
         Guid subject,
-        string idempotencyKey)
+        string idempotencyKey,
+        Guid? operatorId = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, path);
         request.Headers.TryAddWithoutValidation(
             "X-Internal-Auth",
-            $"Bearer {CreateInternalJwt(role, subject)}");
+            $"Bearer {CreateInternalJwt(role, subject, operatorId)}");
         request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
         return request;
     }
 
-    private static string CreateInternalJwt(string role, Guid subject)
+    private static string CreateInternalJwt(string role, Guid subject, Guid? operatorId)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TestSecret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var claims = new List<Claim>
+        {
+            new("sub", subject.ToString()),
+            new(ClaimTypes.Role, role),
+        };
+        if (operatorId.HasValue)
+        {
+            claims.Add(new Claim("operatorId", operatorId.Value.ToString()));
+        }
         var token = new JwtSecurityToken(
             issuer: "vietride-gateway",
             audience: "vietride-internal",
-            claims: [new Claim("sub", subject.ToString()), new Claim(ClaimTypes.Role, role)],
+            claims: claims,
             expires: DateTime.UtcNow.AddMinutes(2),
             signingCredentials: credentials);
         return new JwtSecurityTokenHandler().WriteToken(token);
@@ -452,9 +593,24 @@ public sealed class TripArrivalEndpointTests
                         clock).Handle(command, cancellationToken),
                     ArriveTripDestinationCommand command => await new ArriveTripDestinationCommandHandler(
                         trips,
+                        CreateRepository<ITripStopRepository>(
+                            db,
+                            "VietRide.Trip.Infrastructure.Persistence.Repositories.TripStopRepository"),
                         CreateRepository<IRouteRepository>(
                             db,
                             "VietRide.Trip.Infrastructure.Persistence.Repositories.RouteRepository"),
+                        outbox,
+                        clock).Handle(command, cancellationToken),
+                    DepartStopCommand command => await new DepartStopHandler(
+                        trips,
+                        CreateRepository<ITripStopRepository>(
+                            db,
+                            "VietRide.Trip.Infrastructure.Persistence.Repositories.TripStopRepository"),
+                        CreateRepository<IStopRepository>(
+                            db,
+                            "VietRide.Trip.Infrastructure.Persistence.Repositories.StopRepository"),
+                        new EmptyBookingImpactClient(),
+                        new ClearParcelImpactClient(),
                         outbox,
                         clock).Handle(command, cancellationToken),
                     _ => throw new InvalidOperationException($"Unexpected request {request.GetType().Name}."),
@@ -492,6 +648,22 @@ public sealed class TripArrivalEndpointTests
             object request,
             CancellationToken cancellationToken = default)
             => Empty<object?>();
+    }
+
+    private sealed class EmptyBookingImpactClient : IBookingImpactClient
+    {
+        public Task<TripStopPendingPassengerCountProjection> GetPendingPassengerCountAsync(
+            Guid tripId,
+            Guid stopId,
+            Guid operatorId,
+            CancellationToken cancellationToken)
+            => Task.FromResult(new TripStopPendingPassengerCountProjection(tripId, stopId, 0));
+
+        public Task<TripBookingImpactProjection> GetTripEditImpactAsync(
+            Guid tripId,
+            Guid operatorId,
+            CancellationToken cancellationToken)
+            => throw new NotSupportedException();
     }
 
     private sealed class RejectingMediator : IMediator

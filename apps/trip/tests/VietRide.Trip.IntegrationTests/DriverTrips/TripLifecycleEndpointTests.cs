@@ -42,6 +42,77 @@ public sealed class TripLifecycleEndpointTests
     private const string TestSecret = "test-secret-at-least-32-chars-long-xxxxx";
 
     [Fact]
+    public async Task ManualComplete_BeforeDestinationIsRejectedThenSucceedsAfterArrival()
+    {
+        var databaseName = $"vietride_trip_destination_complete_flow_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.Parse("2026-08-31T08:00:00Z");
+        await using var setup = CreateDbContext(databaseName);
+        try
+        {
+            await setup.Database.MigrateAsync();
+            var trip = await SeedTripAsync(
+                setup,
+                now,
+                inProgress: true,
+                destinationArrived: false);
+            using var factory = new LifecycleWebApplicationFactory(new DatabaseMediator(databaseName, now));
+            using var client = factory.CreateClient();
+            var path = $"/v1/driver/trips/{trip.Id}/complete";
+
+            var prematureCompletion = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                path,
+                "DRIVER",
+                trip.DriverUserId,
+                NewKey()));
+            await AssertErrorAsync(
+                prematureCompletion,
+                HttpStatusCode.Conflict,
+                "TRIP_DESTINATION_NOT_ARRIVED");
+
+            await using (var rejectedAssertionDb = CreateDbContext(databaseName))
+            {
+                var unchanged = await rejectedAssertionDb.Trips.SingleAsync(item => item.Id == trip.Id);
+                unchanged.Status.Should().Be(TripStatus.IN_PROGRESS);
+                unchanged.CompletedAt.Should().BeNull();
+                (await rejectedAssertionDb.TripAuditLogs.CountAsync(item => item.TripId == trip.Id))
+                    .Should().Be(0);
+                (await rejectedAssertionDb.OutboxEvents.CountAsync(item =>
+                    item.EventType == "trip.trip.completed")).Should().Be(0);
+            }
+
+            await using (var arrivalDb = CreateDbContext(databaseName))
+            {
+                var arrivedTrip = await arrivalDb.Trips.SingleAsync(item => item.Id == trip.Id);
+                arrivedTrip.MarkDestinationArrived(now, trip.DriverUserId);
+                await arrivalDb.SaveChangesAsync();
+            }
+
+            var completed = await client.SendAsync(CreateRequest(
+                HttpMethod.Post,
+                path,
+                "DRIVER",
+                trip.DriverUserId,
+                NewKey()));
+            completed.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            await using var assertionDb = CreateDbContext(databaseName);
+            var persisted = await assertionDb.Trips.SingleAsync(item => item.Id == trip.Id);
+            persisted.Status.Should().Be(TripStatus.COMPLETED);
+            persisted.DestinationArrivedAt.Should().Be(now);
+            persisted.CompletedAt.Should().Be(now);
+            (await assertionDb.TripAuditLogs.CountAsync(item => item.TripId == trip.Id))
+                .Should().Be(1);
+            (await assertionDb.OutboxEvents.CountAsync(item =>
+                item.EventType == "trip.trip.completed")).Should().Be(1);
+        }
+        finally
+        {
+            await setup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task ManualBoardingEndpoints_UseInclusiveWindow_NoOpReplay_AndPreserveStrictStartSequence()
     {
         var databaseName = $"vietride_trip_boarding_http_{Guid.NewGuid():N}";
@@ -1093,7 +1164,8 @@ public sealed class TripLifecycleEndpointTests
         DateTimeOffset now,
         bool inProgress,
         bool scheduled = false,
-        DateTimeOffset? departure = null)
+        DateTimeOffset? departure = null,
+        bool destinationArrived = true)
     {
         var operatorId = Guid.NewGuid();
         var origin = Station.Create(
@@ -1156,6 +1228,10 @@ public sealed class TripLifecycleEndpointTests
         if (inProgress)
         {
             trip.Start(now.AddMinutes(-5));
+            if (destinationArrived)
+            {
+                trip.MarkDestinationArrived(now, trip.DriverUserId);
+            }
         }
 
         db.AddRange(origin, destination, route, vehicleType, vehicle, trip);

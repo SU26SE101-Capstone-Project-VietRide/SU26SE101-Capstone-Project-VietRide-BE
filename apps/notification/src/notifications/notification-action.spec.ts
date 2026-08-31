@@ -5,6 +5,7 @@ const BOOKING_ID = '11111111-1111-4111-8111-111111111111';
 const TRIP_ID = '22222222-2222-4222-8222-222222222222';
 const PARCEL_ID = '33333333-3333-4333-8333-333333333333';
 const SHUTTLE_TRIP_ID = '44444444-4444-4444-8444-444444444444';
+const APPROVAL_REQUEST_ID = '55555555-5555-4555-8555-555555555555';
 
 describe('resolveNotificationAction', () => {
   it.each([
@@ -114,6 +115,19 @@ describe('resolveNotificationAction', () => {
     expect(resolveNotificationAction(type, { parcelId: PARCEL_ID })).toEqual({
       type: 'OPEN_PARCEL_DETAIL',
       params: { parcelId: PARCEL_ID },
+    });
+  });
+
+  it('maps a Parcel approval request to the native approval screen', () => {
+    expect(
+      resolveNotificationAction(NotificationType.PARCEL_APPROVAL_REQUESTED, {
+        requestId: APPROVAL_REQUEST_ID,
+        requestType: 'CUSTODY_EXCEPTION',
+        parcelId: PARCEL_ID,
+      }),
+    ).toEqual({
+      type: 'OPEN_PARCEL_APPROVAL',
+      params: { requestId: APPROVAL_REQUEST_ID, requestType: 'CUSTODY_EXCEPTION' },
     });
   });
 

@@ -31,5 +31,16 @@ public interface IParcelStopDepartureApprovalRepository
         Guid stopId,
         CancellationToken ct = default);
 
+    Task<IReadOnlyList<ParcelStopDepartureApprovalRequest>> ListPendingByOperatorAsync(
+        Guid operatorId,
+        CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<ParcelStopDepartureApprovalRequest>>([]);
+
+    Task<IReadOnlyList<ParcelStopDepartureApprovalRequest>> ListPendingByTripForUpdateAsync(
+        Guid tripId,
+        Guid? stopId = null,
+        CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<ParcelStopDepartureApprovalRequest>>([]);
+
     Task AddAsync(ParcelStopDepartureApprovalRequest entity, CancellationToken ct = default);
 }

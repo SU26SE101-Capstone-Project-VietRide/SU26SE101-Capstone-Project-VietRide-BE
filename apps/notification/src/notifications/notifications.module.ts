@@ -14,6 +14,7 @@ import { CoreEventsConsumer } from './core-events.consumer';
 import { BookingCreatedEventsConsumer } from './booking-created-events.consumer';
 import { BookingCancelledCrewEventsConsumer } from './booking-cancelled-crew-events.consumer';
 import { ParcelReservedAssistantEventsConsumer } from './parcel-reserved-assistant-events.consumer';
+import { ParcelApprovalRequestedEventsConsumer } from './parcel-approval-requested-events.consumer';
 import { EmailSendQueue } from './email-send.queue';
 import { EmailSendWorker } from './email-send.worker';
 import { EmailDeliveryRecoveryService } from './email-delivery-recovery.service';
@@ -73,6 +74,7 @@ import { RouteChangeProposalEventsConsumer } from './route-change-proposal-event
     BookingCreatedEventsConsumer,
     BookingCancelledCrewEventsConsumer,
     ParcelReservedAssistantEventsConsumer,
+    ParcelApprovalRequestedEventsConsumer,
     BookingTripChangeEventsConsumer,
     Day24StopDisabledAutoFallbackEventsConsumer,
     Day24NoShowEventsConsumer,

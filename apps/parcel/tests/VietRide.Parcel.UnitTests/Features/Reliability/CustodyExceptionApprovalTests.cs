@@ -99,15 +99,39 @@ public sealed class CustodyExceptionApprovalTests
                 parcel.OperatorId,
                 Arg.Any<CancellationToken>())
             .Returns(new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized));
+        var targetDriverUserId = Guid.NewGuid();
+        var station = new TripStationDto(Guid.NewGuid(), "Station");
+        trips.GetTripParcelSnapshotAsync(parcel.TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(
+                TripSnapshotOutcomeKind.Success,
+                new TripParcelSnapshot(
+                    parcel.TripId,
+                    parcel.OperatorId,
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    "IN_PROGRESS",
+                    now.AddHours(-1),
+                    now.AddHours(1),
+                    100_000,
+                    station,
+                    station,
+                    Array.Empty<TripStopDto>(),
+                    new TripSeatSummaryDto(40, 10),
+                    null,
+                    null,
+                    targetDriverUserId),
+                null));
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(now);
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
 
         var response = await new ReportCustodyExceptionCommandHandler(
                 parcels,
                 reliability,
                 requests,
                 trips,
-                clock)
+                clock,
+                outbox)
             .Handle(
                 new ReportCustodyExceptionCommand(
                     parcel.Id,
@@ -139,6 +163,11 @@ public sealed class CustodyExceptionApprovalTests
                 && item.SearchDeadline == null),
             Arg.Any<CancellationToken>());
         await reliability.DidNotReceiveWithAnyArgs().AddSearchTaskAsync(default!, default);
+        await outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(),
+            ParcelOutboxEvents.ApprovalRequested,
+            Arg.Is<string>(payload => payload.Contains(targetDriverUserId.ToString(), StringComparison.OrdinalIgnoreCase)),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]

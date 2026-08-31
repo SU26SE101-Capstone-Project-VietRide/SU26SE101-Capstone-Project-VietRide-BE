@@ -103,6 +103,31 @@ internal sealed class ParcelCustodyExceptionRequestRepository
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<ParcelCustodyExceptionRequest>> ListPendingByOperatorAsync(
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await _db.ParcelCustodyExceptionRequests
+            .AsNoTracking()
+            .Where(item => item.OperatorId == operatorId
+                && item.Status == ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL)
+            .OrderByDescending(item => item.ReportedAt)
+            .ThenBy(item => item.Id)
+            .ToArrayAsync(ct);
+
+    public async Task<IReadOnlyList<ParcelCustodyExceptionRequest>> ListPendingByTripForUpdateAsync(
+        Guid tripId,
+        CancellationToken ct = default)
+        => await _db.ParcelCustodyExceptionRequests
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_parcel.parcel_custody_exception_requests
+                WHERE trip_id = {tripId} AND status = 'PENDING_APPROVAL'
+                ORDER BY id
+                FOR UPDATE
+                """)
+            .AsTracking()
+            .ToArrayAsync(ct);
+
     public async Task AddAsync(
         ParcelCustodyExceptionRequest entity,
         CancellationToken ct = default)

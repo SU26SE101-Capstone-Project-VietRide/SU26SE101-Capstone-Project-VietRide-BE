@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-08-29 (Parcel stop-departure approval và claim appeal settlement)
+> **Cập nhật:** 2026-08-31 (Parcel production E2E reliability and approval lifecycle)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -3665,8 +3665,22 @@ trình tìm kiếm mà không có custody fact xác nhận hàng đã được t
 Nếu hàng còn trên xe thì giữ nguyên leg và giao đúng stop. Nếu đã ở wrong station, station scan
 `FOUND/HANDOFF`, giữ tại kho an toàn, reserve cargo trên Trip phù hợp, kết thúc leg cũ bằng
 `FORWARDED_OUT`, tạo leg mới và crew scan `FORWARDED_IN`. Không thu thêm phí, không sửa lịch sử và
-không tạo payment trùng. Không có Trip phù hợp thì lưu kho, tìm chuyến khác, return sender hoặc sau
+không tạo payment trùng. Xác nhận của target crew chỉ chuyển custody và incident vẫn `FORWARDING`;
+incident chỉ tự resolve `FORWARDED_TO_EXPECTED_DROPOFF` sau verified `UNLOADED` trên forwarding leg
+tại đúng intended dropoff. Stop/destination reconciliation phải self-heal incident `FORWARDING`
+cũ khi custody fact hợp lệ đã tồn tại. Không có Trip phù hợp thì lưu kho, tìm chuyến khác, return sender hoặc sau
 SLA xác nhận mất.
+
+Passenger chỉ được report `DELIVERY_NOT_RECEIVED|DAMAGED|PARTIAL_LOSS` khi Parcel đang
+`UNLOADED|DELIVERED_PENDING_CONFIRM`. Mọi status khác (kể cả `DELIVERY_CONFIRMED`) fail
+`409 PARCEL_INCIDENT_STATUS_NOT_REPORTABLE` trước khi tạo incident/task/custody/outbox.
+
+Pending custody-exception và stop-departure approvals không có TTL (`expiresAt=null`); validity
+phụ thuộc Trip/Parcel/unresolved snapshot/current crew assignment. Request bị `CANCELLED` khi
+snapshot đổi, stop đã depart, Trip terminal hoặc điều kiện custody không còn hợp lệ. Khi Driver
+assignment đổi, Driver cũ mất quyền nhìn/quyết định ngay theo current Trip assignment; request còn
+hợp lệ giữ nguyên identity và phát lại `parcel.approval.requested` cho Driver mới. Nếu Trip không
+còn Driver, request đang chờ bị `CANCELLED`.
 
 Sender là claim owner/beneficiary; recipient chỉ tracking và report incident. Policy mặc định của
 operator là rate 50%, cap 30.000.000 VND, fallback không chứng từ 4 lần cước, claim window 30 ngày,
@@ -4066,6 +4080,17 @@ Fields cần có: tripId + stopId composite key, `orderIndex` (1-indexed, thứ 
 > **Lý do chọn explicit confirm thay vì GPS auto-detect:** GPS auto-detect tạo cross-service write phức tạp (Tracking Service NestJS phải write sang Trip-Route-Vehicle ASP.NET Core DB qua HTTP/event, coupling chặt). GPS có thể giật (xe dừng đèn đỏ gần stop) → false positive. Explicit confirm đơn giản, nhất quán với các confirm action khác của Assistant (LOADED, UNLOADED). DISRUPTED refund luôn có fallback stop-order ratio nếu `actualArrivalTime` chưa được set — không bị block.
 >
 > **Endpoint:** `POST /v1/driver/trips/{tripId}/stops/{stopId}/arrive` — role DRIVER hoặc ASSISTANT của trip đó, precondition Trip.status = IN_PROGRESS và TripStop.status = PENDING.
+> Trip và toàn bộ TripStop được lock theo `(orderIndex,stopId)`. Stop N chỉ được arrive khi mọi stop
+> trước đã có `actualDepartureTime` hoặc `SKIPPED`; destination chỉ được arrive khi mọi stop không
+> skip đã departed. Vi phạm trả `409 TRIP_STOP_SEQUENCE_VIOLATION` với
+> `blockingStopId,target,requiredAction=DEPART_BLOCKING_STOP`.
+>
+> Mọi manual completion của Driver/Assistant/Operations yêu cầu `destinationArrivedAt`; nếu thiếu
+> trả `409 TRIP_DESTINATION_NOT_ARRIVED` với
+> `requiredAction=ARRIVE_DESTINATION_BEFORE_COMPLETION` trước khi gọi Parcel clearance. Auto
+> fallback ETA+30 vẫn được complete khi thiếu arrival nhưng phải atomically ghi audit
+> `TRIP_COMPLETED_FALLBACK_WITHOUT_DESTINATION_ARRIVAL` cùng Trip transition, resource release và
+> Outbox completion event.
 
 > **Day-24 departure endpoint:** bodyless `POST /v1/driver/trips/{tripId}/stops/{stopId}/depart` —
 > assigned DRIVER/ASSISTANT only, tenant-scoped, required UUID-v4 Idempotency-Key, precondition

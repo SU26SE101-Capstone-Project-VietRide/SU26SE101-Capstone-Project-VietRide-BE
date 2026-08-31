@@ -59,6 +59,7 @@ public sealed class CompleteTripCommandHandler : IRequestHandler<CompleteTripCom
                 ?? throw new CodedNotFoundException("TRIP_NOT_FOUND", "Trip was not found.");
 
             EnsureAssigned(trip, request.ActorUserId, request.ActorRole);
+            TripCompletionDestinationGuard.EnsureManualCompletionAllowed(trip);
 
             await ParcelTripCompletionClearanceGuard.EnsureAsync(
                 parcelImpact,

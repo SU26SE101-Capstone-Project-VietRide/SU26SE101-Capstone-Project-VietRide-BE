@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.83.0
+> **Phiên bản:** 1.86.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-30
+> **Cập nhật lần cuối:** 2026-08-31
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1706,7 +1706,9 @@ phát integration event.
 | | `TRIP_STOP_ALREADY_FINALIZED` | 409 | TripStop đã `ARRIVED` hoặc `SKIPPED` |
 | | `TRIP_STOP_NOT_ARRIVED` | 422 | Day-24 departure requires TripStop.status = ARRIVED |
 | | `TRIP_STOP_ALREADY_DEPARTED` | 409 | A new idempotency key targets a TripStop with actualDepartureTime already set |
+| | `TRIP_STOP_SEQUENCE_VIOLATION` | 409 | Stop/destination arrival bị chặn bởi stop trước chưa departed; fields gồm `blockingStopId,target,requiredAction=DEPART_BLOCKING_STOP` |
 | | `TRIP_DESTINATION_ALREADY_ARRIVED` | 409 | Destination-terminal anchor đã được ghi trước đó |
+| | `TRIP_DESTINATION_NOT_ARRIVED` | 409 | Manual completion chưa có destination arrival; `requiredAction=ARRIVE_DESTINATION_BEFORE_COMPLETION` |
 | | `VEHICLE_NOT_FOUND` | 404 | Vehicle không tồn tại, đã soft-delete, hoặc không thuộc operator caller |
 | | `VEHICLE_NOT_ACTIVE` | 422 | Replacement Vehicle exists but is not active |
 | | `VEHICLE_TYPE_NOT_FOUND` | 404 | VehicleType không tồn tại hoặc không active |
@@ -1763,6 +1765,7 @@ phát integration event.
 | | `PARCEL_INCIDENT_NOT_FOUND` | 404 | Parcel incident không tồn tại hoặc bị tenant-mask |
 | | `PARCEL_INCIDENT_ALREADY_OPEN` | 409 | Parcel đã có incident active cùng phạm vi điều tra |
 | | `PARCEL_INCIDENT_INVALID_STATUS` | 409 | Incident state không cho phép found/forward/resolve/close transition được yêu cầu |
+| | `PARCEL_INCIDENT_STATUS_NOT_REPORTABLE` | 409 | Passenger report incident ngoài `UNLOADED|DELIVERED_PENDING_CONFIRM`; fields gồm `status,incidentType,allowedStatuses` |
 | | `PARCEL_CUSTODY_EXCEPTION_REQUEST_NOT_FOUND` | 404 | Custody exception approval request không tồn tại hoặc bị tenant-mask |
 | | `PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED` | 409 | Báo cáo custody exception chưa được Driver/Operator có quyền phê duyệt |
 | | `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED` | 409 | Custody exception request đã được duyệt/từ chối trước đó |
@@ -2445,7 +2448,7 @@ Parcel custody reconciliation; a positive exact Booking pending-count result add
 | `booking.voucher.consent_rejected` | Booking | Notification | `{ voucherId, operatorId, reason? }` |
 | `trip.trip.boarding_started` | Trip | Notification | Existing exact `{ tripId, boardingStartedAt }`; emitted once by the shared locked automatic/manual boarding transition coordinator |
 | `trip.trip.assigned` | Trip | Notification | `{ tripId, operatorId, driverUserId, assistantUserId?, routeName, vehiclePlateNumber, departureDateTime }` |
-| `trip.trip.crew_changed` | Trip | Notification | `{ tripId, operatorId, oldDriverUserId, oldAssistantUserId?, driverUserId, assistantUserId?, routeName, vehiclePlateNumber?, departureDateTime }` |
+| `trip.trip.crew_changed` | Trip | Notification, Parcel | `{ eventId, tripId, operatorId, oldDriverUserId, oldAssistantUserId?, driverUserId, assistantUserId?, routeName, vehiclePlateNumber?, departureDateTime }`; Parcel immediately scopes pending approvals away from the old Driver, preserves the request identity, and emits a new `parcel.approval.requested` notification fact for the new Driver; pending requests are cancelled when no Driver remains. |
 | `trip.trip.started` | Trip | Parcel (block new parcel), Tracking | `{ tripId, actualDepartureTime }` |
 | `trip.assignment.start_blocked` | Trip | Notification (operator) | Exact `{ eventId, occurredAt, tripId, operatorId, resourceRole, resourceId, conflictingSourceType, conflictingSourceId, conflictReason: RESOURCE_ACTIVE, blockingUntil? }`; emitted through Trip Outbox at most once per blocked Trip while any assigned reservation remains `ACTIVE`. Trip state is unchanged and Notification fans out to active operator admins. |
 | `trip.trip.completed` | Trip | Booking, Parcel, Payment (settlement eligibility), Tracking (runtime cleanup) | `{ eventId, occurredAt, tripId, operatorId, terminalAt, completedAt, hasSubstitution, tripCode?, source? }`; `completedAt` equals `terminalAt`; nullable `tripCode` and `source` are additive for queued legacy payload compatibility. Payment snapshots `tripCode` when present and uses `source=VEHICLE_SUBSTITUTION` to persist the dedicated zero-net cancellation reason. |
@@ -2521,6 +2524,7 @@ Parcel custody reconciliation; a positive exact Booking pending-count result add
 | `parcel.custody.event_recorded` | Parcel | None in v1 (registered audit/extension fact) | `{ eventId,occurredAt,custodyEventId,parcelId,tripId,operatorId,eventType,actualLocationType?,actualLocationId? }`; emitted for every accepted lifecycle/manual scan from the same transaction; no evidence URL, token, reason or actor PII. |
 | `parcel.incident.opened` | Parcel | Notification | Required common `{ incidentId,parcelId,operatorId,type,searchDeadline }` plus source-specific Trip/stop/reporter/last-location fields; opens sender/recipient/operator search communication without exposing internal notes. For assistant custody exceptions it is emitted only after the assigned Driver or same-tenant Operator Staff/Admin approves; the pending report emits no passenger search notification. |
 | `parcel.incident.updated` | Parcel | Notification | Required common `{ incidentId,parcelId,status }` plus transition-specific operator/location/forwarding/resolution fields; statuses include `FOUND|FORWARDING|RESOLVED|LOST_CONFIRMED`. |
+| `parcel.approval.requested` | Parcel | Notification | Exact `{ eventId,occurredAt,approvalRequestId,requestType:CUSTODY_EXCEPTION\|STOP_DEPARTURE,operatorId,targetDriverUserId,tripId,parcelId?,incidentId?,stopId?,expiresAt:null,validityCondition,actionType:"OPEN_PARCEL_APPROVAL",actionParams:{requestId,requestType} }`; request and Outbox are atomic; Notification creates `PARCEL_APPROVAL_REQUESTED` with dedupe key `routingKey:eventId:targetDriverUserId:notificationType`. |
 | `parcel.claim.submitted` | Parcel | Notification | `{ claimId,parcelId,incidentId,operatorId,beneficiaryUserId,policyVersion }`; sender is always beneficiary. |
 | `parcel.claim.decided` | Parcel | Payment (only `APPROVED`), Notification | `{ claimId,parcelId,tripId?,operatorId,status:APPROVED\|REJECTED,totalAwardVnd,beneficiaryUserId }`; Payment requires non-null Trip and positive award only for `APPROVED`, and unique payout is keyed by claimId. |
 | `parcel.claim.appealed` | Parcel | None in v1 (registered audit/extension fact) | `{ eventId,occurredAt,appealId,claimId,parcelId,incidentId,operatorId,beneficiaryUserId,status:"SUBMITTED" }`; sender-only creation of a separate appeal aggregate; no appeal reason or evidence URL is published and the original claim remains unchanged. |
@@ -3835,7 +3839,7 @@ KHÔNG dùng Prometheus/Grafana/Jaeger/Loki cho v1 (xem technical_context 3.5).
 | `GenerateTripsFromScheduleJob` | Recurring | Weekly Sun 23:00 Asia/Ho_Chi_Minh + immediate on DriverSchedule create/activate | Generate Trip theo cửa sổ lăn từ today đến `today + 30` inclusive. Idempotent (driverId + departureDateTime) |
 | `AutoBoardingJob` | Recurring | Every minute; UTC cron `* * * * *` | Shared locked boarding coordinator sets SCHEDULED Trips to BOARDING only when `departureDateTime <= now + 30 phút`; any later status is a no-op and cannot be overwritten; publish one `trip.trip.boarding_started` |
 | `AutoStartFallbackJob` | Recurring | Every 5 phút | Set BOARDING Trips to IN_PROGRESS only when `departureDateTime < now - 30 phút` and no assigned resource belongs to another `ACTIVE` reservation; otherwise leave Trip unchanged and persist one deduped alert/`trip.assignment.start_blocked` Outbox event. On success capture `actualDepartureTime`, activate reservations, and publish `trip.trip.started`. |
-| `AutoCompletedFallbackJob` | Recurring | Every 15 phút | Set IN_PROGRESS Trips to COMPLETED only when `estimatedArrivalTime < now - 30 phút`; publish `trip.trip.completed` |
+| `AutoCompletedFallbackJob` | Recurring | Every 15 phút | Set IN_PROGRESS Trips to COMPLETED when `estimatedArrivalTime < now - 30 phút`; if destination arrival is missing, atomically write `TRIP_COMPLETED_FALLBACK_WITHOUT_DESTINATION_ARRIVAL`; publish `trip.trip.completed` in the same transaction |
 
 #### Booking
 
@@ -4380,6 +4384,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.86.0** | 2026-08-31 | Codex | **MINOR** — Fix Parcel production E2E defects BE-PCL-001..008: expose stop departure anchors; enforce ordered stop/destination arrival and destination-before-manual-completion while auditing the ETA+30 exception; make forwarding custody/outbox atomic and auto-resolve only after verified unload; align Assistant actions and Passenger incident policy; clarify destination reconciliation semantics with a deprecated `canComplete` alias; and add the Driver unified approval inbox, `parcel.approval.requested`, `PARCEL_APPROVAL_REQUESTED`, native `OPEN_PARCEL_APPROVAL`, reassignment/terminal invalidation, Gateway route and one Notification enum migration. No dependency or Parcel/Trip schema change. |
 | **1.85.0** | 2026-08-30 | Codex | **MINOR** — Let assigned Driver/Assistant resolve a crew manifest seat to its Booking buyer during `BOARDING|IN_PROGRESS`: add nullable `buyerName`, canonical-E.164 `buyerPhone`, and `pickupPointName` to the Booking manifest, mirror buyer contact plus `bookingCode` in QR scan, expose additive Stop `name` in the internal Trip snapshot, retain paid no-show rows, and require private no-store responses. Passenger remains operational-only with no per-seat identity; unmatched Trip `BOOKED` seats are never assigned fabricated contact. No schema, dependency, Gateway route or event change. |
 | **1.84.0** | 2026-08-30 | Codex | **MINOR** — Simplify Parcel FE operation contracts after the reality audit. Require an assigned Assistant before Parcel create/forward/transfer; make crew manifests role-aware with inline custody-exception approval context; expose `CUSTODY_SCAN` only for a valid operational context and recovery-on-vehicle for `UNSCANNED_HANDOFF`; derive stop/destination reconciliation exclusively from persisted custody rather than client Parcel-ID assertions; add an operator `approvalStatus` queue filter; and expose nullable `bookingId` in create/detail. Correct the shared manifest contract to use nested pagination. No schema, dependency, Gateway family or routing key is added. |
 | **1.83.0** | 2026-08-30 | Codex | **MINOR** — Correct terminal Parcel recovery: `trip.destination.arrived` now opens the normal unload window without prematurely quarantining `LOADED|IN_TRANSIT`; `trip.trip.completed` freezes `pendingActionResumeStatus` when opening the fallback system search. Add the assigned-Assistant `confirm-found-on-vehicle` mutation to QR-verify an active system missing incident, append `FOUND@VEHICLE`, cancel search tasks, resolve it and atomically restore transport state. Inventory becomes 218/197/21; no schema, dependency, Gateway family or routing key is added. |

@@ -951,6 +951,24 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes the unified Parcel approval inbox to Parcel for Drivers only', () => {
+    expect(matchRoute(routes, '/v1/crew/parcel-approval-requests', 'GET'))
+      .toMatchObject({
+        prefix: '/v1/crew/parcel-approval-requests',
+        method: 'GET',
+        target: env.PARCEL_BASE_URL,
+        authRequired: 'user',
+        requiredRoles: ['DRIVER'],
+      });
+    const inboxIndex = routes.findIndex(
+      (route) => route.prefix === '/v1/crew/parcel-approval-requests',
+    );
+    const genericCrewParcelIndex = routes.findIndex(
+      (route) => route.prefix === '/v1/crew/parcels',
+    );
+    expect(inboxIndex).toBeLessThan(genericCrewParcelIndex);
+  });
+
   it('routes the Assistant trip parcel list and QR scan to Parcel without capturing other Assistant paths', () => {
     const parcelListRoute = matchRoute(
       routes,

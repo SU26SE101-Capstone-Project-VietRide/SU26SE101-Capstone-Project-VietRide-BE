@@ -118,6 +118,13 @@ public sealed class ReconcileParcelStopCommandHandler
                 manual.Add(parcel.Id);
         }
 
+        await ForwardingIncidentResolution.ResolveVerifiedUnloadsAsync(
+            scanned,
+            _reliability,
+            _outbox,
+            _clock.UtcNow,
+            cancellationToken);
+
         var unresolved = expectedIds.Except(scanned).Except(manual).ToArray();
         if (unresolved.Length > 0)
         {
@@ -133,7 +140,7 @@ public sealed class ReconcileParcelStopCommandHandler
             .ToDictionary(group => group.Key, group => group.OrderByDescending(incident => incident.CreatedAt).First());
         foreach (var parcel in expected.Where(x => unresolved.Contains(x.Id)))
         {
-            await _parcels.TrySetPendingOperatorActionAsync(
+            var quarantined = await _parcels.TrySetPendingOperatorActionAsync(
                 parcel.Id,
                 PendingActionType.CUSTODY_EXCEPTION,
                 "Parcel was unresolved during stop close reconciliation.",
@@ -141,6 +148,10 @@ public sealed class ReconcileParcelStopCommandHandler
                 now,
                 cancellationToken,
                 parcel.Status);
+            if (!quarantined)
+                throw new CodedConflictException(
+                    "INVALID_STATUS",
+                    "Parcel status changed during stop reconciliation.");
 
             if (incidentByParcel.TryGetValue(parcel.Id, out var existing))
                 continue;
@@ -225,14 +236,20 @@ public sealed class ReconcileParcelStopCommandHandler
                     "SEARCH_VEHICLE_OR_STATION");
             }).ToArray();
 
-        ParcelStopDepartureApprovalRequest? departureApproval = null;
+        var departureApproval = await _departureApprovals.GetLatestByTripStopForUpdateAsync(
+            command.TripId,
+            command.StopId,
+            cancellationToken);
+        if (departureApproval?.Status == ParcelStopDepartureApprovalStatus.PENDING_APPROVAL
+            && (unresolved.Length == 0
+                || !ParcelStopDepartureApprovalMapper.Matches(departureApproval, unresolved)))
+        {
+            departureApproval.CancelAsSuperseded(now);
+        }
+
         var hasAuthorizedOverride = false;
         if (unresolved.Length > 0)
         {
-            departureApproval = await _departureApprovals.GetLatestByTripStopForUpdateAsync(
-                command.TripId,
-                command.StopId,
-                cancellationToken);
             hasAuthorizedOverride = departureApproval is not null
                 && departureApproval.OperatorId == command.OperatorId
                 && departureApproval.Status == ParcelStopDepartureApprovalStatus.APPROVED
@@ -271,6 +288,23 @@ public sealed class ReconcileParcelStopCommandHandler
                         now,
                         command.IdempotencyKey);
                     await _departureApprovals.AddAsync(departureApproval, cancellationToken);
+                    if (snapshotOutcome.Snapshot.DriverUserId is not Guid targetDriverUserId)
+                        throw new CodedConflictException(
+                            "TRIP_SERVICE_UNAVAILABLE",
+                            "Assigned Driver context is unavailable for the approval request.");
+                    await ParcelApprovalRequestedEvent.EnqueueAsync(
+                        _outbox,
+                        departureApproval.Id,
+                        "STOP_DEPARTURE",
+                        command.OperatorId,
+                        targetDriverUserId,
+                        command.TripId,
+                        null,
+                        null,
+                        command.StopId,
+                        "WHILE_PENDING_AND_UNRESOLVED_SNAPSHOT_MATCHES_BEFORE_STOP_DEPARTURE",
+                        now,
+                        cancellationToken);
                 }
             }
         }

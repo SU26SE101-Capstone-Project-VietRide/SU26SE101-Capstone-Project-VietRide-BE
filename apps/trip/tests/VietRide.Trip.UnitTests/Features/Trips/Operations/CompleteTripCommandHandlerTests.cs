@@ -22,6 +22,7 @@ public sealed class CompleteTripCommandHandlerTests
     {
         var driverId = Guid.NewGuid();
         var trip = CreateInProgressTrip(driverId, Guid.NewGuid());
+        trip.MarkDestinationArrived(Now.AddMinutes(-1), driverId);
         var outbox = new FakeOutbox();
         var handler = CreateHandler(trip, outbox);
 

@@ -168,6 +168,11 @@ public static class InfrastructureServiceCollectionExtensions
                 options.QueueName = "parcel.trip-completed";
                 options.BindingKeys = [TripCompletedIntegrationEvent.EventType];
             });
+            services.AddVietRideEventConsumer<TripCrewChangedIntegrationEvent, TripCrewChangedIntegrationEventHandler>(options =>
+            {
+                options.QueueName = "parcel.trip-crew-changed";
+                options.BindingKeys = [TripCrewChangedIntegrationEvent.EventTypeValue];
+            });
             services.AddVietRideEventConsumer<TripStopDepartedIntegrationEvent, TripStopDepartedIntegrationEventHandler>(options =>
             {
                 options.QueueName = "parcel.trip-stop-departed";

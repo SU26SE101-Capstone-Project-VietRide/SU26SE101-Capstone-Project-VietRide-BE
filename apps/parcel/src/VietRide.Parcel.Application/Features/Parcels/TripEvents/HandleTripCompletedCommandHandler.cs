@@ -14,17 +14,23 @@ public sealed class HandleTripCompletedCommandHandler
     private readonly IParcelReliabilityRepository? _reliability;
     private readonly IIntegrationEventOutbox? _outbox;
     private readonly IClock _clock;
+    private readonly IParcelCustodyExceptionRequestRepository? _custodyApprovals;
+    private readonly IParcelStopDepartureApprovalRepository? _departureApprovals;
 
     public HandleTripCompletedCommandHandler(
         IParcelRepository parcelRepository,
         IParcelReliabilityRepository? reliability = null,
         IIntegrationEventOutbox? outbox = null,
-        IClock? clock = null)
+        IClock? clock = null,
+        IParcelCustodyExceptionRequestRepository? custodyApprovals = null,
+        IParcelStopDepartureApprovalRepository? departureApprovals = null)
     {
         _parcelRepository = parcelRepository;
         _reliability = reliability;
         _outbox = outbox;
         _clock = clock ?? new SystemClock();
+        _custodyApprovals = custodyApprovals;
+        _departureApprovals = departureApprovals;
     }
 
     public async Task<int> Handle(
@@ -32,6 +38,24 @@ public sealed class HandleTripCompletedCommandHandler
         CancellationToken cancellationToken)
     {
         var now = _clock.UtcNow;
+        if (_custodyApprovals is not null)
+        {
+            var approvals = await _custodyApprovals.ListPendingByTripForUpdateAsync(
+                command.TripId,
+                cancellationToken);
+            foreach (var approval in approvals)
+                approval.CancelAsInvalidated(now, "Trip reached a terminal status.");
+        }
+        if (_departureApprovals is not null)
+        {
+            var approvals = await _departureApprovals.ListPendingByTripForUpdateAsync(
+                command.TripId,
+                null,
+                cancellationToken);
+            foreach (var approval in approvals)
+                approval.CancelAsSuperseded(now);
+        }
+
         var updated = await _parcelRepository.TryBulkSetPendingOperatorActionByTripIdAsync(
             command.TripId,
             now,

@@ -29,6 +29,7 @@ export * from './events/day24-stop-no-show-events';
 export * from './events/trip-cargo-threshold-crossed.event';
 export * from './events/parcel-sprint4-events';
 export * from './events/parcel-delivery-events';
+export * from './events/parcel-approval-requested.event';
 export * from './events/subscription-payment-succeeded.event';
 export * from './events/invoice-issued.event';
 export * from './events/trip-settlement-completed.event';

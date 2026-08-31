@@ -13,6 +13,7 @@ public sealed record TripStopDto(
     string Status,
     DateTimeOffset EstimatedArrivalTime,
     DateTimeOffset? ActualArrivalTime,
+    DateTimeOffset? ActualDepartureTime,
     double? DistanceFromOriginKm,
     long? FareFromThisStop,
     long EffectiveFare)

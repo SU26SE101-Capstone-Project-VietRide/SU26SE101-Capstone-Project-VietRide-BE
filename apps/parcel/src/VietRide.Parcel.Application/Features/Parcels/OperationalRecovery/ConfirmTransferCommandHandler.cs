@@ -50,6 +50,7 @@ public sealed class ConfirmTransferCommandHandler
 
         if (IsCompletedReplay(snapshot, command.IdempotencyKey))
         {
+            await EnsureCompletedForwardingCustodyAsync(snapshot, cancellationToken);
             return ToResponse(snapshot);
         }
 
@@ -72,18 +73,25 @@ public sealed class ConfirmTransferCommandHandler
 
         if (transfer.Kind == TripCargoTransferOutcomeKind.Success)
         {
+            Guid? targetVehicleId = null;
+            if (_reliability is not null)
+            {
+                var targetSnapshot = await _tripClient.GetTripParcelSnapshotAsync(targetTripId, cancellationToken);
+                if (targetSnapshot.Kind != TripSnapshotOutcomeKind.Success || targetSnapshot.Snapshot is null)
+                {
+                    throw new ParcelDependencyUnavailableException(
+                        "TRIP_SERVICE_UNAVAILABLE",
+                        targetSnapshot.ErrorMessage ?? "Target Trip context is unavailable after cargo transfer.");
+                }
+                targetVehicleId = targetSnapshot.Snapshot.VehicleId;
+            }
+
             var completed = await CompleteAsync(
                 claimed,
                 targetTripId,
                 claimId,
                 confirmedByUserId,
-                cancellationToken);
-            await RecordForwardingCustodyAsync(
-                claimed.ParcelId,
-                claimed.SourceTripId,
-                targetTripId,
-                claimId,
-                confirmedByUserId,
+                targetVehicleId,
                 cancellationToken);
             return ToResponse(completed);
         }
@@ -105,12 +113,54 @@ public sealed class ConfirmTransferCommandHandler
             transfer.ErrorMessage ?? "Trip cargo transfer outcome is unknown.");
     }
 
+    private async Task EnsureCompletedForwardingCustodyAsync(
+        ParcelTransferConfirmationSnapshot completed,
+        CancellationToken cancellationToken)
+    {
+        if (_reliability is null
+            || completed.TargetTripId is not Guid targetTripId
+            || completed.ClaimId is not Guid operationId
+            || completed.TransferConfirmedByUserId is not Guid actorUserId)
+        {
+            return;
+        }
+
+        var targetSnapshot = await _tripClient.GetTripParcelSnapshotAsync(targetTripId, cancellationToken);
+        if (targetSnapshot.Kind != TripSnapshotOutcomeKind.Success || targetSnapshot.Snapshot is null)
+        {
+            throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                targetSnapshot.ErrorMessage ?? "Target Trip context is unavailable while repairing forwarding custody.");
+        }
+
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await RecordForwardingCustodyAsync(
+                completed.ParcelId,
+                completed.SourceTripId,
+                targetTripId,
+                operationId,
+                actorUserId,
+                targetSnapshot.Snapshot.VehicleId,
+                cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _unitOfWork.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
     private async Task RecordForwardingCustodyAsync(
         Guid parcelId,
         Guid sourceTripId,
         Guid targetTripId,
         Guid operationId,
         Guid actorUserId,
+        Guid? targetVehicleId,
         CancellationToken cancellationToken)
     {
         if (_reliability is null)
@@ -120,22 +170,26 @@ public sealed class ConfirmTransferCommandHandler
         if (parcel is null)
             return;
 
-        var target = await _tripClient.GetTripParcelSnapshotAsync(targetTripId, cancellationToken);
-        var targetVehicleId = target.Snapshot?.VehicleId;
         var oldLeg = await _reliability.GetTransitLegAsync(parcel.Id, sourceTripId, cancellationToken);
         var targetLeg = await _reliability.GetTransitLegAsync(parcel.Id, targetTripId, cancellationToken);
         var existingEvents = await _reliability.ListCustodyEventsAsync(parcel.Id, cancellationToken);
         var sequence = existingEvents.Count == 0 ? 1 : existingEvents.Max(x => x.Sequence) + 1;
         var current = await _reliability.GetCurrentCustodyAsync(parcel.Id, cancellationToken);
         var now = _clock.UtcNow;
+        var forwardedOutKey = $"forward:{operationId:D}:out";
+        var forwardedInKey = $"forward:{operationId:D}:in";
+        var existingForwardedOut = existingEvents.FirstOrDefault(x => x.IdempotencyKey == forwardedOutKey);
+        var existingForwardedIn = existingEvents.FirstOrDefault(x => x.IdempotencyKey == forwardedInKey);
 
-        await _unitOfWork.BeginTransactionAsync(cancellationToken);
-        try
+        if (oldLeg is not null)
         {
-            if (oldLeg is not null)
+            if (oldLeg.Status != ParcelTransitLegStatus.FORWARDED)
             {
                 oldLeg.MarkForwarded(now);
                 await _reliability.UpdateTransitLegAsync(oldLeg, cancellationToken);
+            }
+            if (existingForwardedOut is null)
+            {
                 var forwardedOut = ParcelCustodyEvent.Create(
                     parcel.Id,
                     oldLeg.Id,
@@ -151,32 +205,37 @@ public sealed class ConfirmTransferCommandHandler
                     "ASSISTANT",
                     now,
                     "TRANSFER_CONFIRMATION",
-                    $"forward:{operationId:D}:out",
+                    forwardedOutKey,
                     null,
                     null,
                     sequence++);
                 await _reliability.AddCustodyEventAsync(forwardedOut, cancellationToken);
+                await EnqueueCustodyEventAsync(forwardedOut, parcel, cancellationToken);
             }
+        }
 
-            var newLeg = targetLeg ?? ParcelTransitLeg.Create(
-                parcel.Id,
-                targetTripId,
-                parcel.OperatorId,
-                (oldLeg?.Sequence ?? 0) + 1,
-                current?.LastLocationId,
-                parcel.DropoffStopId,
-                current?.LastLocationSnapshot,
-                parcel.DropoffStopId.HasValue
-                    ? $"STOP:{parcel.DropoffStopId:D}"
-                    : parcel.TripSnapshotDestinationStationName,
-                targetVehicleId,
-                null);
+        var newLeg = targetLeg ?? ParcelTransitLeg.Create(
+            parcel.Id,
+            targetTripId,
+            parcel.OperatorId,
+            (oldLeg?.Sequence ?? 0) + 1,
+            current?.LastLocationId,
+            parcel.DropoffStopId,
+            current?.LastLocationSnapshot,
+            parcel.DropoffStopId.HasValue
+                ? $"STOP:{parcel.DropoffStopId:D}"
+                : parcel.TripSnapshotDestinationStationName,
+            targetVehicleId,
+            null);
+        if (newLeg.Status is ParcelTransitLegStatus.PLANNED or ParcelTransitLegStatus.ACTIVE)
             newLeg.Start(now);
-            if (targetLeg is null)
-                await _reliability.AddTransitLegAsync(newLeg, cancellationToken);
-            else
-                await _reliability.UpdateTransitLegAsync(newLeg, cancellationToken);
+        if (targetLeg is null)
+            await _reliability.AddTransitLegAsync(newLeg, cancellationToken);
+        else
+            await _reliability.UpdateTransitLegAsync(newLeg, cancellationToken);
 
+        if (existingForwardedIn is null)
+        {
             var forwardedIn = ParcelCustodyEvent.Create(
                 parcel.Id,
                 newLeg.Id,
@@ -192,11 +251,12 @@ public sealed class ConfirmTransferCommandHandler
                 "ASSISTANT",
                 now,
                 "TRANSFER_CONFIRMATION",
-                $"forward:{operationId:D}:in",
+                forwardedInKey,
                 null,
                 null,
                 sequence);
             await _reliability.AddCustodyEventAsync(forwardedIn, cancellationToken);
+            await EnqueueCustodyEventAsync(forwardedIn, parcel, cancellationToken);
             if (current is null)
                 await _reliability.AddCurrentCustodyAsync(ParcelCurrentCustody.Create(parcel.Id, forwardedIn), cancellationToken);
             else
@@ -204,16 +264,41 @@ public sealed class ConfirmTransferCommandHandler
                 current.Apply(forwardedIn);
                 await _reliability.UpdateCurrentCustodyAsync(current, cancellationToken);
             }
-
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            await _unitOfWork.CommitAsync(cancellationToken);
         }
-        catch
+        else if (current is null)
         {
-            await _unitOfWork.RollbackAsync(cancellationToken);
-            throw;
+            await _reliability.AddCurrentCustodyAsync(
+                ParcelCurrentCustody.Create(parcel.Id, existingForwardedIn),
+                cancellationToken);
+        }
+        else if (current.LastSequence < existingForwardedIn.Sequence)
+        {
+            current.Apply(existingForwardedIn);
+            await _reliability.UpdateCurrentCustodyAsync(current, cancellationToken);
         }
     }
+
+    private Task EnqueueCustodyEventAsync(
+        ParcelCustodyEvent custodyEvent,
+        VietRide.Parcel.Domain.Entities.Parcel parcel,
+        CancellationToken cancellationToken)
+        => ParcelOutboxEvents.EnqueueAsync(
+            _outbox,
+            custodyEvent.Id,
+            ParcelOutboxEvents.CustodyEventRecorded,
+            new
+            {
+                eventId = custodyEvent.Id,
+                occurredAt = custodyEvent.OccurredAt,
+                custodyEventId = custodyEvent.Id,
+                parcelId = parcel.Id,
+                tripId = custodyEvent.TripId,
+                operatorId = parcel.OperatorId,
+                eventType = custodyEvent.EventType.ToString(),
+                actualLocationType = custodyEvent.ActualLocationType?.ToString(),
+                actualLocationId = custodyEvent.ActualLocationId,
+            },
+            cancellationToken);
 
 
     private async Task<ParcelTransferConfirmationSnapshot> AcquireClaimAsync(
@@ -301,6 +386,7 @@ public sealed class ConfirmTransferCommandHandler
         Guid targetTripId,
         Guid claimId,
         Guid confirmedByUserId,
+        Guid? targetVehicleId,
         CancellationToken cancellationToken)
     {
         var now = _clock.UtcNow;
@@ -323,6 +409,15 @@ public sealed class ConfirmTransferCommandHandler
             }
             else
             {
+                await RecordForwardingCustodyAsync(
+                    claimed.ParcelId,
+                    claimed.SourceTripId,
+                    targetTripId,
+                    claimId,
+                    confirmedByUserId,
+                    targetVehicleId,
+                    cancellationToken);
+
                 var eventId = ParcelOperationId.Create(
                     claimId,
                     claimed.ParcelId,

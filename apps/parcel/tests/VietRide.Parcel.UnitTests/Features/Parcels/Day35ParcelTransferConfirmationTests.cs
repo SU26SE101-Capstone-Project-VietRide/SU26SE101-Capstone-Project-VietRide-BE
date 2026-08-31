@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Security.Claims;
 using FluentAssertions;
 using MediatR;
@@ -17,6 +18,7 @@ using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
+using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Parcel.UnitTests.Features.Parcels;
 
@@ -93,8 +95,50 @@ public sealed class Day35ParcelTransferConfirmationTests
             .Returns(SuccessfulTransfer());
         var outbox = Substitute.For<IIntegrationEventOutbox>();
         var unitOfWork = Substitute.For<IUnitOfWork>();
+        var reliability = Substitute.For<IParcelReliabilityRepository>();
+        var parcel = CreateParcel();
+        repository.GetByIdAsync(ParcelId, Arg.Any<CancellationToken>()).Returns(parcel);
+        var oldLeg = ParcelTransitLeg.Create(
+            ParcelId,
+            SourceTripId,
+            OperatorId,
+            1,
+            null,
+            null,
+            "Origin",
+            "Destination",
+            Guid.NewGuid(),
+            "51A-00000");
+        oldLeg.Start(Now.AddHours(-1));
+        reliability.GetTransitLegAsync(ParcelId, SourceTripId, Arg.Any<CancellationToken>())
+            .Returns(oldLeg);
+        reliability.GetTransitLegAsync(ParcelId, TargetTripId, Arg.Any<CancellationToken>())
+            .Returns((ParcelTransitLeg?)null);
+        reliability.ListCustodyEventsAsync(ParcelId, Arg.Any<CancellationToken>())
+            .Returns([]);
+        reliability.GetCurrentCustodyAsync(ParcelId, Arg.Any<CancellationToken>())
+            .Returns((ParcelCurrentCustody?)null);
+        var station = new TripStationDto(Guid.NewGuid(), "Station");
+        tripClient.GetTripParcelSnapshotAsync(TargetTripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(
+                TripSnapshotOutcomeKind.Success,
+                new TripParcelSnapshot(
+                    TargetTripId,
+                    OperatorId,
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    "IN_PROGRESS",
+                    Now.AddHours(-1),
+                    Now.AddHours(1),
+                    100_000,
+                    station,
+                    station,
+                    [],
+                    new TripSeatSummaryDto(40, 10),
+                    null),
+                null));
 
-        var result = await Handler(repository, tripClient, outbox, unitOfWork)
+        var result = await Handler(repository, tripClient, outbox, unitOfWork, reliability)
             .Handle(Command(requestKey), CancellationToken.None);
 
         result.Status.Should().Be("LOADED");
@@ -109,6 +153,14 @@ public sealed class Day35ParcelTransferConfirmationTests
             Arg.Is<string>(payload =>
                 payload.Contains(ParcelId.ToString(), StringComparison.OrdinalIgnoreCase)
                 && payload.Contains(TargetTripId.ToString(), StringComparison.OrdinalIgnoreCase)),
+            Arg.Any<CancellationToken>());
+        await reliability.Received(2).AddCustodyEventAsync(
+            Arg.Any<ParcelCustodyEvent>(),
+            Arg.Any<CancellationToken>());
+        await outbox.Received(2).EnqueueAsync(
+            Arg.Any<Guid>(),
+            ParcelOutboxEvents.CustodyEventRecorded,
+            Arg.Any<string>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -481,4 +533,29 @@ public sealed class Day35ParcelTransferConfirmationTests
             confirmedAt,
             confirmedByUserId,
             SenderUserId);
+
+    private static VietRide.Parcel.Domain.Entities.Parcel CreateParcel()
+    {
+        var parcel = VietRide.Parcel.Domain.Entities.Parcel.CreatePendingPayment(
+            ParcelCode,
+            SenderUserId,
+            null,
+            "Recipient",
+            PhoneNumber.Normalize("0900000000"),
+            null,
+            OperatorId,
+            SourceTripId,
+            null,
+            null,
+            "Package",
+            null,
+            ParcelSizeCategory.SMALL,
+            5m,
+            ParcelDeliveryMethod.TERMINAL_PICKUP,
+            Money.FromRaw(100_000));
+        typeof(VietRide.Parcel.Domain.Entities.Parcel)
+            .GetProperty(nameof(parcel.Id), BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+            .SetValue(parcel, ParcelId);
+        return parcel;
+    }
 }

@@ -129,7 +129,11 @@ public sealed class DevTripServiceClient : ITripServiceClient
                 new TripVehicleSummarySnapshot(
                     Guid.Parse("33333333-3333-4333-8333-333333333333"),
                     "DEV-0001",
-                    "ACTIVE")))
+                    "ACTIVE"))
+            {
+                DriverUserId = Guid.Parse("77777777-7777-4777-8777-777777777771"),
+                AssistantUserId = Guid.Parse("77777777-7777-4777-8777-777777777772"),
+            })
             .ToArray();
         return Task.FromResult(TripSummaryBatchOutcome.Success(summaries));
     }

@@ -5,6 +5,7 @@ using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Reliability.Incidents;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.ValueObjects;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
@@ -14,7 +15,7 @@ namespace VietRide.Parcel.UnitTests.Features.Reliability;
 public sealed class TripReliabilityEventHandlersTests
 {
     [Fact]
-    public async Task StopDeparted_WhenStatusTransitionLosesRace_DoesNotOpenIncident()
+    public async Task StopDeparted_WhenStatusTransitionLosesRace_RollsBackTheBatch()
     {
         var tripId = Guid.NewGuid();
         var stopId = Guid.NewGuid();
@@ -34,10 +35,11 @@ public sealed class TripReliabilityEventHandlersTests
                 ParcelStatus.IN_TRANSIT)
             .Returns(false);
 
-        var result = await new HandleTripStopDepartedWithPendingCommandHandler(parcels, reliability, outbox)
+        var action = () => new HandleTripStopDepartedWithPendingCommandHandler(parcels, reliability, outbox)
             .Handle(new HandleTripStopDepartedWithPendingCommand(tripId, stopId, DateTimeOffset.UtcNow), CancellationToken.None);
 
-        result.Should().Be(0);
+        (await action.Should().ThrowAsync<CodedConflictException>()).Which.ErrorCode
+            .Should().Be("PARCEL_STATE_CONFLICT");
         await reliability.DidNotReceive().AddIncidentAsync(
             Arg.Any<ParcelIncident>(),
             Arg.Any<CancellationToken>());

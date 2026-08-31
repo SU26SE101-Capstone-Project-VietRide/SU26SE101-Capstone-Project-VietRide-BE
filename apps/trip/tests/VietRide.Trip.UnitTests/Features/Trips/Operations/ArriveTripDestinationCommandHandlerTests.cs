@@ -141,6 +141,34 @@ public sealed class ArriveTripDestinationCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_PriorStopNotDeparted_RejectsDestinationArrival()
+    {
+        var route = CreateRoute();
+        var trip = CreateTrip(route.Id, inProgress: true);
+        var prior = TripStop.Create(
+            trip.Id,
+            Guid.NewGuid(),
+            1,
+            Now.AddMinutes(-30),
+            allowPickup: true,
+            allowDropoff: true,
+            distanceFromOriginKm: 10m);
+        prior.MarkArrived(Now.AddMinutes(-10));
+        var fixture = new Fixture(trip, route, [prior]);
+
+        var action = () => fixture.Handler.Handle(
+            new ArriveTripDestinationCommand(trip.Id, trip.DriverUserId),
+            CancellationToken.None);
+
+        var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
+        exception.ErrorCode.Should().Be("TRIP_STOP_SEQUENCE_VIOLATION");
+        exception.Errors.Should().Contain(error =>
+            error.Field == "target" && error.Message == "DESTINATION");
+        trip.DestinationArrivedAt.Should().BeNull();
+        fixture.RouteLookupCount.Should().Be(0);
+    }
+
+    [Fact]
     public void CompleteAutomatically_DoesNotSynthesizeDestinationAnchor()
     {
         var route = CreateRoute();
@@ -192,12 +220,16 @@ public sealed class ArriveTripDestinationCommandHandlerTests
     {
         private readonly CountingRouteRepository routeRepository;
 
-        public Fixture(TripEntity? trip, RouteEntity? route)
+        public Fixture(
+            TripEntity? trip,
+            RouteEntity? route,
+            IReadOnlyList<TripStop>? stops = null)
         {
             routeRepository = new CountingRouteRepository(route);
             Outbox = new RecordingOutbox();
             Handler = new ArriveTripDestinationCommandHandler(
                 new FakeTripRepository(trip),
+                new FakeTripStopRepository(stops ?? []),
                 routeRepository,
                 Outbox,
                 new FrozenClock(Now));
@@ -232,6 +264,35 @@ public sealed class ArriveTripDestinationCommandHandlerTests
         public IQueryable<TripEntity> QueryNoTracking() => Query();
         public Task<TripEntity?> GetWithSeatsAsync(Guid tripId, CancellationToken cancellationToken)
             => GetByIdAsync(tripId, cancellationToken);
+    }
+
+    private sealed class FakeTripStopRepository : ITripStopRepository
+    {
+        private readonly IReadOnlyList<TripStop> stops;
+
+        public FakeTripStopRepository(IReadOnlyList<TripStop> stops)
+        {
+            this.stops = stops;
+        }
+
+        public Task<IReadOnlyList<TripStop>> AcquireByTripAsync(
+            Guid tripId,
+            CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<TripStop>>(
+                stops.Where(stop => stop.TripId == tripId).ToArray());
+
+        public Task<TripStop?> GetByIdAsync(
+            (Guid TripId, Guid StopId) id,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<TripStop?>(null);
+
+        public Task<TripStop> AddAsync(TripStop entity, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public void Update(TripStop entity) => throw new NotSupportedException();
+        public void Remove(TripStop entity) => throw new NotSupportedException();
+        public IQueryable<TripStop> Query() => Array.Empty<TripStop>().AsQueryable();
+        public IQueryable<TripStop> QueryNoTracking() => Query();
     }
 
     private sealed class CountingRouteRepository : IRouteRepository

@@ -18,6 +18,7 @@ using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.DriverTrips.CompleteTrip;
 using VietRide.Trip.Application.Features.DriverTrips.StartTrip;
 using VietRide.Trip.Application.Services;
+using VietRide.Trip.Domain.Constants;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
 using VietRide.Trip.Infrastructure.Jobs;
@@ -83,7 +84,7 @@ public sealed class TripLifecycleJobIntegrationTests
     }
 
     [Fact]
-    public async Task AutoCompletion_UsesStrictEtaPlusThirtyMinuteBoundaryAndWritesNoAudit()
+    public async Task AutoCompletion_UsesStrictEtaPlusThirtyMinuteBoundaryAndAuditsMissingDestination()
     {
         await WithDatabaseAsync(async db =>
         {
@@ -101,13 +102,19 @@ public sealed class TripLifecycleJobIntegrationTests
             completed.Status.Should().Be(TripStatus.COMPLETED);
             completed.CompletedAt.Should().Be(InitialNow);
             completed.CompletedByUserId.Should().BeNull();
-            (await db.TripAuditLogs.CountAsync()).Should().Be(0);
+            var audit = await db.TripAuditLogs.SingleAsync(item => item.TripId == eligible.Id);
+            audit.Action.Should().Be(TripAuditAction.TripCompletedFallbackWithoutDestinationArrival);
+            audit.ActorUserId.Should().BeNull();
+            audit.Metadata!.Value.GetProperty("reason").GetString()
+                .Should().Be("DESTINATION_ARRIVAL_NOT_RECORDED");
             var message = await db.OutboxEvents.SingleAsync(item => item.EventType == "trip.trip.completed");
             AssertPayload(message.Payload, eligible.Id, "completedAt", InitialNow);
 
             clock.Advance(TimeSpan.FromSeconds(1));
             await job.ScanAsync();
             (await db.OutboxEvents.CountAsync(item => item.EventType == "trip.trip.completed")).Should().Be(2);
+            (await db.TripAuditLogs.CountAsync(item =>
+                item.Action == TripAuditAction.TripCompletedFallbackWithoutDestinationArrival)).Should().Be(2);
         });
     }
 
@@ -198,6 +205,8 @@ public sealed class TripLifecycleJobIntegrationTests
                 InitialNow.AddHours(-4),
                 InitialNow.AddMinutes(-31),
                 TripStatus.IN_PROGRESS);
+            seeded.MarkDestinationArrived(InitialNow.AddMinutes(-40), seeded.DriverUserId);
+            await setup.SaveChangesAsync();
             setup.ChangeTracker.Clear();
 
             await using var manualDb = CreateDbContext(databaseName, new MutableClock(InitialNow));
@@ -350,7 +359,7 @@ public sealed class TripLifecycleJobIntegrationTests
         new(db, CreateRepository(db), CreateOutbox(db, clock), clock);
 
     private static AutoCompletedFallbackJob CreateAutoCompletionJob(TripDbContext db, IClock clock) =>
-        new(db, CreateRepository(db), CreateOutbox(db, clock), clock);
+        new(db, CreateRepository(db), CreateOutbox(db, clock), clock, CreateAuditRepository(db));
 
     private static IIntegrationEventOutbox CreateOutbox(TripDbContext db, IClock clock) =>
         new IntegrationEventOutbox(new OutboxStore(db, clock));
