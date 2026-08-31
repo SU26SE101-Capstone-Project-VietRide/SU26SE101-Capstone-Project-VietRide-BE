@@ -124,10 +124,43 @@ describe('TripShareRealtimePublisher', () => {
     expect(first.disconnect).toHaveBeenCalledWith(true);
     expect(second.disconnect).toHaveBeenCalledWith(true);
   });
+
+  it('emits a sanitized substitution event and moves viewers to the replacement room', async () => {
+    const socket = {
+      disconnect: jest.fn(),
+      join: jest.fn().mockResolvedValue(undefined),
+      leave: jest.fn().mockResolvedValue(undefined),
+    };
+    const fixture = createNamespaceFixture({
+      [`shared-trip:${TRIP_ID}`]: [socket],
+    });
+    const publisher = new TripShareRealtimePublisher();
+    publisher.attach(fixture.namespace);
+
+    await publisher.transferTrip(
+      TRIP_ID,
+      '33333333-3333-4333-8333-333333333333',
+      '2026-08-31T08:00:00.000Z',
+    );
+
+    expect(fixture.emit).toHaveBeenCalledWith('shared:trip:vehicleSubstituted', {
+      status: 'VEHICLE_REPLACEMENT_PENDING',
+      occurredAt: '2026-08-31T15:00:00.000+07:00',
+    });
+    expect(socket.join).toHaveBeenCalledWith(
+      'shared-trip:33333333-3333-4333-8333-333333333333',
+    );
+    expect(socket.leave).toHaveBeenCalledWith(`shared-trip:${TRIP_ID}`);
+    expect(JSON.stringify(fixture.emit.mock.calls)).not.toMatch(/tripId|vehicleId|plate/);
+  });
 });
 
 function createNamespaceFixture(
-  roomSockets: Record<string, Array<{ disconnect: jest.Mock }>> = {},
+  roomSockets: Record<string, Array<{
+    disconnect: jest.Mock;
+    join?: jest.Mock;
+    leave?: jest.Mock;
+  }>> = {},
 ): {
   namespace: Namespace;
   to: jest.Mock;
@@ -144,6 +177,8 @@ function createNamespaceFixture(
     fetchSockets: async () => {
       operations.push(`fetch:${room}`);
       return (roomSockets[room] ?? []).map((socket) => ({
+        join: (targetRoom: string) => socket.join?.(targetRoom),
+        leave: (targetRoom: string) => socket.leave?.(targetRoom),
         disconnect: (close: boolean) => {
           operations.push(`disconnect:${room}`);
           return socket.disconnect(close);

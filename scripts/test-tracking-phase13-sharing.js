@@ -35,7 +35,9 @@ const ids = Object.fromEntries(
     'route',
     'vehicleType',
     'vehicle',
+    'replacementVehicle',
     'trip',
+    'replacementTrip',
     'bookingA',
     'bookingB',
     'passengerA',
@@ -54,6 +56,7 @@ const rawShareTokens = new Set();
 const grantIds = new Set();
 const idempotencyKeys = new Set();
 const eventIds = new Set();
+const trackingLifecycleEventIds = new Set();
 const outboxIds = new Set();
 const identityEventIds = new Set();
 const identityOutboxIds = new Set();
@@ -302,10 +305,13 @@ function seedDomain() {
     VALUES ('${ids.route}','${ids.operator}','Phase13 Route ${tag}','${ids.origin}','${ids.destination}',100000,'_p~iF~ps|U_ulLnnqC_mqNvxq\`@',true);
     INSERT INTO vehicle_types (id,code,display_name,default_seat_count,is_system_defined,is_active)
     VALUES ('${ids.vehicleType}','P13${tag.slice(0, 5).toUpperCase()}','Phase13 Coach',40,false,true);
-    INSERT INTO vehicles (id,operator_id,vehicle_type_id,license_plate,seat_layout_json,total_seats,status,is_active)
-    VALUES ('${ids.vehicle}','${ids.operator}','${ids.vehicleType}','P13-${tag.slice(0, 6)}','{}'::jsonb,40,'ACTIVE',true);
+    INSERT INTO vehicles (id,operator_id,vehicle_type_id,license_plate,seat_layout_json,total_seats,status,is_active) VALUES
+    ('${ids.vehicle}','${ids.operator}','${ids.vehicleType}','P13-${tag.slice(0, 6)}','{}'::jsonb,40,'ACTIVE',true),
+    ('${ids.replacementVehicle}','${ids.operator}','${ids.vehicleType}','P13R-${tag.slice(0, 5)}','{}'::jsonb,40,'ACTIVE',true);
     INSERT INTO trips (id,operator_id,route_id,vehicle_id,driver_user_id,departure_date_time,estimated_arrival_time,status,source,base_fare)
-    VALUES ('${ids.trip}','${ids.operator}','${ids.route}','${ids.vehicle}','${ids.driver}',now()-interval '1 hour',now()+interval '3 hours','IN_PROGRESS','MANUAL',100000); COMMIT;`,
+    VALUES
+    ('${ids.trip}','${ids.operator}','${ids.route}','${ids.vehicle}','${ids.driver}',now()-interval '1 hour',now()+interval '3 hours','IN_PROGRESS','MANUAL',100000),
+    ('${ids.replacementTrip}','${ids.operator}','${ids.route}','${ids.replacementVehicle}','${ids.driver}',now()+interval '30 minutes',now()+interval '4 hours','BOARDING','VEHICLE_SUBSTITUTION',100000); COMMIT;`,
   );
   tripSeeded = true;
   sql(
@@ -453,6 +459,61 @@ function assertSharedGps(payload) {
   );
 }
 
+async function ensureRabbitChannel() {
+  if (rabbitChannel) return;
+  rabbitConnection = await amqp.connect(rabbitUrl);
+  rabbitChannel = await rabbitConnection.createConfirmChannel();
+}
+
+async function publishTrackingLifecycle(queue, payload) {
+  await ensureRabbitChannel();
+  trackingLifecycleEventIds.add(payload.eventId);
+  rabbitChannel.sendToQueue(queue, Buffer.from(JSON.stringify(payload)), {
+    contentType: 'application/json',
+    persistent: true,
+    messageId: payload.eventId,
+    correlationId: payload.eventId,
+  });
+  await rabbitChannel.waitForConfirms();
+}
+
+function substitutionPayload(eventId, occurredAt) {
+  return {
+    eventId,
+    occurredAt,
+    substitutionId: eventId,
+    disruptedAt: occurredAt,
+    operatorId: ids.operator,
+    oldTripId: ids.trip,
+    oldTripStatus: 'DISRUPTED',
+    oldVehicleId: ids.vehicle,
+    newTripId: ids.replacementTrip,
+    newTripStatus: 'BOARDING',
+    newVehicleId: ids.replacementVehicle,
+    newVehiclePlateNumber: `P13R-${tag.slice(0, 5)}`,
+    newTripDepartureDateTime: new Date(Date.now() + 30 * 60_000).toISOString(),
+    actorUserId: ids.driver,
+    reason: 'Phase 13 tracking vehicle substitution',
+    notifyPassengers: true,
+    mappings: [
+      {
+        bookingId: ids.bookingA,
+        passengerId: ids.passengerA,
+        originalSeatNumber: 'A01',
+        newSeatNumber: 'A01',
+        originalBoardingStatus: 'BOARDED',
+      },
+      {
+        bookingId: ids.bookingB,
+        passengerId: ids.passengerB,
+        originalSeatNumber: 'A02',
+        newSeatNumber: 'A02',
+        originalBoardingStatus: 'BOARDED',
+      },
+    ],
+  };
+}
+
 async function journey(tokens) {
   const denied = await owner('PUT', tokens.outsider);
   assert.equal(denied.response.status, 403, 'Outsider was not denied');
@@ -532,26 +593,126 @@ async function journey(tokens) {
   await gpsBAfter;
   const replacementA = shareToken((await owner('PUT', tokens.ownerA)).body);
   const replacementSocket = await connect(`${trackingUrl}/shared`, { shareToken: replacementA });
-  const terminalA = event(replacementSocket, 'shared:access:revoked', 60_000);
-  const terminalB = event(guestB, 'shared:access:revoked', 60_000);
-  const terminalDisconnectA = disconnected(replacementSocket, 60_000);
-  const terminalDisconnectB = disconnected(guestB, 60_000);
-  const completed = await request(gatewayUrl, 'POST', `/v1/driver/trips/${ids.trip}/complete`, {
-    jwt: tokens.driver,
-    idempotencyKey: key(),
+
+  const substitutedA = event(replacementSocket, 'shared:trip:vehicleSubstituted', 60_000);
+  const substitutedB = event(guestB, 'shared:trip:vehicleSubstituted', 60_000);
+  const occurredAt = new Date().toISOString();
+  sql(
+    'vietride_trip',
+    `SET search_path TO vietride_trip,public; UPDATE trips SET status='DISRUPTED',has_substitution=true,disrupted_at=${literal(occurredAt)},disruption_reason='Phase 13 tracking verifier' WHERE id='${ids.trip}';`,
+  );
+  const disruptedEventId = randomUUID();
+  await publishTrackingLifecycle('tracking-trip-share-disrupted', {
+    eventId: disruptedEventId,
+    occurredAt,
+    tripId: ids.trip,
+    operatorId: ids.operator,
+    terminalAt: occurredAt,
+    hasSubstitution: true,
+    source: 'MANUAL',
+    reason: 'Phase 13 tracking verifier',
   });
-  assert.equal(completed.response.status, 200, 'Real Trip completion failed');
-  const outbox = await pollOutbox();
-  const [terminalEventA, terminalEventB] = await Promise.all([terminalA, terminalB]);
-  assert.equal(terminalEventA.reason, 'TRIP_ENDED');
-  assert.equal(terminalEventB.reason, 'TRIP_ENDED');
-  await Promise.all([terminalDisconnectA, terminalDisconnectB]);
+  await poll(
+    async () =>
+      (await redis.exists(`tracking:trip-share:event:processed:${disruptedEventId}`)) === 1,
+    'Tracking disrupted-with-substitution processing',
+  );
+  const substitutionEventId = randomUUID();
+  await publishTrackingLifecycle(
+    'tracking-trip-share-vehicle-substituted',
+    substitutionPayload(substitutionEventId, occurredAt),
+  );
+  const [vehicleEventA, vehicleEventB] = await Promise.all([substitutedA, substitutedB]);
+  for (const payload of [vehicleEventA, vehicleEventB]) {
+    exactKeys(payload, ['status', 'occurredAt'], 'shared:trip:vehicleSubstituted');
+    assert.equal(payload.status, 'VEHICLE_REPLACEMENT_PENDING');
+    const serialized = JSON.stringify(payload);
+    assert(!serialized.includes(ids.trip));
+    assert(!serialized.includes(ids.replacementTrip));
+    assert(!serialized.includes(ids.vehicle));
+    assert(!serialized.includes(ids.replacementVehicle));
+    assert(!/tripId|vehicleId|plate|userId|operatorId/iu.test(serialized));
+  }
+  assert(replacementSocket.connected && guestB.connected, 'Substitution disconnected a viewer');
   await poll(
     () =>
       Number(
         sql(
           'vietride_tracking',
-          `SET search_path TO vietride_tracking,public; SELECT count(*) FROM trip_share_grants WHERE trip_id='${ids.trip}' AND revoked_at IS NULL;`,
+          `SET search_path TO vietride_tracking,public; SELECT count(*) FROM trip_share_grants WHERE trip_id='${ids.replacementTrip}' AND revoked_at IS NULL;`,
+        ),
+      ) === 2,
+    'Tracking grant transfer to replacement Trip',
+  );
+  const pending = await request(gatewayUrl, 'GET', '/v1/tracking/shared-trip/context', {
+    headers: { 'X-Trip-Share-Token': replacementA },
+  });
+  assert.equal(pending.response.status, 200, 'Original token failed during replacement pending');
+  assertPublicContext(pending.body?.data);
+  assert.equal(pending.body?.data?.status, 'VEHICLE_REPLACEMENT_PENDING');
+  assert(pending.body?.data?.vehicle?.location, 'Pending context omitted previous GPS');
+  assert.equal(pending.body?.data?.eta, null, 'Pending context did not force ETA to null');
+
+  sql(
+    'vietride_trip',
+    `SET search_path TO vietride_trip,public; UPDATE trips SET status='IN_PROGRESS',actual_departure_time=now() WHERE id='${ids.replacementTrip}';`,
+  );
+  const replacementGpsA = event(replacementSocket, 'shared:gps:update');
+  const replacementGpsB = event(guestB, 'shared:gps:update');
+  assert(
+    (
+      await emitAck(driver, 'gps:update', {
+        tripId: ids.replacementTrip,
+        latitude: 10.9,
+        longitude: 106.9,
+        speedKmh: 32,
+        headingDeg: 48,
+        recordedAt: new Date(Date.now() + 2000).toISOString(),
+      })
+    ).success,
+  );
+  assertSharedGps(await replacementGpsA);
+  assertSharedGps(await replacementGpsB);
+  const activeReplacement = await request(
+    gatewayUrl,
+    'GET',
+    '/v1/tracking/shared-trip/context',
+    { headers: { 'X-Trip-Share-Token': replacementA } },
+  );
+  assert.equal(activeReplacement.body?.data?.status, 'IN_PROGRESS');
+
+  const aliasRevokedA = event(replacementSocket, 'shared:access:revoked');
+  const aliasDisconnectedA = disconnected(replacementSocket);
+  assert.equal((await owner('DELETE', tokens.ownerA)).response.status, 200);
+  assert.equal((await aliasRevokedA).reason, 'REVOKED');
+  await aliasDisconnectedA;
+  assert(guestB.connected, 'Old-Trip alias revoke disconnected the other owner');
+
+  const terminalB = event(guestB, 'shared:access:revoked', 60_000);
+  const terminalDisconnectB = disconnected(guestB, 60_000);
+  sql(
+    'vietride_trip',
+    `SET search_path TO vietride_trip,public; UPDATE trips SET destination_arrived_at=now(),destination_arrived_by_user_id='${ids.driver}' WHERE id='${ids.replacementTrip}';`,
+  );
+  const completed = await request(
+    gatewayUrl,
+    'POST',
+    `/v1/driver/trips/${ids.replacementTrip}/complete`,
+    {
+    jwt: tokens.driver,
+    idempotencyKey: key(),
+    },
+  );
+  assert.equal(completed.response.status, 200, 'Real Trip completion failed');
+  const outbox = await pollOutbox(ids.replacementTrip);
+  assert.equal((await terminalB).reason, 'TRIP_ENDED');
+  await terminalDisconnectB;
+  await poll(
+    () =>
+      Number(
+        sql(
+          'vietride_tracking',
+          `SET search_path TO vietride_tracking,public; SELECT count(*) FROM trip_share_grants WHERE trip_id='${ids.replacementTrip}' AND revoked_at IS NULL;`,
         ),
       ) === 0,
     'Tracking terminal revocation',
@@ -560,13 +721,13 @@ async function journey(tokens) {
   await verifyNoLeak();
 }
 
-async function pollOutbox() {
+async function pollOutbox(tripId = ids.trip) {
   let row;
   await poll(
     () => {
       const value = sql(
         'vietride_trip',
-        `SET search_path TO vietride_trip,public; SELECT id || '|' || payload FROM outbox_events WHERE event_type='trip.trip.completed' AND payload::jsonb->>'tripId'='${ids.trip}' AND status='PUBLISHED' ORDER BY created_at DESC LIMIT 1;`,
+        `SET search_path TO vietride_trip,public; SELECT id || '|' || payload FROM outbox_events WHERE event_type='trip.trip.completed' AND payload::jsonb->>'tripId'='${tripId}' AND status='PUBLISHED' ORDER BY created_at DESC LIMIT 1;`,
       );
       if (!value) return false;
       const separator = value.indexOf('|');
@@ -588,11 +749,10 @@ async function publishDuplicate(outbox) {
   const processedKey = `tracking:trip-share:event:processed:${outbox.eventId}`;
   const markerBefore = await redis.get(processedKey);
   const ttlBefore = await redis.ttl(processedKey);
-  const snapshotSql = `SET search_path TO vietride_tracking,public; SELECT string_agg(id::text || ':' || updated_at::text,',' ORDER BY id) FROM trip_share_grants WHERE trip_id='${ids.trip}';`;
+  const snapshotSql = `SET search_path TO vietride_tracking,public; SELECT string_agg(id::text || ':' || updated_at::text,',' ORDER BY id) FROM trip_share_grants WHERE trip_id='${outbox.payload.tripId}';`;
   const grantsBefore = sql('vietride_tracking', snapshotSql);
   assert(markerBefore && ttlBefore > 0, 'Original terminal event lacks a processed marker');
-  rabbitConnection = await amqp.connect(rabbitUrl);
-  rabbitChannel = await rabbitConnection.createConfirmChannel();
+  await ensureRabbitChannel();
   rabbitChannel.publish(
     'vietride.events',
     'trip.trip.completed',
@@ -662,7 +822,7 @@ function discoverTripEvents() {
   if (!tripSeeded) return;
   const discovered = sql(
     'vietride_trip',
-    `SET search_path TO vietride_trip,public; SELECT id || '|' || COALESCE(payload::jsonb->>'eventId','') FROM outbox_events WHERE event_type='trip.trip.completed' AND payload::jsonb->>'tripId'='${ids.trip}';`,
+    `SET search_path TO vietride_trip,public; SELECT id || '|' || COALESCE(payload::jsonb->>'eventId','') FROM outbox_events WHERE event_type='trip.trip.completed' AND payload::jsonb->>'tripId' IN ('${ids.trip}','${ids.replacementTrip}');`,
   );
   for (const value of discovered.split(/\r?\n/u).filter(Boolean)) {
     const [outboxId, eventId] = value.split('|');
@@ -848,7 +1008,7 @@ async function cleanup() {
     try {
       if (redis.status === 'ready') {
         await removeEmailJobs();
-        await redis.srem('tracking:active_trips', ids.trip);
+        await redis.srem('tracking:active_trips', ids.trip, ids.replacementTrip);
         const tokenHashes = [...rawShareTokens].map((token) =>
           createHash('sha256').update(token, 'utf8').digest('hex'),
         );
@@ -860,6 +1020,7 @@ async function cleanup() {
           ...Object.values(ids),
           ...grantIds,
           ...eventIds,
+          ...trackingLifecycleEventIds,
           ...identityEventIds,
           ...emailDeliveryIds,
           ...Object.values(emails),
@@ -917,7 +1078,7 @@ async function cleanup() {
   );
   sql(
     'vietride_payment',
-    `SET search_path TO vietride_payment,public; DELETE FROM operator_trip_settlements WHERE trip_id='${ids.trip}'; DELETE FROM wallet_transactions WHERE user_id IN ${userList}; DELETE FROM wallets WHERE user_id IN ${userList}; DELETE FROM processed_integration_events WHERE event_id IN (${identityEventList},${tripEventList});`,
+    `SET search_path TO vietride_payment,public; DELETE FROM operator_trip_settlements WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}'); DELETE FROM wallet_transactions WHERE user_id IN ${userList}; DELETE FROM wallets WHERE user_id IN ${userList}; DELETE FROM processed_integration_events WHERE event_id IN (${identityEventList},${tripEventList});`,
   );
   sql(
     'vietride_parcel',
@@ -934,11 +1095,11 @@ async function cleanup() {
       [...outboxIds].map(literal).join(',') || "'00000000-0000-0000-0000-000000000000'";
     sql(
       'vietride_tracking',
-      `SET search_path TO vietride_tracking,public; DELETE FROM gps_trails WHERE trip_id='${ids.trip}'; DELETE FROM trip_share_grants WHERE trip_id='${ids.trip}';`,
+      `SET search_path TO vietride_tracking,public; DELETE FROM gps_trails WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}'); DELETE FROM trip_share_grants WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}');`,
     );
     sql(
       'vietride_trip',
-      `SET search_path TO vietride_trip,public; DELETE FROM trip_audit_logs WHERE trip_id='${ids.trip}'; DELETE FROM outbox_events WHERE id IN (${outboxList}); DELETE FROM trips WHERE id='${ids.trip}'; DELETE FROM vehicles WHERE id='${ids.vehicle}'; DELETE FROM vehicle_types WHERE id='${ids.vehicleType}'; DELETE FROM routes WHERE id='${ids.route}'; DELETE FROM stations WHERE id IN ('${ids.origin}','${ids.destination}');`,
+      `SET search_path TO vietride_trip,public; DELETE FROM trip_audit_logs WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}'); DELETE FROM outbox_events WHERE id IN (${outboxList}); DELETE FROM trips WHERE id IN ('${ids.trip}','${ids.replacementTrip}'); DELETE FROM vehicles WHERE id IN ('${ids.vehicle}','${ids.replacementVehicle}'); DELETE FROM vehicle_types WHERE id='${ids.vehicleType}'; DELETE FROM routes WHERE id='${ids.route}'; DELETE FROM stations WHERE id IN ('${ids.origin}','${ids.destination}');`,
     );
   }
   if (identitySeeded || Object.values(emails).length > 0) {
@@ -950,7 +1111,7 @@ async function cleanup() {
   for (const [database, query] of [
     [
       'vietride_tracking',
-      `SET search_path TO vietride_tracking,public; SELECT (SELECT count(*) FROM trip_share_grants WHERE trip_id='${ids.trip}') + (SELECT count(*) FROM gps_trails WHERE trip_id='${ids.trip}');`,
+      `SET search_path TO vietride_tracking,public; SELECT (SELECT count(*) FROM trip_share_grants WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}')) + (SELECT count(*) FROM gps_trails WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}'));`,
     ],
     [
       'vietride_booking',
@@ -962,7 +1123,7 @@ async function cleanup() {
     ],
     [
       'vietride_trip',
-      `SET search_path TO vietride_trip,public; SELECT (SELECT count(*) FROM trips WHERE id='${ids.trip}') + (SELECT count(*) FROM trip_audit_logs WHERE trip_id='${ids.trip}') + (SELECT count(*) FROM outbox_events WHERE id IN (${[...outboxIds].map(literal).join(',') || "'00000000-0000-0000-0000-000000000000'"})) + (SELECT count(*) FROM vehicles WHERE id='${ids.vehicle}') + (SELECT count(*) FROM vehicle_types WHERE id='${ids.vehicleType}') + (SELECT count(*) FROM routes WHERE id='${ids.route}') + (SELECT count(*) FROM stations WHERE id IN ('${ids.origin}','${ids.destination}'));`,
+      `SET search_path TO vietride_trip,public; SELECT (SELECT count(*) FROM trips WHERE id IN ('${ids.trip}','${ids.replacementTrip}')) + (SELECT count(*) FROM trip_audit_logs WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}')) + (SELECT count(*) FROM outbox_events WHERE id IN (${[...outboxIds].map(literal).join(',') || "'00000000-0000-0000-0000-000000000000'"})) + (SELECT count(*) FROM vehicles WHERE id IN ('${ids.vehicle}','${ids.replacementVehicle}')) + (SELECT count(*) FROM vehicle_types WHERE id='${ids.vehicleType}') + (SELECT count(*) FROM routes WHERE id='${ids.route}') + (SELECT count(*) FROM stations WHERE id IN ('${ids.origin}','${ids.destination}'));`,
     ],
     [
       'vietride_identity',
@@ -970,7 +1131,7 @@ async function cleanup() {
     ],
     [
       'vietride_payment',
-      `SET search_path TO vietride_payment,public; SELECT (SELECT count(*) FROM operator_trip_settlements WHERE trip_id='${ids.trip}') + (SELECT count(*) FROM wallets WHERE user_id IN ${userList}) + (SELECT count(*) FROM wallet_transactions WHERE user_id IN ${userList}) + (SELECT count(*) FROM processed_integration_events WHERE event_id IN (${identityEventList},${tripEventList}));`,
+      `SET search_path TO vietride_payment,public; SELECT (SELECT count(*) FROM operator_trip_settlements WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}')) + (SELECT count(*) FROM wallets WHERE user_id IN ${userList}) + (SELECT count(*) FROM wallet_transactions WHERE user_id IN ${userList}) + (SELECT count(*) FROM processed_integration_events WHERE event_id IN (${identityEventList},${tripEventList}));`,
     ],
     [
       'vietride_notification',

@@ -40,6 +40,13 @@ export class TripShareGrantRepository {
     return this.prisma.tripShareGrant.findUnique({ where: { id } });
   }
 
+  async hasActiveForTrip(tripId: string, now: Date): Promise<boolean> {
+    const count = await this.prisma.tripShareGrant.count({
+      where: { tripId, revokedAt: null, expiresAt: { gt: now } },
+    });
+    return count > 0;
+  }
+
   create(input: CreateTripShareGrantInput): Promise<TripShareGrant> {
     return this.prisma.tripShareGrant.create({ data: input });
   }
@@ -83,5 +90,49 @@ export class TripShareGrantRepository {
       data: { revokedAt: now, revokeReason: 'TRIP_TERMINATED' },
     });
     return result.count;
+  }
+
+  transferActiveGrants(oldTripId: string, newTripId: string, now: Date): Promise<number> {
+    return this.prisma.$transaction(async (transaction) => {
+      const grants = await transaction.tripShareGrant.findMany({
+        where: { tripId: oldTripId, revokedAt: null, expiresAt: { gt: now } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      let transferred = 0;
+
+      for (const grant of grants) {
+        const conflicting = await transaction.tripShareGrant.findFirst({
+          where: {
+            tripId: newTripId,
+            createdByUserId: grant.createdByUserId,
+            revokedAt: null,
+          },
+        });
+        if (conflicting && conflicting.id !== grant.id) {
+          await transaction.tripShareGrant.updateMany({
+            where: { id: conflicting.id, revokedAt: null },
+            data: {
+              revokedAt: now,
+              revokeReason: conflicting.expiresAt.getTime() <= now.getTime()
+                ? 'EXPIRED'
+                : 'CREATION_ROLLBACK',
+            },
+          });
+        }
+
+        const result = await transaction.tripShareGrant.updateMany({
+          where: {
+            id: grant.id,
+            tripId: oldTripId,
+            revokedAt: null,
+            expiresAt: { gt: now },
+          },
+          data: { tripId: newTripId },
+        });
+        transferred += result.count;
+      }
+
+      return transferred;
+    }, { isolationLevel: 'Serializable' });
   }
 }

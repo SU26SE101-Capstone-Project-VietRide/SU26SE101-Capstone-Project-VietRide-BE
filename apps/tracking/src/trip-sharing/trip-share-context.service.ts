@@ -19,6 +19,7 @@ import type {
   TripSharePublicStopDto,
 } from './trip-share-context.dto';
 import { TripShareRouteStopsProvider } from './trip-share-route-stops.provider';
+import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 import {
   TripShareTrackingStateRepository,
   type TripShareLatestState,
@@ -35,24 +36,31 @@ export class TripShareContextService {
     private readonly routes: DetailedRouteGeometryProvider,
     private readonly routeStops: TripShareRouteStopsProvider,
     private readonly state: TripShareTrackingStateRepository,
+    private readonly substitutions: TripShareSubstitutionStateRepository,
   ) {}
 
   async getContext(access: TripShareAccessContext): Promise<TripShareContextDto> {
     try {
-      const [routeResult, stops, latest] = await Promise.all([
+      const [routeResult, stops, latest, previousTripIds] = await Promise.all([
         this.routes.getDetailedRouteGeometry(access.tripId),
         this.routeStops.getRouteStops(access.tripId),
         this.state.findLatest(access.tripId),
+        this.substitutions.listPreviousTripIds(access.tripId),
       ]);
       if (routeResult.kind !== 'ok') this.unavailable();
       if (!Array.isArray(stops)) this.unavailable();
 
       const route = this.requireDetailedRoute(routeResult.snapshot);
-      const nextStop = this.findNextStop(stops);
+      const fallbackLatest = latest
+        ? null
+        : await this.findLatestPrevious(previousTripIds);
+      const replacementPending = access.status === 'VEHICLE_REPLACEMENT_PENDING'
+        || Boolean(previousTripIds.length > 0 && !latest);
+      const nextStop = replacementPending ? null : this.findNextStop(stops);
       const etaState = nextStop
         ? await this.state.findEta(access.tripId, nextStop.stopId)
         : null;
-      const location = this.mapLocation(latest);
+      const location = this.mapLocation(latest ?? fallbackLatest);
       const eta = etaState
         ? {
             estimatedArrivalAt: etaState.estimatedArrivalTime,
@@ -63,7 +71,7 @@ export class TripShareContextService {
         : null;
 
       return {
-        status: 'IN_PROGRESS',
+        status: replacementPending ? 'VEHICLE_REPLACEMENT_PENDING' : 'IN_PROGRESS',
         expiresAt: access.expiresAt.toISOString(),
         lastUpdatedAt: this.latestTimestamp(location?.recordedAt, eta?.updatedAt),
         vehicle: { location },
@@ -142,6 +150,14 @@ export class TripShareContextService {
     return [...stops]
       .filter((stop) => !TERMINAL_STOP_STATUSES.has(stop.status?.toUpperCase() ?? ''))
       .sort((left, right) => left.sequence - right.sequence)[0] ?? null;
+  }
+
+  private async findLatestPrevious(tripIds: string[]): Promise<TripShareLatestState | null> {
+    for (const tripId of tripIds) {
+      const latest = await this.state.findLatest(tripId);
+      if (latest) return latest;
+    }
+    return null;
   }
 
   private mapLocation(latest: TripShareLatestState | null): TripSharePublicLocationDto | null {

@@ -24,6 +24,8 @@ import { TripShareGateway } from './trip-share.gateway';
 import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
 import { TripShareMessageIdempotencyRepository } from './trip-share-message-idempotency.repository';
 import { TripTerminalShareConsumer } from './trip-terminal-share.consumer';
+import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
+import { TripVehicleSubstitutedShareConsumer } from './trip-vehicle-substituted-share.consumer';
 
 @Module({
   imports: [OffRouteModule],
@@ -48,7 +50,9 @@ import { TripTerminalShareConsumer } from './trip-terminal-share.consumer';
     TripShareRealtimePublisher,
     TripShareGateway,
     TripShareMessageIdempotencyRepository,
+    TripShareSubstitutionStateRepository,
     TripTerminalShareConsumer,
+    TripVehicleSubstitutedShareConsumer,
     { provide: TRACKING_JWT_VERIFIER, useClass: JoseUserJwtVerifier },
   ],
   exports: [TripShareRealtimePublisher],

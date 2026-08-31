@@ -14,6 +14,7 @@ import type {
 import { TripShareTokenCodec } from './trip-share-token.codec';
 import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provider';
 import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
+import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 
 const HTTP_CLIENT_ERROR_MIN = 400;
 const HTTP_CLIENT_ERROR_MAX_EXCLUSIVE = 500;
@@ -29,6 +30,7 @@ export class TripShareOwnerService {
     private readonly tokenCodec: TripShareTokenCodec,
     @Inject(ENV_TOKEN) private readonly env: Env,
     private readonly realtime: TripShareRealtimePublisher,
+    private readonly substitutions: TripShareSubstitutionStateRepository,
   ) {}
 
   async ensureShareLink(
@@ -78,9 +80,15 @@ export class TripShareOwnerService {
 
     try {
       const now = new Date();
-      const active = await this.grantRepository.findActiveByOwnerTrip(tripId, userId, now);
+      const currentTripId = await this.substitutions.resolveCurrentTripId(tripId);
+      const active = await this.grantRepository.findActiveByOwnerTrip(currentTripId, userId, now);
       const revoked = active
-        ? await this.grantRepository.revokeOwnActiveGrantById(active.id, tripId, userId, now)
+        ? await this.grantRepository.revokeOwnActiveGrantById(
+            active.id,
+            currentTripId,
+            userId,
+            now,
+          )
         : false;
       if (active && revoked) {
         void this.realtime.revokeGrant(active.id, 'REVOKED').catch(() => undefined);

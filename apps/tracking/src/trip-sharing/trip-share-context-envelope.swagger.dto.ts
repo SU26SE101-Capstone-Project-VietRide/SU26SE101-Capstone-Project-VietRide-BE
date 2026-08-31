@@ -12,7 +12,10 @@ export class TripShareContextEnvelopeSwaggerDto {
   @ApiProperty({
     type: 'object',
     properties: {
-      status: { type: 'string', enum: ['IN_PROGRESS'] },
+      status: {
+        type: 'string',
+        enum: ['IN_PROGRESS', 'VEHICLE_REPLACEMENT_PENDING'],
+      },
       expiresAt: { type: 'string', format: 'date-time' },
       lastUpdatedAt: { type: 'string', format: 'date-time', nullable: true },
       vehicle: {

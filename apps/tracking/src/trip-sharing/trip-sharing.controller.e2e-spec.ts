@@ -25,6 +25,7 @@ import { TripShareOwnerService } from './trip-share-owner.service';
 import { TripShareTokenCodec } from './trip-share-token.codec';
 import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provider';
 import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
+import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const USER_ID = '22222222-2222-4222-8222-222222222222';
@@ -56,6 +57,7 @@ describe('TripShareOwnerController (e2e)', () => {
   };
   const realtime = { revokeGrant: jest.fn() };
   const idempotency = { begin: jest.fn(), complete: jest.fn(), abandon: jest.fn() };
+  const substitutions = { resolveCurrentTripId: jest.fn() };
 
   beforeAll(async () => {
     const keys = await generateKeyPair('RS256');
@@ -76,6 +78,7 @@ describe('TripShareOwnerController (e2e)', () => {
         { provide: TripShareGrantRepository, useValue: repository },
         { provide: TripShareIdempotencyService, useValue: idempotency },
         { provide: TripShareRealtimePublisher, useValue: realtime },
+        { provide: TripShareSubstitutionStateRepository, useValue: substitutions },
         { provide: APP_FILTER, useValue: new ApiResponseExceptionFilter() },
         { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
       ],
@@ -101,6 +104,7 @@ describe('TripShareOwnerController (e2e)', () => {
     idempotency.begin.mockResolvedValue({ state: 'acquired', ownerToken: 'owner-lock' });
     idempotency.complete.mockResolvedValue(undefined);
     idempotency.abandon.mockResolvedValue(undefined);
+    substitutions.resolveCurrentTripId.mockImplementation(async (tripId: string) => tripId);
   });
 
   afterAll(async () => {

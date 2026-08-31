@@ -9,6 +9,7 @@ import { TripShareGrantRepository } from './trip-share-grant.repository';
 import { TripShareRateLimiter, type TripShareRateLimitSurface } from './trip-share-rate-limiter';
 import { TripShareTokenCodec } from './trip-share-token.codec';
 import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provider';
+import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 
 const SHA_256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -16,7 +17,7 @@ export interface TripShareAccessContext {
   grantId: string;
   tripId: string;
   expiresAt: Date;
-  status: 'IN_PROGRESS';
+  status: 'IN_PROGRESS' | 'VEHICLE_REPLACEMENT_PENDING';
 }
 
 @Injectable()
@@ -26,6 +27,7 @@ export class TripShareAccessService {
     private readonly tokenCodec: TripShareTokenCodec,
     private readonly rateLimiter: TripShareRateLimiter,
     private readonly trips: TripShareTripSnapshotProvider,
+    private readonly substitutions: TripShareSubstitutionStateRepository,
   ) {}
 
   async authorize(
@@ -87,7 +89,27 @@ export class TripShareAccessService {
       this.unavailable('TRIP_ENDED');
     }
 
-    if (snapshot.status !== 'IN_PROGRESS') {
+    const status = snapshot.status.toUpperCase();
+    // Share grants cannot be created for BOARDING Trips. Reaching this state with an active grant
+    // therefore means the DB transfer committed and the Redis alias may still be catching up on a
+    // retry. Keep the capability alive instead of revoking it in that transient window.
+    if (status === 'BOARDING') {
+      return {
+        grantId: grant.id,
+        tripId: grant.tripId,
+        expiresAt: grant.expiresAt,
+        status: 'VEHICLE_REPLACEMENT_PENDING',
+      };
+    }
+    if (status === 'DISRUPTED' && await this.substitutions.isPending(grant.tripId)) {
+      return {
+        grantId: grant.id,
+        tripId: grant.tripId,
+        expiresAt: grant.expiresAt,
+        status: 'VEHICLE_REPLACEMENT_PENDING',
+      };
+    }
+    if (status !== 'IN_PROGRESS') {
       await this.grants.revokeGrantById(grant.id, 'TRIP_TERMINATED', now);
       this.unavailable('TRIP_ENDED');
     }

@@ -111,6 +111,59 @@ describe('TripShareGrantRepository', () => {
       data: { revokedAt: NOW, revokeReason: 'TRIP_TERMINATED' },
     });
   });
+
+  it('transfers active grants and revokes a replacement conflict while preserving the old grant', async () => {
+    const oldGrant = grantRow();
+    const conflicting = grantRow({
+      id: '55555555-5555-4555-8555-555555555555',
+      tripId: '66666666-6666-4666-8666-666666666666',
+    });
+    prisma.tripShareGrant.findMany.mockResolvedValue([oldGrant]);
+    prisma.tripShareGrant.findFirst.mockResolvedValue(conflicting);
+    prisma.tripShareGrant.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 1 });
+
+    await expect(repository.transferActiveGrants(
+      TRIP_ID,
+      '66666666-6666-4666-8666-666666666666',
+      NOW,
+    )).resolves.toBe(1);
+
+    expect(prisma.tripShareGrant.updateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: conflicting.id, revokedAt: null },
+      data: { revokedAt: NOW, revokeReason: 'CREATION_ROLLBACK' },
+    });
+    expect(prisma.tripShareGrant.updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        id: GRANT_ID,
+        tripId: TRIP_ID,
+        revokedAt: null,
+        expiresAt: { gt: NOW },
+      },
+      data: { tripId: '66666666-6666-4666-8666-666666666666' },
+    });
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: 'Serializable' },
+    );
+  });
+
+  it('does not transfer expired or revoked old grants', async () => {
+    prisma.tripShareGrant.findMany.mockResolvedValue([]);
+
+    await expect(repository.transferActiveGrants(
+      TRIP_ID,
+      '66666666-6666-4666-8666-666666666666',
+      NOW,
+    )).resolves.toBe(0);
+
+    expect(prisma.tripShareGrant.findMany).toHaveBeenCalledWith({
+      where: { tripId: TRIP_ID, revokedAt: null, expiresAt: { gt: NOW } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    expect(prisma.tripShareGrant.updateMany).not.toHaveBeenCalled();
+  });
 });
 
 describe('TripShareGrantService', () => {
@@ -199,14 +252,20 @@ describe('TripShareGrantService', () => {
 });
 
 function createPrismaMock() {
-  return {
+  const prisma = {
     tripShareGrant: {
       updateMany: jest.fn(),
       findFirst: jest.fn(),
       findUnique: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
       create: jest.fn(),
     },
+    $transaction: jest.fn(),
   };
+  prisma.$transaction.mockImplementation(async (operation: (transaction: typeof prisma) => unknown) =>
+    operation(prisma));
+  return prisma;
 }
 
 function createRepositoryMock(): jest.Mocked<TripShareGrantRepository> {

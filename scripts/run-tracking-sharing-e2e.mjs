@@ -50,6 +50,8 @@ const compose = [
 ];
 const ids = {
   trip: randomUUID(),
+  replacementTrip: randomUUID(),
+  replacementVehicle: randomUUID(),
   ownerA: randomUUID(),
   ownerB: randomUUID(),
   outsider: randomUUID(),
@@ -74,6 +76,7 @@ let redisClient;
 let rabbitConnection;
 let rabbitChannel;
 let tripStatus = 'IN_PROGRESS';
+let replacementTripStatus = 'BOARDING';
 let composeAttempted = false;
 let infraStarted = false;
 
@@ -214,7 +217,9 @@ async function startFakeBoundaries() {
       /^\/internal\/v1\/trips\/([0-9a-f-]+)\/tracking-authorization$/i,
     );
     if (trackingAuthMatch) {
-      const allowed = trackingAuthMatch[1].toLowerCase() === ids.trip;
+      const allowed = [ids.trip, ids.replacementTrip].includes(
+        trackingAuthMatch[1].toLowerCase(),
+      );
       response.statusCode = allowed ? 200 : 403;
       response.end(JSON.stringify({ allowed, scope: allowed ? 'DRIVER' : 'NONE' }));
       return;
@@ -222,12 +227,18 @@ async function startFakeBoundaries() {
 
     const tripMatch = url.pathname.match(/^\/internal\/v1\/trips\/([0-9a-f-]+)$/i);
     if (tripMatch) {
-      if (tripMatch[1].toLowerCase() !== ids.trip) {
+      const tripId = tripMatch[1].toLowerCase();
+      if (![ids.trip, ids.replacementTrip].includes(tripId)) {
         response.statusCode = 404;
         response.end(JSON.stringify({ errorCode: 'TRIP_NOT_FOUND' }));
         return;
       }
-      response.end(JSON.stringify({ tripId: ids.trip, status: tripStatus }));
+      response.end(
+        JSON.stringify({
+          tripId,
+          status: tripId === ids.trip ? tripStatus : replacementTripStatus,
+        }),
+      );
       return;
     }
 
@@ -239,7 +250,7 @@ async function startFakeBoundaries() {
         JSON.stringify({
           success: true,
           data: {
-            tripId: ids.trip,
+            tripId: geometryMatch[1].toLowerCase(),
             points: [
               { latitude: 10.7812, longitude: 106.6981 },
               { latitude: 10.8123, longitude: 106.7214 },
@@ -401,8 +412,14 @@ function assertPublicContext(result) {
   assert(result.body.data.vehicle.location === null, 'Missing GPS did not produce null');
   assertExactKeys(
     result.body.data.route,
-    ['originName', 'destinationName', 'stops', 'geometry'],
+    ['originName', 'destinationName', 'origin', 'destination', 'stops', 'geometry'],
     'route',
+  );
+  assertExactKeys(result.body.data.route.origin, ['latitude', 'longitude'], 'route.origin');
+  assertExactKeys(
+    result.body.data.route.destination,
+    ['latitude', 'longitude'],
+    'route.destination',
   );
   assert(
     result.body.data.route.originName === 'Bến xe Miền Đông',
@@ -446,6 +463,8 @@ function assertPublicContext(result) {
   const serialized = JSON.stringify(result.body);
   const forbiddenValues = [
     ids.trip,
+    ids.replacementTrip,
+    ids.replacementVehicle,
     ids.ownerA,
     ids.ownerB,
     ids.outsider,
@@ -551,11 +570,11 @@ function emitAck(socket, event, payload) {
   });
 }
 
-async function sendDriverGps(driverSocket, sequence) {
+async function sendDriverGps(driverSocket, sequence, tripId = ids.trip) {
   const recordedAt = new Date(Date.now() + sequence * 10).toISOString();
   recordedAtValues.push(recordedAt);
   const ack = await emitAck(driverSocket, 'gps:update', {
-    tripId: ids.trip,
+    tripId,
     latitude: 10.7812 + sequence * 0.0001,
     longitude: 106.6981 + sequence * 0.0001,
     headingDeg: 42,
@@ -580,7 +599,9 @@ function assertSharedGps(payload) {
   );
   const serialized = JSON.stringify(payload);
   assert(
-    !serialized.includes(ids.trip) && !/tripId|grantId|userId|driver/i.test(serialized),
+    !serialized.includes(ids.trip)
+      && !serialized.includes(ids.replacementTrip)
+      && !/tripId|grantId|userId|driver/i.test(serialized),
     'Shared GPS leaked an internal identifier',
   );
 }
@@ -738,6 +759,7 @@ async function verifyRabbitTopology() {
     ['tracking-trip-share-completed', 'trip.trip.completed'],
     ['tracking-trip-share-cancelled', 'trip.trip.cancelled'],
     ['tracking-trip-share-disrupted', 'trip.trip.disrupted'],
+    ['tracking-trip-share-vehicle-substituted', 'trip.trip.vehicle_substituted'],
   ];
   for (const [queue, routingKey] of bindings) {
     const encodedQueue = encodeURIComponent(queue);
@@ -772,7 +794,7 @@ async function verifyRabbitTopology() {
     );
     await rabbitManagement(`/api/queues/%2F/${encodeURIComponent(`${queue}.dlq`)}`);
   }
-  console.log('PASS | three exact terminal bindings + production retry/DLQ topology');
+  console.log('PASS | four exact share-lifecycle bindings + production retry/DLQ topology');
 }
 
 function terminalPayload(eventId, kind = 'completed') {
@@ -796,6 +818,29 @@ async function publishTerminal(routingKey, payload) {
     correlationId: payload.eventId,
   });
   await rabbitChannel.waitForConfirms();
+}
+
+function vehicleSubstitutedPayload(eventId) {
+  const occurredAt = new Date().toISOString();
+  return {
+    eventId,
+    occurredAt,
+    substitutionId: eventId,
+    disruptedAt: occurredAt,
+    operatorId: ids.operator,
+    oldTripId: ids.trip,
+    oldTripStatus: 'DISRUPTED',
+    oldVehicleId: randomUUID(),
+    newTripId: ids.replacementTrip,
+    newTripStatus: 'BOARDING',
+    newVehicleId: ids.replacementVehicle,
+    newVehiclePlateNumber: 'E2E-REDACTED',
+    newTripDepartureDateTime: new Date(Date.now() + 30 * 60_000).toISOString(),
+    actorUserId: ids.driver,
+    reason: 'E2E vehicle substitution',
+    notifyPassengers: true,
+    mappings: [],
+  };
 }
 
 async function createFreshShares(tokens) {
@@ -861,6 +906,95 @@ async function verifyTerminalAndDuplicate(tokens) {
   );
   tripStatus = 'COMPLETED';
   console.log('PASS | canonical terminal event revoke/disconnect + duplicate idempotency');
+}
+
+async function verifyVehicleSubstitutionKeepsToken(tokens) {
+  tripStatus = 'IN_PROGRESS';
+  replacementTripStatus = 'BOARDING';
+  const fresh = await createFreshShares(tokens);
+  const guestA = await connectShared(fresh.ownerA.token);
+  const guestB = await connectShared(fresh.ownerB.token);
+  const substitutedA = waitForSocketEvent(guestA, 'shared:trip:vehicleSubstituted');
+  const substitutedB = waitForSocketEvent(guestB, 'shared:trip:vehicleSubstituted');
+
+  const disruptedEventId = randomUUID();
+  eventIds.add(disruptedEventId);
+  tripStatus = 'DISRUPTED';
+  await publishTerminal('trip.trip.disrupted', {
+    ...terminalPayload(disruptedEventId),
+    hasSubstitution: true,
+  });
+  const substitutionEventId = randomUUID();
+  eventIds.add(substitutionEventId);
+  await publishTerminal(
+    'trip.trip.vehicle_substituted',
+    vehicleSubstitutedPayload(substitutionEventId),
+  );
+
+  for (const payload of [await substitutedA, await substitutedB]) {
+    assertExactKeys(payload, ['status', 'occurredAt'], 'shared:trip:vehicleSubstituted');
+    assert(
+      payload.status === 'VEHICLE_REPLACEMENT_PENDING',
+      'Vehicle-substituted event exposed an unexpected status',
+    );
+    const serialized = JSON.stringify(payload);
+    assert(
+      !serialized.includes(ids.trip)
+        && !serialized.includes(ids.replacementTrip)
+        && !serialized.includes(ids.replacementVehicle)
+        && !/tripId|vehicleId|plate|userId|operatorId/i.test(serialized),
+      'Vehicle-substituted event leaked an internal identifier or vehicle data',
+    );
+  }
+  assert(guestA.connected && guestB.connected, 'Vehicle substitution disconnected a viewer');
+  await poll(
+    () =>
+      Number(
+        sql(
+          `SELECT count(*) FROM trip_share_grants WHERE trip_id='${ids.replacementTrip}' AND revoked_at IS NULL`,
+        ),
+      ) === 2,
+    'Vehicle substitution did not transfer both active grants',
+  );
+
+  const pending = await contextRequest(fresh.ownerA.token);
+  assert(pending.response.status === 200, 'Original token failed during vehicle replacement');
+  assert(
+    pending.body?.data?.status === 'VEHICLE_REPLACEMENT_PENDING',
+    'Context did not expose replacement-pending status',
+  );
+  assert(pending.body?.data?.vehicle?.location, 'Pending context omitted the previous GPS marker');
+  assert(pending.body?.data?.eta === null, 'Pending context did not force ETA to null');
+
+  replacementTripStatus = 'IN_PROGRESS';
+  const driver = await connectSocket(trackingUrl, { token: tokens.driver });
+  const replacementGpsA = waitForSocketEvent(guestA, 'shared:gps:update');
+  const replacementGpsB = waitForSocketEvent(guestB, 'shared:gps:update');
+  await sendDriverGps(driver, 20, ids.replacementTrip);
+  assertSharedGps(await replacementGpsA);
+  assertSharedGps(await replacementGpsB);
+  const active = await contextRequest(fresh.ownerA.token);
+  assert(active.body?.data?.status === 'IN_PROGRESS', 'Context did not return to IN_PROGRESS');
+
+  const revokedA = waitForSocketEvent(guestA, 'shared:access:revoked');
+  const disconnectedA = waitForDisconnect(guestA);
+  const revokeViaOldTrip = await ownerRequest(
+    'DELETE',
+    ids.trip,
+    tokens.ownerA,
+    safeUuidV4(),
+  );
+  assert(
+    revokeViaOldTrip.response.status === 200 && revokeViaOldTrip.body?.data?.revoked === true,
+    'DELETE through the old Trip alias did not revoke the transferred grant',
+  );
+  assert((await revokedA)?.reason === 'REVOKED', 'Alias DELETE emitted the wrong revoke reason');
+  await disconnectedA;
+  assert(guestB.connected, 'Alias DELETE disconnected the independent owner viewer');
+
+  guestB.close();
+  driver.close();
+  console.log('PASS | same share tokens + pending marker + room transfer + replacement GPS');
 }
 
 async function verifyRetryAndDlq() {
@@ -966,7 +1100,7 @@ async function verifyNoTokenLeakage() {
 
 async function cleanupFixtures() {
   if (redisClient?.status === 'ready') {
-    await redisClient.srem('tracking:active_trips', ids.trip);
+    await redisClient.srem('tracking:active_trips', ids.trip, ids.replacementTrip);
     const markers = ownedMarkers();
     const keys = await scanRedisKeys();
     const ownedKeys = [];
@@ -987,14 +1121,22 @@ async function cleanupFixtures() {
   }
 
   if (infraStarted) {
-    sql(`DELETE FROM gps_trails WHERE trip_id='${ids.trip}'`);
-    sql(`DELETE FROM trip_share_grants WHERE trip_id='${ids.trip}'`);
+    sql(`DELETE FROM gps_trails WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}')`);
+    sql(`DELETE FROM trip_share_grants WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}')`);
     assert(
-      Number(sql(`SELECT count(*) FROM trip_share_grants WHERE trip_id='${ids.trip}'`)) === 0,
+      Number(
+        sql(
+          `SELECT count(*) FROM trip_share_grants WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}')`,
+        ),
+      ) === 0,
       'Run-owned trip_share_grants remained after exact-row cleanup',
     );
     assert(
-      Number(sql(`SELECT count(*) FROM gps_trails WHERE trip_id='${ids.trip}'`)) === 0,
+      Number(
+        sql(
+          `SELECT count(*) FROM gps_trails WHERE trip_id IN ('${ids.trip}','${ids.replacementTrip}')`,
+        ),
+      ) === 0,
       'Run-owned gps_trails remained after exact-row cleanup',
     );
   }
@@ -1084,6 +1226,7 @@ async function main() {
     const shares = await verifyOwnerConcurrencyAndPrivacy(tokens);
     await verifyRealtimeAndExpiry(tokens, shares);
     await verifyTerminalAndDuplicate(tokens);
+    await verifyVehicleSubstitutionKeepsToken(tokens);
     await verifyRetryAndDlq();
     await verifyNoTokenLeakage();
     console.log('PASS | Tracking Phase 13 sharing isolated real-infrastructure E2E');

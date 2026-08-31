@@ -5,6 +5,7 @@ import type { TripShareGrantRepository } from './trip-share-grant.repository';
 import type { TripShareMessageIdempotencyRepository } from './trip-share-message-idempotency.repository';
 import type { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
 import { TripTerminalShareConsumer } from './trip-terminal-share.consumer';
+import type { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const BROKER_ID = 'broker-message-1';
@@ -18,6 +19,7 @@ describe('TripTerminalShareConsumer', () => {
   let grants: jest.Mocked<TripShareGrantRepository>;
   let realtime: jest.Mocked<TripShareRealtimePublisher>;
   let consumer: TripTerminalShareConsumer;
+  let substitutions: jest.Mocked<TripShareSubstitutionStateRepository>;
 
   beforeEach(() => {
     subscribe = jest.fn().mockResolvedValue(undefined);
@@ -29,15 +31,20 @@ describe('TripTerminalShareConsumer', () => {
     } as unknown as jest.Mocked<TripShareMessageIdempotencyRepository>;
     grants = {
       revokeAllActiveForTrip: jest.fn().mockResolvedValue(2),
+      hasActiveForTrip: jest.fn().mockResolvedValue(true),
     } as unknown as jest.Mocked<TripShareGrantRepository>;
     realtime = {
       revokeTrip: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<TripShareRealtimePublisher>;
+    substitutions = {
+      markPending: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<TripShareSubstitutionStateRepository>;
     consumer = new TripTerminalShareConsumer(
       { subscribe } as unknown as RabbitMqConsumer,
       idempotency,
       grants,
       realtime,
+      substitutions,
     );
   });
 
@@ -180,6 +187,27 @@ describe('TripTerminalShareConsumer', () => {
 
     expect(realtime.revokeTrip).toHaveBeenCalledWith(TRIP_ID, 'TRIP_ENDED');
     expect(idempotency.markProcessed).toHaveBeenCalledWith(EVENT_ID, 'owner-token');
+  });
+
+  it('preserves active grants and marks replacement pending for substituted disruption', async () => {
+    const payload = { ...disruptedPayload(), hasSubstitution: true };
+
+    await invoke(consumer, subscribe, 'trip.trip.disrupted', payload, raw(payload));
+
+    expect(grants.revokeAllActiveForTrip).not.toHaveBeenCalled();
+    expect(realtime.revokeTrip).not.toHaveBeenCalled();
+    expect(substitutions.markPending).toHaveBeenCalledWith(TRIP_ID, payload.occurredAt);
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(EVENT_ID, 'owner-token');
+  });
+
+  it('does not create a stale pending marker after grants already moved', async () => {
+    grants.hasActiveForTrip.mockResolvedValueOnce(false);
+    const payload = { ...disruptedPayload(), hasSubstitution: true };
+
+    await invoke(consumer, subscribe, 'trip.trip.disrupted', payload, raw(payload));
+
+    expect(substitutions.markPending).not.toHaveBeenCalled();
+    expect(grants.revokeAllActiveForTrip).not.toHaveBeenCalled();
   });
 
   it('releases and retries when Redis cannot complete the owned processing lock', async () => {

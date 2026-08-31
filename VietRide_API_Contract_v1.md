@@ -6043,7 +6043,8 @@ trong request page/referrer.
 
 Auth: Identity User Access Token với role `PASSENGER`. `Idempotency-Key` giống PUT, nhưng DELETE
 không gọi lại Booking và không phụ thuộc trạng thái hiện tại của Trip; endpoint chỉ tác động grant
-active do chính user đó tạo và luôn idempotent:
+active do chính user đó tạo và luôn idempotent. Nếu `{tripId}` là chuyến cũ đã được thay xe,
+Tracking resolve alias đến replacement Trip hiện tại nên owner vẫn revoke được bằng URL cũ:
 
 ```json
 {
@@ -6114,6 +6115,14 @@ Hai object này không chứa station ID. `STOPS_ONLY` vẫn trả terminal coor
 dừng trả `stops: []`. Mỗi phần tử chỉ gồm `name`, `latitude`, `longitude`, `sequence`, không chứa
 ID nội bộ. Không dựng GPS, geometry, điểm dừng hoặc ETA giả. Response luôn có:
 
+`status` chỉ có `IN_PROGRESS` hoặc `VEHICLE_REPLACEMENT_PENDING`. Khi Trip bị gián đoạn để thay xe,
+link/token, grant ID, owner, `createdAt` và expiry ban đầu được giữ nguyên. Trong lúc replacement còn
+`BOARDING` hoặc chưa có GPS mới, context trả `VEHICLE_REPLACEMENT_PENDING`, giữ vị trí cuối của xe
+cũ nếu Redis còn dữ liệu và bắt buộc `eta: null`; FE hiển thị đây là "vị trí trước khi đổi xe".
+Khi replacement đã `IN_PROGRESS` và có GPS mới, cùng token tự trả `IN_PROGRESS` với dữ liệu chuyến
+mới. Chuỗi nhiều lần đổi xe được resolve qua alias có cycle/depth guard; không lần đổi xe nào gia
+hạn expiry.
+
 ```http
 Cache-Control: no-store
 Pragma: no-cache
@@ -6141,21 +6150,33 @@ Identity JWT không dùng được ở namespace `/shared`, và share token khô
 - `shared:gps:update`
 - `shared:eta:update`
 - `shared:trip:statusChanged`
+- `shared:trip:vehicleSubstituted` với payload chính xác
+  `{ "status": "VEHICLE_REPLACEMENT_PENDING", "occurredAt": "date-time" }`
 - `shared:access:revoked` với reason `EXPIRED`, `REVOKED`, `TRIP_ENDED` hoặc `ACCESS_UNAVAILABLE`
 
 Owner revoke chỉ emit/disconnect grant room của họ. Trip terminal emit/disconnect toàn trip room.
+Vehicle substitution emit event pending rồi chuyển socket từ room cũ sang replacement room, không
+disconnect. Public event không chứa old/new Trip ID, Vehicle ID/biển số hoặc PII. Viewer không còn
+nhận GPS room cũ và tự nhận GPS replacement khi chuyến mới bắt đầu chạy.
 Socket đặt expiry timer chính xác và mặc định revalidate grant/Trip mỗi 60 giây. Phase 13 giả định một
 Tracking replica; Socket.IO Redis adapter cho scale-out không thuộc contract này.
 
 #### Vòng đời, RabbitMQ và bảo mật
 
-- Grant hard-expire sau TTL mặc định 24 giờ, khi owner revoke, hoặc khi Trip
-  `COMPLETED`/`CANCELLED`/`DISRUPTED`.
+- Grant hard-expire sau TTL mặc định 24 giờ, khi owner revoke, khi Trip
+  `COMPLETED`/`CANCELLED`, hoặc khi `DISRUPTED` có `hasSubstitution=false`. `DISRUPTED` có
+  `hasSubstitution=true` giữ grant để chờ event substitution.
 - Tracking subscribe `tracking-trip-share-completed` → `trip.trip.completed`,
   `tracking-trip-share-cancelled` → `trip.trip.cancelled`, và
-  `tracking-trip-share-disrupted` → `trip.trip.disrupted` với `prefetch=1`, dead-letter, 5 retry,
-  delay 10 giây. Consumer chỉ mark processed sau DB revoke và realtime disconnect; retry sau DB
-  commit vẫn emit realtime dù update lần hai bằng 0.
+  `tracking-trip-share-disrupted` → `trip.trip.disrupted`, cùng queue mới
+  `tracking-trip-share-vehicle-substituted` → `trip.trip.vehicle_substituted`; tất cả dùng
+  `prefetch=1`, dead-letter, 5 retry, delay 10 giây.
+- Consumer substitution chuyển mọi grant active `oldTripId → newTripId` trong transaction
+  serializable mà không đổi grant ID/token hash/owner/expiry/created time. Nếu cùng owner đã tạo
+  grant mới cho replacement trong lúc event trễ, grant mới bị revoke `CREATION_ROLLBACK` và grant
+  cũ thắng. Sau DB commit, consumer ghi Redis alias hai chiều với TTL bằng share token, xóa pending
+  marker, emit/chuyển socket rồi mới mark processed; retry phải tiếp tục các bước sau DB dù update
+  lại bằng 0.
 - Token là `v1.<grant UUID>.<base64url HMAC-SHA256>` ký canonical `v1.<grantId>`. PostgreSQL chỉ lưu
   SHA-256 full token; Redis idempotency chỉ lưu fingerprint, grant ID và outcome metadata. Không log
   raw token hoặc `X-Trip-Share-Token`.

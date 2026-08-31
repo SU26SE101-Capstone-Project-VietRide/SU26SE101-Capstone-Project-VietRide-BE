@@ -31,7 +31,7 @@ export interface TripSharePublicEtaDto {
 }
 
 export interface TripShareContextDto {
-  status: 'IN_PROGRESS';
+  status: 'IN_PROGRESS' | 'VEHICLE_REPLACEMENT_PENDING';
   expiresAt: string;
   lastUpdatedAt: string | null;
   vehicle: { location: TripSharePublicLocationDto | null };
