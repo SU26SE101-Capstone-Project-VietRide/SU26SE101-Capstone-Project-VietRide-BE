@@ -18,8 +18,10 @@ import {
 import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
 import { TripShareTokenCodec } from './trip-share-token.codec';
 import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provider';
+import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
+const REPLACEMENT_TRIP_ID = '55555555-5555-4555-8555-555555555555';
 const GRANT_A = '22222222-2222-4222-8222-222222222222';
 const GRANT_B = '33333333-3333-4333-8333-333333333333';
 const USER_ID = '44444444-4444-4444-8444-444444444444';
@@ -45,6 +47,10 @@ describe('TripShareGateway (e2e)', () => {
   };
   const rateLimiter = { consume: jest.fn(async () => undefined) };
   const trips = { getTrip: jest.fn(async () => ({ tripId: TRIP_ID, status: 'IN_PROGRESS' })) };
+  const substitutions = {
+    isPending: jest.fn(async () => false),
+    findPrevious: jest.fn(async () => null),
+  };
 
   beforeAll(async () => {
     const env = createTestEnv();
@@ -58,6 +64,7 @@ describe('TripShareGateway (e2e)', () => {
         { provide: TripShareGrantRepository, useValue: repository },
         { provide: TripShareRateLimiter, useValue: rateLimiter },
         { provide: TripShareTripSnapshotProvider, useValue: trips },
+        { provide: TripShareSubstitutionStateRepository, useValue: substitutions },
       ],
     }).compile();
     app = moduleRef.createNestApplication();
@@ -148,6 +155,34 @@ describe('TripShareGateway (e2e)', () => {
 
     expect(first.connected).toBe(false);
     expect(second.connected).toBe(false);
+  });
+
+  it('keeps viewers connected and moves them to replacement GPS without leaking Trip ids', async () => {
+    const socket = await connectShared({ shareToken: tokenA });
+    const substituted = waitForEvent<Record<string, unknown>>(
+      socket,
+      'shared:trip:vehicleSubstituted',
+    );
+
+    await publisher.transferTrip(TRIP_ID, REPLACEMENT_TRIP_ID, '2026-08-31T08:00:00.000Z');
+
+    expect(await substituted).toEqual({
+      status: 'VEHICLE_REPLACEMENT_PENDING',
+      occurredAt: '2026-08-31T15:00:00.000+07:00',
+    });
+    expect(socket.connected).toBe(true);
+    expect(serverRoomMembers(sharedTripRoom(TRIP_ID))).not.toContain(socket.id);
+    expect(serverRoomMembers(sharedTripRoom(REPLACEMENT_TRIP_ID))).toContain(socket.id);
+
+    const gps = waitForEvent<Record<string, unknown>>(socket, SHARED_GPS_UPDATE_EVENT);
+    publisher.publishGps({
+      tripId: REPLACEMENT_TRIP_ID,
+      latitude: 10.8,
+      longitude: 106.8,
+      recordedAt: '2026-08-31T08:01:00.000Z',
+    });
+    expect(await gps).toMatchObject({ location: { latitude: 10.8, longitude: 106.8 } });
+    socket.disconnect();
   });
 
   it('emits EXPIRED then disconnects at the exact grant expiry', async () => {

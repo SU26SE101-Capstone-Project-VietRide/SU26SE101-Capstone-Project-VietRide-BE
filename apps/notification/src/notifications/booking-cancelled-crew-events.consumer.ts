@@ -11,6 +11,7 @@ import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import { TripAnnouncementRecipientProvider } from './trip-announcement-recipient.provider';
 import { createNotificationLogger } from './notification-logger';
+import { formatBookingReference } from './notification-display';
 
 const QUEUE_NAME = 'notification:booking-cancelled-crew';
 const TERMINAL_TRIP_REASONS = new Set(['OPERATOR_CANCELLED_TRIP', 'TRIP_DISRUPTED']);
@@ -68,8 +69,8 @@ export class BookingCancelledCrewEventsConsumer implements OnModuleInit {
       await Promise.all(recipientUserIds.map((userId) => this.notifications.createNotification({
         userId,
         type: NotificationType.BOOKING_CANCELLED,
-        title: 'Booking trên chuyến đã bị hủy',
-        body: `Booking ${event.bookingCode} đã bị hủy và được gỡ khỏi danh sách đón khách.`,
+        title: 'Vé trên chuyến đã bị hủy',
+        body: `Vé ${formatBookingReference(event.bookingCode)} đã bị hủy và được gỡ khỏi danh sách đón khách.`,
         data: {
           eventId: event.eventId,
           occurredAt: event.occurredAt,

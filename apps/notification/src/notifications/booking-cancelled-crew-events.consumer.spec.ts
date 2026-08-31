@@ -21,6 +21,8 @@ describe('BookingCancelledCrewEventsConsumer', () => {
     expect(notifications.createNotification).toHaveBeenCalledWith(expect.objectContaining({
       userId: DRIVER_ID,
       type: NotificationType.BOOKING_CANCELLED,
+      title: 'Vé trên chuyến đã bị hủy',
+      body: 'Vé #VR-20260808-ABCDEFGH đã bị hủy và được gỡ khỏi danh sách đón khách.',
       data: expect.objectContaining({ seatNumbers: ['A01'] }),
     }));
     expect(idempotency.markProcessed).toHaveBeenCalledWith('booking.booking.cancelled:crew', EVENT_ID);

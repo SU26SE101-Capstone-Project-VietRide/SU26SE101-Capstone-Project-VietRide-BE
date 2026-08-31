@@ -15,7 +15,7 @@ import {
   WALLET_CREDITED_ROUTING_KEY,
   WALLET_DEBITED_ROUTING_KEY,
 } from './core-events.constants';
-import { formatBookingReference } from './notification-display';
+import { formatBookingReference, formatCancellationReason } from './notification-display';
 
 const moneyAmountSchema = z
   .union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)])
@@ -93,7 +93,7 @@ function mapBookingCancelled(payload: BookingCancelledConsumerEvent): CreateNoti
     userId: payload.userId,
     type: NotificationType.BOOKING_CANCELLED,
     title: 'Vé đã bị hủy',
-    body: `Vé ${formatBookingReference(payload.bookingCode)} đã bị hủy. Lý do: ${payload.cancellationReason}.`,
+    body: `Vé ${formatBookingReference(payload.bookingCode)} đã bị hủy. Lý do: ${formatCancellationReason(payload.cancellationReason)}.`,
     data: buildBookingData(payload),
   };
 }

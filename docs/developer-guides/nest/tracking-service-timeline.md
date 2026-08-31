@@ -564,8 +564,10 @@ capability link; người nhận không cần tài khoản và không nhìn th�
   `CREATION_ROLLBACK` và không trả link.
 - Mỗi `(tripId, passengerUserId)` chỉ có một grant active. PUT với grant còn hiệu lực trả lại cùng
   link; DELETE cùng endpoint luôn idempotent và chỉ revoke grant của owner đang gọi.
-- Grant hết hiệu lực khi owner revoke, Trip `COMPLETED`/`CANCELLED`/`DISRUPTED`, hoặc sau TTL mặc
-  định 24 giờ. Hai passenger cùng Trip có grant và room độc lập.
+- Grant hết hiệu lực khi owner revoke, Trip `COMPLETED`/`CANCELLED`, Trip `DISRUPTED` không có xe
+  thay thế, hoặc sau TTL mặc định 24 giờ. `DISRUPTED` với `hasSubstitution=true` giữ nguyên grant,
+  token, owner và thời hạn rồi chuyển grant sang replacement Trip. Hai passenger cùng Trip có grant
+  và room độc lập.
 - Token có dạng `v1.<grantId>.<HMAC-SHA256>`; PostgreSQL chỉ lưu SHA-256 của full token. Redis
   idempotency chỉ lưu fingerprint, grant ID và metadata kết quả, không lưu token hoặc share URL.
 
@@ -577,9 +579,11 @@ capability link; người nhận không cần tài khoản và không nhìn th�
   hưởng phép match. POST, trailing slash, suffix thường hoặc suffix encode đều không được public.
 - Guest gửi token trong `X-Trip-Share-Token`. Response luôn đặt `Cache-Control: no-store`,
   `Pragma: no-cache`, `Referrer-Policy: no-referrer`.
-- DTO guest chỉ gồm trạng thái, hạn link, thời điểm cập nhật gần nhất, vị trí xe hiện tại, tên điểm
-  đầu/cuối, GeoJSON `LineString` và ETA. GPS, geometry hoặc ETA chưa có phải trả `null`, không dựng
-  dữ liệu giả. Cấm phát `tripId`, grant/token/hash, mọi internal ID, Booking/Ticket/seat, PII,
+- DTO guest chỉ gồm trạng thái `IN_PROGRESS|VEHICLE_REPLACEMENT_PENDING`, hạn link, thời điểm cập
+  nhật gần nhất, vị trí xe hiện tại, tên điểm đầu/cuối, GeoJSON `LineString` và ETA. Trong lúc chờ
+  GPS của xe mới, response giữ GPS cuối của chuyến trước nếu còn và trả `eta: null`; FE phải gắn
+  nhãn đây là vị trí trước khi đổi xe. GPS, geometry hoặc ETA chưa có phải trả `null`, không dựng dữ
+  liệu giả. Cấm phát `tripId`, grant/token/hash, mọi internal ID, Booking/Ticket/seat, PII,
   driver/assistant/operator data và GPS history.
 - Map công khai nhận thêm `route.origin` và `route.destination` dạng `{ latitude, longitude } | null`
   từ station snapshot đã kiểm tra tọa độ, không phát station ID. `STOPS_ONLY` vẫn giữ
@@ -591,7 +595,11 @@ capability link; người nhận không cần tài khoản và không nhìn th�
   `/tracking/socket.io`, handshake `auth.shareToken`; Gateway hiện không proxy Socket.IO.
 - Server tự join cả `shared-trip:{tripId}` và `shared-grant:{grantId}`. Client không có event tự
   chọn room. Sự kiện public là `shared:gps:update`, `shared:eta:update`,
-  `shared:trip:statusChanged`, `shared:access:revoked`.
+  `shared:trip:statusChanged`, `shared:trip:vehicleSubstituted`, `shared:access:revoked`.
+- Khi đổi xe, server emit `shared:trip:vehicleSubstituted` với payload chỉ gồm
+  `{ status: "VEHICLE_REPLACEMENT_PENDING", occurredAt }`, rồi chuyển socket từ room cũ sang room
+  replacement mà không disconnect. Payload public không chứa old/new Trip ID, Vehicle ID/biển số
+  hoặc PII. Khi replacement `IN_PROGRESS` có GPS mới, context và realtime trở lại `IN_PROGRESS`.
 - Revoke một grant chỉ ngắt viewer trong grant room đó. Trip terminal ngắt toàn bộ trip room.
   Socket đặt timer đến `expiresAt` và revalidate grant/Trip theo
   `TRACKING_SHARE_SOCKET_REVALIDATE_SECONDS` (mặc định 60 giây).
@@ -602,15 +610,23 @@ capability link; người nhận không cần tài khoản và không nhìn th�
 
 ### Đồng bộ Trip terminal qua RabbitMQ
 
-- Ba queue độc lập: `tracking-trip-share-completed` → `trip.trip.completed`,
+- Bốn queue độc lập: `tracking-trip-share-completed` → `trip.trip.completed`,
   `tracking-trip-share-cancelled` → `trip.trip.cancelled`, và
-  `tracking-trip-share-disrupted` → `trip.trip.disrupted`.
+  `tracking-trip-share-disrupted` → `trip.trip.disrupted`,
+  `tracking-trip-share-vehicle-substituted` → `trip.trip.vehicle_substituted`.
 - Consumer dùng `prefetch=1`, dead-letter, tối đa 5 retry và delay 10 giây. Thứ tự xử lý là kiểm tra
-  processed → lấy processing lock 120 giây → validate Zod → revoke DB → emit/disconnect realtime →
-  mark processed 7 ngày.
+  processed → lấy processing lock 120 giây → validate Zod → cập nhật DB → cập nhật Redis → xử lý
+  realtime → mark processed 7 ngày.
 - Lock bận phải retry; payload malformed được drop có chủ đích sau khi mark processed. Lỗi transient
   chỉ release lock do chính consumer sở hữu rồi throw. Retry sau DB commit nhưng realtime fail vẫn
-  phải emit/disconnect dù lần revoke DB tiếp theo cập nhật 0 row.
+  phải tiếp tục Redis/realtime dù lần chuyển hoặc revoke DB tiếp theo cập nhật 0 row.
+- `trip.trip.disrupted` với `hasSubstitution=true` không revoke/disconnect; Tracking ghi pending
+  marker nếu grant vẫn ở chuyến cũ. Consumer substitution chuyển mọi grant active sang chuyến mới
+  trong transaction serializable, giữ nguyên grant ID/token hash/owner/expiry/created time, revoke
+  grant mới trùng owner bằng `CREATION_ROLLBACK`, ghi alias hai chiều và xóa pending marker. Alias
+  có TTL bằng share token, hỗ trợ chuỗi tối đa 8 lần đổi xe và fail closed khi gặp cycle/depth lỗi.
+- DELETE bằng old Trip ID resolve alias đến chuyến hiện tại. Link/token cũ luôn thắng link tạo mới
+  trong race; việc đổi xe không gia hạn expiry.
 - Nếu bỏ lỡ terminal event, guest context, socket handshake và revalidation vẫn kiểm tra Trip để
   đóng quyền truy cập.
 

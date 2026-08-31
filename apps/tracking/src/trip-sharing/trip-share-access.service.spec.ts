@@ -10,6 +10,7 @@ import { TripShareAccessService } from './trip-share-access.service';
 import { TripShareRateLimiter } from './trip-share-rate-limiter';
 import { TripShareTokenCodec } from './trip-share-token.codec';
 import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provider';
+import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 
 const GRANT_ID = '11111111-1111-4111-8111-111111111111';
 const TRIP_ID = '22222222-2222-4222-8222-222222222222';
@@ -27,6 +28,7 @@ describe('TripShareAccessService', () => {
   const codec = { verify: jest.fn() };
   const rateLimiter = { consume: jest.fn() };
   const tripProvider = { getTrip: jest.fn() };
+  const substitutions = { isPending: jest.fn() };
   let service: TripShareAccessService;
 
   beforeEach(() => {
@@ -36,12 +38,14 @@ describe('TripShareAccessService', () => {
       codec as unknown as TripShareTokenCodec,
       rateLimiter as unknown as TripShareRateLimiter,
       tripProvider as unknown as TripShareTripSnapshotProvider,
+      substitutions as unknown as TripShareSubstitutionStateRepository,
     );
     rateLimiter.consume.mockResolvedValue(undefined);
     codec.verify.mockReturnValue({ version: 'v1', grantId: GRANT_ID, tokenHash: TOKEN_HASH });
     repository.findById.mockResolvedValue(createGrant());
     repository.revokeGrantById.mockResolvedValue(1);
     tripProvider.getTrip.mockResolvedValue({ tripId: TRIP_ID, status: 'IN_PROGRESS' });
+    substitutions.isPending.mockResolvedValue(false);
   });
 
   it('rejects a missing token without consuming the limiter', async () => {
@@ -151,6 +155,27 @@ describe('TripShareAccessService', () => {
       expect(repository.revokeGrantById).toHaveBeenCalledWith(GRANT_ID, 'TRIP_TERMINATED', NOW);
     },
   );
+
+  it('keeps a substitution-pending disrupted Trip authorized without revoking the grant', async () => {
+    tripProvider.getTrip.mockResolvedValueOnce({ tripId: TRIP_ID, status: 'DISRUPTED' });
+    substitutions.isPending.mockResolvedValueOnce(true);
+
+    await expect(service.revalidate(TOKEN, NOW)).resolves.toMatchObject({
+      tripId: TRIP_ID,
+      status: 'VEHICLE_REPLACEMENT_PENDING',
+    });
+    expect(repository.revokeGrantById).not.toHaveBeenCalled();
+  });
+
+  it('keeps a transferred grant valid while the replacement Trip is BOARDING', async () => {
+    tripProvider.getTrip.mockResolvedValueOnce({ tripId: TRIP_ID, status: 'BOARDING' });
+
+    await expect(service.revalidate(TOKEN, NOW)).resolves.toMatchObject({
+      tripId: TRIP_ID,
+      status: 'VEHICLE_REPLACEMENT_PENDING',
+    });
+    expect(repository.revokeGrantById).not.toHaveBeenCalled();
+  });
 
   it('maps a Trip 404 after grant validation to 410', async () => {
     tripProvider.getTrip.mockRejectedValueOnce(new NotFoundException());

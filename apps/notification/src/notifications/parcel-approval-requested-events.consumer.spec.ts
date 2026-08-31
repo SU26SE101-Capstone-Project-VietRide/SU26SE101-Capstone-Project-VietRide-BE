@@ -21,8 +21,8 @@ describe('ParcelApprovalRequestedEventsConsumer', () => {
     expect(notifications.createNotification).toHaveBeenCalledWith({
       userId: DRIVER_ID,
       type: NotificationType.PARCEL_APPROVAL_REQUESTED,
-      title: 'Có yêu cầu Parcel cần phê duyệt',
-      body: expect.any(String),
+      title: 'Có yêu cầu đơn gửi hàng cần phê duyệt',
+      body: 'Phụ xe yêu cầu phê duyệt rời điểm dừng khi còn đơn gửi hàng chưa đối soát.',
       data: expect.objectContaining({
         requestId: REQUEST_ID,
         requestType: 'STOP_DEPARTURE',

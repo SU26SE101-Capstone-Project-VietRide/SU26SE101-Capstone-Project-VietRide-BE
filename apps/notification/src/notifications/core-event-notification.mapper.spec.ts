@@ -70,13 +70,13 @@ describe('mapCoreEventToNotification', () => {
         bookingId: BOOKING_ID,
         refundAmount: 0,
         refundOverride: false,
-        cancellationReason: 'Passenger cancelled',
+        cancellationReason: 'USER_INITIATED',
       }),
     ).toEqual(
       expect.objectContaining({
         type: NotificationType.BOOKING_CANCELLED,
         title: 'Vé đã bị hủy',
-        body: 'Vé của bạn đã bị hủy. Lý do: Passenger cancelled.',
+        body: 'Vé của bạn đã bị hủy. Lý do: người dùng chủ động hủy.',
       }),
     );
   });
@@ -94,6 +94,7 @@ describe('mapCoreEventToNotification', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.BOOKING_CANCELLED,
+        body: 'Vé của bạn đã bị hủy. Lý do: lịch làm việc của tài xế đã bị hủy.',
       }),
     );
     expect(notification.data).toMatchObject({ bookingId: BOOKING_ID, refundAmount: 0 });

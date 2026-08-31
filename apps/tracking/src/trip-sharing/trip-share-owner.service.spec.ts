@@ -13,6 +13,7 @@ import { TripShareOwnerService } from './trip-share-owner.service';
 import { TripShareTripSnapshotProvider } from './trip-share-trip-snapshot.provider';
 import { TripShareTokenCodec } from './trip-share-token.codec';
 import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
+import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const USER_ID = '22222222-2222-4222-8222-222222222222';
@@ -28,6 +29,7 @@ describe('TripShareOwnerService', () => {
   let repository: jest.Mocked<TripShareGrantRepository>;
   let idempotency: jest.Mocked<TripShareIdempotencyService>;
   let realtime: jest.Mocked<TripShareRealtimePublisher>;
+  let substitutions: jest.Mocked<TripShareSubstitutionStateRepository>;
   let service: TripShareOwnerService;
 
   beforeEach(() => {
@@ -64,6 +66,9 @@ describe('TripShareOwnerService', () => {
     realtime = {
       revokeGrant: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<TripShareRealtimePublisher>;
+    substitutions = {
+      resolveCurrentTripId: jest.fn().mockResolvedValue(TRIP_ID),
+    } as unknown as jest.Mocked<TripShareSubstitutionStateRepository>;
     const env = {
       TRACKING_SHARE_PAGE_URL: 'https://app.vietride.vn/trip-sharing',
     } as Env;
@@ -79,6 +84,7 @@ describe('TripShareOwnerService', () => {
       codec,
       env,
       realtime,
+      substitutions,
     );
   });
 
@@ -167,6 +173,25 @@ describe('TripShareOwnerService', () => {
     );
     expect(second).toEqual(first);
     expect(grants.ensureActive).toHaveBeenCalledTimes(2);
+  });
+
+  it('revokes the transferred grant when DELETE still uses the original Trip id', async () => {
+    const newTripId = '66666666-6666-4666-8666-666666666666';
+    substitutions.resolveCurrentTripId.mockResolvedValueOnce(newTripId);
+
+    await service.revokeShareLink(USER_ID, TRIP_ID, IDEMPOTENCY_KEY, OWNER_PATH);
+
+    expect(repository.findActiveByOwnerTrip).toHaveBeenCalledWith(
+      newTripId,
+      USER_ID,
+      expect.any(Date),
+    );
+    expect(repository.revokeOwnActiveGrantById).toHaveBeenCalledWith(
+      GRANT_ID,
+      newTripId,
+      USER_ID,
+      expect.any(Date),
+    );
   });
 
   it('rethrows a replayed business error without calling dependencies', async () => {

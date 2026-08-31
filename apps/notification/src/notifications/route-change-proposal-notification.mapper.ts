@@ -15,6 +15,7 @@ import {
 import { z } from 'zod';
 import { NotificationType } from '../generated/notification-prisma-client';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
+import { formatDisplayReason } from './notification-display';
 
 type ParseResult =
   | { success: true; data: RouteChangeProposalEvent }
@@ -48,7 +49,7 @@ const contentByRoutingKey: Record<
 > = {
   [TRIP_ROUTE_CHANGE_PROPOSAL_CREATED_ROUTING_KEY]: {
     title: 'Có đề xuất đổi lộ trình mới',
-    body: (event) => `Chuyến xe có đề xuất đổi lộ trình: ${event.reason}.`,
+    body: (event) => `Chuyến xe có đề xuất đổi lộ trình: ${formatDisplayReason(event.reason)}.`,
   },
   [TRIP_ROUTE_CHANGE_PROPOSAL_APPROVED_ROUTING_KEY]: {
     title: 'Đề xuất đổi lộ trình đã được duyệt',
@@ -57,7 +58,7 @@ const contentByRoutingKey: Record<
   [TRIP_ROUTE_CHANGE_PROPOSAL_REJECTED_ROUTING_KEY]: {
     title: 'Đề xuất đổi lộ trình đã bị từ chối',
     body: (event) =>
-      `Đề xuất đổi lộ trình cho chuyến xe đã bị từ chối${event.rejectionReason ? `: ${event.rejectionReason}` : '.'}`,
+      `Đề xuất đổi lộ trình cho chuyến xe đã bị từ chối${event.rejectionReason ? `: ${formatDisplayReason(event.rejectionReason)}` : '.'}`,
   },
   [TRIP_ROUTE_CHANGE_PROPOSAL_SUPERSEDED_ROUTING_KEY]: {
     title: 'Đề xuất đổi lộ trình đã được thay thế',

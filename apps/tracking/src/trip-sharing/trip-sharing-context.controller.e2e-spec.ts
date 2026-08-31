@@ -25,6 +25,7 @@ import { TripSharePublicController } from './trip-share-public.controller';
 import { TripShareRouteStopsProvider } from './trip-share-route-stops.provider';
 import { TripShareTokenGuard } from './trip-share-token.guard';
 import { TripShareTrackingStateRepository } from './trip-share-tracking-state.repository';
+import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const GRANT_ID = '22222222-2222-4222-8222-222222222222';
@@ -55,6 +56,7 @@ describe('TripSharePublicController (e2e)', () => {
   const routes = { getDetailedRouteGeometry: jest.fn() };
   const routeStops = { getRouteStops: jest.fn() };
   const state = { findLatest: jest.fn(), findEta: jest.fn() };
+  const substitutions = { listPreviousTripIds: jest.fn() };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -67,6 +69,7 @@ describe('TripSharePublicController (e2e)', () => {
         { provide: TripShareTrackingStateRepository, useValue: state },
         { provide: ROUTE_GEOMETRY_PROVIDER, useValue: routes },
         { provide: TripShareRouteStopsProvider, useValue: routeStops },
+        { provide: TripShareSubstitutionStateRepository, useValue: substitutions },
         { provide: APP_FILTER, useValue: new ApiResponseExceptionFilter() },
         { provide: APP_INTERCEPTOR, useValue: new ApiResponseInterceptor() },
       ],
@@ -104,6 +107,7 @@ describe('TripSharePublicController (e2e)', () => {
       distanceMeters: 8_500,
       updatedAt: '2026-08-03T10:02:00.000Z',
     });
+    substitutions.listPreviousTripIds.mockResolvedValue([]);
   });
 
   afterAll(async () => {

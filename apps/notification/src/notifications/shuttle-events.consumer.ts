@@ -29,6 +29,11 @@ import { NotificationsService } from './notifications.service';
 import { createNotificationLogger } from './notification-logger';
 import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 import type { OperatorRecipientProvider } from './operator-recipient.provider';
+import {
+  formatDisplayReason,
+  formatResourceRole,
+  formatShuttleStatusTitle,
+} from './notification-display';
 
 const bindings = [
   { queue: 'notification:shuttle-assigned', routingKey: TRIP_SHUTTLE_ASSIGNED_ROUTING_KEY },
@@ -118,7 +123,7 @@ export class ShuttleEventsConsumer implements OnModuleInit {
             userId,
             type: NotificationType.TRIP_ASSIGNMENT_START_BLOCKED,
             title: 'Không thể bắt đầu chuyến',
-            body: `${event.resourceRole} vẫn đang ACTIVE ở một chuyến khác. Vui lòng xử lý assignment trước khi thử lại.`,
+            body: `${formatResourceRole(event.resourceRole)} vẫn đang hoạt động ở một chuyến khác. Vui lòng xử lý phân công trước khi thử lại.`,
             data: event,
             dedupeKey: `${routingKey}:${event.tripId}:${userId}`,
           }),
@@ -246,7 +251,7 @@ export class ShuttleEventsConsumer implements OnModuleInit {
             userId,
             type: NotificationType.SHUTTLE_REASSIGNED,
             title: 'Đã đổi phân công trung chuyển',
-            body: `Xe mới ${event.newVehicle.licensePlate}. Lý do: ${event.reason}`,
+            body: `Xe mới ${event.newVehicle.licensePlate}. Lý do: ${formatDisplayReason(event.reason)}`,
             data: eventData,
             dedupeKey: `${event.eventId}:operator:${userId}`,
           }),
@@ -292,8 +297,10 @@ export class ShuttleEventsConsumer implements OnModuleInit {
         await this.notifications.createNotification({
           userId: event.passengerUserId,
           type,
-          title: `Cập nhật trung chuyển: ${event.status}`,
-          body: event.reason ?? `Trạng thái trung chuyển đã chuyển sang ${event.status}.`,
+          title: formatShuttleStatusTitle(event.status),
+          body: event.reason
+            ? formatDisplayReason(event.reason)
+            : 'Trạng thái trung chuyển đã được cập nhật.',
           data,
           dedupeKey: `${eventId}:passenger:${event.passengerUserId}`,
         });
@@ -305,8 +312,10 @@ export class ShuttleEventsConsumer implements OnModuleInit {
           this.notifications.createNotification({
             userId,
             type,
-            title: `Trung chuyển: ${event.status}`,
-            body: event.reason ?? 'Chuyến trung chuyển đã cập nhật trạng thái.',
+            title: formatShuttleStatusTitle(event.status),
+            body: event.reason
+              ? formatDisplayReason(event.reason)
+              : 'Chuyến trung chuyển đã cập nhật trạng thái.',
             data,
             dedupeKey: `${eventId}:operator:${userId}`,
           }),
@@ -320,8 +329,10 @@ export class ShuttleEventsConsumer implements OnModuleInit {
         await this.notifications.createNotification({
           userId: event.driverUserId,
           type: NotificationType.SHUTTLE_CANCELLED,
-          title: 'Chuyến trung chuyển đã bị huỷ',
-          body: event.reason ?? 'Nhà xe đã huỷ chuyến trung chuyển được phân công.',
+          title: 'Chuyến trung chuyển đã bị hủy',
+          body: event.reason
+            ? formatDisplayReason(event.reason)
+            : 'Nhà xe đã hủy chuyến trung chuyển được phân công.',
           data,
           dedupeKey: `${routingKey}:${event.shuttleTripId}:driver:${event.driverUserId}`,
         });

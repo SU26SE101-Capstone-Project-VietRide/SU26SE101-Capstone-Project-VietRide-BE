@@ -11,6 +11,7 @@ import {
 } from './booking-trip-change-events.consumer';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
+import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 
 const EVENT_ID = '11111111-1111-4111-8111-111111111111';
 const AUTO_RESOLVED_QUEUE = 'notification:booking-pending-action-auto-resolved';
@@ -50,6 +51,10 @@ describe('Day 23 schedule notification e2e:', () => {
         { provide: RabbitMqConsumer, useValue: rabbitConsumer },
         { provide: MessageIdempotencyService, useValue: idempotency },
         { provide: NotificationsService, useValue: notificationsService },
+        {
+          provide: OPERATOR_RECIPIENT_PROVIDER,
+          useValue: { resolveOperatorRecipientUserIds: jest.fn().mockResolvedValue([]) },
+        },
       ],
     }).compile();
 

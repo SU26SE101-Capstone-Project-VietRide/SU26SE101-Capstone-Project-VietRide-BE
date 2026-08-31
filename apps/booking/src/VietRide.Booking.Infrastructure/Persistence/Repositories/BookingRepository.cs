@@ -188,7 +188,9 @@ internal sealed class BookingRepository : IBookingRepository
             query = query.Where(booking => booking.CreatedAt < to.Value);
 
         var totalItems = await query.LongCountAsync(ct);
-        IQueryable<BookingEntity> pageQuery = query.Include(booking => booking.Tickets);
+        IQueryable<BookingEntity> pageQuery = query
+            .Include(booking => booking.Tickets)
+            .Include(booking => booking.Passengers);
         if (includeShuttleRequests)
             pageQuery = pageQuery.Include(booking => booking.ShuttleIntents);
 

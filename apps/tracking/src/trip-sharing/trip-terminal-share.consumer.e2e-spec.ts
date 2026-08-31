@@ -6,6 +6,7 @@ import { TrackingPrismaService } from '../prisma/tracking-prisma.service';
 import { TripShareGrantRepository } from './trip-share-grant.repository';
 import { TripShareMessageIdempotencyRepository } from './trip-share-message-idempotency.repository';
 import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
+import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 import { TripTerminalShareConsumer } from './trip-terminal-share.consumer';
 
 const OPERATOR_ID = '99999999-9999-4999-8999-999999999999';
@@ -16,12 +17,14 @@ describe('TripTerminalShareConsumer (in-process e2e)', () => {
   let updateMany: jest.Mock;
   let revokeTrip: jest.Mock;
   let redis: InMemoryRedis;
+  let markPending: jest.Mock;
 
   beforeEach(async () => {
     subscriptions = new Map();
     updateMany = jest.fn().mockResolvedValue({ count: 1 });
     revokeTrip = jest.fn().mockResolvedValue(undefined);
     redis = new InMemoryRedis();
+    markPending = jest.fn().mockResolvedValue(undefined);
 
     module = await Test.createTestingModule({
       providers: [
@@ -43,9 +46,18 @@ describe('TripTerminalShareConsumer (in-process e2e)', () => {
         { provide: RedisService, useValue: { getClient: () => redis } },
         {
           provide: TrackingPrismaService,
-          useValue: { tripShareGrant: { updateMany } },
+          useValue: {
+            tripShareGrant: {
+              updateMany,
+              count: jest.fn().mockResolvedValue(1),
+            },
+          },
         },
         { provide: TripShareRealtimePublisher, useValue: { revokeTrip } },
+        {
+          provide: TripShareSubstitutionStateRepository,
+          useValue: { markPending },
+        },
       ],
     }).compile();
 

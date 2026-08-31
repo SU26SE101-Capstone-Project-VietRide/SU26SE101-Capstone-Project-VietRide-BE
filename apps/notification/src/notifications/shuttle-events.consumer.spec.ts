@@ -77,14 +77,14 @@ describe('ShuttleEventsConsumer', () => {
   });
 
   it.each([
-    ['trip.shuttle.cancelled', NotificationType.SHUTTLE_CANCELLED, 'CANCELLED'],
-    ['trip.shuttle.picked_up', NotificationType.SHUTTLE_PICKED_UP, 'PICKED_UP'],
-    ['trip.shuttle.delivered', NotificationType.SHUTTLE_DELIVERED, 'DELIVERED'],
-    ['trip.shuttle.no_show', NotificationType.SHUTTLE_NO_SHOW, 'NO_SHOW'],
-    ['trip.shuttle.completed', NotificationType.SHUTTLE_COMPLETED, 'COMPLETED'],
+    ['trip.shuttle.cancelled', NotificationType.SHUTTLE_CANCELLED, 'CANCELLED', 'Chuyến trung chuyển đã bị hủy'],
+    ['trip.shuttle.picked_up', NotificationType.SHUTTLE_PICKED_UP, 'PICKED_UP', 'Đã đón hành khách'],
+    ['trip.shuttle.delivered', NotificationType.SHUTTLE_DELIVERED, 'DELIVERED', 'Đã trả hành khách'],
+    ['trip.shuttle.no_show', NotificationType.SHUTTLE_NO_SHOW, 'NO_SHOW', 'Hành khách không có mặt'],
+    ['trip.shuttle.completed', NotificationType.SHUTTLE_COMPLETED, 'COMPLETED', 'Chuyến trung chuyển đã hoàn tất'],
   ] as const)(
     'maps %s with canonical event identity and tenant recipients',
-    async (routingKey, type, status) => {
+    async (routingKey, type, status, title) => {
       const eventId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
       const operatorUserId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
       const recipients = consumer as unknown as {
@@ -120,6 +120,7 @@ describe('ShuttleEventsConsumer', () => {
         expect.objectContaining({
           userId: '36000000-0000-4000-8000-000000000004',
           type,
+          title,
           data: expect.objectContaining({
             direction: 'OUTBOUND_FROM_STATION',
             status,

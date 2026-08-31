@@ -23,6 +23,8 @@ describe('BookingCreatedEventsConsumer', () => {
     expect(notifications.createNotification).toHaveBeenCalledWith(expect.objectContaining({
       userId: DRIVER_ID,
       type: NotificationType.BOOKING_CREATED,
+      title: 'Có vé mới trên chuyến',
+      body: 'Vé #VR-20260805-ABCDEFGH đã được xác nhận cho chuyến của bạn.',
       dedupeKey: `${ROUTING_KEY}:${EVENT_ID}:${DRIVER_ID}`,
     }));
     expect(notifications.createNotification).toHaveBeenCalledWith(expect.objectContaining({

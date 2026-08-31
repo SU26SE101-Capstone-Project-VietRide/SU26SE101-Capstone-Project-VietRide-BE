@@ -360,7 +360,7 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
   });
 
   it.each([
-    ['CHECK_IN_TIMEOUT', 'không check-in đúng hạn'],
+    ['CHECK_IN_TIMEOUT', 'không xác nhận lên xe đúng hạn'],
     ['FINAL_PAYMENT_TIMEOUT', 'không thanh toán số dư đúng hạn'],
   ] as const)('maps %s to one sender notification with forfeited deposit', async (reason, copy) => {
     const [notification] = await mapParcelSubscriptionOperatorEventToNotifications(
@@ -633,7 +633,7 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.VOUCHER_CONSENT_ACCEPTED,
-        title: 'Đã chấp nhận voucher',
+        title: 'Đã chấp nhận mã ưu đãi',
       }),
     ]);
   });
@@ -665,8 +665,8 @@ describe('mapParcelSubscriptionOperatorEventToNotifications', () => {
         {
           userId: USER_ID,
           type: NotificationType.VOUCHER_CONSENT_REQUESTED,
-          title: 'Đề xuất voucher mới',
-          body: `VietRide đề xuất voucher SUMMER26 ${discountText} cho chuyến của nhà xe. Đề xuất đang chờ bạn xác nhận áp dụng.`,
+          title: 'Đề xuất mã ưu đãi mới',
+          body: `VietRide đề xuất mã ưu đãi SUMMER26 ${discountText} cho chuyến của nhà xe. Đề xuất đang chờ bạn xác nhận áp dụng.`,
           data: {
             eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
             occurredAt: '2026-07-27T08:30:00+07:00',

@@ -6,6 +6,7 @@ import {
   SHARED_ETA_UPDATE_EVENT,
   SHARED_GPS_UPDATE_EVENT,
   SHARED_TRIP_STATUS_CHANGED_EVENT,
+  SHARED_TRIP_VEHICLE_SUBSTITUTED_EVENT,
   sharedGrantRoom,
   sharedTripRoom,
   type TripShareAccessRevocationReason,
@@ -93,6 +94,25 @@ export class TripShareRealtimePublisher {
 
   async revokeTrip(tripId: string, reason: TripShareAccessRevocationReason): Promise<void> {
     await this.revokeRoom(sharedTripRoom(tripId), reason);
+  }
+
+  async transferTrip(oldTripId: string, newTripId: string, occurredAt: string): Promise<void> {
+    const namespace = this.namespace;
+    if (!namespace) return;
+
+    const oldRoom = sharedTripRoom(oldTripId);
+    namespace.to(oldRoom).emit(
+      SHARED_TRIP_VEHICLE_SUBSTITUTED_EVENT,
+      transformFrontendTimestamps({
+        status: 'VEHICLE_REPLACEMENT_PENDING',
+        occurredAt,
+      }),
+    );
+    const sockets = await namespace.in(oldRoom).fetchSockets();
+    for (const socket of sockets) {
+      await socket.join(sharedTripRoom(newTripId));
+      await socket.leave(oldRoom);
+    }
   }
 
   private async revokeRoom(room: string, reason: TripShareAccessRevocationReason): Promise<void> {

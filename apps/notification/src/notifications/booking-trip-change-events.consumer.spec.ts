@@ -361,6 +361,7 @@ describe('BookingTripChangeEventsConsumer binds the Booking-owned passenger fact
       expect.objectContaining({
         userId: USER_ID,
         type: NotificationType.VEHICLE_SUBSTITUTION_SEAT_SHORTAGE,
+        body: 'Vé #BKG-20260726-ABC123 có 1 hành khách chưa được xếp ghế trên chuyến thay thế.',
         dedupeKey: `${BOOKING_SEAT_SHORTAGE_DETECTED_ROUTING_KEY}:${EVENT_ID}:${USER_ID}:${NotificationType.VEHICLE_SUBSTITUTION_SEAT_SHORTAGE}`,
       }),
     );

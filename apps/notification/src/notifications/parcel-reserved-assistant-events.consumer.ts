@@ -70,7 +70,7 @@ export class ParcelReservedAssistantEventsConsumer implements OnModuleInit {
         await this.notifications.createNotification({
           userId: assistantUserId,
           type: NotificationType.PARCEL_RESERVED,
-          title: 'Có đơn hàng mới cần check-in',
+          title: 'Có đơn hàng mới cần xác nhận lên xe',
           body: `Đơn hàng ${event.parcelCode} đã thanh toán cọc và được giữ chỗ trên chuyến.`,
           data: {
             eventId: event.eventId,

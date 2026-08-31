@@ -63,10 +63,10 @@ export class ParcelApprovalRequestedEventsConsumer implements OnModuleInit {
       await this.notifications.createNotification({
         userId: event.targetDriverUserId,
         type: NotificationType.PARCEL_APPROVAL_REQUESTED,
-        title: 'Có yêu cầu Parcel cần phê duyệt',
+        title: 'Có yêu cầu đơn gửi hàng cần phê duyệt',
         body: event.requestType === 'STOP_DEPARTURE'
-          ? 'Trợ lý yêu cầu phê duyệt rời điểm dừng khi còn Parcel chưa đối soát.'
-          : 'Trợ lý yêu cầu phê duyệt ngoại lệ bàn giao Parcel.',
+          ? 'Phụ xe yêu cầu phê duyệt rời điểm dừng khi còn đơn gửi hàng chưa đối soát.'
+          : 'Phụ xe yêu cầu phê duyệt ngoại lệ bàn giao đơn gửi hàng.',
         data: {
           eventId: event.eventId,
           occurredAt: event.occurredAt,

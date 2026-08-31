@@ -3,119 +3,77 @@ import { RabbitMqConsumer } from '@vietride/nest-rabbitmq';
 import type { ConsumeMessage } from 'amqplib';
 import { createHash } from 'node:crypto';
 import pino from 'pino';
-import { z, type ZodIssue } from 'zod';
+import { z } from 'zod';
 import { TripShareGrantRepository } from './trip-share-grant.repository';
 import { TripShareMessageIdempotencyRepository } from './trip-share-message-idempotency.repository';
 import { TripShareRealtimePublisher } from './trip-share-realtime.publisher';
 import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 import {
-  TRIP_SHARE_TERMINAL_CONSUMER_OPTIONS,
-  TRIP_SHARE_TERMINAL_QUEUE_BINDINGS,
-} from './trip-terminal-share.constants';
-import { TRIP_DISRUPTED_ROUTING_KEY } from '@vietride/contracts';
+  TRIP_SHARE_VEHICLE_SUBSTITUTED_CONSUMER_OPTIONS,
+  TRIP_SHARE_VEHICLE_SUBSTITUTED_QUEUE,
+  TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
+  TripShareVehicleSubstitutedEventSchema,
+} from './trip-vehicle-substituted-share.constants';
 
 const SAFE_BROKER_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const EVENT_ID_SCHEMA = z.string().uuid();
 
-interface ParsedTerminalEvent {
-  eventId: string;
-  tripId: string;
-  occurredAt?: string;
-  hasSubstitution?: boolean;
-}
-
-interface TerminalEventSchema {
-  safeParse(payload: unknown):
-    | { success: true; data: ParsedTerminalEvent }
-    | { success: false; error: { issues: ZodIssue[] } };
-}
-
 @Injectable()
-export class TripTerminalShareConsumer implements OnModuleInit {
-  private readonly logger = pino({ name: TripTerminalShareConsumer.name });
+export class TripVehicleSubstitutedShareConsumer implements OnModuleInit {
+  private readonly logger = pino({ name: TripVehicleSubstitutedShareConsumer.name });
 
   constructor(
     private readonly consumer: RabbitMqConsumer,
     private readonly idempotency: TripShareMessageIdempotencyRepository,
     private readonly grants: TripShareGrantRepository,
-    private readonly realtime: TripShareRealtimePublisher,
     private readonly substitutions: TripShareSubstitutionStateRepository,
+    private readonly realtime: TripShareRealtimePublisher,
   ) {}
 
   async onModuleInit(): Promise<void> {
-    await Promise.all(
-      TRIP_SHARE_TERMINAL_QUEUE_BINDINGS.map((binding) =>
-        this.consumer.subscribe(
-          binding.queue,
-          binding.routingKey,
-          (payload, raw) => this.handle(binding.routingKey, binding.schema, payload, raw),
-          TRIP_SHARE_TERMINAL_CONSUMER_OPTIONS,
-        ),
-      ),
+    await this.consumer.subscribe(
+      TRIP_SHARE_VEHICLE_SUBSTITUTED_QUEUE,
+      TRIP_VEHICLE_SUBSTITUTED_ROUTING_KEY,
+      (payload, raw) => this.handle(payload, raw),
+      TRIP_SHARE_VEHICLE_SUBSTITUTED_CONSUMER_OPTIONS,
     );
   }
 
-  private async handle(
-    routingKey: string,
-    schema: TerminalEventSchema,
-    payload: unknown,
-    raw: ConsumeMessage,
-  ): Promise<void> {
+  private async handle(payload: unknown, raw: ConsumeMessage): Promise<void> {
     const messageIdentity = this.resolveMessageIdentity(payload, raw);
-    if (await this.idempotency.isProcessed(messageIdentity)) {
-      this.logger.info({ routingKey, messageIdentity }, 'Skipping processed trip-share terminal event');
-      return;
-    }
+    if (await this.idempotency.isProcessed(messageIdentity)) return;
 
     const ownerToken = await this.idempotency.acquire(messageIdentity);
-    if (!ownerToken) throw new Error(`TRIP_SHARE_TERMINAL_EVENT_LOCKED_${routingKey}`);
+    if (!ownerToken) throw new Error('TRIP_SHARE_VEHICLE_SUBSTITUTED_EVENT_LOCKED');
 
     try {
       if (await this.idempotency.isProcessed(messageIdentity)) {
         await this.idempotency.release(messageIdentity, ownerToken);
-        this.logger.info(
-          { routingKey, messageIdentity },
-          'Skipping trip-share terminal event completed before lock acquisition',
-        );
         return;
       }
 
-      const parsed = schema.safeParse(payload);
+      const parsed = TripShareVehicleSubstitutedEventSchema.safeParse(payload);
       if (!parsed.success) {
         this.logger.warn(
           {
-            routingKey,
             messageIdentity,
             issues: parsed.error.issues.map((issue) => ({ code: issue.code, path: issue.path })),
           },
-          'Dropping malformed trip-share terminal event',
+          'Dropping malformed trip-share vehicle-substituted event',
         );
         await this.requireMarkedProcessed(messageIdentity, ownerToken);
         return;
       }
 
-      if (routingKey === TRIP_DISRUPTED_ROUTING_KEY && parsed.data.hasSubstitution === true) {
-        const now = new Date();
-        if (await this.grants.hasActiveForTrip(parsed.data.tripId, now)) {
-          await this.substitutions.markPending(
-            parsed.data.tripId,
-            parsed.data.occurredAt ?? now.toISOString(),
-          );
-        }
-        await this.requireMarkedProcessed(messageIdentity, ownerToken);
-        this.logger.info(
-          { routingKey, messageIdentity, tripId: parsed.data.tripId },
-          'Preserved trip-share grants for vehicle substitution',
-        );
-        return;
-      }
-
-      await this.grants.revokeAllActiveForTrip(parsed.data.tripId, new Date());
-      await this.realtime.revokeTrip(parsed.data.tripId, 'TRIP_ENDED');
+      const event = parsed.data;
+      await this.grants.transferActiveGrants(event.oldTripId, event.newTripId, new Date());
+      await this.substitutions.storeAlias(event.oldTripId, event.newTripId);
+      await this.realtime.transferTrip(event.oldTripId, event.newTripId, event.occurredAt);
+      await this.substitutions.clearPending(event.oldTripId);
       await this.requireMarkedProcessed(messageIdentity, ownerToken);
       this.logger.info(
-        { routingKey, messageIdentity, tripId: parsed.data.tripId },
-        'Processed trip-share terminal event',
+        { messageIdentity, oldTripId: event.oldTripId, newTripId: event.newTripId },
+        'Transferred trip-share grants to replacement Trip',
       );
     } catch (error) {
       await this.idempotency.release(messageIdentity, ownerToken);
@@ -147,6 +105,6 @@ export class TripTerminalShareConsumer implements OnModuleInit {
 
   private async requireMarkedProcessed(messageIdentity: string, ownerToken: string): Promise<void> {
     if (await this.idempotency.markProcessed(messageIdentity, ownerToken)) return;
-    throw new Error(`TRIP_SHARE_TERMINAL_EVENT_LOCK_NOT_OWNED_${messageIdentity}`);
+    throw new Error(`TRIP_SHARE_VEHICLE_SUBSTITUTED_EVENT_LOCK_NOT_OWNED_${messageIdentity}`);
   }
 }

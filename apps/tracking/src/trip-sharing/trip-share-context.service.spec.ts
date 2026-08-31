@@ -5,6 +5,7 @@ import type { TripShareAccessContext } from './trip-share-access.service';
 import { TripShareContextService } from './trip-share-context.service';
 import type { TripShareRouteStopsProvider } from './trip-share-route-stops.provider';
 import { TripShareTrackingStateRepository } from './trip-share-tracking-state.repository';
+import { TripShareSubstitutionStateRepository } from './trip-share-substitution-state.repository';
 
 const TRIP_ID = '11111111-1111-4111-8111-111111111111';
 const GRANT_ID = '22222222-2222-4222-8222-222222222222';
@@ -25,6 +26,7 @@ describe('TripShareContextService', () => {
   const routeProvider = { getDetailedRouteGeometry: jest.fn() };
   const tripDataProvider = { getRouteStops: jest.fn() };
   const state = { findLatest: jest.fn(), findEta: jest.fn() };
+  const substitutions = { listPreviousTripIds: jest.fn() };
   let service: TripShareContextService;
 
   beforeEach(() => {
@@ -33,6 +35,7 @@ describe('TripShareContextService', () => {
       routeProvider as unknown as DetailedRouteGeometryProvider,
       tripDataProvider as unknown as TripShareRouteStopsProvider,
       state as unknown as TripShareTrackingStateRepository,
+      substitutions as unknown as TripShareSubstitutionStateRepository,
     );
     routeProvider.getDetailedRouteGeometry.mockResolvedValue({ kind: 'ok', snapshot: createRoute() });
     tripDataProvider.getRouteStops.mockResolvedValue([
@@ -55,6 +58,7 @@ describe('TripShareContextService', () => {
       distanceMeters: 8_500,
       updatedAt: '2026-08-03T10:02:00.000Z',
     });
+    substitutions.listPreviousTripIds.mockResolvedValue([]);
   });
 
   it('maps the exact anonymous allow-list with GeoJSON longitude-latitude order', async () => {
@@ -119,6 +123,55 @@ describe('TripShareContextService', () => {
     expect(result.eta).toBeNull();
     expect(result.lastUpdatedAt).toBeNull();
     expect(state.findEta).not.toHaveBeenCalled();
+  });
+
+  it('returns the previous Trip last location and no ETA while replacement GPS is pending', async () => {
+    const oldTripId = '77777777-7777-4777-8777-777777777777';
+    substitutions.listPreviousTripIds.mockResolvedValueOnce([oldTripId]);
+    state.findLatest
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        tripId: oldTripId,
+        latitude: 10.07,
+        longitude: 106.07,
+        recordedAt: '2026-08-03T10:03:00.000Z',
+      });
+
+    const result = await service.getContext(ACCESS);
+
+    expect(result.status).toBe('VEHICLE_REPLACEMENT_PENDING');
+    expect(result.vehicle.location).toMatchObject({ latitude: 10.07, longitude: 106.07 });
+    expect(result.eta).toBeNull();
+    expect(state.findEta).not.toHaveBeenCalled();
+    assertAnonymousPrivacy(result);
+  });
+
+  it('falls back through multiple substitutions to the newest available previous GPS', async () => {
+    const immediatelyPreviousTripId = '77777777-7777-4777-8777-777777777777';
+    const originalTripId = '88888888-8888-4888-8888-888888888888';
+    substitutions.listPreviousTripIds.mockResolvedValueOnce([
+      immediatelyPreviousTripId,
+      originalTripId,
+    ]);
+    state.findLatest
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        tripId: originalTripId,
+        latitude: 10.08,
+        longitude: 106.08,
+        recordedAt: '2026-08-03T10:04:00.000Z',
+      });
+
+    const result = await service.getContext(ACCESS);
+
+    expect(result.status).toBe('VEHICLE_REPLACEMENT_PENDING');
+    expect(result.vehicle.location).toMatchObject({ latitude: 10.08, longitude: 106.08 });
+    expect(state.findLatest).toHaveBeenNthCalledWith(1, TRIP_ID);
+    expect(state.findLatest).toHaveBeenNthCalledWith(2, immediatelyPreviousTripId);
+    expect(state.findLatest).toHaveBeenNthCalledWith(3, originalTripId);
+    expect(result.eta).toBeNull();
+    assertAnonymousPrivacy(result);
   });
 
   it('returns null geometry when a polyline has fewer than two valid sanitized points', async () => {

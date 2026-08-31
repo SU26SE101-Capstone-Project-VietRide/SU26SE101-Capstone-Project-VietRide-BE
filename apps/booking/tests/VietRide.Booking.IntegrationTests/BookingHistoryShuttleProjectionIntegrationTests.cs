@@ -52,6 +52,7 @@ public sealed class BookingHistoryShuttleProjectionIntegrationTests
                 .ShuttleIntents.Should().HaveCount(2);
             page.Items.Single(booking => booking.Id == withoutShuttle.Id)
                 .ShuttleIntents.Should().BeEmpty();
+            AssertOperationalSeatLoaded(page.Items.Single(booking => booking.Id == withShuttle.Id));
         }
 
         _factory.SqlCapture.Commands.Should().Contain(command =>
@@ -73,6 +74,7 @@ public sealed class BookingHistoryShuttleProjectionIntegrationTests
 
             page.TotalItems.Should().Be(2);
             page.Items.Should().HaveCount(2).And.OnlyContain(booking => booking.ShuttleIntents.Count == 0);
+            AssertOperationalSeatLoaded(page.Items.Single(booking => booking.Id == withShuttle.Id));
         }
 
         _factory.SqlCapture.Commands.Should().NotContain(command =>
@@ -109,6 +111,23 @@ public sealed class BookingHistoryShuttleProjectionIntegrationTests
                 4_200);
         }
 
+        booking.AddTicketedPassenger(
+            "A01",
+            TicketCode.Generate(DateTimeOffset.UtcNow),
+            Money.FromRaw(100_000),
+            Money.Zero,
+            Money.FromRaw(100_000));
+        booking.Passengers.Single().ApplyVehicleSubstitutionSeat("A10");
+
         return booking;
+    }
+
+    private static void AssertOperationalSeatLoaded(Domain.Entities.Booking booking)
+    {
+        var ticket = booking.Tickets.Should().ContainSingle().Subject;
+        var passenger = booking.Passengers.Should().ContainSingle().Subject;
+        ticket.PassengerId.Should().Be(passenger.Id);
+        ticket.SeatNumber.Should().Be("A01");
+        passenger.SeatNumber.Should().Be("A10");
     }
 }

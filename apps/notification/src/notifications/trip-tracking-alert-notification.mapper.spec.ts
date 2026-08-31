@@ -258,7 +258,7 @@ describe('mapTripTrackingAlertToNotifications maps stop disabled event for expli
           userId: USER_ID,
           type: NotificationType.INCIDENT_REPORTED,
           title: 'Có sự cố trên chuyến xe',
-          body: 'Chuyến xe vừa ghi nhận sự cố: TRAFFIC_JAM.',
+          body: 'Chuyến xe vừa ghi nhận sự cố: ùn tắc giao thông.',
           data: {
             incidentId: INCIDENT_ID,
             tripId: TRIP_ID,

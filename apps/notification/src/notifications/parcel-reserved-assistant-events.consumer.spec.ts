@@ -24,7 +24,7 @@ describe('ParcelReservedAssistantEventsConsumer', () => {
     expect(notifications.createNotification).toHaveBeenCalledWith({
       userId: ASSISTANT_ID,
       type: NotificationType.PARCEL_RESERVED,
-      title: 'Có đơn hàng mới cần check-in',
+      title: 'Có đơn hàng mới cần xác nhận lên xe',
       body: 'Đơn hàng VRP-20260813-ABCDEFGH đã thanh toán cọc và được giữ chỗ trên chuyến.',
       data: expect.objectContaining({ parcelId: PARCEL_ID, tripId: TRIP_ID }),
       dedupeKey: `${PARCEL_RESERVED_ROUTING_KEY}:${EVENT_ID}:${ASSISTANT_ID}:${NotificationType.PARCEL_RESERVED}`,

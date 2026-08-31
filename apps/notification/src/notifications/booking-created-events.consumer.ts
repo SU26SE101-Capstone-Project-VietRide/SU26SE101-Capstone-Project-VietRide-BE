@@ -10,6 +10,7 @@ import { RABBITMQ_PREFETCH_ONE } from './core-events.constants';
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import { createNotificationLogger } from './notification-logger';
+import { formatBookingReference } from './notification-display';
 
 const QUEUE_NAME = 'notification:booking-created';
 
@@ -72,8 +73,8 @@ export class BookingCreatedEventsConsumer implements OnModuleInit {
           this.notifications.createNotification({
             userId,
             type: NotificationType.BOOKING_CREATED,
-            title: 'Có booking mới trên chuyến',
-            body: `Booking ${event.bookingCode} đã được xác nhận cho chuyến của bạn.`,
+            title: 'Có vé mới trên chuyến',
+            body: `Vé ${formatBookingReference(event.bookingCode)} đã được xác nhận cho chuyến của bạn.`,
             data: {
               eventId: event.eventId,
               occurredAt: event.occurredAt,
