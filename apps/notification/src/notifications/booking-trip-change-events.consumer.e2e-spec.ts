@@ -8,6 +8,7 @@ import {
 import { MessageIdempotencyService } from './message-idempotency.service';
 import { NotificationsService } from './notifications.service';
 import { NotificationsModule } from './notifications.module';
+import { OPERATOR_RECIPIENT_PROVIDER } from './parcel-subscription-operator-events.constants';
 
 describe('BookingTripChangeEventsConsumer registers the Booking-owned passenger subscriptions (e2e)', () => {
   it('is registered by NotificationsModule', () => {
@@ -30,6 +31,10 @@ describe('BookingTripChangeEventsConsumer registers the Booking-owned passenger 
           useValue: { begin: jest.fn(), markProcessed: jest.fn(), release: jest.fn() },
         },
         { provide: NotificationsService, useValue: { createNotification: jest.fn() } },
+        {
+          provide: OPERATOR_RECIPIENT_PROVIDER,
+          useValue: { resolveOperatorRecipientUserIds: jest.fn().mockResolvedValue([]) },
+        },
       ],
     }).compile();
 

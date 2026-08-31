@@ -13,7 +13,7 @@ import {
 import { NotificationType } from '../generated/notification-prisma-client';
 import { formatVietnamDateTime } from '@vietride/nest-common';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
-import { formatTripLabel } from './notification-display';
+import { formatIncidentCategory, formatTripLabel } from './notification-display';
 import {
   TRACKING_GPS_APPROACHING_STOP_ROUTING_KEY,
   TRACKING_GPS_OFF_ROUTE_ROUTING_KEY,
@@ -489,7 +489,7 @@ export function mapIncidentReportedToNotifications(
     userId,
     type: NotificationType.INCIDENT_REPORTED,
     title: 'Có sự cố trên chuyến xe',
-    body: `Chuyến xe vừa ghi nhận sự cố: ${payload.category}.`,
+    body: `Chuyến xe vừa ghi nhận sự cố: ${formatIncidentCategory(payload.category)}.`,
     data: {
       incidentId: payload.incidentId,
       tripId: payload.tripId,

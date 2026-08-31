@@ -30,6 +30,7 @@ import {
 import { NotificationType } from '../generated/notification-prisma-client';
 import { formatVietnamDateTime } from '@vietride/nest-common';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
+import { formatBookingReference } from './notification-display';
 
 export type BookingTripChangeRoutingKey =
   | typeof BOOKING_SEAT_REASSIGNMENT_REQUIRED_ROUTING_KEY
@@ -91,7 +92,7 @@ function mapSeatShortageDetected(
     userId,
     type: NotificationType.VEHICLE_SUBSTITUTION_SEAT_SHORTAGE,
     title: 'Xe thay thế không đủ ghế',
-    body: `Booking ${payload.bookingCode} có ${payload.affectedPassengerCount} hành khách chưa được xếp ghế trên chuyến thay thế.`,
+    body: `Vé ${formatBookingReference(payload.bookingCode)} có ${payload.affectedPassengerCount} hành khách chưa được xếp ghế trên chuyến thay thế.`,
     data: operatorBookingEventData(payload),
   };
 }
@@ -104,7 +105,7 @@ function mapTransferEscalated(
     userId,
     type: NotificationType.BOOKING_TRANSFER_ESCALATED,
     title: 'Xác nhận chuyển khách quá hạn',
-    body: `Booking ${payload.bookingCode} có ${payload.pendingConfirmationCount} lượt chuyển khách chưa được tổ lái xác nhận.`,
+    body: `Vé ${formatBookingReference(payload.bookingCode)} có ${payload.pendingConfirmationCount} lượt chuyển khách chưa được tổ lái xác nhận.`,
     data: operatorBookingEventData(payload),
   };
 }

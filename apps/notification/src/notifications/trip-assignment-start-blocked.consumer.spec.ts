@@ -50,6 +50,7 @@ describe('Trip assignment start-blocked notification', () => {
       expect.objectContaining({
         userId: '20000000-0000-4000-8000-000000000001',
         type: NotificationType.TRIP_ASSIGNMENT_START_BLOCKED,
+        body: 'Phương tiện vẫn đang hoạt động ở một chuyến khác. Vui lòng xử lý phân công trước khi thử lại.',
         dedupeKey:
           'trip.assignment.start_blocked:20000000-0000-4000-8000-000000000003:20000000-0000-4000-8000-000000000001',
       }),

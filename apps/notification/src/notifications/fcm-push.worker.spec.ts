@@ -79,8 +79,8 @@ describe('FcmPushWorker', () => {
     });
     expect(fcmPushProvider.send).toHaveBeenCalledWith({
       token: FCM_TOKEN,
-      title: 'Dat ve thanh cong',
-      body: 'Ve cua ban da duoc xac nhan.',
+      title: 'Đặt vé thành công',
+      body: 'Vé của bạn đã được xác nhận.',
       data: expect.objectContaining({
         notificationId: NOTIFICATION_ID,
         type: 'NOTIFICATION',
@@ -186,8 +186,8 @@ function createNotification(type: NotificationType = NotificationType.BOOKING_CO
     id: NOTIFICATION_ID,
     userId: USER_ID,
     type,
-    title: 'Dat ve thanh cong',
-    body: 'Ve cua ban da duoc xac nhan.',
+    title: 'Đặt vé thành công',
+    body: 'Vé của bạn đã được xác nhận.',
     data: {
       bookingId: BOOKING_ID,
       actionType: 'UNTRUSTED_LEGACY_OVERRIDE',

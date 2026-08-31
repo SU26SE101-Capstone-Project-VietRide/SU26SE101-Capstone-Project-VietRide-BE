@@ -21,7 +21,11 @@ import {
 import { NotificationType } from '../generated/notification-prisma-client';
 import { formatVietnamDateTime } from '@vietride/nest-common';
 import type { CreateNotificationDto } from './dto/create-notification.dto';
-import { formatOperatorLabel, formatParcelLabel } from './notification-display';
+import {
+  formatDisplayReason,
+  formatOperatorLabel,
+  formatParcelLabel,
+} from './notification-display';
 import type { ParcelRecipientSnapshot } from './parcel-recipient.provider';
 import {
   BOOKING_VOUCHER_CONSENT_ACCEPTED_ROUTING_KEY,
@@ -528,8 +532,8 @@ function mapVoucherConsentRequested(
   return {
     userId,
     type: NotificationType.VOUCHER_CONSENT_REQUESTED,
-    title: 'Đề xuất voucher mới',
-    body: `VietRide đề xuất voucher ${payload.voucherCode} giảm ${discount} cho chuyến của nhà xe. Đề xuất đang chờ bạn xác nhận áp dụng.`,
+    title: 'Đề xuất mã ưu đãi mới',
+    body: `VietRide đề xuất mã ưu đãi ${payload.voucherCode} giảm ${discount} cho chuyến của nhà xe. Đề xuất đang chờ bạn xác nhận áp dụng.`,
     data: buildNotificationData(payload),
   };
 }
@@ -541,8 +545,8 @@ function mapVoucherConsentAccepted(
   return {
     userId,
     type: NotificationType.VOUCHER_CONSENT_ACCEPTED,
-    title: 'Đã chấp nhận voucher',
-    body: `${formatOperatorLabel(payload.operatorName)} đã chấp nhận voucher.`,
+    title: 'Đã chấp nhận mã ưu đãi',
+    body: `${formatOperatorLabel(payload.operatorName)} đã chấp nhận mã ưu đãi.`,
     data: buildNotificationData(payload),
   };
 }
@@ -554,9 +558,9 @@ function mapVoucherConsentRejected(
   return {
     userId,
     type: NotificationType.VOUCHER_CONSENT_REJECTED,
-    title: 'Đã từ chối voucher',
-    body: `${formatOperatorLabel(payload.operatorName)} đã từ chối voucher.${
-      payload.reason ? ` Lý do: ${payload.reason}.` : ''
+    title: 'Đã từ chối mã ưu đãi',
+    body: `${formatOperatorLabel(payload.operatorName)} đã từ chối mã ưu đãi.${
+      payload.reason ? ` Lý do: ${formatDisplayReason(payload.reason)}.` : ''
     }`,
     data: buildNotificationData(payload),
   };
@@ -697,7 +701,7 @@ function mapParcelAutoRejected(
   if ('reason' in payload) {
     const timeoutText =
       payload.reason === 'CHECK_IN_TIMEOUT'
-        ? 'không check-in đúng hạn'
+        ? 'không xác nhận lên xe đúng hạn'
         : 'không thanh toán số dư đúng hạn';
     return {
       userId,
@@ -995,7 +999,7 @@ async function mapTripVehicleSubstitutedEvent(
       title: isReplacementCrew ? 'Bạn được gán xe thay thế' : 'Đã thay xe cho chuyến',
       body: isReplacementCrew
         ? `Bạn được gán vào chuyến thay thế và cần đến điểm sự cố để nhận hàng.${location}`
-        : `Chuyến xe đã được gán xe thay thế.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
+        : `Chuyến xe đã được gán xe thay thế.${payload.reason ? ` Lý do: ${formatDisplayReason(payload.reason)}.` : ''}`,
       data: buildNotificationData(payload),
     };
   });
@@ -1117,7 +1121,7 @@ function mapPayoutFailed(userId: string, payload: OperatorPayload): CreateNotifi
     userId,
     type: NotificationType.PAYOUT_FAILED,
     title: 'Lệnh chi trả thất bại',
-    body: `Lệnh chi trả xử lý thất bại.${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
+    body: `Lệnh chi trả xử lý thất bại.${payload.reason ? ` Lý do: ${formatDisplayReason(payload.reason)}.` : ''}`,
     data: buildNotificationData(payload),
   };
 }
@@ -1240,7 +1244,7 @@ function buildParcelNotification(
     userId,
     type,
     title,
-    body: `${formatParcelLabel(payload.parcelCode)} ${actionText}${payload.reason ? ` Lý do: ${payload.reason}.` : ''}`,
+    body: `${formatParcelLabel(payload.parcelCode)} ${actionText}${payload.reason ? ` Lý do: ${formatDisplayReason(payload.reason)}.` : ''}`,
     data: buildNotificationData(payload),
   };
 }
