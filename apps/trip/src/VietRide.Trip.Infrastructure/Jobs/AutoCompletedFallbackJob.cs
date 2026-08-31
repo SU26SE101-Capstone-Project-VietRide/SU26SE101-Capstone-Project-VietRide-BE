@@ -6,6 +6,7 @@ using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.Services;
 using VietRide.Trip.Application.Features.Trips.Operations;
+using VietRide.Trip.Domain.Constants;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Infrastructure.Jobs;
@@ -18,6 +19,7 @@ public sealed class AutoCompletedFallbackJob
     private readonly ITripRepository tripRepository;
     private readonly IIntegrationEventOutbox outbox;
     private readonly IClock clock;
+    private readonly ITripAuditLogRepository auditLogs;
     private readonly IRouteChangeProposalService? routeChangeProposals;
     private readonly IResourceAvailabilityService? resourceAvailability;
 
@@ -26,6 +28,7 @@ public sealed class AutoCompletedFallbackJob
         ITripRepository tripRepository,
         IIntegrationEventOutbox outbox,
         IClock clock,
+        ITripAuditLogRepository auditLogs,
         IRouteChangeProposalService? routeChangeProposals = null,
         IResourceAvailabilityService? resourceAvailability = null)
     {
@@ -33,6 +36,7 @@ public sealed class AutoCompletedFallbackJob
         this.tripRepository = tripRepository;
         this.outbox = outbox;
         this.clock = clock;
+        this.auditLogs = auditLogs;
         this.routeChangeProposals = routeChangeProposals;
         this.resourceAvailability = resourceAvailability;
     }
@@ -69,6 +73,24 @@ public sealed class AutoCompletedFallbackJob
         }
         if (routeChangeProposals is not null)
             await routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
+        if (trip.DestinationArrivedAt is null)
+        {
+            await auditLogs.AddAsync(
+                TripAuditLog.Create(
+                    Guid.NewGuid(),
+                    trip.Id,
+                    null,
+                    TripAuditAction.TripCompletedFallbackWithoutDestinationArrival,
+                    JsonSerializer.Serialize(new
+                    {
+                        tripId = trip.Id,
+                        estimatedArrivalTime = trip.EstimatedArrivalTime,
+                        destinationArrivedAt = (DateTimeOffset?)null,
+                        reason = "DESTINATION_ARRIVAL_NOT_RECORDED",
+                    }, JsonOptions),
+                    now),
+                cancellationToken);
+        }
         var integrationEvent = new TripCompletedIntegrationEvent(
             trip.Id,
             trip.OperatorId,

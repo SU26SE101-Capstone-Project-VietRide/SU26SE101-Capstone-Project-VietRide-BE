@@ -12,8 +12,7 @@ internal static class ParcelReliabilityActionResolver
         bool isSender)
     {
         var actions = new List<string>();
-        if (incident is null && parcel.Status is not (
-            ParcelStatus.CANCELLED or ParcelStatus.REJECTED or ParcelStatus.EXPIRED or ParcelStatus.RETURNED))
+        if (incident is null && ParcelIncidentReportPolicy.CanPassengerReport(parcel.Status))
             actions.Add("REPORT_INCIDENT");
         if (!isSender)
             return actions;
@@ -54,6 +53,10 @@ internal static class ParcelReliabilityActionResolver
                 break;
             case ParcelStatus.UNLOADED:
                 actions.Add("DELIVER");
+                break;
+            case ParcelStatus.DELIVERED_PENDING_CONFIRM:
+                actions.Add("MANUAL_CONFIRM");
+                actions.Add("RESEND_DELIVERY_EMAIL");
                 break;
         }
 

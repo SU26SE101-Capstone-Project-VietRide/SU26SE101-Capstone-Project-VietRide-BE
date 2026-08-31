@@ -186,6 +186,15 @@ public sealed class ReconcileParcelStopTests
         IParcelStopDepartureApprovalRepository Approvals) CreateHandler(bool atCurrentStop = true)
     {
         var parcels = Substitute.For<IParcelRepository>();
+        parcels.TrySetPendingOperatorActionAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<PendingActionType>(),
+                Arg.Any<string>(),
+                Arg.Any<Money?>(),
+                Arg.Any<DateTimeOffset>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<ParcelStatus>())
+            .Returns(true);
         var reliability = Substitute.For<IParcelReliabilityRepository>();
         var departureApprovals = Substitute.For<IParcelStopDepartureApprovalRepository>();
         var trips = Substitute.For<ITripServiceClient>();
@@ -257,7 +266,9 @@ public sealed class ReconcileParcelStopTests
                     null),
             },
             new TripSeatSummaryDto(40, 20),
-            null);
+            null,
+            null,
+            Guid.NewGuid());
     }
 
     private static ParcelEntity CreateManifestParcel(ParcelStatus status)

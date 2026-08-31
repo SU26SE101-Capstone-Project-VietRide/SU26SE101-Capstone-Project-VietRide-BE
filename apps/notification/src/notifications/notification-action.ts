@@ -7,6 +7,7 @@ export const NOTIFICATION_ACTION_TYPES = [
   'OPEN_TRIP_DETAIL',
   'OPEN_TRIP_TRACKING',
   'OPEN_PARCEL_DETAIL',
+  'OPEN_PARCEL_APPROVAL',
   'OPEN_WALLET',
   'OPEN_SUBSCRIPTION',
   'OPEN_SHUTTLE_TRACKING',
@@ -19,6 +20,10 @@ export type NotificationActionDto =
   | { type: 'OPEN_TRIP_DETAIL'; params: { tripId: string } }
   | { type: 'OPEN_TRIP_TRACKING'; params: { tripId: string } }
   | { type: 'OPEN_PARCEL_DETAIL'; params: { parcelId: string } }
+  | {
+      type: 'OPEN_PARCEL_APPROVAL';
+      params: { requestId: string; requestType: 'CUSTODY_EXCEPTION' | 'STOP_DEPARTURE' };
+    }
   | { type: 'OPEN_WALLET'; params: Record<string, never> }
   | { type: 'OPEN_SUBSCRIPTION'; params: Record<string, never> }
   | {
@@ -32,6 +37,8 @@ const ActionDataSchema = z
     bookingId: z.string().uuid().nullish(),
     tripId: z.string().uuid().nullish(),
     parcelId: z.string().uuid().nullish(),
+    requestId: z.string().uuid().nullish(),
+    requestType: z.enum(['CUSTODY_EXCEPTION', 'STOP_DEPARTURE']).nullish(),
     shuttleTripId: z.string().uuid().nullish(),
     pickupOrder: z.number().int().positive().nullish(),
     deepLink: z.string().trim().min(1).nullish(),
@@ -137,6 +144,14 @@ export function resolveNotificationAction(
   }
 
   if (type.startsWith('PARCEL_')) {
+    if (type === NotificationType.PARCEL_APPROVAL_REQUESTED) {
+      return data.requestId && data.requestType
+        ? {
+            type: 'OPEN_PARCEL_APPROVAL',
+            params: { requestId: data.requestId, requestType: data.requestType },
+          }
+        : NONE_ACTION;
+    }
     return data.parcelId
       ? { type: 'OPEN_PARCEL_DETAIL', params: { parcelId: data.parcelId } }
       : NONE_ACTION;

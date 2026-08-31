@@ -14,4 +14,6 @@ public sealed record ReconcileParcelDestinationResponse(
     int ManualExceptionCount,
     IReadOnlyList<ReconcileUnresolvedParcelResponse> UnresolvedParcels,
     bool CanComplete,
+    bool CanCompleteTrip,
+    bool AllExpectedParcelsDelivered,
     bool RequiresDriverCompletion);

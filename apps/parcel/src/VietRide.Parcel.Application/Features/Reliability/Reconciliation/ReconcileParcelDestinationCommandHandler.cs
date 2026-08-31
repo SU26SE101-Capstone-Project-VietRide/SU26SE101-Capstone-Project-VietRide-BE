@@ -82,6 +82,12 @@ public sealed class ReconcileParcelDestinationCommandHandler
                 && custodyEvent.ActualLocationId == trip.DestinationStation.Id))
             .Select(parcel => parcel.Id)
             .ToHashSet();
+        await ForwardingIncidentResolution.ResolveVerifiedUnloadsAsync(
+            scanned,
+            _reliability,
+            _outbox,
+            _clock.UtcNow,
+            cancellationToken);
         var unresolved = expectedIds.Except(scanned).Except(manual).ToArray();
         var now = _clock.UtcNow;
         var activeIncidents = await _reliability.ListActiveIncidentsByParcelsAsync(unresolved, cancellationToken);
@@ -190,12 +196,18 @@ public sealed class ReconcileParcelDestinationCommandHandler
             })
             .ToArray();
 
+        var scannedCount = manifest.Count(parcel => scanned.Contains(parcel.Id));
+        var completionDecision = ParcelTripCompletionClearancePolicy.Evaluate(
+            manifest,
+            incidentByParcel.Values.ToArray());
         return new ReconcileParcelDestinationResponse(
             manifest.Count,
-            manifest.Count(parcel => scanned.Contains(parcel.Id)),
+            scannedCount,
             manifest.Count(parcel => manual.Contains(parcel.Id)),
             unresolvedResponses,
-            CanComplete: true,
-            RequiresDriverCompletion: unresolved.Length > 0);
+            CanComplete: completionDecision.CanCompleteTrip,
+            CanCompleteTrip: completionDecision.CanCompleteTrip,
+            AllExpectedParcelsDelivered: scannedCount == manifest.Count,
+            RequiresDriverCompletion: completionDecision.RequiresDriverCompletion);
     }
 }

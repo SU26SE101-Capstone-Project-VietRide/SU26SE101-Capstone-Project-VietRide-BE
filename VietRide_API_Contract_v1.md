@@ -2441,6 +2441,8 @@ Notes:
   the terminal. This additive field is authoritative for terminal no-show detection; existing
   stop snapshot `status` and nullable `actualArrivalTime` remain authoritative for along-route
   anchors. No event or projection is added to this snapshot seam.
+- Every `stops[]` item also exposes nullable `actualDepartureTime` as an additive UTC datetime.
+  It is the authoritative proof that the vehicle left that intermediate stop.
 - Errors: `404 TRIP_NOT_FOUND`.
 
 ### POST `/internal/v1/trips/{tripId}/lock-seats`
@@ -3976,6 +3978,9 @@ behavioral no-op only when it carries the same actor/note fingerprint; otherwise
 
 Exact body and behavior match the operator endpoint. Auth is assigned `DRIVER|ASSISTANT` of the
 Parcel's current Trip. Existing assistant/operator `confirm-delivery` aliases remain compatible.
+For `DELIVERED_PENDING_CONFIRM`, Assistant manifest, shared crew manifest, and crew action-state
+all expose both `MANUAL_CONFIRM` and `RESEND_DELIVERY_EMAIL`; Passenger trace/detail never expose
+these crew-only actions.
 
 ### GET `/v1/assistant/trips/{tripId}/parcels`
 
@@ -4757,6 +4762,12 @@ Legacy `appealReason,appealedByUserId,appealedAt` remain nullable compatibility 
 use the nested `appeal` resource. The original claim remains `PAID` or `REJECTED` and is never
 mutated to `APPEALED`.
 
+Passenger incident creation permits only `DELIVERY_NOT_RECEIVED|DAMAGED|PARTIAL_LOSS` while the
+Parcel is `UNLOADED|DELIVERED_PENDING_CONFIRM`. Any other status, including
+`DELIVERY_CONFIRMED`, returns `409 PARCEL_INCIDENT_STATUS_NOT_REPORTABLE` with fields
+`status,incidentType,allowedStatuses`; no incident, task, custody event, quarantine transition or
+Outbox row is committed.
+
 `data.appeal` has
 `appealId,claimId,originalClaimStatus,originalTotalAwardVnd,status,reason,submittedByUserId,
 submittedAt,revisedProvenDirectLossVnd,revisedCargoAwardVnd,revisedFreightRefundVnd,
@@ -4930,8 +4941,53 @@ successful reconciliation by sending Parcel IDs.
 
 Bodyless. The assigned Assistant calls this after terminal unload attempts and before Driver
 completion. Parcel derives terminal `scannedCount`, `manualExceptionCount`, and
-`unresolvedParcels` from persisted custody facts. It returns `canComplete` and
-`requiresDriverCompletion`; the client does not submit Parcel ID lists.
+`unresolvedParcels` from persisted custody facts. Response adds
+`canCompleteTrip,allExpectedParcelsDelivered`, retains `requiresDriverCompletion`, and keeps
+`canComplete` as a deprecated one-release alias equal to `canCompleteTrip`. The values come from
+the same completion-clearance policy used by Trip: `CLEAR` and `ACKNOWLEDGED_INCIDENTS` set
+`canCompleteTrip=true`; only the latter sets `requiresDriverCompletion=true`.
+`allExpectedParcelsDelivered` is true only when `scannedCount == expectedCount`; acknowledged
+manual exceptions never count as delivered. The client does not submit Parcel ID lists.
+
+#### GET `/v1/crew/parcel-approval-requests`
+
+Assigned `DRIVER` only. Query:
+`type=CUSTODY_EXCEPTION|STOP_DEPARTURE`, `status=PENDING_APPROVAL` (default and only supported
+status), `page=1`, `pageSize=20` (1–100). Parcel merges both approval resources, batch-fetches Trip
+assignment snapshots, filters by tenant/current assigned Driver before paging, and returns:
+
+```json
+{
+  "items": [{
+    "requestId": "uuid",
+    "requestType": "CUSTODY_EXCEPTION|STOP_DEPARTURE",
+    "status": "PENDING_APPROVAL",
+    "tripId": "uuid",
+    "parcelId": "uuid|null",
+    "incidentId": "uuid|null",
+    "stopId": "uuid|null",
+    "unresolvedParcelIds": ["uuid"],
+    "reason": "Operational exception",
+    "evidenceReferences": ["https://..."],
+    "requestedByUserId": "uuid",
+    "requestedAt": "2026-08-31T09:00:00Z",
+    "expiresAt": null,
+    "validityCondition": "WHILE_PENDING_AND_CURRENT_TRIP_ASSIGNMENT",
+    "availableActions": ["APPROVE", "REJECT"]
+  }],
+  "page": 1,
+  "pageSize": 20,
+  "totalItems": 1,
+  "totalPages": 1,
+  "hasNextPage": false,
+  "hasPreviousPage": false
+}
+```
+
+Requests have no TTL. Stop departure, Trip terminal, changed unresolved snapshot, invalidated
+custody state, or removal of the assigned Driver cancels a pending request. On Driver reassignment,
+the old Driver immediately loses visibility/decision authority; a still-valid request retains its
+identity and emits a new notification fact targeted to the new Driver.
 
 #### Stop-departure approval APIs
 
@@ -9317,6 +9373,15 @@ Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
 `409 TRIP_INVALID_TRANSITION`; `409 IDEMPOTENCY_REQUEST_PENDING`;
 `422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
 
+### POST `/v1/driver/trips/{tripId}/stops/{stopId}/arrive` and destination arrival
+
+Assigned `DRIVER|ASSISTANT` only. Under a Trip lock, Trip locks the ordered TripStop snapshot by
+`orderIndex,stopId`. An intermediate stop may arrive only after every earlier non-skipped stop has
+`actualDepartureTime`; destination may arrive only after every non-skipped stop has departed.
+Violation returns `409 TRIP_STOP_SEQUENCE_VIOLATION` with fields
+`blockingStopId,target,requiredAction=DEPART_BLOCKING_STOP`. Successful Trip detail reload exposes
+the persisted nullable `stops[].actualDepartureTime`.
+
 ### POST `/v1/driver/trips/{tripId}/complete`
 
 Auth: `DRIVER` or `ASSISTANT`. For `DRIVER`, authenticated JWT `sub` must equal
@@ -9324,7 +9389,10 @@ Auth: `DRIVER` or `ASSISTANT`. For `DRIVER`, authenticated JWT `sub` must equal
 mismatch returns `403 FORBIDDEN`. The request has no body and requires the idempotency semantics
 above.
 
-Precondition: Trip status is `IN_PROGRESS`. A successful transition sets status to `COMPLETED`,
+Preconditions: Trip status is `IN_PROGRESS` and `destinationArrivedAt` is present. The destination
+guard runs under the Trip lock before Parcel clearance; failure returns
+`409 TRIP_DESTINATION_NOT_ARRIVED` with
+`requiredAction=ARRIVE_DESTINATION_BEFORE_COMPLETION`. A successful transition sets status to `COMPLETED`,
 captures `completedAt` and `completedByUserId` from the caller, appends the
 `TRIP_COMPLETED_MANUAL` Trip audit row with metadata `{tripId,role}`, and publishes
 `trip.trip.completed` through the Trip Outbox atomically in one Trip-local transaction. It does
@@ -9351,7 +9419,8 @@ this manual endpoint:
 Data schema: `{ tripId: string(uuid), status: "COMPLETED", completedAt: string(date-time), completedByUserId: string(uuid) }`.
 
 Errors: `401 AUTH_TOKEN_INVALID`; `403 FORBIDDEN`; `404 TRIP_NOT_FOUND`;
-`409 TRIP_INVALID_TRANSITION`; `409 IDEMPOTENCY_REQUEST_PENDING`;
+`409 TRIP_INVALID_TRANSITION`; `409 TRIP_DESTINATION_NOT_ARRIVED`;
+`409 IDEMPOTENCY_REQUEST_PENDING`;
 `422 IDEMPOTENCY_KEY_MISMATCH`; `422 VALIDATION_ERROR`.
 
 ### POST `/v1/driver/trips/{tripId}/stops/{stopId}/depart`

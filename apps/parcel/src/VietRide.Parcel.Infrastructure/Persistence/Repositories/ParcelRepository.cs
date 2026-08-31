@@ -34,6 +34,18 @@ internal sealed class ParcelRepository : IParcelRepository
         _logger = logger;
     }
 
+    public async Task<ParcelEntity?> AcquireForIncidentReportAsync(
+        Guid parcelId,
+        CancellationToken ct = default)
+    {
+        if (_db.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("A caller-owned transaction is required for Parcel incident reporting.");
+
+        return await _db.Parcels
+            .FromSqlInterpolated($"SELECT * FROM vietride_parcel.parcels WHERE id = {parcelId} FOR UPDATE")
+            .SingleOrDefaultAsync(ct);
+    }
+
     public async Task<IReadOnlyList<ParcelTripDisplaySnapshotCandidate>> ListTripDisplaySnapshotBackfillCandidatesAsync(
         int batchSize,
         CancellationToken ct = default)

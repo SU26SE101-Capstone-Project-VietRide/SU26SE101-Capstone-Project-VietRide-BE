@@ -12,6 +12,11 @@ namespace VietRide.Parcel.Application.Abstractions.Repositories;
 
 public interface IParcelRepository : IRepository<ParcelEntity, Guid>
 {
+    Task<ParcelEntity?> AcquireForIncidentReportAsync(
+        Guid parcelId,
+        CancellationToken ct = default)
+        => GetByIdAsync(parcelId, ct);
+
     Task<OperatorParcelDetailData?> GetOperatorDetailAsync(
         Guid parcelId,
         Guid operatorId,

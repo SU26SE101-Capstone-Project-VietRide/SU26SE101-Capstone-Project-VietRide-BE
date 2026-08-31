@@ -16,17 +16,23 @@ public sealed class HandleTripCancelledCommandHandler
     private readonly ITripServiceClient tripClient;
     private readonly IIntegrationEventOutbox outbox;
     private readonly IParcelStatsRepository statsRepository;
+    private readonly IParcelCustodyExceptionRequestRepository? custodyApprovals;
+    private readonly IParcelStopDepartureApprovalRepository? departureApprovals;
 
     public HandleTripCancelledCommandHandler(
         IParcelRepository parcelRepository,
         ITripServiceClient tripClient,
         IIntegrationEventOutbox outbox,
-        IParcelStatsRepository statsRepository)
+        IParcelStatsRepository statsRepository,
+        IParcelCustodyExceptionRequestRepository? custodyApprovals = null,
+        IParcelStopDepartureApprovalRepository? departureApprovals = null)
     {
         this.parcelRepository = parcelRepository;
         this.tripClient = tripClient;
         this.outbox = outbox;
         this.statsRepository = statsRepository;
+        this.custodyApprovals = custodyApprovals;
+        this.departureApprovals = departureApprovals;
     }
 
     public async Task<int> Handle(
@@ -34,6 +40,24 @@ public sealed class HandleTripCancelledCommandHandler
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
+        if (custodyApprovals is not null)
+        {
+            var approvals = await custodyApprovals.ListPendingByTripForUpdateAsync(
+                command.TripId,
+                cancellationToken);
+            foreach (var approval in approvals)
+                approval.CancelAsInvalidated(now, "Trip reached a terminal status.");
+        }
+        if (departureApprovals is not null)
+        {
+            var approvals = await departureApprovals.ListPendingByTripForUpdateAsync(
+                command.TripId,
+                null,
+                cancellationToken);
+            foreach (var approval in approvals)
+                approval.CancelAsSuperseded(now);
+        }
+
         var candidates = await parcelRepository.GetTripCancellationCandidatesAsync(
             command.TripId,
             command.OperatorId,

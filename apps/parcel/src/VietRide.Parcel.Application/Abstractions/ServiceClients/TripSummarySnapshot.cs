@@ -8,5 +8,7 @@ public sealed record TripSummarySnapshot(
     TripRouteSummarySnapshot Route,
     TripVehicleSummarySnapshot Vehicle)
 {
+    public Guid? DriverUserId { get; init; }
+    public Guid? AssistantUserId { get; init; }
     public IReadOnlyList<TripStopSummarySnapshot> Stops { get; init; } = [];
 }

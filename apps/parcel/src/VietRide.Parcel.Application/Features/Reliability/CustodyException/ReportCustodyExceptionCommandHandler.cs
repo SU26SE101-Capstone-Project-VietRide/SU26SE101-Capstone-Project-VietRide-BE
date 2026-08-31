@@ -4,9 +4,11 @@ using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Exceptions;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Application.Services;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 
 namespace VietRide.Parcel.Application.Features.Reliability.CustodyException;
@@ -19,19 +21,22 @@ public sealed class ReportCustodyExceptionCommandHandler
     private readonly IParcelCustodyExceptionRequestRepository _requests;
     private readonly ITripServiceClient _trips;
     private readonly IClock _clock;
+    private readonly IIntegrationEventOutbox _outbox;
 
     public ReportCustodyExceptionCommandHandler(
         IParcelRepository parcels,
         IParcelReliabilityRepository reliability,
         IParcelCustodyExceptionRequestRepository requests,
         ITripServiceClient trips,
-        IClock clock)
+        IClock clock,
+        IIntegrationEventOutbox outbox)
     {
         _parcels = parcels;
         _reliability = reliability;
         _requests = requests;
         _trips = trips;
         _clock = clock;
+        _outbox = outbox;
     }
 
     public async Task<ReportCustodyExceptionResponse> Handle(
@@ -72,6 +77,13 @@ public sealed class ReportCustodyExceptionCommandHandler
                 authorization.ErrorMessage ?? "Trip service is unavailable.");
         if (authorization.Kind != TripCrewAuthorizationOutcomeKind.Authorized)
             throw new ForbiddenException("FORBIDDEN", "Only the assigned assistant can report this exception.");
+
+        var tripOutcome = await _trips.GetTripParcelSnapshotAsync(parcel.TripId, cancellationToken);
+        if (tripOutcome.Kind != TripSnapshotOutcomeKind.Success
+            || tripOutcome.Snapshot?.DriverUserId is not Guid targetDriverUserId)
+            throw new ParcelDependencyUnavailableException(
+                "TRIP_SERVICE_UNAVAILABLE",
+                "Assigned Driver context is unavailable for the approval request.");
 
         if (!Enum.TryParse<ParcelIncidentType>(command.IncidentType, true, out var incidentType)
             || !Enum.TryParse<ParcelCustodyLocationType>(command.ActualLocationType, true, out var locationType))
@@ -138,6 +150,20 @@ public sealed class ReportCustodyExceptionCommandHandler
             parcel.Status);
         if (!quarantined)
             throw new CodedConflictException("INVALID_STATUS", "Parcel status does not allow a custody exception report.");
+
+        await ParcelApprovalRequestedEvent.EnqueueAsync(
+            _outbox,
+            approvalRequest.Id,
+            "CUSTODY_EXCEPTION",
+            parcel.OperatorId,
+            targetDriverUserId,
+            parcel.TripId,
+            parcel.Id,
+            incident.Id,
+            null,
+            "WHILE_PENDING_AND_CURRENT_TRIP_ASSIGNMENT",
+            now,
+            cancellationToken);
 
         return CustodyExceptionResponseMapper.Map(approvalRequest, incident, ["WAIT_FOR_APPROVAL"]);
     }

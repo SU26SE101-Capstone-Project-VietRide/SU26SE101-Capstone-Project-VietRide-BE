@@ -78,6 +78,21 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
     public Task<ParcelIncident?> GetIncidentAsync(Guid incidentId, CancellationToken ct = default)
         => _db.ParcelIncidents.FirstOrDefaultAsync(x => x.Id == incidentId, ct);
 
+    public Task<ParcelIncident?> GetForwardingIncidentForUpdateAsync(
+        Guid parcelId,
+        CancellationToken ct = default)
+        => _db.ParcelIncidents
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_parcel.parcel_incidents
+                WHERE parcel_id = {parcelId}
+                  AND status = 'FORWARDING'
+                ORDER BY created_at DESC, id
+                LIMIT 1
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(ct);
+
     public async Task<IReadOnlyList<ParcelIncident>> ListIncidentsByIdsAsync(
         IReadOnlyCollection<Guid> incidentIds,
         CancellationToken ct = default)

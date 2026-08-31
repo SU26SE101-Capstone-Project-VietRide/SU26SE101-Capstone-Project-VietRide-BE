@@ -4,6 +4,8 @@ public static class TripAuditAction
 {
     public const string TripBoardingStartedManual = "TRIP_BOARDING_STARTED_MANUAL";
     public const string TripCompletedManual = "TRIP_COMPLETED_MANUAL";
+    public const string TripCompletedFallbackWithoutDestinationArrival =
+        "TRIP_COMPLETED_FALLBACK_WITHOUT_DESTINATION_ARRIVAL";
     public const string TripEdited = "TRIP_EDITED";
     public const string TripVehicleSwapped = "TRIP_VEHICLE_SWAPPED";
     public const string TripRouteChanged = "TRIP_ROUTE_CHANGED";
@@ -21,6 +23,7 @@ public static class TripAuditAction
     public static bool IsApproved(string action) => action is
         TripBoardingStartedManual
         or TripCompletedManual
+        or TripCompletedFallbackWithoutDestinationArrival
         or TripEdited
         or TripVehicleSwapped
         or TripRouteChanged

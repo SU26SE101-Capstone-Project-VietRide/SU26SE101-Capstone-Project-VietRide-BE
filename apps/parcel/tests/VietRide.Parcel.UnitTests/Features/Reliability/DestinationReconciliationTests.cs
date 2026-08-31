@@ -83,6 +83,8 @@ public sealed class DestinationReconciliationTests
                 CancellationToken.None);
 
         response.CanComplete.Should().BeTrue();
+        response.CanCompleteTrip.Should().BeTrue();
+        response.AllExpectedParcelsDelivered.Should().BeFalse();
         response.RequiresDriverCompletion.Should().BeTrue();
         response.UnresolvedParcels.Should().ContainSingle(item => item.ParcelId == parcel.Id);
         addedIncident.Should().NotBeNull();

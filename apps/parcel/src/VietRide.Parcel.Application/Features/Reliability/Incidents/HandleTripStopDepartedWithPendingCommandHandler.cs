@@ -3,6 +3,7 @@ using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Parcels;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 
 namespace VietRide.Parcel.Application.Features.Reliability.Incidents;
@@ -13,21 +14,34 @@ public sealed class HandleTripStopDepartedWithPendingCommandHandler
     private readonly IParcelRepository _parcels;
     private readonly IParcelReliabilityRepository _reliability;
     private readonly IIntegrationEventOutbox _outbox;
+    private readonly IParcelStopDepartureApprovalRepository? _departureApprovals;
 
     public HandleTripStopDepartedWithPendingCommandHandler(
         IParcelRepository parcels,
         IParcelReliabilityRepository reliability,
-        IIntegrationEventOutbox outbox)
+        IIntegrationEventOutbox outbox,
+        IParcelStopDepartureApprovalRepository? departureApprovals = null)
     {
         _parcels = parcels;
         _reliability = reliability;
         _outbox = outbox;
+        _departureApprovals = departureApprovals;
     }
 
     public async Task<int> Handle(
         HandleTripStopDepartedWithPendingCommand command,
         CancellationToken cancellationToken)
     {
+        if (_departureApprovals is not null)
+        {
+            var approvals = await _departureApprovals.ListPendingByTripForUpdateAsync(
+                command.TripId,
+                command.StopId,
+                cancellationToken);
+            foreach (var approval in approvals)
+                approval.CancelAsSuperseded(command.DepartedAt);
+        }
+
         var candidates = await _parcels.ListPendingDropoffByTripAndStopAsync(
             command.TripId,
             command.StopId,
@@ -48,14 +62,17 @@ public sealed class HandleTripStopDepartedWithPendingCommandHandler
                 cancellationToken);
             if (unresolvedHandoff is not null)
             {
-                await _parcels.TrySetPendingOperatorActionAsync(
+                if (!await _parcels.TrySetPendingOperatorActionAsync(
                     parcel.Id,
                     PendingActionType.CUSTODY_EXCEPTION,
                     "Expected stop departed with an unresolved handoff reconciliation.",
                     null,
                     command.DepartedAt,
                     cancellationToken,
-                    parcel.Status);
+                    parcel.Status))
+                    throw new CodedConflictException(
+                        "PARCEL_STATE_CONFLICT",
+                        "Parcel status changed while processing the departed stop.");
                 continue;
             }
 
@@ -67,7 +84,9 @@ public sealed class HandleTripStopDepartedWithPendingCommandHandler
                     command.DepartedAt,
                     cancellationToken,
                     parcel.Status))
-                continue;
+                throw new CodedConflictException(
+                    "PARCEL_STATE_CONFLICT",
+                    "Parcel status changed while processing the departed stop.");
 
             var current = await _reliability.GetCurrentCustodyAsync(parcel.Id, cancellationToken);
             var leg = await _reliability.GetActiveLegAsync(parcel.Id, cancellationToken);

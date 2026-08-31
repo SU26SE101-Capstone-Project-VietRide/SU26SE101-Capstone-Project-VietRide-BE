@@ -7,6 +7,7 @@ using VietRide.Parcel.Application.Features.Parcels.AssistantTripParcels;
 using VietRide.Parcel.Application.Features.Parcels.ManualConfirmDelivery;
 using VietRide.Parcel.Application.Features.Parcels.OperationalRecovery;
 using VietRide.Parcel.Application.Features.Parcels.ResendDeliveryEmail;
+using VietRide.Parcel.Application.Features.Reliability.ApprovalRequests;
 using VietRide.Parcel.Application.Features.Reliability.CustodyException;
 using VietRide.Parcel.Application.Features.Reliability.Reconciliation;
 using VietRide.Shared.Application.Exceptions;
@@ -24,6 +25,33 @@ public sealed class CrewParcelsController : ControllerBase
     public CrewParcelsController(IMediator mediator)
     {
         _mediator = mediator;
+    }
+
+    [HttpGet("~/v1/crew/parcel-approval-requests")]
+    [Authorize(Roles = "DRIVER")]
+    [ProducesResponseType(typeof(ApiResponse<PagedResult<ParcelApprovalRequestListItem>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<PagedResult<ParcelApprovalRequestListItem>>> ListApprovalRequestsAsync(
+        [FromQuery] string? type = null,
+        [FromQuery] string? status = "PENDING_APPROVAL",
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new ListParcelApprovalRequestsQuery(
+                CurrentUserClaims.GetUserId(User),
+                operatorId,
+                type,
+                status,
+                page,
+                pageSize),
+            cancellationToken));
     }
 
     [HttpGet("{parcelId:guid}/custody-exception")]

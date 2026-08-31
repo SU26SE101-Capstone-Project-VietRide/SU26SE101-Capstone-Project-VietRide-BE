@@ -383,7 +383,7 @@ public sealed class TripsEndpointTests
             400000,
             new TripStationDto(Guid.NewGuid(), "Bến xe Miền Đông"),
             new TripStationDto(Guid.NewGuid(), "Bến xe Mỹ Đình"),
-            [new TripStopDto(stopId, "Tram Phu Lam", "123 Hong Bang", 10.7321m, 106.6142m, true, 1, true, false, "ARRIVED", DateTimeOffset.Parse("2026-05-18T09:30:00+07:00"), DateTimeOffset.Parse("2026-05-18T09:35:00+07:00"), 42.5, 350000, 350000)],
+            [new TripStopDto(stopId, "Tram Phu Lam", "123 Hong Bang", 10.7321m, 106.6142m, true, 1, true, false, "ARRIVED", DateTimeOffset.Parse("2026-05-18T09:30:00+07:00"), DateTimeOffset.Parse("2026-05-18T09:35:00+07:00"), null, 42.5, 350000, 350000)],
             new TripSeatSummaryDto(40, 18),
             null,
             new TripFareBreakdownDto(400000, [new TripFareStopDto(stopId, 350000)]));

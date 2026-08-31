@@ -114,6 +114,17 @@ public sealed class ParcelCustodyExceptionRequest : BaseEntity<Guid>
         RowVersion++;
     }
 
+    public void CancelAsInvalidated(DateTimeOffset cancelledAt, string reason)
+    {
+        EnsurePending();
+        Status = ParcelCustodyExceptionRequestStatus.CANCELLED;
+        ReviewedByUserId = ReportedByUserId;
+        ReviewedByRole = "SYSTEM";
+        ReviewedAt = cancelledAt;
+        ReviewNote = Normalize(reason) ?? "Approval request is no longer valid.";
+        RowVersion++;
+    }
+
     private void EnsurePending()
     {
         if (Status != ParcelCustodyExceptionRequestStatus.PENDING_APPROVAL)

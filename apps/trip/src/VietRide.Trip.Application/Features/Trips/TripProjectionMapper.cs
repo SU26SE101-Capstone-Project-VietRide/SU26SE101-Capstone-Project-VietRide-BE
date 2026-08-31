@@ -83,6 +83,7 @@ internal static class TripProjectionMapper
                     stop.Status.ToString(),
                     stop.EstimatedArrivalTime,
                     stop.ActualArrivalTime,
+                    stop.ActualDepartureTime,
                     stop.DistanceFromOriginKm.HasValue ? (double)stop.DistanceFromOriginKm.Value : null,
                     fareOverride,
                     adjustment.EffectiveFare)

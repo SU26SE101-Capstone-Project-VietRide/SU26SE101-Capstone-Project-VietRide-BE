@@ -4,6 +4,7 @@ using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
+using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.DriverTrips.CompleteTrip;
 using VietRide.Trip.Domain.Constants;
@@ -22,6 +23,7 @@ public sealed class CompleteTripCommandHandlerTests
         var now = DateTimeOffset.UtcNow;
         var trip = CreateInProgressTrip(now);
         var actor = role == "DRIVER" ? trip.DriverUserId : trip.AssistantUserId!.Value;
+        trip.MarkDestinationArrived(now.AddMinutes(-1), actor);
         var fixture = new Fixture(trip, now);
 
         var response = await fixture.Handler.Handle(
@@ -38,6 +40,29 @@ public sealed class CompleteTripCommandHandlerTests
         fixture.Outbox.Events.Should().ContainSingle();
         fixture.Outbox.Events[0].EventType.Should().Be("trip.trip.completed");
         fixture.UnitOfWork.CommitCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Handle_DestinationNotArrived_RejectsBeforeParcelClearance()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var trip = CreateInProgressTrip(now);
+        var parcelImpact = new RecordingParcelImpactClient();
+        var fixture = new Fixture(trip, now, parcelImpact);
+
+        var action = () => fixture.Handler.Handle(
+            new CompleteTripCommand(trip.Id, trip.DriverUserId, "DRIVER"),
+            CancellationToken.None);
+
+        var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
+        exception.ErrorCode.Should().Be("TRIP_DESTINATION_NOT_ARRIVED");
+        exception.Errors.Should().ContainSingle(error =>
+            error.Field == "requiredAction"
+            && error.Message == "ARRIVE_DESTINATION_BEFORE_COMPLETION");
+        parcelImpact.ClearanceCalls.Should().Be(0);
+        fixture.Audit.Logs.Should().BeEmpty();
+        fixture.Outbox.Events.Should().BeEmpty();
+        fixture.UnitOfWork.RollbackCount.Should().Be(1);
     }
 
     [Theory]
@@ -92,7 +117,10 @@ public sealed class CompleteTripCommandHandlerTests
 
     private sealed class Fixture
     {
-        public Fixture(VietRide.Trip.Domain.Entities.Trip trip, DateTimeOffset now)
+        public Fixture(
+            VietRide.Trip.Domain.Entities.Trip trip,
+            DateTimeOffset now,
+            IParcelImpactClient? parcelImpact = null)
         {
             Audit = new RecordingAuditRepository();
             Outbox = new RecordingOutbox();
@@ -103,13 +131,45 @@ public sealed class CompleteTripCommandHandlerTests
                 Outbox,
                 UnitOfWork,
                 new FrozenClock(now),
-                new ClearParcelImpactClient());
+                parcelImpact ?? new ClearParcelImpactClient());
         }
 
         public RecordingAuditRepository Audit { get; }
         public RecordingOutbox Outbox { get; }
         public RecordingUnitOfWork UnitOfWork { get; }
         public CompleteTripCommandHandler Handler { get; }
+    }
+
+    private sealed class RecordingParcelImpactClient : IParcelImpactClient
+    {
+        public int ClearanceCalls { get; private set; }
+
+        public Task<ParcelTripCompletionClearanceProjection> GetTripCompletionClearanceAsync(
+            Guid tripId,
+            Guid operatorId,
+            CancellationToken cancellationToken)
+        {
+            ClearanceCalls++;
+            return Task.FromResult(new ParcelTripCompletionClearanceProjection(
+                tripId,
+                operatorId,
+                "CLEAR",
+                [],
+                []));
+        }
+
+        public Task<ParcelStopDepartureClearanceProjection> GetStopDepartureClearanceAsync(
+            Guid tripId,
+            Guid stopId,
+            Guid operatorId,
+            CancellationToken cancellationToken)
+            => throw new NotSupportedException();
+
+        public Task<TripParcelCancellationImpactProjection> GetTripCancellationImpactAsync(
+            Guid tripId,
+            Guid operatorId,
+            CancellationToken cancellationToken)
+            => throw new NotSupportedException();
     }
 
     private sealed class LifecycleTripRepository : ITripRepository

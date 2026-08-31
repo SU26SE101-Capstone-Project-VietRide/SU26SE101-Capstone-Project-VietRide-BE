@@ -97,6 +97,7 @@ public sealed class DriverScheduleAuditLogTests
                 "ROUTE_CHANGE_PROPOSAL_REJECTED",
                 "ROUTE_CHANGE_PROPOSAL_SUPERSEDED",
                 "TRIP_BOARDING_STARTED_MANUAL",
+                "TRIP_COMPLETED_FALLBACK_WITHOUT_DESTINATION_ARRIVAL",
                 "TRIP_COMPLETED_MANUAL",
                 "TRIP_EDITED",
                 "TRIP_ROUTE_CHANGED",

@@ -38,7 +38,7 @@ public sealed class ArriveTripStopCommandHandlerTests
         stop.Status.Should().Be(TripStopStatus.ARRIVED);
         stop.ActualArrivalTime.Should().Be(Now);
         stop.EstimatedArrivalTime.Should().Be(originalEta);
-        fixture.LockOrder.Should().Equal("trip", "stop");
+        fixture.LockOrder.Should().Equal("trip", "stops");
         fixture.Outbox.Events.Should().ContainSingle();
         fixture.Outbox.Events[0].EventType.Should().Be("trip.stop.arrived");
 
@@ -57,7 +57,7 @@ public sealed class ArriveTripStopCommandHandlerTests
     [Fact]
     public async Task Handle_MissingTrip_ThrowsNotFoundBeforeStopLock()
     {
-        var fixture = new Fixture(null, null);
+        var fixture = new Fixture(null, (TripStop?)null);
 
         var action = () => fixture.Handler.Handle(
             new ArriveTripStopCommand(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
@@ -88,7 +88,7 @@ public sealed class ArriveTripStopCommandHandlerTests
     public async Task Handle_MissingStop_ThrowsExactNotFoundCode()
     {
         var trip = CreateTrip(inProgress: true);
-        var fixture = new Fixture(trip, null);
+        var fixture = new Fixture(trip, (TripStop?)null);
 
         var action = () => fixture.Handler.Handle(
             new ArriveTripStopCommand(trip.Id, Guid.NewGuid(), trip.DriverUserId),
@@ -96,7 +96,7 @@ public sealed class ArriveTripStopCommandHandlerTests
 
         var exception = (await action.Should().ThrowAsync<CodedNotFoundException>()).Which;
         exception.ErrorCode.Should().Be("TRIP_STOP_NOT_FOUND");
-        fixture.LockOrder.Should().Equal("trip", "stop");
+        fixture.LockOrder.Should().Equal("trip", "stops");
         fixture.Outbox.Events.Should().BeEmpty();
     }
 
@@ -145,6 +145,48 @@ public sealed class ArriveTripStopCommandHandlerTests
         fixture.Outbox.Events.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Handle_PriorStopNotDeparted_RejectsWithBlockingStopFields()
+    {
+        var trip = CreateTrip(inProgress: true);
+        var prior = CreateStop(trip.Id, 1);
+        prior.MarkArrived(Now.AddMinutes(-10));
+        var target = CreateStop(trip.Id, 2);
+        var fixture = new Fixture(trip, [prior, target]);
+
+        var action = () => fixture.Handler.Handle(
+            new ArriveTripStopCommand(trip.Id, target.StopId, trip.DriverUserId),
+            CancellationToken.None);
+
+        var exception = (await action.Should().ThrowAsync<CodedConflictException>()).Which;
+        exception.ErrorCode.Should().Be("TRIP_STOP_SEQUENCE_VIOLATION");
+        exception.Errors.Should().Contain(error =>
+            error.Field == "blockingStopId" && error.Message == prior.StopId.ToString("D"));
+        exception.Errors.Should().Contain(error =>
+            error.Field == "target" && error.Message == $"STOP:{target.StopId:D}");
+        target.Status.Should().Be(TripStopStatus.PENDING);
+        fixture.Outbox.Events.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_PriorStopDeparted_AllowsNextStopArrival()
+    {
+        var trip = CreateTrip(inProgress: true);
+        var prior = CreateStop(trip.Id, 1);
+        prior.MarkArrived(Now.AddMinutes(-10));
+        typeof(TripStop).GetProperty(nameof(TripStop.ActualDepartureTime))!
+            .SetValue(prior, Now.AddMinutes(-5));
+        var target = CreateStop(trip.Id, 2);
+        var fixture = new Fixture(trip, [prior, target]);
+
+        await fixture.Handler.Handle(
+            new ArriveTripStopCommand(trip.Id, target.StopId, trip.DriverUserId),
+            CancellationToken.None);
+
+        target.Status.Should().Be(TripStopStatus.ARRIVED);
+        target.ActualArrivalTime.Should().Be(Now);
+    }
+
     private static TripEntity CreateTrip(bool inProgress)
     {
         var trip = TripEntity.Create(
@@ -169,11 +211,11 @@ public sealed class ArriveTripStopCommandHandlerTests
         return trip;
     }
 
-    private static TripStop CreateStop(Guid tripId)
+    private static TripStop CreateStop(Guid tripId, int orderIndex = 1)
         => TripStop.Create(
             tripId,
             Guid.NewGuid(),
-            1,
+            orderIndex,
             Now.AddMinutes(30),
             allowPickup: true,
             allowDropoff: true,
@@ -182,13 +224,18 @@ public sealed class ArriveTripStopCommandHandlerTests
     private sealed class Fixture
     {
         public Fixture(TripEntity? trip, TripStop? stop)
+            : this(trip, stop is null ? [] : [stop])
         {
-            Stop = stop;
+        }
+
+        public Fixture(TripEntity? trip, IReadOnlyList<TripStop> stops)
+        {
+            Stop = stops.Count == 1 ? stops[0] : null;
             LockOrder = [];
             Outbox = new RecordingOutbox();
             Handler = new ArriveTripStopCommandHandler(
                 new FakeTripRepository(trip, LockOrder),
-                new FakeTripStopRepository(stop, LockOrder),
+                new FakeTripStopRepository(stops, LockOrder),
                 Outbox,
                 new FrozenClock(Now));
         }
@@ -232,12 +279,12 @@ public sealed class ArriveTripStopCommandHandlerTests
 
     private sealed class FakeTripStopRepository : ITripStopRepository
     {
-        private readonly TripStop? stop;
+        private readonly IReadOnlyList<TripStop> stops;
         private readonly List<string> lockOrder;
 
-        public FakeTripStopRepository(TripStop? stop, List<string> lockOrder)
+        public FakeTripStopRepository(IReadOnlyList<TripStop> stops, List<string> lockOrder)
         {
-            this.stop = stop;
+            this.stops = stops;
             this.lockOrder = lockOrder;
         }
 
@@ -248,14 +295,23 @@ public sealed class ArriveTripStopCommandHandlerTests
         {
             lockOrder.Add("stop");
             return Task.FromResult(
-                stop?.TripId == tripId && stop.StopId == stopId ? stop : null);
+                stops.SingleOrDefault(stop => stop.TripId == tripId && stop.StopId == stopId));
+        }
+
+        public Task<IReadOnlyList<TripStop>> AcquireByTripAsync(
+            Guid tripId,
+            CancellationToken cancellationToken)
+        {
+            lockOrder.Add("stops");
+            IReadOnlyList<TripStop> result = stops.Where(stop => stop.TripId == tripId).ToArray();
+            return Task.FromResult(result);
         }
 
         public Task<TripStop?> GetByIdAsync(
             (Guid TripId, Guid StopId) id,
             CancellationToken cancellationToken = default)
             => Task.FromResult(
-                stop?.TripId == id.TripId && stop.StopId == id.StopId ? stop : null);
+                stops.SingleOrDefault(stop => stop.TripId == id.TripId && stop.StopId == id.StopId));
 
         public Task<TripStop> AddAsync(TripStop entity, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();

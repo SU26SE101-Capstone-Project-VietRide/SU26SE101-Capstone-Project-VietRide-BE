@@ -732,7 +732,10 @@ public sealed class TripHandlerProjectionTests
         var arrived = TripStop.Create(trip.Id, arrivedStop.Id, 2, trip.DepartureDateTime.AddHours(2), true, true, 80m);
         var skipped = TripStop.Create(trip.Id, skippedStop.Id, 3, trip.DepartureDateTime.AddHours(3), true, true, 120m);
         var stopArrivedAt = DateTimeOffset.Parse("2026-07-21T03:05:00Z");
+        var stopDepartedAt = stopArrivedAt.AddMinutes(10);
         arrived.MarkArrived(stopArrivedAt);
+        typeof(TripStop).GetProperty(nameof(TripStop.ActualDepartureTime))!
+            .SetValue(arrived, stopDepartedAt);
         skipped.MarkSkipped();
 
         var handler = new GetTripDetailHandler(
@@ -752,6 +755,7 @@ public sealed class TripHandlerProjectionTests
         result.Stops.Select(stop => stop.Status).Should().Equal("PENDING", "ARRIVED", "SKIPPED");
         result.Stops[0].ActualArrivalTime.Should().BeNull();
         result.Stops[1].ActualArrivalTime.Should().Be(stopArrivedAt);
+        result.Stops[1].ActualDepartureTime.Should().Be(stopDepartedAt);
         result.Stops[2].ActualArrivalTime.Should().BeNull();
     }
 

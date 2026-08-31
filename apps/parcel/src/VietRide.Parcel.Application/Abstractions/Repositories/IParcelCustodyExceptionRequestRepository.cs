@@ -32,5 +32,15 @@ public interface IParcelCustodyExceptionRequestRepository
         IReadOnlyCollection<Guid> parcelIds,
         CancellationToken ct = default);
 
+    Task<IReadOnlyList<ParcelCustodyExceptionRequest>> ListPendingByOperatorAsync(
+        Guid operatorId,
+        CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<ParcelCustodyExceptionRequest>>([]);
+
+    Task<IReadOnlyList<ParcelCustodyExceptionRequest>> ListPendingByTripForUpdateAsync(
+        Guid tripId,
+        CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<ParcelCustodyExceptionRequest>>([]);
+
     Task AddAsync(ParcelCustodyExceptionRequest entity, CancellationToken ct = default);
 }

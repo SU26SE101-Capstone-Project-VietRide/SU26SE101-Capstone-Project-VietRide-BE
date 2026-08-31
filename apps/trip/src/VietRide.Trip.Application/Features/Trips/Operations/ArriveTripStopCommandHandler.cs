@@ -39,10 +39,8 @@ public sealed class ArriveTripStopCommandHandler
 
         EnsureAssignedCrew(trip, request.ActorUserId);
 
-        var stop = await tripStops.GetForUpdateAsync(
-            request.TripId,
-            request.StopId,
-            cancellationToken)
+        var lockedStops = await tripStops.AcquireByTripAsync(request.TripId, cancellationToken);
+        var stop = lockedStops.SingleOrDefault(candidate => candidate.StopId == request.StopId)
             ?? throw new CodedNotFoundException("TRIP_STOP_NOT_FOUND", "Trip stop was not found.");
 
         if (stop.Status != TripStopStatus.PENDING)
@@ -58,6 +56,8 @@ public sealed class ArriveTripStopCommandHandler
                 "TRIP_NOT_IN_PROGRESS",
                 "Trip must be in progress before a stop arrival can be recorded.");
         }
+
+        TripStopSequenceGuard.EnsureCanArriveStop(lockedStops, stop);
 
         var now = clock.UtcNow;
         stop.MarkArrived(now);

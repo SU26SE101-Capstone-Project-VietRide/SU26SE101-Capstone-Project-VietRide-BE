@@ -14,17 +14,20 @@ public sealed class ArriveTripDestinationCommandHandler
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly ITripRepository trips;
+    private readonly ITripStopRepository tripStops;
     private readonly IRouteRepository routes;
     private readonly IIntegrationEventOutbox outbox;
     private readonly IClock clock;
 
     public ArriveTripDestinationCommandHandler(
         ITripRepository trips,
+        ITripStopRepository tripStops,
         IRouteRepository routes,
         IIntegrationEventOutbox outbox,
         IClock clock)
     {
         this.trips = trips;
+        this.tripStops = tripStops;
         this.routes = routes;
         this.outbox = outbox;
         this.clock = clock;
@@ -52,6 +55,9 @@ public sealed class ArriveTripDestinationCommandHandler
                 "TRIP_NOT_IN_PROGRESS",
                 "Trip must be in progress before destination arrival can be recorded.");
         }
+
+        var lockedStops = await tripStops.AcquireByTripAsync(trip.Id, cancellationToken);
+        TripStopSequenceGuard.EnsureCanArriveDestination(lockedStops);
 
         var route = await routes.GetByIdAsync(trip.RouteId, cancellationToken)
             ?? throw new CodedNotFoundException(

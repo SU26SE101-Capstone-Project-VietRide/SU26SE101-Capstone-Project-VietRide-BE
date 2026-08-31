@@ -1,19 +1,293 @@
+using System.Reflection;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
+using Npgsql.NameTranslation;
 using VietRide.Parcel.Application.Abstractions.Repositories;
+using VietRide.Parcel.Application.Abstractions.ServiceClients;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Application.Features.Parcels.Unload;
+using VietRide.Parcel.Application.Features.Reliability.ReportIncident;
+using VietRide.Parcel.Application.Services;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Parcel.Infrastructure;
+using VietRide.Shared.Application.Behaviors;
+using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
+using VietRide.Shared.Persistence.Outbox;
+using VietRide.Shared.Persistence.UnitOfWork;
 using ParcelEntity = VietRide.Parcel.Domain.Entities.Parcel;
 
 namespace VietRide.Parcel.IntegrationTests.Persistence;
 
 public sealed class Day39ParcelDeliveryTransitionPersistenceTests
 {
+    [Fact]
+    public async Task PassengerIncident_TerminalRejectsCleanlyThenUnloadedCommitsAllRecords()
+    {
+        var databaseName = $"vietride_parcel_incident_atomic_{Guid.NewGuid():N}";
+        var connectionString = CreateConnectionString(databaseName);
+        await CreateDatabaseAsync(connectionString, databaseName);
+
+        try
+        {
+            await using var dataSource = CreateDataSource(connectionString);
+            var terminalParcel = CreateParcel("VRP-INCIDENT-TERMINAL");
+            var reportableParcel = CreateParcel("VRP-INCIDENT-UNLOADED");
+
+            await using (var seedContext = CreateDbContext(dataSource))
+            {
+                await seedContext.Database.MigrateAsync();
+                seedContext.Parcels.AddRange(terminalParcel, reportableParcel);
+                await seedContext.SaveChangesAsync();
+                await SetStatusAsync(seedContext, terminalParcel.Id, ParcelStatus.DELIVERY_CONFIRMED);
+                await SetStatusAsync(seedContext, reportableParcel.Id, ParcelStatus.UNLOADED);
+            }
+
+            await using (var rejectedContext = CreateDbContext(dataSource))
+            {
+                var terminalCommand = new ReportParcelIncidentCommand(
+                    terminalParcel.Id,
+                    terminalParcel.SenderUserId,
+                    null,
+                    ParcelIncidentType.DELIVERY_NOT_RECEIVED.ToString(),
+                    "Passenger did not receive the parcel.",
+                    []);
+                var terminalAction = async () => await ExecuteIncidentReportAsync(
+                    rejectedContext,
+                    terminalCommand);
+                var rejected = await terminalAction.Should().ThrowAsync<CodedConflictException>();
+                rejected.Which.ErrorCode.Should().Be("PARCEL_INCIDENT_STATUS_NOT_REPORTABLE");
+            }
+
+            await using (var rejectedAssertionContext = CreateDbContext(dataSource))
+            {
+                var persistedTerminal = await rejectedAssertionContext.Parcels
+                    .AsNoTracking()
+                    .SingleAsync(item => item.Id == terminalParcel.Id);
+                persistedTerminal.Status.Should().Be(ParcelStatus.DELIVERY_CONFIRMED);
+                (await rejectedAssertionContext.ParcelIncidents.CountAsync(item =>
+                    item.ParcelId == terminalParcel.Id)).Should().Be(0);
+                (await rejectedAssertionContext.ParcelSearchTasks.CountAsync(item =>
+                    item.ParcelId == terminalParcel.Id)).Should().Be(0);
+                (await rejectedAssertionContext.ParcelCustodyEvents.CountAsync(item =>
+                    item.ParcelId == terminalParcel.Id)).Should().Be(0);
+                (await rejectedAssertionContext.OutboxEvents.CountAsync()).Should().Be(0);
+            }
+
+            ReportParcelIncidentResponse accepted;
+            await using (var acceptedContext = CreateDbContext(dataSource))
+            {
+                accepted = await ExecuteIncidentReportAsync(
+                    acceptedContext,
+                    new ReportParcelIncidentCommand(
+                        reportableParcel.Id,
+                        reportableParcel.SenderUserId,
+                        null,
+                        ParcelIncidentType.DAMAGED.ToString(),
+                        "Parcel was damaged at delivery.",
+                        ["https://example.test/damage-evidence"]));
+            }
+
+            await using var assertionContext = CreateDbContext(dataSource);
+            var persistedReportable = await assertionContext.Parcels
+                .AsNoTracking()
+                .SingleAsync(item => item.Id == reportableParcel.Id);
+            persistedReportable.Status.Should().Be(ParcelStatus.PENDING_OPERATOR_ACTION);
+            persistedReportable.PendingActionType.Should().Be(PendingActionType.CUSTODY_EXCEPTION);
+            persistedReportable.PendingActionResumeStatus.Should().Be(ParcelStatus.UNLOADED);
+            (await assertionContext.ParcelIncidents.CountAsync(item =>
+                item.Id == accepted.IncidentId && item.ParcelId == reportableParcel.Id)).Should().Be(1);
+            (await assertionContext.ParcelSearchTasks.CountAsync(item =>
+                item.ParcelId == reportableParcel.Id)).Should().Be(3);
+            (await assertionContext.ParcelCustodyEvents.CountAsync(item =>
+                item.ParcelId == reportableParcel.Id
+                && item.EventType == ParcelCustodyEventType.EXCEPTION_REPORTED)).Should().Be(1);
+            (await assertionContext.OutboxEvents.CountAsync(item =>
+                item.EventType == ParcelOutboxEvents.CustodyEventRecorded)).Should().Be(1);
+            (await assertionContext.OutboxEvents.CountAsync(item =>
+                item.EventType == ParcelOutboxEvents.IncidentOpened)).Should().Be(1);
+        }
+        finally
+        {
+            await DropDatabaseAsync(connectionString, databaseName);
+        }
+    }
+
+    [Fact]
+    public async Task WrongStopThenTargetStop_RejectsWithoutWritesThenUnloadsAtomically()
+    {
+        var databaseName = $"vietride_parcel_wrong_then_target_{Guid.NewGuid():N}";
+        var connectionString = CreateConnectionString(databaseName);
+        await CreateDatabaseAsync(connectionString, databaseName);
+
+        try
+        {
+            await using var dataSource = CreateDataSource(connectionString);
+            var operatorId = Guid.NewGuid();
+            var tripId = Guid.NewGuid();
+            var assistantId = Guid.NewGuid();
+            var vehicleId = Guid.NewGuid();
+            var intendedDropoffStopId = Guid.NewGuid();
+            var wrongStopId = Guid.NewGuid();
+            var parcel = CreateParcel(
+                "VRP-WRONG-THEN-TARGET",
+                operatorId,
+                tripId,
+                intendedDropoffStopId);
+            var forwardingIncident = ParcelIncident.Open(
+                parcel.Id,
+                operatorId,
+                ParcelIncidentType.WRONG_STOP,
+                DateTimeOffset.UtcNow.AddHours(6),
+                tripId,
+                null,
+                assistantId,
+                "ASSISTANT",
+                $"STOP:{intendedDropoffStopId:D}",
+                "Forwarding vehicle",
+                "Forwarding to the intended drop-off stop.",
+                null,
+                operatorProcessBreach: false);
+            forwardingIncident.StartSearch();
+            forwardingIncident.MarkFound("Found on the forwarding vehicle.");
+            forwardingIncident.StartForwarding();
+
+            await using (var seedContext = CreateDbContext(dataSource))
+            {
+                await seedContext.Database.MigrateAsync();
+                seedContext.Parcels.Add(parcel);
+                seedContext.ParcelIncidents.Add(forwardingIncident);
+                await seedContext.SaveChangesAsync();
+                await SetStatusAsync(seedContext, parcel.Id, ParcelStatus.IN_TRANSIT);
+            }
+
+            var tripSnapshot = new TripParcelSnapshot(
+                tripId,
+                operatorId,
+                Guid.NewGuid(),
+                vehicleId,
+                "IN_PROGRESS",
+                DateTimeOffset.UtcNow.AddHours(-2),
+                DateTimeOffset.UtcNow.AddHours(2),
+                100_000,
+                new TripStationDto(Guid.NewGuid(), "Origin"),
+                new TripStationDto(Guid.NewGuid(), "Destination"),
+                [
+                    new TripStopDto(
+                        intendedDropoffStopId,
+                        1,
+                        true,
+                        true,
+                        DateTimeOffset.UtcNow,
+                        50,
+                        null,
+                        "ARRIVED",
+                        DateTimeOffset.UtcNow,
+                        null),
+                ],
+                new TripSeatSummaryDto(20, 10),
+                null,
+                null,
+                Guid.NewGuid(),
+                assistantId);
+            var tripClient = TripServiceClientProxy.Create(
+                tripSnapshot,
+                new TripOperationalLocationSnapshot(
+                    tripId,
+                    vehicleId,
+                    "IN_PROGRESS",
+                    intendedDropoffStopId,
+                    "ARRIVED",
+                    DateTimeOffset.UtcNow,
+                    null,
+                    null));
+
+            await using (var handlerContext = CreateDbContext(dataSource))
+            {
+                var clock = new SystemClock();
+                var outbox = new IntegrationEventOutbox(new OutboxStore(handlerContext, clock));
+                var reliability = CreateReliabilityRepository(handlerContext);
+                var handler = new UnloadParcelCommandHandler(
+                    CreateRepository(handlerContext),
+                    tripClient,
+                    outbox,
+                    new EfUnitOfWork(handlerContext),
+                    new ParcelCustodyService(reliability, outbox, clock),
+                    reliability);
+
+                var wrongStopAction = async () => await handler.Handle(
+                    new UnloadParcelCommand(
+                        parcel.Id,
+                        assistantId,
+                        operatorId,
+                        Guid.NewGuid(),
+                        "ROUTE_STOP",
+                        wrongStopId,
+                        [],
+                        parcel.ParcelCode),
+                    CancellationToken.None);
+                var mismatch = await wrongStopAction.Should()
+                    .ThrowAsync<CodedConflictException>();
+                mismatch.Which.ErrorCode.Should().Be("PARCEL_CUSTODY_LOCATION_MISMATCH");
+
+                handlerContext.ChangeTracker.Clear();
+                var afterWrongStop = await handlerContext.Parcels
+                    .AsNoTracking()
+                    .SingleAsync(item => item.Id == parcel.Id);
+                afterWrongStop.Status.Should().Be(ParcelStatus.IN_TRANSIT);
+                afterWrongStop.UnloadedAt.Should().BeNull();
+                (await handlerContext.OutboxEvents.CountAsync()).Should().Be(0);
+                var incidentAfterWrongStop = await handlerContext.ParcelIncidents
+                    .AsNoTracking()
+                    .SingleAsync(item => item.Id == forwardingIncident.Id);
+                incidentAfterWrongStop.Status.Should().Be(ParcelIncidentStatus.FORWARDING);
+
+                var unloaded = await handler.Handle(
+                    new UnloadParcelCommand(
+                        parcel.Id,
+                        assistantId,
+                        operatorId,
+                        Guid.NewGuid(),
+                        "ROUTE_STOP",
+                        intendedDropoffStopId,
+                        [],
+                        parcel.ParcelCode),
+                    CancellationToken.None);
+                unloaded.Status.Should().Be(ParcelStatus.UNLOADED.ToString());
+            }
+
+            await using var assertionContext = CreateDbContext(dataSource);
+            var persisted = await assertionContext.Parcels
+                .AsNoTracking()
+                .SingleAsync(item => item.Id == parcel.Id);
+            persisted.Status.Should().Be(ParcelStatus.UNLOADED);
+            persisted.UnloadedAt.Should().NotBeNull();
+            var resolvedIncident = await assertionContext.ParcelIncidents
+                .AsNoTracking()
+                .SingleAsync(item => item.Id == forwardingIncident.Id);
+            resolvedIncident.Status.Should().Be(ParcelIncidentStatus.RESOLVED);
+            resolvedIncident.ResolutionCode.Should().Be("FORWARDED_TO_EXPECTED_DROPOFF");
+            (await assertionContext.ParcelCustodyEvents.CountAsync(item =>
+                item.ParcelId == parcel.Id
+                && item.EventType == ParcelCustodyEventType.UNLOADED)).Should().Be(1);
+            (await assertionContext.OutboxEvents.CountAsync(item =>
+                item.EventType == ParcelOutboxEvents.Unloaded)).Should().Be(1);
+            (await assertionContext.OutboxEvents.CountAsync(item =>
+                item.EventType == ParcelOutboxEvents.CustodyEventRecorded)).Should().Be(1);
+            (await assertionContext.OutboxEvents.CountAsync(item =>
+                item.EventType == ParcelOutboxEvents.IncidentUpdated)).Should().Be(1);
+        }
+        finally
+        {
+            await DropDatabaseAsync(connectionString, databaseName);
+        }
+    }
+
     [Fact]
     public async Task ConcurrentUnloadAndDeliver_AllowOneCasWinner_AndPreserveConfirmationFlow()
     {
@@ -147,7 +421,11 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
         return await Task.WhenAll(first, second);
     }
 
-    private static ParcelEntity CreateParcel(string parcelCode)
+    private static ParcelEntity CreateParcel(
+        string parcelCode,
+        Guid? operatorId = null,
+        Guid? tripId = null,
+        Guid? dropoffStopId = null)
         => ParcelEntity.CreatePendingPayment(
             parcelCode,
             Guid.NewGuid(),
@@ -155,9 +433,9 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
             "Recipient",
             PhoneNumber.Normalize("+84912345678"),
             "recipient@example.com",
-            Guid.NewGuid(),
-            Guid.NewGuid(),
-            null,
+            operatorId ?? Guid.NewGuid(),
+            tripId ?? Guid.NewGuid(),
+            dropoffStopId,
             null,
             "Item",
             null,
@@ -187,10 +465,44 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
         return (IParcelRepository)Activator.CreateInstance(repositoryType, dbContext)!;
     }
 
+    private static IParcelReliabilityRepository CreateReliabilityRepository(ParcelDbContext dbContext)
+    {
+        var repositoryType = typeof(ParcelDbContext).Assembly.GetType(
+            "VietRide.Parcel.Infrastructure.Persistence.Repositories.ParcelReliabilityRepository",
+            throwOnError: true)!;
+
+        return (IParcelReliabilityRepository)Activator.CreateInstance(repositoryType, dbContext)!;
+    }
+
+    private static async Task<ReportParcelIncidentResponse> ExecuteIncidentReportAsync(
+        ParcelDbContext dbContext,
+        ReportParcelIncidentCommand command)
+    {
+        var clock = new SystemClock();
+        var outbox = new IntegrationEventOutbox(new OutboxStore(dbContext, clock));
+        var reliability = CreateReliabilityRepository(dbContext);
+        var handler = new ReportParcelIncidentCommandHandler(
+            CreateRepository(dbContext),
+            reliability,
+            new ParcelCustodyService(reliability, outbox, clock),
+            outbox,
+            clock);
+        var behavior = new TransactionBehavior<ReportParcelIncidentCommand, ReportParcelIncidentResponse>(
+            NullLogger<TransactionBehavior<ReportParcelIncidentCommand, ReportParcelIncidentResponse>>.Instance,
+            new EfUnitOfWork(dbContext));
+        return await behavior.Handle(
+            command,
+            () => handler.Handle(command, CancellationToken.None),
+            CancellationToken.None);
+    }
+
     private static NpgsqlDataSource CreateDataSource(string connectionString)
     {
         var builder = new NpgsqlDataSourceBuilder(connectionString);
         ParcelDbContext.ConfigurePostgresTypes(builder);
+        builder.MapEnum<OutboxEventStatus>(
+            $"{ParcelDbContext.SchemaName}.outbox_event_status",
+            new NpgsqlNullNameTranslator());
         return builder.Build();
     }
 
@@ -252,4 +564,39 @@ public sealed class Day39ParcelDeliveryTransitionPersistenceTests
     private sealed record DeliveryAttempt(
         DateTimeOffset DeliveredAt,
         IReadOnlyCollection<string> PhotoUrls);
+
+    private class TripServiceClientProxy : DispatchProxy
+    {
+        private TripParcelSnapshot snapshot = null!;
+        private TripOperationalLocationSnapshot operationalLocation = null!;
+
+        public static ITripServiceClient Create(
+            TripParcelSnapshot snapshot,
+            TripOperationalLocationSnapshot operationalLocation)
+        {
+            var client = Create<ITripServiceClient, TripServiceClientProxy>();
+            var proxy = (TripServiceClientProxy)(object)client;
+            proxy.snapshot = snapshot;
+            proxy.operationalLocation = operationalLocation;
+            return client;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+            => targetMethod?.Name switch
+            {
+                nameof(ITripServiceClient.AuthorizeAssistantForTripAsync) => Task.FromResult(
+                    new TripCrewAuthorizationOutcome(TripCrewAuthorizationOutcomeKind.Authorized)),
+                nameof(ITripServiceClient.GetTripParcelSnapshotAsync) => Task.FromResult(
+                    new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, snapshot, null)),
+                nameof(ITripServiceClient.GetTripOperationalLocationAsync) => Task.FromResult(
+                    new TripOperationalLocationOutcome(
+                        TripOperationalLocationOutcomeKind.Success,
+                        operationalLocation,
+                        null)),
+                nameof(ITripServiceClient.ReleaseCargoAsync) => Task.FromResult(
+                    new TripCargoOutcome(TripCargoOutcomeKind.Success, null)),
+                _ => throw new NotSupportedException(
+                    $"Unexpected Trip client call '{targetMethod?.Name}'."),
+            };
+    }
 }

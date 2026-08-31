@@ -3,6 +3,7 @@ using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Abstractions.Services;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Application.Services;
 using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -38,7 +39,7 @@ public sealed class ReportParcelIncidentCommandHandler
         ReportParcelIncidentCommand command,
         CancellationToken cancellationToken)
     {
-        var parcel = await _parcels.GetByIdAsync(command.ParcelId, cancellationToken)
+        var parcel = await _parcels.AcquireForIncidentReportAsync(command.ParcelId, cancellationToken)
             ?? throw new CodedNotFoundException("PARCEL_NOT_FOUND", "Parcel was not found.");
 
         var authorized = command.ReporterUserId == parcel.SenderUserId
@@ -60,6 +61,9 @@ public sealed class ReportParcelIncidentCommandHandler
                 "PARCEL_INCIDENT_TYPE_NOT_REPORTABLE",
                 "Passengers can only report delivery-not-received, damaged, or partial-loss incidents.");
         }
+
+        if (!isSameTenantOperator && !ParcelIncidentReportPolicy.CanPassengerReport(parcel.Status))
+            throw ParcelIncidentReportPolicy.StatusNotReportable(parcel.Status, type);
 
         var existing = await _reliability.GetOpenIncidentAsync(parcel.Id, type, cancellationToken);
         if (existing is not null)
@@ -119,7 +123,7 @@ public sealed class ReportParcelIncidentCommandHandler
                 cancellationToken);
         }
 
-        await _parcels.TrySetPendingOperatorActionAsync(
+        var quarantined = await _parcels.TrySetPendingOperatorActionAsync(
             parcel.Id,
             PendingActionType.CUSTODY_EXCEPTION,
             command.Description ?? "Parcel incident reported.",
@@ -127,6 +131,14 @@ public sealed class ReportParcelIncidentCommandHandler
             now,
             cancellationToken,
             parcel.Status);
+        if (!quarantined)
+        {
+            if (!isSameTenantOperator)
+                throw ParcelIncidentReportPolicy.StatusNotReportable(parcel.Status, type);
+            throw new CodedConflictException(
+                "PARCEL_STATE_CONFLICT",
+                "Parcel status changed while the incident report was being created.");
+        }
 
         await ParcelOutboxEvents.EnqueueAsync(
             _outbox,

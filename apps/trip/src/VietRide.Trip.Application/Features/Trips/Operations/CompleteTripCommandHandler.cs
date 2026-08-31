@@ -7,6 +7,7 @@ using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Abstractions.Services;
+using VietRide.Trip.Domain.Constants;
 using VietRide.Trip.Domain.Entities;
 
 namespace VietRide.Trip.Application.Features.Trips.Operations;
@@ -22,6 +23,7 @@ public sealed class CompleteTripCommandHandler
     private readonly ILogger<CompleteTripCommandHandler> _logger;
     private readonly IParcelImpactClient _parcelImpact;
     private readonly IRouteChangeProposalLifecycleService? _routeChangeProposals;
+    private readonly ITripAuditLogRepository? _auditLogs;
 
     public CompleteTripCommandHandler(
         ITripRepository trips,
@@ -29,7 +31,8 @@ public sealed class CompleteTripCommandHandler
         IClock clock,
         ILogger<CompleteTripCommandHandler> logger,
         IParcelImpactClient parcelImpact,
-        IRouteChangeProposalLifecycleService? routeChangeProposals = null)
+        IRouteChangeProposalLifecycleService? routeChangeProposals = null,
+        ITripAuditLogRepository? auditLogs = null)
     {
         _trips = trips;
         _outbox = outbox;
@@ -37,6 +40,7 @@ public sealed class CompleteTripCommandHandler
         _logger = logger;
         _parcelImpact = parcelImpact;
         _routeChangeProposals = routeChangeProposals;
+        _auditLogs = auditLogs;
     }
 
     public async Task<CompleteTripResponse> Handle(
@@ -63,6 +67,8 @@ public sealed class CompleteTripCommandHandler
                     "FORBIDDEN",
                     "Only the assigned driver or assistant can complete this trip.");
             }
+
+            TripCompletionDestinationGuard.EnsureManualCompletionAllowed(trip);
         }
 
         await ParcelTripCompletionClearanceGuard.EnsureAsync(
@@ -80,6 +86,24 @@ public sealed class CompleteTripCommandHandler
             trip.CompleteManually(now, request.ActorUserId!.Value);
         if (_routeChangeProposals is not null)
             await _routeChangeProposals.ExpirePendingForTripAsync(trip.Id, now, cancellationToken);
+        if (request.IsAutomatic && trip.DestinationArrivedAt is null && _auditLogs is not null)
+        {
+            await _auditLogs.AddAsync(
+                TripAuditLog.Create(
+                    Guid.NewGuid(),
+                    trip.Id,
+                    null,
+                    TripAuditAction.TripCompletedFallbackWithoutDestinationArrival,
+                    JsonSerializer.Serialize(new
+                    {
+                        tripId = trip.Id,
+                        estimatedArrivalTime = trip.EstimatedArrivalTime,
+                        destinationArrivedAt = (DateTimeOffset?)null,
+                        reason = "DESTINATION_ARRIVAL_NOT_RECORDED",
+                    }, JsonOptions),
+                    now),
+                cancellationToken);
+        }
 
         var evt = new TripCompletedIntegrationEvent(
             trip.Id,

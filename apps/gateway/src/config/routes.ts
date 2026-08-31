@@ -693,6 +693,13 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['DRIVER', 'ASSISTANT'],
     },
     {
+      prefix: '/v1/crew/parcel-approval-requests',
+      method: 'GET',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER'],
+    },
+    {
       prefix: '/v1/crew/parcel-stop-departure-approvals',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',

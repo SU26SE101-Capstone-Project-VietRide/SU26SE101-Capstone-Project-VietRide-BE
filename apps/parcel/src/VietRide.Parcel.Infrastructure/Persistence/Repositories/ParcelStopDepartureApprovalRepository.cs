@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Domain.Entities;
+using VietRide.Parcel.Domain.Enums;
 
 namespace VietRide.Parcel.Infrastructure.Persistence.Repositories;
 
@@ -83,6 +84,40 @@ internal sealed class ParcelStopDepartureApprovalRepository
             .AsTracking()
             .ToListAsync(ct);
         return matches.SingleOrDefault();
+    }
+
+    public async Task<IReadOnlyList<ParcelStopDepartureApprovalRequest>> ListPendingByOperatorAsync(
+        Guid operatorId,
+        CancellationToken ct = default)
+        => await _db.ParcelStopDepartureApprovalRequests
+            .AsNoTracking()
+            .Where(item => item.OperatorId == operatorId
+                && item.Status == ParcelStopDepartureApprovalStatus.PENDING_APPROVAL)
+            .OrderByDescending(item => item.RequestedAt)
+            .ThenBy(item => item.Id)
+            .ToArrayAsync(ct);
+
+    public async Task<IReadOnlyList<ParcelStopDepartureApprovalRequest>> ListPendingByTripForUpdateAsync(
+        Guid tripId,
+        Guid? stopId = null,
+        CancellationToken ct = default)
+    {
+        var query = stopId.HasValue
+            ? _db.ParcelStopDepartureApprovalRequests.FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_parcel.parcel_stop_departure_approval_requests
+                WHERE trip_id = {tripId} AND stop_id = {stopId.Value} AND status = 'PENDING_APPROVAL'
+                ORDER BY id
+                FOR UPDATE
+                """)
+            : _db.ParcelStopDepartureApprovalRequests.FromSqlInterpolated($"""
+                SELECT *
+                FROM vietride_parcel.parcel_stop_departure_approval_requests
+                WHERE trip_id = {tripId} AND status = 'PENDING_APPROVAL'
+                ORDER BY id
+                FOR UPDATE
+                """);
+        return await query.AsTracking().ToArrayAsync(ct);
     }
 
     public async Task AddAsync(

@@ -46,6 +46,12 @@ public interface IParcelReliabilityRepository
 
     Task<ParcelIncident?> GetIncidentAsync(Guid incidentId, CancellationToken ct = default);
 
+    async Task<ParcelIncident?> GetForwardingIncidentForUpdateAsync(
+        Guid parcelId,
+        CancellationToken ct = default)
+        => (await ListActiveIncidentsByParcelsAsync([parcelId], ct))
+            .FirstOrDefault(incident => incident.Status == ParcelIncidentStatus.FORWARDING);
+
     Task<IReadOnlyList<ParcelIncident>> ListIncidentsByIdsAsync(
         IReadOnlyCollection<Guid> incidentIds,
         CancellationToken ct = default);
