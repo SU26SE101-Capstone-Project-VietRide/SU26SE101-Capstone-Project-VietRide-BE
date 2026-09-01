@@ -774,6 +774,41 @@ public sealed class CreateParcelTests
         captured.TripId.Should().Be(TripId);
     }
 
+    [Fact]
+    public async Task Create_WhenDropoffStopBecameInactive_ReturnsNotFoundWithoutSideEffects()
+    {
+        var (identity, booking, trip, parcelRepo, fareRepo, uow) = SetupMocks();
+        var snapshot = CreateTripSnapshot("SCHEDULED") with
+        {
+            Stops =
+            [
+                new TripStopDto(
+                    DropoffStopId,
+                    1,
+                    false,
+                    true,
+                    EstimatedArrival,
+                    10,
+                    null,
+                    "PENDING",
+                    null,
+                    null,
+                    IsActive: false,
+                    Name: "Inactive stop"),
+            ],
+        };
+        trip.GetTripParcelSnapshotAsync(TripId, Arg.Any<CancellationToken>())
+            .Returns(new TripSnapshotOutcome(TripSnapshotOutcomeKind.Success, snapshot, null));
+        var handler = CreateHandler(identity, booking, trip, parcelRepo, fareRepo, uow);
+
+        var action = () => handler.Handle(BuildCommand(), CancellationToken.None);
+
+        var exception = (await action.Should().ThrowAsync<CodedValidationException>()).Which;
+        exception.ErrorCode.Should().Be("DROP_OFF_STOP_NOT_FOUND");
+        await parcelRepo.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
+        await uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
+    }
+
     private static CreateParcelCommand BuildCommand(
         Guid? bookingId = null,
         string sizeCategory = "MEDIUM",

@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.86.0
+> **Phiên bản:** 1.87.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-31
+> **Cập nhật lần cuối:** 2026-09-01
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -4384,6 +4384,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.87.0** | 2026-09-01 | Codex | **MINOR** — Close Passenger Mobile BE gaps without changing Tracking share lifecycle. Notification resolves Passenger `VEHICLE_SUBSTITUTED` notifications carrying `bookingId` to `OPEN_BOOKING_DETAIL` while preserving Trip-detail fallback. Booking and Parcel history model operational `seatNumber` as nullable. Parcel availability adds backward-compatible destination Station, exact drop-off Stop, and destination Location discovery modes with typed `dropoffPoints`; Trip applies active Stop/`allowDropoff`, fare, Assistant, capacity and pagination filters authoritatively. Parcel pickup remains the Route origin Station, all eligible drop-off points use the same Route fare, and quote tokens remain Trip/Route/station-pair bound rather than Stop-bound. No endpoint path, schema, migration, dependency, Gateway route, event key or Tracking lifecycle change. |
 | **1.86.0** | 2026-08-31 | Codex | **MINOR** — Fix Parcel production E2E defects BE-PCL-001..008: expose stop departure anchors; enforce ordered stop/destination arrival and destination-before-manual-completion while auditing the ETA+30 exception; make forwarding custody/outbox atomic and auto-resolve only after verified unload; align Assistant actions and Passenger incident policy; clarify destination reconciliation semantics with a deprecated `canComplete` alias; and add the Driver unified approval inbox, `parcel.approval.requested`, `PARCEL_APPROVAL_REQUESTED`, native `OPEN_PARCEL_APPROVAL`, reassignment/terminal invalidation, Gateway route and one Notification enum migration. No dependency or Parcel/Trip schema change. |
 | **1.85.0** | 2026-08-30 | Codex | **MINOR** — Let assigned Driver/Assistant resolve a crew manifest seat to its Booking buyer during `BOARDING|IN_PROGRESS`: add nullable `buyerName`, canonical-E.164 `buyerPhone`, and `pickupPointName` to the Booking manifest, mirror buyer contact plus `bookingCode` in QR scan, expose additive Stop `name` in the internal Trip snapshot, retain paid no-show rows, and require private no-store responses. Passenger remains operational-only with no per-seat identity; unmatched Trip `BOOKED` seats are never assigned fabricated contact. No schema, dependency, Gateway route or event change. |
 | **1.84.0** | 2026-08-30 | Codex | **MINOR** — Simplify Parcel FE operation contracts after the reality audit. Require an assigned Assistant before Parcel create/forward/transfer; make crew manifests role-aware with inline custody-exception approval context; expose `CUSTODY_SCAN` only for a valid operational context and recovery-on-vehicle for `UNSCANNED_HANDOFF`; derive stop/destination reconciliation exclusively from persisted custody rather than client Parcel-ID assertions; add an operator `approvalStatus` queue filter; and expose nullable `bookingId` in create/detail. Correct the shared manifest contract to use nested pagination. No schema, dependency, Gateway family or routing key is added. |

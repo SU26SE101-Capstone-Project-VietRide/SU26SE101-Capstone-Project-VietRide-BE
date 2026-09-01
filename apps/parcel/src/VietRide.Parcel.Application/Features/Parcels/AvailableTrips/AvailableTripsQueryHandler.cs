@@ -65,17 +65,33 @@ public sealed class AvailableTripsQueryHandler
                 0);
         }
 
-        var searchOutcome = await _tripClient.SearchAvailableParcelTripsForRoutesAsync(
-            request.OriginStationId,
-            request.DestinationStationId,
-            request.DepartureDate,
-            estimate.WeightKg,
-            estimate.VolumeM3,
-            sizeCategory,
-            eligibleRouteIds,
-            request.Page,
-            request.PageSize,
-            cancellationToken);
+        var searchOutcome = request.DestinationStationId.HasValue
+            ? await _tripClient.SearchAvailableParcelTripsForRoutesAsync(
+                request.OriginStationId,
+                request.DestinationStationId.Value,
+                request.DepartureDate,
+                estimate.WeightKg,
+                estimate.VolumeM3,
+                sizeCategory,
+                eligibleRouteIds,
+                request.Page,
+                request.PageSize,
+                cancellationToken)
+            : await _tripClient.SearchAvailableParcelTripsForRoutesAsync(
+                new ParcelTripAvailabilityFilter(
+                    request.OriginStationId,
+                    null,
+                    request.DropoffStopId,
+                    request.DestinationProvinceCode,
+                    request.DestinationLocationCode),
+                request.DepartureDate,
+                estimate.WeightKg,
+                estimate.VolumeM3,
+                sizeCategory,
+                eligibleRouteIds,
+                request.Page,
+                request.PageSize,
+                cancellationToken);
 
         if (searchOutcome.Kind == ParcelTripSearchOutcomeKind.TransportError)
         {
@@ -150,6 +166,7 @@ public sealed class AvailableTripsQueryHandler
             {
                 AvailableCargoWeightKg = trip.AvailableCargoWeightKg,
                 AvailableCargoVolumeM3 = trip.AvailableCargoVolumeM3,
+                DropoffPoints = trip.DropoffPoints ?? [],
             });
         }
 

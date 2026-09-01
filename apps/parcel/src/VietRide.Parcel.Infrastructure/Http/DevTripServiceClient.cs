@@ -220,7 +220,17 @@ public sealed class DevTripServiceClient : ITripServiceClient
                 EstimatedArrivalTime: now.AddHours(8),
                 AvailableCargoWeightKg: 50m,
                 AvailableCargoVolumeM3: 3m,
-                PriceVnd: 100_000),
+                PriceVnd: 100_000,
+                DropoffPoints:
+                [
+                    new TripDropoffPointDto(
+                        "STATION",
+                        destinationStationId,
+                        null,
+                        "Dev Destination",
+                        1,
+                        now.AddHours(8)),
+                ]),
             new(
                 TripId: Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2"),
                 RouteId: routeId,
@@ -233,7 +243,17 @@ public sealed class DevTripServiceClient : ITripServiceClient
                 EstimatedArrivalTime: now.AddHours(12),
                 AvailableCargoWeightKg: 30m,
                 AvailableCargoVolumeM3: 2m,
-                PriceVnd: 120_000),
+                PriceVnd: 120_000,
+                DropoffPoints:
+                [
+                    new TripDropoffPointDto(
+                        "STATION",
+                        destinationStationId,
+                        null,
+                        "Dev Destination",
+                        1,
+                        now.AddHours(12)),
+                ]),
         };
 
         return Task.FromResult(new ParcelTripSearchOutcome(
@@ -243,6 +263,52 @@ public sealed class DevTripServiceClient : ITripServiceClient
             page,
             pageSize,
             null));
+    }
+
+    public async Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsForRoutesAsync(
+        ParcelTripAvailabilityFilter filter,
+        DateOnly departureDate,
+        decimal estimatedWeightKg,
+        decimal estimatedVolumeM3,
+        ParcelSizeCategory sizeCategory,
+        IReadOnlyCollection<Guid> eligibleRouteIds,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var destinationStationId = filter.DestinationStationId
+            ?? Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+        var outcome = await SearchAvailableParcelTripsAsync(
+            filter.OriginStationId,
+            destinationStationId,
+            departureDate,
+            estimatedWeightKg,
+            estimatedVolumeM3,
+            sizeCategory,
+            page,
+            pageSize,
+            cancellationToken);
+        var eligibleRoutes = eligibleRouteIds.ToHashSet();
+        var trips = (outcome.Trips ?? [])
+            .Where(trip => eligibleRoutes.Contains(trip.RouteId))
+            .Select(trip => trip with
+            {
+                DropoffPoints = filter.DropoffStopId.HasValue
+                    ?
+                    [
+                        new TripDropoffPointDto(
+                            "STOP",
+                            null,
+                            filter.DropoffStopId,
+                            "Dev Drop-off Stop",
+                            1,
+                            trip.EstimatedArrivalTime.AddHours(-1)),
+                    ]
+                    : trip.DropoffPoints,
+            })
+            .ToArray();
+
+        return outcome with { Trips = trips, TotalItems = trips.Length };
     }
 
     public Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsAsync(

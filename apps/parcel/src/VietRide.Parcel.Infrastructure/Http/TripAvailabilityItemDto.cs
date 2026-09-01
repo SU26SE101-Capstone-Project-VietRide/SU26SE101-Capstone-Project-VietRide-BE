@@ -14,4 +14,5 @@ public sealed record TripAvailabilityItemDto(
     DateTimeOffset DepartureDateTime,
     DateTimeOffset EstimatedArrivalTime,
     decimal AvailableCargoWeightKg,
-    decimal AvailableCargoVolumeM3);
+    decimal AvailableCargoVolumeM3,
+    IReadOnlyList<TripAvailabilityDropoffPointDto>? DropoffPoints = null);

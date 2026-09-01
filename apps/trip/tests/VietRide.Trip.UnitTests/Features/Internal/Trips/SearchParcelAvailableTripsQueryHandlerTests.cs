@@ -2,7 +2,9 @@ using System.Collections;
 using System.Linq.Expressions;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore.Query;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Repositories;
+using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.ExternalClients;
 using VietRide.Trip.Application.Abstractions.Repositories;
@@ -34,6 +36,13 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
         item.EstimatedArrivalTime.Should().Be(enough.EstimatedArrivalTime);
         item.OriginStation.Should().Be(new ParcelTripStationDto(fixture.Origin.Id, fixture.Origin.Name));
         item.DestinationStation.Should().Be(new ParcelTripStationDto(fixture.Destination.Id, fixture.Destination.Name));
+        item.DropoffPoints.Should().ContainSingle().Which.Should().Be(new ParcelTripDropoffPointDto(
+            "STATION",
+            fixture.Destination.Id,
+            null,
+            fixture.Destination.Name,
+            1,
+            enough.EstimatedArrivalTime));
         item.AvailableCargoWeightKg.Should().Be(100m);
         item.AvailableCargoVolumeM3.Should().Be(10m);
     }
@@ -126,6 +135,93 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
         included.TotalItems.Should().Be(1);
     }
 
+    [Fact]
+    public async Task Handle_ExactStopMode_ReturnsOnlyTripsWithActiveDropoffStop_BeforePagination()
+    {
+        var fixture = Fixture.Create(withLocations: true);
+        var withoutStop = fixture.CreateTrip(Departure, 100m, 10m);
+        var withStop = fixture.CreateTrip(Departure.AddHours(1), 100m, 10m);
+        fixture.Trips.Items.AddRange([withoutStop, withStop]);
+        var stop = fixture.AddStop(withStop, allowDropoff: true);
+
+        var result = await fixture.Handler.Handle(
+            fixture.Query(useDefaultStation: false, dropoffStopId: stop.Id, pageSize: 1),
+            CancellationToken.None);
+
+        result.TotalItems.Should().Be(1);
+        var item = result.Items.Should().ContainSingle().Which;
+        item.TripId.Should().Be(withStop.Id);
+        item.DropoffPoints.Should().ContainSingle().Which.Should().Be(new ParcelTripDropoffPointDto(
+            "STOP",
+            null,
+            stop.Id,
+            stop.Name,
+            1,
+            withStop.DepartureDateTime.AddHours(2)));
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task Handle_ExactStopMode_ExcludesInactiveOrNonDropoffStop(bool deactivate, bool allowDropoff)
+    {
+        var fixture = Fixture.Create(withLocations: true);
+        var trip = fixture.CreateTrip(Departure, 100m, 10m);
+        fixture.Trips.Items.Add(trip);
+        var stop = fixture.AddStop(trip, allowDropoff);
+        if (deactivate)
+            stop.Deactivate();
+
+        var result = await fixture.Handler.Handle(
+            fixture.Query(useDefaultStation: false, dropoffStopId: stop.Id),
+            CancellationToken.None);
+
+        result.Items.Should().BeEmpty();
+        result.TotalItems.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Handle_LocationMode_ReturnsMatchingStopsAndDestinationTerminalInOrder()
+    {
+        var fixture = Fixture.Create(withLocations: true);
+        var trip = fixture.CreateTrip(Departure, 100m, 10m);
+        fixture.Trips.Items.Add(trip);
+        var stop = fixture.AddStop(trip, allowDropoff: true);
+
+        var result = await fixture.Handler.Handle(
+            fixture.Query(
+                useDefaultStation: false,
+                destinationProvinceCode: fixture.Province!.Code),
+            CancellationToken.None);
+
+        var points = result.Items.Should().ContainSingle().Which.DropoffPoints;
+        points.Should().HaveCount(2);
+        points[0].Type.Should().Be("STOP");
+        points[0].StopId.Should().Be(stop.Id);
+        points[0].StationId.Should().BeNull();
+        points[1].Type.Should().Be("STATION");
+        points[1].StationId.Should().Be(fixture.Destination.Id);
+        points[1].StopId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Handle_RejectsMissingOrCombinedDestinationModes()
+    {
+        var fixture = Fixture.Create();
+
+        var missing = () => fixture.Handler.Handle(
+            fixture.Query(useDefaultStation: false),
+            CancellationToken.None);
+        var combined = () => fixture.Handler.Handle(
+            fixture.Query(dropoffStopId: Guid.NewGuid()),
+            CancellationToken.None);
+
+        (await missing.Should().ThrowAsync<CodedValidationException>()).Which.ErrorCode
+            .Should().Be("VALIDATION_ERROR");
+        (await combined.Should().ThrowAsync<CodedValidationException>()).Which.ErrorCode
+            .Should().Be("VALIDATION_ERROR");
+    }
+
     private sealed class Fixture
     {
         private Fixture(
@@ -134,6 +230,10 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
             Station destination,
             RouteEntity route,
             FakeTripRepository trips,
+            FakeTripStopRepository tripStops,
+            FakeStopRepository stops,
+            Location? province,
+            Location? destinationLocation,
             SearchParcelAvailableTripsQueryHandler handler)
         {
             OperatorId = operatorId;
@@ -141,6 +241,10 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
             Destination = destination;
             Route = route;
             Trips = trips;
+            TripStops = tripStops;
+            Stops = stops;
+            Province = province;
+            DestinationLocation = destinationLocation;
             Handler = handler;
         }
 
@@ -149,13 +253,28 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
         public Station Destination { get; }
         public RouteEntity Route { get; }
         public FakeTripRepository Trips { get; }
+        public FakeTripStopRepository TripStops { get; }
+        public FakeStopRepository Stops { get; }
+        public Location? Province { get; }
+        public Location? DestinationLocation { get; }
         public SearchParcelAvailableTripsQueryHandler Handler { get; }
 
-        public static Fixture Create()
+        public static Fixture Create(bool withLocations = false)
         {
             var operatorId = Guid.NewGuid();
+            var province = withLocations
+                ? Location.Create("79", "Ho Chi Minh City", Location.MunicipalityType, 1)
+                : null;
+            var destinationLocation = withLocations
+                ? Location.Create("760", "District 1", Location.WardType, province!.Id, 1)
+                : null;
             var origin = Station.Create("Origin Station", $"origin-{Guid.NewGuid():N}", "HCM", "HCM");
-            var destination = Station.Create("Destination Station", $"destination-{Guid.NewGuid():N}", "Da Nang", "Da Nang");
+            var destination = Station.Create(
+                "Destination Station",
+                $"destination-{Guid.NewGuid():N}",
+                "Da Nang",
+                "Da Nang",
+                locationId: destinationLocation?.Id);
             var route = RouteEntity.Create(
                 operatorId,
                 "HCM - Da Nang",
@@ -165,12 +284,29 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
                 900m,
                 720);
             var trips = new FakeTripRepository([]);
+            var tripStops = new FakeTripStopRepository([]);
+            var stops = new FakeStopRepository([]);
+            var locations = new FakeLocationRepository(
+                new[] { province, destinationLocation }.Where(location => location is not null).Cast<Location>().ToList());
             var handler = new SearchParcelAvailableTripsQueryHandler(
                 new FakeRouteRepository([route]),
                 trips,
                 new FakeStationRepository([origin, destination]),
-                new FakeIdentityInternalClient(operatorId, "VietRide Express"));
-            return new Fixture(operatorId, origin, destination, route, trips, handler);
+                new FakeIdentityInternalClient(operatorId, "VietRide Express"),
+                tripStops,
+                stops,
+                locations);
+            return new Fixture(
+                operatorId,
+                origin,
+                destination,
+                route,
+                trips,
+                tripStops,
+                stops,
+                province,
+                destinationLocation,
+                handler);
         }
 
         public TripEntity CreateTrip(
@@ -198,17 +334,45 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
             decimal volumeM3 = 0.001m,
             int page = 1,
             int pageSize = 20,
-            IReadOnlyCollection<Guid>? eligibleRouteIds = null)
+            IReadOnlyCollection<Guid>? eligibleRouteIds = null,
+            bool useDefaultStation = true,
+            Guid? destinationStationId = null,
+            Guid? dropoffStopId = null,
+            string? destinationProvinceCode = null,
+            string? destinationLocationCode = null)
             => new(
                 Origin.Id,
-                Destination.Id,
+                useDefaultStation ? Destination.Id : destinationStationId,
                 DepartureDate,
                 weightKg,
                 volumeM3,
                 "MEDIUM",
                 page,
                 pageSize,
-                eligibleRouteIds);
+                eligibleRouteIds,
+                dropoffStopId,
+                destinationProvinceCode,
+                destinationLocationCode);
+
+        public Stop AddStop(TripEntity trip, bool allowDropoff)
+        {
+            var stop = Stop.Create(
+                OperatorId,
+                $"Dropoff {Stops.Items.Count + 1}",
+                10.1m,
+                106.1m,
+                locationId: DestinationLocation?.Id);
+            Stops.Items.Add(stop);
+            TripStops.Items.Add(TripStop.Create(
+                trip.Id,
+                stop.Id,
+                1,
+                trip.DepartureDateTime.AddHours(2),
+                allowPickup: true,
+                allowDropoff,
+                10m));
+            return stop;
+        }
     }
 
     private abstract class FakeRepository<TEntity, TId> : IRepository<TEntity, TId>
@@ -279,6 +443,47 @@ public sealed class SearchParcelAvailableTripsQueryHandlerTests
             string? province,
             Guid? locationId,
             CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<Station>>(Items);
+    }
+
+    private sealed class FakeTripStopRepository : FakeRepository<TripStop, (Guid TripId, Guid StopId)>, ITripStopRepository
+    {
+        public FakeTripStopRepository(List<TripStop> items)
+            : base(items, tripStop => (tripStop.TripId, tripStop.StopId))
+        {
+        }
+    }
+
+    private sealed class FakeStopRepository : FakeRepository<Stop, Guid>, IStopRepository
+    {
+        public FakeStopRepository(List<Stop> items)
+            : base(items, stop => stop.Id)
+        {
+        }
+    }
+
+    private sealed class FakeLocationRepository : FakeRepository<Location, Guid>, ILocationRepository
+    {
+        public FakeLocationRepository(List<Location> items)
+            : base(items, location => location.Id)
+        {
+        }
+
+        public Task<Location?> GetActiveByIdAsync(Guid id, CancellationToken cancellationToken) =>
+            Task.FromResult(Items.FirstOrDefault(location => location.Id == id && location.IsActive));
+
+        public Task<Location?> GetActiveByCodeAsync(string code, CancellationToken cancellationToken) =>
+            Task.FromResult(Items.FirstOrDefault(location => location.Code == code && location.IsActive));
+
+        public Task<bool> ExistsByCodeAsync(string code, Guid? exceptId, CancellationToken cancellationToken) =>
+            Task.FromResult(Items.Any(location => location.Code == code && location.Id != exceptId));
+
+        public Task<PagedResult<Location>> ListAsync(
+            int page,
+            int pageSize,
+            string? search,
+            bool? isActive,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(PagedResult<Location>.Create(Items, page, pageSize, Items.Count));
     }
 
     private sealed class FakeIdentityInternalClient : IIdentityInternalClient
