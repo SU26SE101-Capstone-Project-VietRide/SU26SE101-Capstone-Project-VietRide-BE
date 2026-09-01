@@ -1280,11 +1280,13 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
-endpoint có behavior-idempotent hay không, trừ đúng 21 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `218 mutation surfaces / 197 required / 21 exempt`;
-thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
+endpoint có behavior-idempotent hay không, trừ đúng 22 action có metadata exemption được khóa ở
+bảng sau. Canonical BSOT tally sau feature này là `219 mutation surfaces / 197 required / 22
+exempt`; executable inventory trên branch hiện còn drift có sẵn, nhưng mọi action thêm hoặc xóa
+vẫn bắt buộc cập nhật contract, runtime metadata và exact inventory theo đúng feature delta trong
+cùng patch.
 
-**Canonical 21 exemptions (không yêu cầu `Idempotency-Key`):**
+**Canonical 22 exemptions (không yêu cầu `Idempotency-Key`):**
 
 | # | Endpoint | Lý do |
 |---:|---|---|
@@ -1308,7 +1310,8 @@ thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata v�
 | 18 | `POST /v1/admin/rag-config/reload` | Chỉ invalidates in-memory cache và naturally repeatable. |
 | 19 | `POST /v1/operator/driver-schedules/availability-check` | Read-only resource availability preview; không tạo reservation. |
 | 20 | `POST /v1/operator/shuttle-trips/availability-check` | Read-only resource availability preview; không tạo reservation. |
-| 21 | `POST /internal/v1/trips/parcel-availability/search` | Read-only Parcel availability query; bounded Route filter nằm trong request body. |
+| 21 | `POST /v1/operator/shuttle-trips/route-preview` | Read-only Shuttle route-risk preview; không tạo reservation hoặc ShuttleTrip. |
+| 22 | `POST /internal/v1/trips/parcel-availability/search` | Read-only Parcel availability query; bounded Route filter nằm trong request body. |
 
 Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable là nguồn exhaustive):
 
@@ -1531,6 +1534,17 @@ Goong Directions v2 is the current routing contract with post-merger administrat
 chunked without reordering, and `routes[0].legs[].distance.value`/`duration.value` are accumulated
 across every leg and chunk. Empty/malformed routes, negative or non-finite metrics, wrong leg count,
 or changed waypoint order reject the whole batch. Never log the full request URI/query.
+
+`POST /v1/operator/shuttle-trips/route-preview` is an `OPERATOR_ADMIN` read-only advisory query.
+For inbound, it keeps `orderedBookingIds` exactly and estimates the chain from the first selected
+pickup through the remaining selected pickups to the origin Station; it does not add a
+Station-to-first-pickup deadhead. `hardCutoffAt` is main Trip departure minus 30 minutes and
+`estimatedFinishAt` adds every Goong leg plus `SHUTTLE_STOP_SERVICE_MINUTES` per Booking group
+(default 5). Any missing configuration, timeout, malformed chunk, or unusable provider response
+returns `200 UNKNOWN` without partial estimation. Outbound returns `NOT_APPLICABLE` without a
+provider call. The preview never checks resource availability and never writes ShuttleTrip,
+passenger, reservation, Outbox, or integration-event state; `LATE_RISK` never bypasses the
+existing create guards.
 
 Tracking maps `401`, `403`, `429`, `5xx`, timeout, malformed JSON and strict-validation failure to
 one consistent Local fallback batch and retains the three-failure/300-second cooldown; it never
@@ -4039,6 +4053,8 @@ ROUTING_PROVIDER=GOONG                # GOONG|LOCAL; LOCAL makes fail-closed Tri
 GOONG_API_KEY=...                     # Secret; never log the full Direction URI/query.
 GOONG_BASE_URL=https://rsapi.goong.io
 GOONG_MAX_DESTINATIONS_PER_REQUEST=10
+SHUTTLE_STOP_SERVICE_MINUTES=5
+SHUTTLE_ROUTE_PREVIEW_TIMEOUT_MS=3000
 TRIP_PLANNED_ETA_TIMEOUT_MS=3000
 RESOURCE_TRAVEL_TIME_TIMEOUT_MS=3000
 TRIP_STOP_DWELL_MINUTES=20

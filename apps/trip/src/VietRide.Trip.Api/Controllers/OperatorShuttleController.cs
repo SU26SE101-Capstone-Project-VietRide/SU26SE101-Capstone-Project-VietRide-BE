@@ -177,6 +177,27 @@ public sealed class OperatorShuttleController : ControllerBase
                 request.OrderedBookingIds),
             cancellationToken));
 
+    [HttpPost("shuttle-trips/route-preview")]
+    [Authorize(Roles = "OPERATOR_ADMIN")]
+    [SkipIdempotency("Shuttle route preview is read-only and never creates a reservation.")]
+    [ProducesResponseType(typeof(ApiResponse<ShuttleRoutePreviewResult>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ShuttleRoutePreviewResult>> PreviewRoute(
+        [FromBody] PreviewShuttleRouteRequest request,
+        CancellationToken cancellationToken)
+        => Ok(await _sender.Send(
+            new PreviewShuttleRouteQuery(
+                GetOperatorId(),
+                request.MainTripId,
+                request.Direction,
+                request.ScheduledDepartureTime,
+                request.OrderedBookingIds),
+            cancellationToken));
+
     [HttpPost("shuttle-requests/{mainTripId:guid}/{bookingId:guid}/cancel")]
     [Authorize(Roles = "OPERATOR_ADMIN,OPERATOR_STAFF")]
     [RequireIdempotency]

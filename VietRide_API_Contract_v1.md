@@ -7601,6 +7601,71 @@ Auth: `OPERATOR_ADMIN`. Read-only and requires no `Idempotency-Key`. Body equals
 fields except `notes`; `orderedBookingIds` determines the first/last manifest endpoint. The
 response is the same availability shape and 100-conflict cap documented for DriverSchedule.
 
+### POST `/v1/operator/shuttle-trips/route-preview`
+
+Auth: `OPERATOR_ADMIN`. Đây là query tư vấn read-only và không yêu cầu `Idempotency-Key`.
+Endpoint không gọi resource availability, không lock/reserve resource và không tạo hoặc sửa
+ShuttleTrip, ShuttlePassenger, reservation hay Outbox.
+
+Request:
+
+```json
+{
+  "mainTripId": "36000000-0000-4000-8000-000000000101",
+  "direction": "INBOUND_TO_STATION",
+  "scheduledDepartureTime": "2026-09-01T14:30:00+07:00",
+  "orderedBookingIds": [
+    "36000000-0000-4000-8000-000000000301",
+    "36000000-0000-4000-8000-000000000302"
+  ]
+}
+```
+
+Với inbound, BE giữ nguyên thứ tự Booking và ước tính chuỗi `pickup đầu tiên → các pickup còn
+lại → origin Station`; không cộng quãng đường từ Station tới pickup đầu tiên.
+`hardCutoffAt = mainTrip.departureDateTime - 30 phút` và
+`estimatedFinishAt = scheduledDepartureTime + tổng Goong duration + bookingCount ×
+SHUTTLE_STOP_SERVICE_MINUTES` (mặc định 5 phút). Tuyến dài được chunk theo
+`GOONG_MAX_DESTINATIONS_PER_REQUEST` mà không đổi thứ tự; một chunk không dùng được làm toàn bộ
+kết quả thành `UNKNOWN`.
+
+Response `200 LATE_RISK`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "status": "LATE_RISK",
+    "estimatedFinishAt": "2026-09-01T15:47:00+07:00",
+    "hardCutoffAt": "2026-09-01T15:30:00+07:00",
+    "delayMinutes": 17,
+    "warningCode": "SHUTTLE_LATE_RISK",
+    "lateRiskBlocksCreate": false,
+    "basis": "GOONG"
+  },
+  "meta": {}
+}
+```
+
+Status semantics:
+
+| `status` | Ý nghĩa | Nullable fields |
+|---|---|---|
+| `SAFE` | ETA không sau cutoff; `delayMinutes=0`. | `warningCode=null`; ETA, cutoff và `basis=GOONG` có giá trị. |
+| `LATE_RISK` | ETA sau cutoff; `delayMinutes` làm tròn lên phút. | Không field nghiệp vụ nào nullable; `warningCode=SHUTTLE_LATE_RISK`. |
+| `UNKNOWN` | Goong/config/timeout/response hoặc tọa độ Station không dùng được. | `estimatedFinishAt`, `delayMinutes`, `warningCode`, `basis` là `null`; `hardCutoffAt` vẫn có nếu Main Trip đã load được. |
+| `NOT_APPLICABLE` | Outbound; BE không gọi Goong. | ETA, cutoff, delay, warning và basis đều `null`. |
+
+`lateRiskBlocksCreate=false` cho mọi status. Đây không phải bảo đảm create thành công:
+`POST /v1/operator/shuttle-trips` giữ nguyên body và `Idempotency-Key`, đồng thời vẫn áp dụng
+capacity, resource conflict, cutoff và Booking-state guards hiện hành. Client không gửi `force`,
+`warningAccepted` hoặc payload split.
+
+Tenant được lấy từ JWT. Main Trip khác tenant trả `404 TRIP_NOT_FOUND`. Mọi Booking group được
+chọn phải còn đầy đủ ở `PENDING_ASSIGNMENT`; selection stale trả `409
+SHUTTLE_REQUEST_SET_CHANGED`. Errors khác: `404 STATION_NOT_FOUND`; `422 VALIDATION_ERROR`.
+
 ### GET `/v1/driver/shuttle-trips`
 
 Auth: `DRIVER` only. Chỉ trả ShuttleTrip có `driverUserId` trùng với `sub` trong JWT và bỏ qua

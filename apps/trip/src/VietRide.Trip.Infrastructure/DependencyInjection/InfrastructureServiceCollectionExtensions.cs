@@ -91,9 +91,11 @@ public static class InfrastructureServiceCollectionExtensions
             services.AddScoped<ITripGenerationJobScheduler, DisabledTripGenerationJobScheduler>();
         }
         services.AddScoped<IShuttleDispatchService, ShuttleDispatchService>();
+        services.AddScoped<IShuttleRoutePreviewService, ShuttleRoutePreviewService>();
         services.AddScoped<IResourceAvailabilityService, ResourceAvailabilityService>();
         services.AddScoped<ITripAssignmentAlertStore, TripAssignmentAlertStore>();
         AddGoongShuttleDistanceClient(services, configuration);
+        AddGoongShuttleRouteEstimatorClient(services, configuration);
         AddGoongTripEtaPlannerClient(services, configuration);
         AddGoongRepositionTravelTimeClient(services, configuration);
         services.AddScoped<ShuttleDispatchSafetyJob>();
@@ -198,6 +200,13 @@ public static class InfrastructureServiceCollectionExtensions
         IServiceCollection services,
         IConfiguration configuration) =>
         services.AddHttpClient<IShuttleDistanceClient, GoongDirectionsShuttleDistanceClient>(client =>
+                ConfigureGoongClient(client, configuration))
+            .RemoveAllLoggers();
+
+    internal static IHttpClientBuilder AddGoongShuttleRouteEstimatorClient(
+        IServiceCollection services,
+        IConfiguration configuration) =>
+        services.AddHttpClient<IShuttleRouteEstimator, GoongDirectionsShuttleRouteEstimator>(client =>
                 ConfigureGoongClient(client, configuration))
             .RemoveAllLoggers();
 
