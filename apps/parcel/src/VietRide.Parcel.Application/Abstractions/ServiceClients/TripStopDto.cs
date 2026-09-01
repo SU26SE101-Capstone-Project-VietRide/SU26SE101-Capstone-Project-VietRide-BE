@@ -6,8 +6,10 @@ public sealed record TripStopDto(
     bool AllowPickup,
     bool AllowDropoff,
     DateTimeOffset EstimatedArrivalTime,
-    double DistanceFromOriginKm,
+    double? DistanceFromOriginKm,
     long? FareFromThisStop,
     string Status = "PENDING",
     DateTimeOffset? ActualArrivalTime = null,
-    DateTimeOffset? ActualDepartureTime = null);
+    DateTimeOffset? ActualDepartureTime = null,
+    bool IsActive = true,
+    string? Name = null);

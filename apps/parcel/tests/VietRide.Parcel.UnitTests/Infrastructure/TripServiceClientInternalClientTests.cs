@@ -231,6 +231,8 @@ public class TripServiceClientInternalClientTests
     public async Task GetTripParcelSnapshotAsync_Returns_Success_On_200()
     {
         var destinationArrivedAt = new DateTimeOffset(2026, 7, 15, 9, 30, 0, TimeSpan.Zero);
+        var stopId = Guid.NewGuid();
+        var stopArrival = DateTimeOffset.UtcNow.AddDays(1).AddHours(4);
         var snapshotJson = JsonSerializer.Serialize(new
         {
             tripId = TripId,
@@ -243,7 +245,24 @@ public class TripServiceClientInternalClientTests
             baseFare = 200_000L,
             originStation = new { id = Guid.NewGuid(), name = "Origin" },
             destinationStation = new { id = Guid.NewGuid(), name = "Destination" },
-            stops = Array.Empty<object>(),
+            stops = new[]
+            {
+                new
+                {
+                    stopId,
+                    orderIndex = 1,
+                    allowPickup = false,
+                    allowDropoff = true,
+                    estimatedArrivalTime = stopArrival,
+                    distanceFromOriginKm = (double?)null,
+                    fareFromThisStop = (long?)null,
+                    status = "PENDING",
+                    actualArrivalTime = (DateTimeOffset?)null,
+                    actualDepartureTime = (DateTimeOffset?)null,
+                    isActive = true,
+                    name = "Nullable distance stop",
+                },
+            },
             seatSummary = new { totalSeats = 40, availableSeats = 20 },
             returnRouteId = (Guid?)null,
             destinationArrivedAt,
@@ -259,6 +278,7 @@ public class TripServiceClientInternalClientTests
         result.Snapshot.Status.Should().Be("SCHEDULED");
         result.Snapshot.BaseFare.Should().Be(200_000);
         result.Snapshot.DestinationArrivedAt.Should().Be(destinationArrivedAt);
+        result.Snapshot.Stops.Should().ContainSingle().Which.DistanceFromOriginKm.Should().BeNull();
     }
 
     [Fact]
@@ -384,6 +404,18 @@ public class TripServiceClientInternalClientTests
                     estimatedArrivalTime = arrival,
                     availableCargoWeightKg = 99m,
                     availableCargoVolumeM3 = 9.999m,
+                    dropoffPoints = new[]
+                    {
+                        new
+                        {
+                            type = "STATION",
+                            stationId = (Guid?)destinationId,
+                            stopId = (Guid?)null,
+                            name = "Bến đến",
+                            orderIndex = 2,
+                            estimatedArrivalTime = arrival,
+                        },
+                    },
                 },
             },
             page = 1,
@@ -410,6 +442,13 @@ public class TripServiceClientInternalClientTests
         trip.EstimatedArrivalTime.Should().Be(arrival);
         trip.AvailableCargoWeightKg.Should().Be(99m);
         trip.AvailableCargoVolumeM3.Should().Be(9.999m);
+        trip.DropoffPoints.Should().ContainSingle().Which.Should().Be(new TripDropoffPointDto(
+            "STATION",
+            destinationId,
+            null,
+            "Bến đến",
+            2,
+            arrival));
     }
 
     [Fact]
@@ -445,6 +484,41 @@ public class TripServiceClientInternalClientTests
             .Select(item => item.GetGuid()).Should().Equal(routeId);
         json.RootElement.GetProperty("page").GetInt32().Should().Be(2);
         json.RootElement.GetProperty("pageSize").GetInt32().Should().Be(10);
+    }
+
+    [Fact]
+    public async Task SearchAvailableParcelTripsForRoutesAsync_PostsLocationDestinationSelectors()
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            items = Array.Empty<object>(),
+            page = 1,
+            pageSize = 20,
+            totalItems = 0,
+        }, JsonOptions);
+        var client = BuildClient(HttpStatusCode.OK, body);
+
+        var result = await client.SearchAvailableParcelTripsForRoutesAsync(
+            new ParcelTripAvailabilityFilter(
+                Guid.NewGuid(),
+                null,
+                null,
+                "79",
+                "760"),
+            new DateOnly(2026, 8, 11),
+            2.5m,
+            0.01m,
+            ParcelSizeCategory.SMALL,
+            [Guid.NewGuid()],
+            1,
+            20);
+
+        result.Kind.Should().Be(ParcelTripSearchOutcomeKind.Success);
+        using var json = JsonDocument.Parse(_handler.LastBody!);
+        json.RootElement.GetProperty("destinationStationId").ValueKind.Should().Be(JsonValueKind.Null);
+        json.RootElement.GetProperty("dropoffStopId").ValueKind.Should().Be(JsonValueKind.Null);
+        json.RootElement.GetProperty("destinationProvinceCode").GetString().Should().Be("79");
+        json.RootElement.GetProperty("destinationLocationCode").GetString().Should().Be("760");
     }
 
     [Fact]

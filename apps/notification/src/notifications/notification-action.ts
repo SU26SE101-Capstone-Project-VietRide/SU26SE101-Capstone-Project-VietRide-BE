@@ -131,6 +131,10 @@ export function resolveNotificationAction(
       : NONE_ACTION;
   }
 
+  if (type === NotificationType.VEHICLE_SUBSTITUTED && data.bookingId) {
+    return { type: 'OPEN_BOOKING_DETAIL', params: { bookingId: data.bookingId } };
+  }
+
   if (TRIP_TRACKING_TYPES.has(type)) {
     return data.tripId
       ? { type: 'OPEN_TRIP_TRACKING', params: { tripId: data.tripId } }

@@ -69,7 +69,7 @@ public sealed class GetBookingHistoryQueryHandler
                 {
                     Ticket = ticket,
                     OperationalSeatNumber = booking.Passengers
-                        .SingleOrDefault(passenger => passenger.Id == ticket.PassengerId)?.SeatNumber!,
+                        .SingleOrDefault(passenger => passenger.Id == ticket.PassengerId)?.SeatNumber,
                 })
                 .OrderBy(item => item.OperationalSeatNumber, StringComparer.Ordinal)
                 .ThenBy(item => item.Ticket.Id)

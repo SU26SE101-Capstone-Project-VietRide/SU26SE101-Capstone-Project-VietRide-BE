@@ -218,7 +218,7 @@ public sealed class CreateParcelCommandHandler
         if (command.DropoffStopId.HasValue)
         {
             var dropoffStop = trip.Stops.FirstOrDefault(stop => stop.StopId == command.DropoffStopId.Value);
-            if (dropoffStop is null)
+            if (dropoffStop is null || !dropoffStop.IsActive)
                 throw new CodedValidationException(
                     "DROP_OFF_STOP_NOT_FOUND",
                     $"Drop-off stop '{command.DropoffStopId}' not found in trip '{command.TripId}'.");

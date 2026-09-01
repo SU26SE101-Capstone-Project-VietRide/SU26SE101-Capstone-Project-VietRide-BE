@@ -8,6 +8,7 @@ public sealed record ParcelTripAvailabilityItemDto(
     string Status,
     ParcelTripStationDto OriginStation,
     ParcelTripStationDto DestinationStation,
+    IReadOnlyList<ParcelTripDropoffPointDto> DropoffPoints,
     DateTimeOffset DepartureDateTime,
     DateTimeOffset EstimatedArrivalTime,
     decimal AvailableCargoWeightKg,

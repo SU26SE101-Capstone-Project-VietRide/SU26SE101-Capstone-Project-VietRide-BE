@@ -38,7 +38,10 @@ public sealed class ParcelsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<PagedResult<AvailableTripResponse>>> GetAvailableTripsAsync(
         [FromQuery] Guid originStationId,
-        [FromQuery] Guid destinationStationId,
+        [FromQuery] Guid? destinationStationId,
+        [FromQuery] Guid? dropoffStopId,
+        [FromQuery] string? destinationProvinceCode,
+        [FromQuery] string? destinationLocationCode,
         [FromQuery] DateOnly departureDate,
         [FromQuery] decimal lengthCm,
         [FromQuery] decimal widthCm,
@@ -61,7 +64,10 @@ public sealed class ParcelsController : ControllerBase
                 sizeCategory,
                 page,
                 pageSize,
-                CurrentUserClaims.GetUserId(User)),
+                CurrentUserClaims.GetUserId(User),
+                dropoffStopId,
+                destinationProvinceCode,
+                destinationLocationCode),
             cancellationToken);
 
         return Ok(result);

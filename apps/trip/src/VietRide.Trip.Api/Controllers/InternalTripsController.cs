@@ -196,7 +196,10 @@ public sealed class InternalTripsController : ControllerBase
                 request.SizeCategory,
                 request.Page,
                 request.PageSize,
-                request.EligibleRouteIds),
+                request.EligibleRouteIds,
+                request.DropoffStopId,
+                request.DestinationProvinceCode,
+                request.DestinationLocationCode),
             cancellationToken);
 
         return Ok(result);

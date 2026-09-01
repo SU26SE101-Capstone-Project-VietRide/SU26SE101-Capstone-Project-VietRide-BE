@@ -2,11 +2,14 @@ namespace VietRide.Trip.Api.Controllers.Requests;
 
 public sealed record SearchParcelAvailabilityRequest(
     Guid OriginStationId,
-    Guid DestinationStationId,
+    Guid? DestinationStationId,
     DateOnly DepartureDate,
     decimal EstimatedWeightKg,
     decimal EstimatedVolumeM3,
     string SizeCategory,
     IReadOnlyCollection<Guid> EligibleRouteIds,
     int Page = 1,
-    int PageSize = 20);
+    int PageSize = 20,
+    Guid? DropoffStopId = null,
+    string? DestinationProvinceCode = null,
+    string? DestinationLocationCode = null);

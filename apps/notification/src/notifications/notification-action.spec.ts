@@ -63,7 +63,6 @@ describe('resolveNotificationAction', () => {
     NotificationType.TRIP_SCHEDULE_CHANGED,
     NotificationType.TRIP_CANCELLED,
     NotificationType.TRIP_DISRUPTED,
-    NotificationType.VEHICLE_SUBSTITUTED,
     NotificationType.VEHICLE_SWAPPED,
     NotificationType.INCIDENT_REPORTED,
     NotificationType.CARGO_NEAR_FULL_ALERT,
@@ -72,6 +71,22 @@ describe('resolveNotificationAction', () => {
     NotificationType.DRIVER_STOP_DEPARTED_WITH_PENDING,
   ])('maps %s to trip detail', (type) => {
     expect(resolveNotificationAction(type, { tripId: TRIP_ID })).toEqual({
+      type: 'OPEN_TRIP_DETAIL',
+      params: { tripId: TRIP_ID },
+    });
+  });
+
+  it('maps passenger vehicle substitution to booking detail and gives bookingId precedence', () => {
+    expect(
+      resolveNotificationAction(NotificationType.VEHICLE_SUBSTITUTED, {
+        bookingId: BOOKING_ID,
+        tripId: TRIP_ID,
+      }),
+    ).toEqual({ type: 'OPEN_BOOKING_DETAIL', params: { bookingId: BOOKING_ID } });
+  });
+
+  it('keeps the trip-detail fallback for vehicle substitution without booking context', () => {
+    expect(resolveNotificationAction(NotificationType.VEHICLE_SUBSTITUTED, { tripId: TRIP_ID })).toEqual({
       type: 'OPEN_TRIP_DETAIL',
       params: { tripId: TRIP_ID },
     });
