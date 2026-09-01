@@ -112,6 +112,14 @@ public interface IShuttleDispatchService
         Guid actorUserId,
         string reason,
         CancellationToken cancellationToken);
+
+    Task<UnassignShuttleBookingResult> UnassignBookingAsync(
+        Guid operatorId,
+        Guid shuttleTripId,
+        Guid bookingId,
+        Guid actorUserId,
+        string reason,
+        CancellationToken cancellationToken);
 }
 
 public sealed record CreateShuttleTripInput(
@@ -144,6 +152,16 @@ public sealed record ReassignShuttleTripResult(
     Guid ShuttleTripId,
     Guid DriverUserId,
     Guid VehicleId);
+
+public sealed record UnassignShuttleBookingResult(
+    Guid ShuttleTripId,
+    Guid BookingId,
+    int UnassignedPassengerCount,
+    int RemainingPassengerCount,
+    string ShuttleTripStatus,
+    bool ReturnedToPendingAssignment,
+    bool ShuttleTripCancelled,
+    DateTimeOffset UnassignedAt);
 
 public sealed record ShuttleRequestTripGroup(
     Guid MainTripId,

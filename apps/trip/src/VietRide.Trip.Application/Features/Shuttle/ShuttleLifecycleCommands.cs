@@ -35,3 +35,12 @@ public sealed record CancelShuttleTripCommand(
     Guid ActorUserId,
     string Reason)
     : IRequest<ShuttleLifecycleResult>;
+
+[SkipTransaction]
+public sealed record UnassignShuttleBookingCommand(
+    Guid OperatorId,
+    Guid ShuttleTripId,
+    Guid BookingId,
+    Guid ActorUserId,
+    string Reason)
+    : IRequest<UnassignShuttleBookingResult>;

@@ -124,6 +124,80 @@ public sealed class ShuttlePickupEndpointMetadataTests
     }
 
     [Fact]
+    public void OperatorShuttleBookingUnassign_IsOperatorMutationWithRequiredIdempotencyKey()
+    {
+        var method = typeof(OperatorShuttleController)
+            .GetMethod(nameof(OperatorShuttleController.UnassignBooking))!;
+
+        method.GetCustomAttribute<HttpPostAttribute>()!.Template
+            .Should().Be("shuttle-trips/{shuttleTripId:guid}/bookings/{bookingId:guid}/unassign");
+        method.GetCustomAttribute<AuthorizeAttribute>()!.Roles
+            .Should().Be("OPERATOR_ADMIN,OPERATOR_STAFF");
+        method.GetCustomAttribute<RequireIdempotencyAttribute>()!.AllowRequestBody.Should().BeTrue();
+        method.GetCustomAttributes<ProducesResponseTypeAttribute>()
+            .Select(attribute => attribute.StatusCode)
+            .Should().BeEquivalentTo([200, 403, 404, 409, 422, 503]);
+    }
+
+    [Fact]
+    public async Task OperatorShuttleBookingUnassign_ForwardsTenantActorBookingAndReason()
+    {
+        var operatorId = Guid.NewGuid();
+        var actorUserId = Guid.NewGuid();
+        var shuttleTripId = Guid.NewGuid();
+        var bookingId = Guid.NewGuid();
+        var unassignedAt = DateTimeOffset.UtcNow;
+        var response = new UnassignShuttleBookingResult(
+            shuttleTripId,
+            bookingId,
+            1,
+            1,
+            "SCHEDULED",
+            true,
+            false,
+            unassignedAt);
+        var sender = TestProxy<ISender>.Create((method, args) =>
+        {
+            if (method.Name == nameof(ISender.Send))
+            {
+                var command = Assert.IsType<UnassignShuttleBookingCommand>(args![0]);
+                command.OperatorId.Should().Be(operatorId);
+                command.ActorUserId.Should().Be(actorUserId);
+                command.ShuttleTripId.Should().Be(shuttleTripId);
+                command.BookingId.Should().Be(bookingId);
+                command.Reason.Should().Be("Gán nhầm khách vào xe");
+                return response;
+            }
+
+            return null;
+        });
+        var controller = new OperatorShuttleController(sender)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        [
+                            new Claim("operatorId", operatorId.ToString()),
+                            new Claim(ClaimTypes.NameIdentifier, actorUserId.ToString()),
+                        ],
+                        "test")),
+                },
+            },
+        };
+
+        var result = await controller.UnassignBooking(
+            shuttleTripId,
+            bookingId,
+            new CancelShuttleRequest { Reason = "Gán nhầm khách vào xe" },
+            CancellationToken.None);
+
+        result.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().Be(response);
+    }
+
+    [Fact]
     public void OperatorAssignmentHistory_IsTenantScopedGetForBothOperatorRoles()
     {
         var method = typeof(OperatorShuttleController)

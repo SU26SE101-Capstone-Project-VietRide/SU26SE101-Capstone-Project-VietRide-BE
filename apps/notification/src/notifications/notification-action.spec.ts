@@ -167,6 +167,7 @@ describe('resolveNotificationAction', () => {
     NotificationType.SHUTTLE_WARNING,
     NotificationType.SHUTTLE_STARTED,
     NotificationType.SHUTTLE_REASSIGNED,
+    NotificationType.SHUTTLE_UNASSIGNED,
   ])('maps %s to shuttle tracking', (type) => {
     expect(resolveNotificationAction(type, { shuttleTripId: SHUTTLE_TRIP_ID })).toEqual({
       type: 'OPEN_SHUTTLE_TRACKING',
@@ -190,6 +191,14 @@ describe('resolveNotificationAction', () => {
   it('falls back from unfulfilled shuttle to booking detail', () => {
     expect(
       resolveNotificationAction(NotificationType.SHUTTLE_UNFULFILLED, {
+        bookingId: BOOKING_ID,
+      }),
+    ).toEqual({ type: 'OPEN_BOOKING_DETAIL', params: { bookingId: BOOKING_ID } });
+  });
+
+  it('opens Booking detail for a passenger whose Shuttle assignment was removed', () => {
+    expect(
+      resolveNotificationAction(NotificationType.SHUTTLE_UNASSIGNED, {
         bookingId: BOOKING_ID,
       }),
     ).toEqual({ type: 'OPEN_BOOKING_DETAIL', params: { bookingId: BOOKING_ID } });

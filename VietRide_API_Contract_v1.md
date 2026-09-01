@@ -7636,6 +7636,60 @@ Errors include `404 SHUTTLE_TRIP_NOT_FOUND`, `404 DRIVER_NOT_FOUND`, `404 VEHICL
 `409 SHUTTLE_TRIP_INVALID_STATE`, `409 SHUTTLE_DRIVER_CONFLICT`, `409 SHUTTLE_VEHICLE_CONFLICT`,
 `409 SHUTTLE_CAPACITY_EXCEEDED`, `422 VALIDATION_ERROR`, and `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`.
 
+### POST `/v1/operator/shuttle-trips/{shuttleTripId}/bookings/{bookingId}/unassign`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Header `Idempotency-Key` UUID v4 là bắt buộc. Tenant
+lấy từ JWT; ShuttleTrip không tồn tại hoặc thuộc tenant khác đều trả
+`404 SHUTTLE_TRIP_NOT_FOUND`.
+
+Endpoint này gỡ **toàn bộ Booking** khỏi một ShuttleTrip còn `SCHEDULED`; không hỗ trợ gỡ riêng
+một ticket hoặc một hành khách trong cùng Booking. `reason` là lý do vận hành nội bộ, bắt buộc
+khác rỗng và không được chuyển sang nội dung thông báo cho khách hoặc tài xế.
+
+```json
+{
+  "reason": "Gán nhầm khách vào xe"
+}
+```
+
+Response `200` dùng `ApiResponse` chuẩn. Instant public được serialize theo
+`Asia/Ho_Chi_Minh` như Global Conventions:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "shuttleTripId": "36000000-0000-4000-8000-000000000001",
+    "bookingId": "36000000-0000-4000-8000-000000000003",
+    "unassignedPassengerCount": 1,
+    "remainingPassengerCount": 1,
+    "shuttleTripStatus": "SCHEDULED",
+    "returnedToPendingAssignment": true,
+    "shuttleTripCancelled": false,
+    "unassignedAt": "2026-09-01T17:00:00+07:00"
+  },
+  "meta": {}
+}
+```
+
+Mọi `ShuttlePassenger` của Booking phải đang `PENDING`. BE đưa cả nhóm về
+`PENDING_ASSIGNMENT`, xóa `shuttleTripId`, `pickupOrder`, `scheduledPickupTime`, rồi compact
+`pickupOrder` của các Booking còn lại và refresh `ResourceReservation`. Nếu Booking bị gỡ là
+Booking cuối, khách vẫn trở lại danh sách chờ nhưng ShuttleTrip tự chuyển `CANCELLED`, hủy toàn bộ
+reservation và trả `shuttleTripCancelled=true`, `shuttleTripStatus=CANCELLED`.
+
+Passenger/Trip/reservation và Outbox commit nguyên tử. Event `trip.shuttle.unassigned` luôn được
+phát cho lần xử lý thành công; nhánh xe rỗng phát thêm `trip.shuttle.cancelled`. Notification gửi
+`SHUTTLE_UNASSIGNED` cho khách đang chờ bố trí lại; tài xế nhận cập nhật manifest khi xe còn khách,
+còn nhánh xe rỗng chỉ nhận `SHUTTLE_CANCELLED` từ lifecycle event.
+
+Errors: `404 SHUTTLE_TRIP_NOT_FOUND`; `404 SHUTTLE_BOOKING_NOT_FOUND`; `409
+SHUTTLE_TRIP_INVALID_STATE`; `409 SHUTTLE_BOOKING_NOT_UNASSIGNABLE`; `422 VALIDATION_ERROR`;
+`422 IDEMPOTENCY_KEY_MISMATCH`; `422 IDEMPOTENCY_KEY_REQUIRED`; các lỗi resource/upstream hiện có
+như `409 SHUTTLE_DRIVER_CONFLICT`, `409 SHUTTLE_VEHICLE_CONFLICT` và `503
+RESOURCE_TRAVEL_TIME_UNAVAILABLE` khi refresh reservation thất bại.
+
 ### POST `/v1/operator/shuttle-trips/availability-check`
 
 Auth: `OPERATOR_ADMIN`. Read-only and requires no `Idempotency-Key`. Body equals Shuttle create

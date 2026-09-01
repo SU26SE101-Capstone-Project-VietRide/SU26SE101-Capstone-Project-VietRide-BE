@@ -32,7 +32,7 @@ export type NotificationActionDto =
     }
   | { type: 'NONE'; params: Record<string, never> };
 
-const ActionDataSchema = z
+const actionDataSchema = z
   .object({
     bookingId: z.string().uuid().nullish(),
     tripId: z.string().uuid().nullish(),
@@ -91,7 +91,7 @@ export function resolveNotificationAction(
     return { type: 'OPEN_SUBSCRIPTION', params: {} };
   }
 
-  const parsed = ActionDataSchema.safeParse(rawData);
+  const parsed = actionDataSchema.safeParse(rawData);
   if (!parsed.success) return NONE_ACTION;
   const data = parsed.data;
 
@@ -155,6 +155,10 @@ export function resolveNotificationAction(
     return data.parcelId
       ? { type: 'OPEN_PARCEL_DETAIL', params: { parcelId: data.parcelId } }
       : NONE_ACTION;
+  }
+
+  if (type === NotificationType.SHUTTLE_UNASSIGNED && data.bookingId) {
+    return { type: 'OPEN_BOOKING_DETAIL', params: { bookingId: data.bookingId } };
   }
 
   if (type.startsWith('SHUTTLE_')) {

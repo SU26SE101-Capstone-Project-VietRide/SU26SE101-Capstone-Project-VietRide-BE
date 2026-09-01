@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.86.0
+> **Phiên bản:** 1.87.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-08-31
+> **Cập nhật lần cuối:** 2026-09-01
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1281,7 +1281,7 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
 endpoint có behavior-idempotent hay không, trừ đúng 22 action có metadata exemption được khóa ở
-bảng sau. Canonical BSOT tally sau feature này là `219 mutation surfaces / 197 required / 22
+bảng sau. Canonical BSOT tally sau feature này là `220 mutation surfaces / 198 required / 22
 exempt`; executable inventory trên branch hiện còn drift có sẵn, nhưng mọi action thêm hoặc xóa
 vẫn bắt buộc cập nhật contract, runtime metadata và exact inventory theo đúng feature delta trong
 cùng patch.
@@ -1386,6 +1386,7 @@ Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable
 | 44 | `POST /v1/operator/route-change-proposals/{proposalId}/reject` | Trip |
 | 45 | `POST /v1/operator/trips/{tripId}/seats/{seatNumber}/disable` | Trip |
 | 46 | `POST /v1/operator/trips/{tripId}/seats/{seatNumber}/enable` | Trip |
+| 47 | `POST /v1/operator/shuttle-trips/{shuttleTripId}/bookings/{bookingId}/unassign` | Trip |
 
 `POST /v1/operator/trips` is deferred outside current v1 and MUST remain absent from the public
 API and Gateway inventories. `Trip.source=MANUAL` is compatibility/readiness only; it does not
@@ -1677,6 +1678,8 @@ phát integration event.
 | | `SHUTTLE_DISTANCE_EXCEEDED` | 422 | Road distance snapshot lớn hơn 10.000 mét; đúng 10.000 mét vẫn hợp lệ |
 | | `SHUTTLE_DISTANCE_UNAVAILABLE` | 503 | Goong Directions thiếu key, `401`/`403`/`429`/`5xx`, timeout hoặc response không hợp lệ |
 | | `SHUTTLE_REQUEST_NOT_CANCELLABLE` | 409 | Request đã assign hoặc không còn ở trạng thái chưa assign |
+| | `SHUTTLE_BOOKING_NOT_FOUND` | 404 | Booking không thuộc ShuttleTrip được yêu cầu trong cùng tenant |
+| | `SHUTTLE_BOOKING_NOT_UNASSIGNABLE` | 409 | Manifest trong ShuttleTrip không còn đồng nhất ở trạng thái `PENDING` để gỡ nguyên Booking |
 | | `SHUTTLE_TRIP_INVALID_STATE` | 409 | ShuttleTrip không cho phép lifecycle transition được yêu cầu |
 | | `SHUTTLE_PASSENGER_INVALID_STATE` | 409 | ShuttlePassenger không cho phép lifecycle transition được yêu cầu |
 | | `SHUTTLE_PASSENGERS_INCOMPLETE` | 409 | Nhóm passenger shuttle chưa ở trạng thái phù hợp để hoàn tất hoặc huỷ thao tác |
@@ -2496,6 +2499,7 @@ Parcel custody reconciliation; a positive exact Booking pending-count result add
 | `trip.shuttle.unfulfilled` | Trip | Notification | `{ mainTripId, bookingId, passengerUserId, stationId, reason: AUTO_UNFULFILLED_CUTOFF }` |
 | `trip.shuttle.started` | Trip | Notification | `{ eventId, occurredAt, shuttleTripId, mainTripId, operatorId, driverUserId, direction, passengers: [{ passengerUserId, bookingId?, pickupOrder }] }`; phát nguyên tử khi Shuttle Trip chuyển `SCHEDULED -> IN_PROGRESS`; Notification gửi từng Passenger và active `OPERATOR_ADMIN|OPERATOR_STAFF` cùng tenant. |
 | `trip.shuttle.reassigned` | Trip | Notification | `{ eventId, occurredAt, shuttleTripId, mainTripId, operatorId, direction, oldDriverUserId, newDriver: { userId, displayName?, phone? }, oldVehicle: { id, licensePlate }, newVehicle: { id, licensePlate }, reason, passengers: [{ passengerUserId, bookingId?, pickupOrder }] }`; phát nguyên tử cùng thay reservation; Notification gửi Passenger, tài xế mới, tài xế cũ khi bị gỡ và active Shuttle dispatch recipients. |
+| `trip.shuttle.unassigned` | Trip | Notification | Exact `{ eventId, occurredAt, shuttleTripId, mainTripId, operatorId, actorUserId, bookingId, direction, driver: { userId }, reason, remainingPassengerCount, shuttleTripCancelled, passengers: [{ passengerUserId, ticketIds[] }] }`; phát nguyên tử cùng manifest/reservation. Notification không hiển thị `reason`: Passenger nhận `SHUTTLE_UNASSIGNED`, Driver nhận cập nhật manifest khi xe còn khách; xe rỗng phát thêm `trip.shuttle.cancelled` và Driver chỉ nhận `SHUTTLE_CANCELLED`. |
 | `trip.shuttle.cancelled` · `trip.shuttle.picked_up` · `trip.shuttle.delivered` · `trip.shuttle.no_show` · `trip.shuttle.completed` | Trip | Notification | Common `{ eventId, occurredAt, shuttleTripId?, mainTripId, operatorId, bookingId?, passengerUserId?, direction, serviceAddress?, serviceOrder?, status, roadDistanceMeters?, reason?, driverUserId?, cancellationScope? }`; Notification dedupes by `eventId/MessageId`, sends affected Passenger và active `OPERATOR_ADMIN|OPERATOR_STAFF` cho Shuttle operations; full-trip cancellation additionally notifies assigned Driver. |
 | `tracking.gps.off_route` | Tracking | Notification | `{ eventId, occurredAt, tripId, durationSeconds }`; Notification resolves assigned driver, assistant, and operator admins |
 | `tracking.gps.approaching_stop` | Tracking | Notification | `{ tripId, stopId, bookingIds, wave, etaMinutes }` |
@@ -4400,6 +4404,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.87.0** | 2026-09-01 | Codex | **MINOR** — Thêm Booking-level Shuttle unassignment cho `OPERATOR_ADMIN|OPERATOR_STAFF`: toàn bộ manifest `PENDING` trở lại `PENDING_ASSIGNMENT`, compact pickup order và refresh reservation nguyên tử; xe rỗng tự hủy và phát thêm lifecycle cancellation. Đăng ký `trip.shuttle.unassigned`, `SHUTTLE_UNASSIGNED`, Gateway exact route, hai Shuttle error code và một Notification Prisma migration. Inventory tăng lên 220/198/22; không đổi Trip schema, Booking chính, thanh toán hoặc API hủy hiện có. |
 | **1.86.0** | 2026-08-31 | Codex | **MINOR** — Fix Parcel production E2E defects BE-PCL-001..008: expose stop departure anchors; enforce ordered stop/destination arrival and destination-before-manual-completion while auditing the ETA+30 exception; make forwarding custody/outbox atomic and auto-resolve only after verified unload; align Assistant actions and Passenger incident policy; clarify destination reconciliation semantics with a deprecated `canComplete` alias; and add the Driver unified approval inbox, `parcel.approval.requested`, `PARCEL_APPROVAL_REQUESTED`, native `OPEN_PARCEL_APPROVAL`, reassignment/terminal invalidation, Gateway route and one Notification enum migration. No dependency or Parcel/Trip schema change. |
 | **1.85.0** | 2026-08-30 | Codex | **MINOR** — Let assigned Driver/Assistant resolve a crew manifest seat to its Booking buyer during `BOARDING|IN_PROGRESS`: add nullable `buyerName`, canonical-E.164 `buyerPhone`, and `pickupPointName` to the Booking manifest, mirror buyer contact plus `bookingCode` in QR scan, expose additive Stop `name` in the internal Trip snapshot, retain paid no-show rows, and require private no-store responses. Passenger remains operational-only with no per-seat identity; unmatched Trip `BOOKED` seats are never assigned fabricated contact. No schema, dependency, Gateway route or event change. |
 | **1.84.0** | 2026-08-30 | Codex | **MINOR** — Simplify Parcel FE operation contracts after the reality audit. Require an assigned Assistant before Parcel create/forward/transfer; make crew manifests role-aware with inline custody-exception approval context; expose `CUSTODY_SCAN` only for a valid operational context and recovery-on-vehicle for `UNSCANNED_HANDOFF`; derive stop/destination reconciliation exclusively from persisted custody rather than client Parcel-ID assertions; add an operator `approvalStatus` queue filter; and expose nullable `bookingId` in create/detail. Correct the shared manifest contract to use nested pagination. No schema, dependency, Gateway family or routing key is added. |

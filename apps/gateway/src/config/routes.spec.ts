@@ -537,6 +537,20 @@ describe('buildRouteTable', () => {
     });
   });
 
+  it('routes exact Shuttle Booking unassign POST to Trip for both operator roles', () => {
+    const path =
+      '/v1/operator/shuttle-trips/11111111-1111-4111-8111-111111111111/bookings/22222222-2222-4222-8222-222222222222/unassign';
+    const route = matchRoute(routes, path, 'POST');
+
+    expect(route).toMatchObject({
+      prefix: '/v1/operator/shuttle-trips/{shuttleTripId}/bookings/{bookingId}/unassign',
+      method: 'POST',
+      target: env.TRIP_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN', 'OPERATOR_STAFF'],
+    });
+  });
+
   it('routes trip search through the mixed public subpath without a duplicate prefix', () => {
     const route = matchRoute(routes, '/v1/trips/search');
 

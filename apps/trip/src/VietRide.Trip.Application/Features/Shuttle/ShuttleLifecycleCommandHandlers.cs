@@ -55,3 +55,22 @@ public sealed class CancelShuttleTripCommandHandler : IRequestHandler<CancelShut
             request.Reason,
             cancellationToken);
 }
+
+public sealed class UnassignShuttleBookingCommandHandler
+    : IRequestHandler<UnassignShuttleBookingCommand, UnassignShuttleBookingResult>
+{
+    private readonly IShuttleDispatchService _service;
+
+    public UnassignShuttleBookingCommandHandler(IShuttleDispatchService service) => _service = service;
+
+    public Task<UnassignShuttleBookingResult> Handle(
+        UnassignShuttleBookingCommand request,
+        CancellationToken cancellationToken)
+        => _service.UnassignBookingAsync(
+            request.OperatorId,
+            request.ShuttleTripId,
+            request.BookingId,
+            request.ActorUserId,
+            request.Reason,
+            cancellationToken);
+}

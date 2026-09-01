@@ -69,7 +69,7 @@ describe('ShuttleEventsConsumer', () => {
         data: expect.objectContaining({
           shuttleTripId: '36000000-0000-4000-8000-000000000001',
           mainTripId: '36000000-0000-4000-8000-000000000002',
-        }),
+        }) as unknown,
         dedupeKey:
           'trip.shuttle.assigned:36000000-0000-4000-8000-000000000003:driver:36000000-0000-4000-8000-000000000005',
       }),
@@ -125,7 +125,7 @@ describe('ShuttleEventsConsumer', () => {
             direction: 'OUTBOUND_FROM_STATION',
             status,
             pickupOrder: 2,
-          }),
+          }) as unknown,
         }),
       );
       expect(notifications.createNotification).toHaveBeenCalledWith(
@@ -218,7 +218,7 @@ describe('ShuttleEventsConsumer', () => {
         data: expect.objectContaining({
           bookingId: '36000000-0000-4000-8000-000000000003',
           pickupOrder: 2,
-        }),
+        }) as unknown,
       }),
     );
   });
@@ -309,5 +309,174 @@ describe('ShuttleEventsConsumer', () => {
           'trip.shuttle.cancelled:36000000-0000-4000-8000-000000000001:driver:36000000-0000-4000-8000-000000000005',
       }),
     );
+  });
+
+  it('notifies affected passengers and the driver when a Booking is unassigned', async () => {
+    const eventId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+    await consumer.handle(
+      'trip.shuttle.unassigned',
+      {
+        eventId,
+        occurredAt: '2026-09-01T01:00:00Z',
+        shuttleTripId: '36000000-0000-4000-8000-000000000001',
+        mainTripId: '36000000-0000-4000-8000-000000000002',
+        operatorId: '36000000-0000-4000-8000-000000000008',
+        actorUserId: '36000000-0000-4000-8000-000000000009',
+        bookingId: '36000000-0000-4000-8000-000000000003',
+        direction: 'INBOUND_TO_STATION',
+        driver: { userId: '36000000-0000-4000-8000-000000000005' },
+        reason: 'Gán nhầm khách vào xe',
+        remainingPassengerCount: 1,
+        shuttleTripCancelled: false,
+        passengers: [
+          {
+            passengerUserId: '36000000-0000-4000-8000-000000000004',
+            ticketIds: ['36000000-0000-4000-8000-000000000007'],
+          },
+        ],
+      },
+      message,
+    );
+
+    expect(notifications.createNotification).toHaveBeenCalledTimes(2);
+    expect(notifications.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: '36000000-0000-4000-8000-000000000004',
+        type: NotificationType.SHUTTLE_UNASSIGNED,
+        title: 'Đang bố trí lại xe trung chuyển',
+        data: expect.objectContaining({
+          bookingId: '36000000-0000-4000-8000-000000000003',
+        }) as unknown,
+      }),
+    );
+    expect(notifications.createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: '36000000-0000-4000-8000-000000000005',
+        type: NotificationType.SHUTTLE_UNASSIGNED,
+        title: 'Danh sách đón khách đã thay đổi',
+        data: expect.objectContaining({
+          shuttleTripId: '36000000-0000-4000-8000-000000000001',
+        }) as unknown,
+      }),
+    );
+  });
+
+  it('does not send the manifest-change notification when unassign auto-cancels the empty trip', async () => {
+    await consumer.handle(
+      'trip.shuttle.unassigned',
+      {
+        eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        occurredAt: '2026-09-01T01:00:00Z',
+        shuttleTripId: '36000000-0000-4000-8000-000000000001',
+        mainTripId: '36000000-0000-4000-8000-000000000002',
+        operatorId: '36000000-0000-4000-8000-000000000008',
+        actorUserId: '36000000-0000-4000-8000-000000000009',
+        bookingId: '36000000-0000-4000-8000-000000000003',
+        direction: 'INBOUND_TO_STATION',
+        driver: { userId: '36000000-0000-4000-8000-000000000005' },
+        reason: 'Gán nhầm khách vào xe',
+        remainingPassengerCount: 0,
+        shuttleTripCancelled: true,
+        passengers: [
+          {
+            passengerUserId: '36000000-0000-4000-8000-000000000004',
+            ticketIds: ['36000000-0000-4000-8000-000000000007'],
+          },
+        ],
+      },
+      message,
+    );
+
+    expect(notifications.createNotification).toHaveBeenCalledTimes(1);
+    expect(notifications.createNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({ userId: '36000000-0000-4000-8000-000000000005' }),
+    );
+  });
+
+  it('deduplicates an unassignment replay by eventId', async () => {
+    const eventId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const payload = {
+      eventId,
+      occurredAt: '2026-09-01T01:00:00Z',
+      shuttleTripId: '36000000-0000-4000-8000-000000000001',
+      mainTripId: '36000000-0000-4000-8000-000000000002',
+      operatorId: '36000000-0000-4000-8000-000000000008',
+      actorUserId: '36000000-0000-4000-8000-000000000009',
+      bookingId: '36000000-0000-4000-8000-000000000003',
+      direction: 'INBOUND_TO_STATION',
+      driver: { userId: '36000000-0000-4000-8000-000000000005' },
+      reason: 'Internal reason',
+      remainingPassengerCount: 1,
+      shuttleTripCancelled: false,
+      passengers: [
+        {
+          passengerUserId: '36000000-0000-4000-8000-000000000004',
+          ticketIds: ['36000000-0000-4000-8000-000000000007'],
+        },
+      ],
+    };
+    const idempotency = (consumer as unknown as { idempotency: MessageIdempotencyService })
+      .idempotency;
+    (idempotency.begin as jest.Mock)
+      .mockResolvedValueOnce('acquired')
+      .mockResolvedValueOnce('duplicate');
+
+    await consumer.handle('trip.shuttle.unassigned', payload, {
+      properties: { messageId: 'transport-1' },
+    } as ConsumeMessage);
+    await consumer.handle('trip.shuttle.unassigned', payload, {
+      properties: { messageId: 'transport-2' },
+    } as ConsumeMessage);
+
+    expect(idempotency.begin).toHaveBeenNthCalledWith(
+      1,
+      'trip.shuttle.unassigned',
+      eventId,
+      undefined,
+    );
+    expect(idempotency.begin).toHaveBeenNthCalledWith(
+      2,
+      'trip.shuttle.unassigned',
+      eventId,
+      undefined,
+    );
+    expect(notifications.createNotification).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops a malformed unassignment event under strict schema validation', async () => {
+    const eventId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const idempotency = (consumer as unknown as { idempotency: MessageIdempotencyService })
+      .idempotency;
+
+    await consumer.handle(
+      'trip.shuttle.unassigned',
+      {
+        eventId,
+        occurredAt: '2026-09-01T01:00:00Z',
+        shuttleTripId: '36000000-0000-4000-8000-000000000001',
+        mainTripId: '36000000-0000-4000-8000-000000000002',
+        operatorId: '36000000-0000-4000-8000-000000000008',
+        actorUserId: '36000000-0000-4000-8000-000000000009',
+        bookingId: '36000000-0000-4000-8000-000000000003',
+        direction: 'INBOUND_TO_STATION',
+        driver: { userId: '36000000-0000-4000-8000-000000000005' },
+        reason: 'Internal reason',
+        remainingPassengerCount: 1,
+        shuttleTripCancelled: false,
+        passengers: [
+          {
+            passengerUserId: '36000000-0000-4000-8000-000000000004',
+            ticketIds: ['36000000-0000-4000-8000-000000000007'],
+            unexpected: true,
+          },
+        ],
+      },
+      message,
+    );
+
+    expect(notifications.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith('trip.shuttle.unassigned', eventId);
+    expect(idempotency.release).not.toHaveBeenCalled();
   });
 });
