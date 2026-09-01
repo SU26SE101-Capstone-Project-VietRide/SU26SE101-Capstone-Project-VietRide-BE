@@ -6,6 +6,7 @@ using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Events;
 using VietRide.Booking.Application.Exceptions;
+using VietRide.Booking.Application.Features.Bookings;
 using VietRide.Booking.Application.Features.Bookings.History;
 using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
@@ -697,7 +698,15 @@ public sealed class CreateRoundTripBookingCommandHandler
             buyerDisplayName: buyerProfile.DisplayName,
             buyerPhone: buyerProfile.Phone,
             buyerEmail: buyerProfile.Email,
-            buyerAvatarUrl: buyerProfile.AvatarUrl);
+            buyerAvatarUrl: buyerProfile.AvatarUrl,
+            pickupPointSnapshot: BookingPointSnapshotFactory.ResolvePickup(
+                trip,
+                leg.PickupStationId,
+                leg.PickupStopId),
+            dropoffPointSnapshot: BookingPointSnapshotFactory.ResolveDropoff(
+                trip,
+                leg.DropoffStationId,
+                leg.DropoffStopId));
 
         var ticketAllocations = BuildTicketAllocations(leg.Seats, perSeatFare, discountAmount, now);
         foreach (var allocation in ticketAllocations)

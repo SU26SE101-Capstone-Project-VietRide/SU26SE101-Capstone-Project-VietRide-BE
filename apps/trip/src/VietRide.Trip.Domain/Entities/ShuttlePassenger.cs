@@ -108,6 +108,35 @@ public sealed class ShuttlePassenger : BaseEntity<Guid>
         Status = PendingStatus;
     }
 
+    public void Unassign()
+    {
+        if (Status != PendingStatus || !ShuttleTripId.HasValue)
+        {
+            throw new InvalidOperationException("Only pending assigned Shuttle passengers can be unassigned.");
+        }
+
+        ShuttleTripId = null;
+        PickupOrder = null;
+        ScheduledPickupTime = null;
+        Status = PendingAssignmentStatus;
+        CancelReason = null;
+    }
+
+    public void ChangePickupOrder(int pickupOrder)
+    {
+        if (Status != PendingStatus || !ShuttleTripId.HasValue)
+        {
+            throw new InvalidOperationException("Only pending assigned Shuttle passengers can be reordered.");
+        }
+
+        if (pickupOrder <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pickupOrder));
+        }
+
+        PickupOrder = pickupOrder;
+    }
+
     public bool Cancel(string reason)
     {
         if (string.IsNullOrWhiteSpace(reason))

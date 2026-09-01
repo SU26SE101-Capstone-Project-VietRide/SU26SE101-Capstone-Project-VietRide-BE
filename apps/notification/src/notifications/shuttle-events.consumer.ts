@@ -10,6 +10,7 @@ import {
   TRIP_SHUTTLE_REASSIGNED_ROUTING_KEY,
   TRIP_SHUTTLE_STARTED_ROUTING_KEY,
   TRIP_SHUTTLE_UNFULFILLED_ROUTING_KEY,
+  TRIP_SHUTTLE_UNASSIGNED_ROUTING_KEY,
   TRIP_SHUTTLE_WARNING_ROUTING_KEY,
   TRIP_ASSIGNMENT_START_BLOCKED_ROUTING_KEY,
   TripAssignmentStartBlockedEventSchema,
@@ -18,6 +19,7 @@ import {
   TripShuttleReassignedEventSchema,
   TripShuttleStartedEventSchema,
   TripShuttleUnfulfilledEventSchema,
+  TripShuttleUnassignedEventSchema,
   TripShuttleWarningEventSchema,
 } from '@vietride/contracts';
 import type { ConsumeMessage } from 'amqplib';
@@ -46,6 +48,7 @@ const bindings = [
   { queue: 'notification:shuttle-completed', routingKey: TRIP_SHUTTLE_COMPLETED_ROUTING_KEY },
   { queue: 'notification:shuttle-started', routingKey: TRIP_SHUTTLE_STARTED_ROUTING_KEY },
   { queue: 'notification:shuttle-reassigned', routingKey: TRIP_SHUTTLE_REASSIGNED_ROUTING_KEY },
+  { queue: 'notification:shuttle-unassigned', routingKey: TRIP_SHUTTLE_UNASSIGNED_ROUTING_KEY },
   {
     queue: 'notification:trip-assignment-start-blocked',
     routingKey: TRIP_ASSIGNMENT_START_BLOCKED_ROUTING_KEY,
@@ -83,9 +86,14 @@ export class ShuttleEventsConsumer implements OnModuleInit {
 
   async handle(routingKey: string, payload: unknown, raw: ConsumeMessage): Promise<void> {
     const payloadEventId = z.object({ eventId: z.string().uuid() }).safeParse(payload);
+    const brokerMessageId = raw.properties.messageId as unknown;
+    const brokerCorrelationId = raw.properties.correlationId as unknown;
+    const brokerIdentity = z.string().min(1).safeParse(brokerMessageId ?? brokerCorrelationId);
     const messageId = payloadEventId.success
       ? payloadEventId.data.eventId
-      : (raw.properties.messageId ?? raw.properties.correlationId);
+      : brokerIdentity.success
+        ? brokerIdentity.data
+        : undefined;
     if (!messageId) throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
     const state = await this.idempotency.begin(routingKey, messageId, raw.content);
     if (state === 'duplicate') return;
@@ -275,6 +283,44 @@ export class ShuttleEventsConsumer implements OnModuleInit {
         dedupeKey: `${routingKey}:${event.bookingId}`,
       });
       return 1;
+    }
+    if (routingKey === TRIP_SHUTTLE_UNASSIGNED_ROUTING_KEY) {
+      const event = TripShuttleUnassignedEventSchema.parse(payload);
+      const passengerNotifications = event.passengers.map((passenger) =>
+        this.notifications.createNotification({
+          userId: passenger.passengerUserId,
+          type: NotificationType.SHUTTLE_UNASSIGNED,
+          title: 'Đang bố trí lại xe trung chuyển',
+          body: 'Nhà xe đã đưa yêu cầu của bạn về danh sách chờ để bố trí lại xe.',
+          data: {
+            eventId: event.eventId,
+            mainTripId: event.mainTripId,
+            bookingId: event.bookingId,
+            ticketIds: passenger.ticketIds,
+            shuttleTripCancelled: event.shuttleTripCancelled,
+          },
+          dedupeKey: `${event.eventId}:passenger:${passenger.passengerUserId}`,
+        }),
+      );
+      const driverNotifications = event.shuttleTripCancelled
+        ? []
+        : [
+            this.notifications.createNotification({
+              userId: event.driver.userId,
+              type: NotificationType.SHUTTLE_UNASSIGNED,
+              title: 'Danh sách đón khách đã thay đổi',
+              body: 'Một nhóm khách đã được gỡ khỏi chuyến. Vui lòng tải lại danh sách đón khách.',
+              data: {
+                eventId: event.eventId,
+                shuttleTripId: event.shuttleTripId,
+                mainTripId: event.mainTripId,
+                remainingPassengerCount: event.remainingPassengerCount,
+              },
+              dedupeKey: `${event.eventId}:driver:${event.driver.userId}`,
+            }),
+          ];
+      await Promise.all([...passengerNotifications, ...driverNotifications]);
+      return passengerNotifications.length + driverNotifications.length;
     }
     if (routingKey.startsWith('trip.shuttle.') && routingKey !== TRIP_SHUTTLE_WARNING_ROUTING_KEY) {
       const event = TripShuttleLifecycleEventSchema.parse(payload);

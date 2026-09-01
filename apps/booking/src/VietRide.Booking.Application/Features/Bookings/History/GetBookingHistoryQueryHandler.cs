@@ -106,6 +106,18 @@ public sealed class GetBookingHistoryQueryHandler
                             vehicle.VehicleType.Code,
                             vehicle.VehicleType.DisplayName))
                 : null,
+            CreatePoint(
+                booking.PickupPointTypeSnapshot,
+                booking.PickupPointIdSnapshot,
+                booking.PickupPointNameSnapshot,
+                booking.PickupPointAddressSnapshot,
+                booking.PickupPointPlannedAtSnapshot),
+            CreatePoint(
+                booking.DropoffPointTypeSnapshot,
+                booking.DropoffPointIdSnapshot,
+                booking.DropoffPointNameSnapshot,
+                booking.DropoffPointAddressSnapshot,
+                booking.DropoffPointPlannedAtSnapshot),
             paymentRedirectUrls.GetValueOrDefault(booking.Id)))
             .ToList();
 
@@ -115,6 +127,16 @@ public sealed class GetBookingHistoryQueryHandler
             page.PageSize,
             page.TotalItems);
     }
+
+    private static BookingHistoryPointDto? CreatePoint(
+        string? type,
+        Guid? id,
+        string? displayName,
+        string? address,
+        DateTimeOffset? plannedAt)
+        => type is not null && id.HasValue
+            ? new BookingHistoryPointDto(type, id.Value, displayName, address, plannedAt)
+            : null;
 
     private async Task<IReadOnlyDictionary<Guid, TripHistoryVehicleSummary>> GetVehiclesAsync(
         IReadOnlyCollection<BookingEntity> bookings,

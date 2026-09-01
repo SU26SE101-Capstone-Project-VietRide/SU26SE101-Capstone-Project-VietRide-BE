@@ -5601,6 +5601,39 @@
           }
         },
         {
+          "name": "Preview inbound Shuttle route risk",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('Route preview returns advisory envelope', () => { pm.response.to.have.status(200); pm.expect(body.success).to.eql(true); pm.expect(body.statusCode).to.eql(200); pm.expect(['SAFE', 'LATE_RISK', 'UNKNOWN']).to.include(body.data.status); pm.expect(body.data.lateRiskBlocksCreate).to.eql(false); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{operatorAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/operator/shuttle-trips/route-preview",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mainTripId\": \"{{day36MainTripId}}\",\n  \"direction\": \"INBOUND_TO_STATION\",\n  \"scheduledDepartureTime\": \"{{day36InboundShuttleDeparture}}\",\n  \"orderedBookingIds\": [\n    \"{{day36BookingId}}\"\n  ]\n}"
+            }
+          }
+        },
+        {
           "name": "Dispatch inbound ShuttleTrip with explicit direction",
           "event": [
             {

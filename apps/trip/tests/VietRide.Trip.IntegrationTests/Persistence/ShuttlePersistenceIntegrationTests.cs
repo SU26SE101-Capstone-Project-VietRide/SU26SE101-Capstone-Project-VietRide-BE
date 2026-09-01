@@ -1528,6 +1528,427 @@ public sealed class ShuttlePersistenceIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task UnassignBooking_RefreshesRemainingRouteThenCancelsTheEmptyShuttleTrip()
+    {
+        var databaseName = $"vietride_trip_shuttle_unassign_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond));
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var seed = await SeedBaseAsync(db, now.AddHours(4));
+            var firstBookingId = Guid.NewGuid();
+            var secondBookingId = Guid.NewGuid();
+            var firstPassengerUserId = Guid.NewGuid();
+            db.ShuttlePassengers.AddRange(
+                ShuttlePassenger.Request(
+                    seed.MainTripId,
+                    firstBookingId,
+                    Guid.NewGuid(),
+                    firstPassengerUserId,
+                    "First pickup",
+                    10.7100m,
+                    106.6100m,
+                    roadDistanceMeters: 1_000),
+                ShuttlePassenger.Request(
+                    seed.MainTripId,
+                    firstBookingId,
+                    Guid.NewGuid(),
+                    firstPassengerUserId,
+                    "First pickup",
+                    10.7100m,
+                    106.6100m,
+                    roadDistanceMeters: 1_000),
+                ShuttlePassenger.Request(
+                    seed.MainTripId,
+                    secondBookingId,
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    "Second pickup",
+                    10.7200m,
+                    106.6200m,
+                    roadDistanceMeters: 1_200));
+            await db.SaveChangesAsync();
+            var actorUserId = Guid.NewGuid();
+            var service = CreateDispatchService(db, clock, seed.OperatorId);
+            var created = await service.CreateAsync(new CreateShuttleTripInput(
+                seed.OperatorId,
+                actorUserId,
+                seed.MainTripId,
+                seed.ShuttleDriverId,
+                seed.ShuttleVehicleId,
+                now.AddHours(1),
+                now.AddHours(2),
+                [firstBookingId, secondBookingId],
+                null), CancellationToken.None);
+
+            var partial = await service.UnassignBookingAsync(
+                seed.OperatorId,
+                created.ShuttleTripId,
+                firstBookingId,
+                actorUserId,
+                "Assigned by mistake",
+                CancellationToken.None);
+
+            partial.UnassignedPassengerCount.Should().Be(2);
+            partial.RemainingPassengerCount.Should().Be(1);
+            partial.ShuttleTripStatus.Should().Be(ShuttleTrip.ScheduledStatus);
+            partial.ReturnedToPendingAssignment.Should().BeTrue();
+            partial.ShuttleTripCancelled.Should().BeFalse();
+            var firstBookingPassengers = await db.ShuttlePassengers
+                .Where(x => x.BookingId == firstBookingId)
+                .ToArrayAsync();
+            firstBookingPassengers.Should().HaveCount(2).And.OnlyContain(passenger =>
+                passenger.Status == ShuttlePassenger.PendingAssignmentStatus
+                && !passenger.ShuttleTripId.HasValue
+                && !passenger.PickupOrder.HasValue
+                && !passenger.ScheduledPickupTime.HasValue);
+            var remainingPassenger = await db.ShuttlePassengers.SingleAsync(x => x.BookingId == secondBookingId);
+            remainingPassenger.PickupOrder.Should().Be(1);
+            var refreshedReservations = await db.ResourceReservations.AsNoTracking()
+                .Where(x => x.ShuttleTripId == created.ShuttleTripId)
+                .ToArrayAsync();
+            refreshedReservations.Should().OnlyContain(x =>
+                x.Status == ResourceReservationStatus.RESERVED
+                && x.StartLatitude == 10.7200m
+                && x.StartLongitude == 106.6200m);
+            var partialEventJson = await db.OutboxEvents.AsNoTracking()
+                .Where(x => x.EventType == "trip.shuttle.unassigned")
+                .Select(x => x.Payload)
+                .SingleAsync();
+            using (var partialEvent = JsonDocument.Parse(partialEventJson))
+            {
+                var root = partialEvent.RootElement;
+                root.GetProperty("actorUserId").GetGuid().Should().Be(actorUserId);
+                root.GetProperty("bookingId").GetGuid().Should().Be(firstBookingId);
+                root.GetProperty("reason").GetString().Should().Be("Assigned by mistake");
+                root.GetProperty("remainingPassengerCount").GetInt32().Should().Be(1);
+                root.GetProperty("shuttleTripCancelled").GetBoolean().Should().BeFalse();
+                var recipient = root.GetProperty("passengers").EnumerateArray().Should().ContainSingle().Which;
+                recipient.GetProperty("passengerUserId").GetGuid().Should().Be(firstPassengerUserId);
+                recipient.GetProperty("ticketIds").GetArrayLength().Should().Be(2);
+            }
+
+            var final = await service.UnassignBookingAsync(
+                seed.OperatorId,
+                created.ShuttleTripId,
+                secondBookingId,
+                actorUserId,
+                "Assigned by mistake",
+                CancellationToken.None);
+
+            final.RemainingPassengerCount.Should().Be(0);
+            final.ShuttleTripStatus.Should().Be(ShuttleTrip.CancelledStatus);
+            final.ShuttleTripCancelled.Should().BeTrue();
+            var persistedTrip = await db.ShuttleTrips.AsNoTracking()
+                .SingleAsync(x => x.Id == created.ShuttleTripId);
+            persistedTrip.CancelledByUserId.Should().Be(actorUserId);
+            var returnedPassengers = await db.ShuttlePassengers.AsNoTracking()
+                .Where(x => x.BookingId == firstBookingId || x.BookingId == secondBookingId)
+                .ToArrayAsync();
+            returnedPassengers.Should().OnlyContain(x =>
+                x.Status == ShuttlePassenger.PendingAssignmentStatus
+                && !x.ShuttleTripId.HasValue
+                && !x.PickupOrder.HasValue);
+            var cancelledReservations = await db.ResourceReservations.AsNoTracking()
+                .Where(x => x.ShuttleTripId == created.ShuttleTripId)
+                .ToArrayAsync();
+            cancelledReservations.Should().OnlyContain(x => x.Status == ResourceReservationStatus.CANCELLED);
+            (await db.OutboxEvents.AsNoTracking().CountAsync(x => x.EventType == "trip.shuttle.unassigned"))
+                .Should().Be(2);
+            (await db.OutboxEvents.AsNoTracking().CountAsync(x => x.EventType == "trip.shuttle.cancelled"))
+                .Should().Be(1);
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task UnassignBooking_InvalidRequestsAndStates_DoNotWritePartialStateOrOutbox()
+    {
+        var databaseName = $"vietride_trip_shuttle_unassign_invalid_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond));
+        var clock = new FrozenClock(now);
+        await using var db = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await db.Database.MigrateAsync();
+            var seed = await SeedBaseAsync(db, now.AddHours(5));
+            var inProgressBookingId = Guid.NewGuid();
+            var mixedStatusBookingId = Guid.NewGuid();
+            db.ShuttlePassengers.AddRange(
+                ShuttlePassenger.Request(
+                    seed.MainTripId,
+                    inProgressBookingId,
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    "First pickup",
+                    10.7100m,
+                    106.6100m,
+                    roadDistanceMeters: 1_000),
+                ShuttlePassenger.Request(
+                    seed.MainTripId,
+                    mixedStatusBookingId,
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    "Second pickup",
+                    10.7200m,
+                    106.6200m,
+                    roadDistanceMeters: 1_200));
+            await db.SaveChangesAsync();
+            var actorUserId = Guid.NewGuid();
+            var service = CreateDispatchService(db, clock, seed.OperatorId);
+            var inProgressTrip = await service.CreateAsync(new CreateShuttleTripInput(
+                seed.OperatorId,
+                actorUserId,
+                seed.MainTripId,
+                seed.ShuttleDriverId,
+                seed.ShuttleVehicleId,
+                now.AddMinutes(30),
+                now.AddHours(1),
+                [inProgressBookingId],
+                null), CancellationToken.None);
+            var mixedStatusTrip = await service.CreateAsync(new CreateShuttleTripInput(
+                seed.OperatorId,
+                actorUserId,
+                seed.MainTripId,
+                seed.ShuttleDriverId,
+                seed.ShuttleVehicleId,
+                now.AddHours(2),
+                now.AddHours(3),
+                [mixedStatusBookingId],
+                null), CancellationToken.None);
+
+            var blankReason = async () => await service.UnassignBookingAsync(
+                seed.OperatorId,
+                inProgressTrip.ShuttleTripId,
+                inProgressBookingId,
+                actorUserId,
+                " ",
+                CancellationToken.None);
+            await blankReason.Should().ThrowAsync<CodedValidationException>()
+                .Where(error => error.ErrorCode == "VALIDATION_ERROR");
+
+            var foreignTenant = async () => await service.UnassignBookingAsync(
+                Guid.NewGuid(),
+                inProgressTrip.ShuttleTripId,
+                inProgressBookingId,
+                actorUserId,
+                "Foreign tenant attempt",
+                CancellationToken.None);
+            await foreignTenant.Should().ThrowAsync<CodedNotFoundException>()
+                .Where(error => error.ErrorCode == "SHUTTLE_TRIP_NOT_FOUND");
+
+            var wrongBooking = async () => await service.UnassignBookingAsync(
+                seed.OperatorId,
+                inProgressTrip.ShuttleTripId,
+                Guid.NewGuid(),
+                actorUserId,
+                "Wrong Booking",
+                CancellationToken.None);
+            await wrongBooking.Should().ThrowAsync<CodedNotFoundException>()
+                .Where(error => error.ErrorCode == "SHUTTLE_BOOKING_NOT_FOUND");
+
+            var mixedManifest = await db.ShuttlePassengers
+                .SingleAsync(x => x.BookingId == mixedStatusBookingId);
+            mixedManifest.MarkPickedUp(now);
+            await db.SaveChangesAsync();
+            var mixedStatus = async () => await service.UnassignBookingAsync(
+                seed.OperatorId,
+                mixedStatusTrip.ShuttleTripId,
+                mixedStatusBookingId,
+                actorUserId,
+                "Mixed status manifest",
+                CancellationToken.None);
+            await mixedStatus.Should().ThrowAsync<CodedConflictException>()
+                .Where(error => error.ErrorCode == "SHUTTLE_BOOKING_NOT_UNASSIGNABLE");
+
+            await service.StartAsync(
+                inProgressTrip.ShuttleTripId,
+                seed.ShuttleDriverId,
+                CancellationToken.None);
+            var startedTrip = async () => await service.UnassignBookingAsync(
+                seed.OperatorId,
+                inProgressTrip.ShuttleTripId,
+                inProgressBookingId,
+                actorUserId,
+                "Trip already started",
+                CancellationToken.None);
+            await startedTrip.Should().ThrowAsync<CodedConflictException>()
+                .Where(error => error.ErrorCode == "SHUTTLE_TRIP_INVALID_STATE");
+
+            (await db.OutboxEvents.AsNoTracking().CountAsync(x => x.EventType == "trip.shuttle.unassigned"))
+                .Should().Be(0);
+            var persistedPassengers = await db.ShuttlePassengers.AsNoTracking()
+                .Where(x => x.BookingId == inProgressBookingId || x.BookingId == mixedStatusBookingId)
+                .ToArrayAsync();
+            persistedPassengers.Should().OnlyContain(passenger => passenger.ShuttleTripId.HasValue);
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UnassignBooking_RaceWithStartOrReassign_LeavesOneConsistentLifecycle(
+        bool raceWithStart)
+    {
+        var databaseName = $"vietride_trip_shuttle_unassign_race_{raceWithStart}_{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerMillisecond));
+        var clock = new FrozenClock(now);
+        await using var setup = CreateDbContext(databaseName, clock);
+
+        try
+        {
+            await setup.Database.MigrateAsync();
+            var (seed, _, created) = await SeedAssignedShuttleAsync(setup, clock, now);
+            var bookingId = await setup.ShuttlePassengers
+                .Where(passenger => passenger.ShuttleTripId == created.ShuttleTripId)
+                .Select(passenger => passenger.BookingId!.Value)
+                .Distinct()
+                .SingleAsync();
+            Guid? replacementVehicleId = null;
+            Guid? replacementDriverId = null;
+            if (!raceWithStart)
+            {
+                var vehicleTypeId = await setup.Vehicles
+                    .Where(vehicle => vehicle.Id == seed.ShuttleVehicleId)
+                    .Select(vehicle => vehicle.VehicleTypeId)
+                    .SingleAsync();
+                var replacementVehicle = Vehicle.Create(
+                    seed.OperatorId,
+                    vehicleTypeId,
+                    $"RACE-{Guid.NewGuid():N}"[..20],
+                    CreateSeatLayout("SHUTTLE_TEST", 3),
+                    3,
+                    100m,
+                    2m);
+                setup.Vehicles.Add(replacementVehicle);
+                await setup.SaveChangesAsync();
+                replacementVehicleId = replacementVehicle.Id;
+                replacementDriverId = Guid.NewGuid();
+            }
+
+            await using var lifecycleDb = CreateDbContext(databaseName, clock);
+            await using var unassignDb = CreateDbContext(databaseName, clock);
+            var lifecycleService = CreateDispatchService(lifecycleDb, clock, seed.OperatorId);
+            var unassignService = CreateDispatchService(unassignDb, clock, seed.OperatorId);
+            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Exception? lifecycleError = null;
+            Exception? unassignError = null;
+
+            var lifecycleTask = Task.Run(async () =>
+            {
+                await start.Task;
+                try
+                {
+                    if (raceWithStart)
+                    {
+                        await lifecycleService.StartAsync(
+                            created.ShuttleTripId,
+                            seed.ShuttleDriverId,
+                            CancellationToken.None);
+                    }
+                    else
+                    {
+                        await lifecycleService.ReassignAsync(
+                            new ReassignShuttleTripInput(
+                                seed.OperatorId,
+                                Guid.NewGuid(),
+                                created.ShuttleTripId,
+                                replacementDriverId,
+                                replacementVehicleId,
+                                "Concurrent reassignment"),
+                            CancellationToken.None);
+                    }
+                }
+                catch (Exception exception)
+                {
+                    lifecycleError = exception;
+                }
+            });
+            var unassignTask = Task.Run(async () =>
+            {
+                await start.Task;
+                try
+                {
+                    await unassignService.UnassignBookingAsync(
+                        seed.OperatorId,
+                        created.ShuttleTripId,
+                        bookingId,
+                        Guid.NewGuid(),
+                        "Concurrent unassignment",
+                        CancellationToken.None);
+                }
+                catch (Exception exception)
+                {
+                    unassignError = exception;
+                }
+            });
+            start.SetResult();
+            await Task.WhenAll(lifecycleTask, unassignTask);
+
+            (lifecycleError is null || lifecycleError is CodedConflictException).Should().BeTrue();
+            (unassignError is null || unassignError is CodedConflictException).Should().BeTrue();
+            await using var assertionDb = CreateDbContext(databaseName, clock);
+            var trip = await assertionDb.ShuttleTrips.AsNoTracking()
+                .SingleAsync(shuttle => shuttle.Id == created.ShuttleTripId);
+            var manifests = await assertionDb.ShuttlePassengers.AsNoTracking()
+                .Where(passenger => passenger.BookingId == bookingId)
+                .ToArrayAsync();
+            var reservations = await assertionDb.ResourceReservations.AsNoTracking()
+                .Where(reservation => reservation.ShuttleTripId == created.ShuttleTripId)
+                .ToArrayAsync();
+            var outboxTypes = await assertionDb.OutboxEvents.AsNoTracking()
+                .Where(outbox => outbox.EventType == "trip.shuttle.started"
+                    || outbox.EventType == "trip.shuttle.reassigned"
+                    || outbox.EventType == "trip.shuttle.unassigned"
+                    || outbox.EventType == "trip.shuttle.cancelled")
+                .Select(outbox => outbox.EventType)
+                .ToArrayAsync();
+
+            if (raceWithStart && trip.Status == ShuttleTrip.InProgressStatus)
+            {
+                manifests.Should().OnlyContain(passenger =>
+                    passenger.Status == ShuttlePassenger.PendingStatus
+                    && passenger.ShuttleTripId == created.ShuttleTripId);
+                reservations.Should().OnlyContain(reservation =>
+                    reservation.Status == ResourceReservationStatus.ACTIVE);
+                outboxTypes.Should().ContainSingle(type => type == "trip.shuttle.started");
+                outboxTypes.Should().NotContain("trip.shuttle.unassigned");
+            }
+            else
+            {
+                trip.Status.Should().Be(ShuttleTrip.CancelledStatus);
+                manifests.Should().OnlyContain(passenger =>
+                    passenger.Status == ShuttlePassenger.PendingAssignmentStatus
+                    && !passenger.ShuttleTripId.HasValue
+                    && !passenger.PickupOrder.HasValue);
+                reservations.Should().OnlyContain(reservation =>
+                    reservation.Status == ResourceReservationStatus.CANCELLED);
+                outboxTypes.Should().ContainSingle(type => type == "trip.shuttle.unassigned");
+                outboxTypes.Should().ContainSingle(type => type == "trip.shuttle.cancelled");
+                outboxTypes.Should().NotContain("trip.shuttle.started");
+            }
+        }
+        finally
+        {
+            await setup.Database.EnsureDeletedAsync();
+        }
+    }
+
     private static async Task<(BaseSeed Seed, IShuttleDispatchService Service, CreateShuttleTripResult Created)>
         SeedAssignedShuttleAsync(TripDbContext db, IClock clock, DateTimeOffset now)
     {

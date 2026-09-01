@@ -125,7 +125,9 @@ public sealed class GetPassengerHistoryQueryHandler
                             ? null
                             : new PassengerHistoryVehicleTypeDto(
                                 booking.Vehicle.VehicleType.Code,
-                                booking.Vehicle.VehicleType.DisplayName))),
+                                booking.Vehicle.VehicleType.DisplayName)),
+                PickupPoint: MapPoint(booking.PickupPoint),
+                DropoffPoint: MapPoint(booking.DropoffPoint)),
             null,
             booking.PaymentRedirectUrl,
             CreateTrackingTarget(booking.DropoffStopId, booking.DropoffStationId)))
@@ -238,6 +240,16 @@ public sealed class GetPassengerHistoryQueryHandler
             : stationId.HasValue
                 ? new PassengerTrackingTargetDto("STATION", StationId: stationId)
                 : null;
+
+    private static PassengerHistoryPointDto? MapPoint(BookingHistoryPointDto? point)
+        => point is null
+            ? null
+            : new PassengerHistoryPointDto(
+                point.Type,
+                point.Id,
+                point.DisplayName,
+                point.Address,
+                point.PlannedAt);
 
     private sealed record RedirectCandidate(
         Guid ParcelId,

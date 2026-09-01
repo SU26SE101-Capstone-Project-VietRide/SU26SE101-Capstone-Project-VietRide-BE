@@ -18,6 +18,74 @@ public sealed class BookingHistoryShuttleProjectionIntegrationTests
         VoucherPersistenceIntegrationTests.DbBackedVoucherFactory factory) => _factory = factory;
 
     [Fact]
+    public async Task PassengerHistory_RoundTripsBookedPointSnapshots()
+    {
+        await _factory.InitializeAsync();
+        var userId = Guid.NewGuid();
+        var pickupStopId = Guid.NewGuid();
+        var dropoffStationId = Guid.NewGuid();
+        var pickupPlannedAt = DateTimeOffset.Parse("2026-09-10T02:15:00Z");
+        var dropoffPlannedAt = DateTimeOffset.Parse("2026-09-10T05:45:00Z");
+        var pickupPoint = new BookingPointSnapshot(
+            BookingPointSnapshot.StopType,
+            pickupStopId,
+            "C",
+            "12 Nguyen Hue",
+            pickupPlannedAt);
+        var dropoffPoint = new BookingPointSnapshot(
+            BookingPointSnapshot.StationType,
+            dropoffStationId,
+            "D",
+            "45 Le Loi",
+            dropoffPlannedAt);
+        var booking = Domain.Entities.Booking.CreatePendingPayment(
+            BookingCode.Generate(DateTimeOffset.UtcNow),
+            userId,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            null,
+            pickupStopId,
+            dropoffStationId,
+            null,
+            Money.FromRaw(100_000),
+            Money.Zero,
+            Money.FromRaw(100_000),
+            pickupPointSnapshot: pickupPoint,
+            dropoffPointSnapshot: dropoffPoint);
+
+        await using (var seedScope = _factory.Services.CreateAsyncScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<BookingDbContext>();
+            await db.Bookings.AddAsync(booking);
+            await db.SaveChangesAsync();
+        }
+
+        await using var readScope = _factory.Services.CreateAsyncScope();
+        var repository = readScope.ServiceProvider.GetRequiredService<IBookingRepository>();
+        var page = await repository.ListPassengerHistoryAsync(
+            userId,
+            null,
+            null,
+            null,
+            1,
+            20,
+            CancellationToken.None,
+            includeShuttleRequests: false);
+
+        var persisted = page.Items.Should().ContainSingle().Subject;
+        persisted.PickupPointTypeSnapshot.Should().Be(BookingPointSnapshot.StopType);
+        persisted.PickupPointIdSnapshot.Should().Be(pickupStopId);
+        persisted.PickupPointNameSnapshot.Should().Be("C");
+        persisted.PickupPointAddressSnapshot.Should().Be("12 Nguyen Hue");
+        persisted.PickupPointPlannedAtSnapshot.Should().Be(pickupPlannedAt);
+        persisted.DropoffPointTypeSnapshot.Should().Be(BookingPointSnapshot.StationType);
+        persisted.DropoffPointIdSnapshot.Should().Be(dropoffStationId);
+        persisted.DropoffPointNameSnapshot.Should().Be("D");
+        persisted.DropoffPointAddressSnapshot.Should().Be("45 Le Loi");
+        persisted.DropoffPointPlannedAtSnapshot.Should().Be(dropoffPlannedAt);
+    }
+
+    [Fact]
     public async Task PassengerHistory_ConditionallyLoadsShuttleIntentsWithoutChangingBookingPagination()
     {
         await _factory.InitializeAsync();

@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-09-01 (Passenger Mobile Parcel destination discovery reconciliation)
+> **Cập nhật:** 2026-09-01 (Shuttle Booking unassignment lifecycle; Passenger Mobile Parcel destination discovery reconciliation)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -4865,17 +4865,31 @@ ShuttlePassenger (manifest entry — link passenger booking with shuttle) {
    - Validate vehicle conflict (xe shuttle không trùng main Trip cùng thời điểm).
    - Validate driver shuttle không trùng schedule khác.
 
-4. **Operator quyết định KHÔNG tổ chức shuttle:**
+4. **Gỡ Booking đã gán nhầm khỏi ShuttleTrip:**
+   - Chỉ `OPERATOR_ADMIN` hoặc `OPERATOR_STAFF` được gỡ nguyên một Booking khi ShuttleTrip còn
+     `SCHEDULED`; không gỡ riêng một ticket hoặc một người trong Booking.
+   - Toàn bộ manifest của Booking phải còn `PENDING`. Hệ thống đưa chúng về
+     `PENDING_ASSIGNMENT`, xóa liên kết chuyến và thông tin thứ tự/giờ đón để operator bố trí lại
+     xe; Booking chính, thanh toán và giá vé không đổi.
+   - Nếu xe còn Booking khác, BE compact thứ tự đón theo thứ tự cũ và tính lại reservation theo
+     điểm đầu/cuối mới. Mọi xung đột resource/reposition làm toàn bộ thao tác rollback.
+   - Nếu gỡ Booking cuối, khách vẫn về danh sách chờ nhưng ShuttleTrip tự `CANCELLED`, giải phóng
+     driver/vehicle reservation và phát thêm lifecycle cancellation fact.
+   - Khách nhận thông báo đang chờ bố trí lại. Tài xế nhận cập nhật manifest nếu xe còn khách; nếu
+     xe rỗng, tài xế chỉ nhận thông báo chuyến bị hủy. Lý do vận hành nội bộ không hiển thị cho hai
+     nhóm người nhận này.
+
+5. **Operator quyết định KHÔNG tổ chức shuttle:**
    - Operator bấm "Hủy nhu cầu shuttle" cho main Trip → push notification cho các passenger:
      "Nhà xe không tổ chức shuttle cho chuyến [X]. Vui lòng tự đến bến [station name]. Vé chính của bạn không bị ảnh hưởng."
    - Update ShuttlePassenger.status = CANCELLED (chưa assigned shuttleTripId).
    - Booking chính vẫn CONFIRMED (passenger tự đến bến, không refund vì shuttle là dịch vụ miễn phí v1).
 
-5. **Passenger tracking shuttle:**
+6. **Passenger tracking shuttle:**
    - Sau khi ShuttleTrip được tạo + assigned, Passenger App hiển thị tab "Theo dõi shuttle" với GPS realtime + ETA đến địa chỉ của mình.
    - Trước khi ShuttleTrip tạo, Passenger App hiển thị "Đang chờ nhà xe xác nhận shuttle".
 
-6. **Driver shuttle:**
+7. **Driver shuttle:**
    - Driver App cho shuttle hiển thị manifest (danh sách địa chỉ + tên buyer + SĐT), GPS tracking, tick "đã đón" / "đã giao" per passenger.
 
 **Fare shuttle:**

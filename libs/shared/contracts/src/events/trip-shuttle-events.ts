@@ -10,6 +10,7 @@ export const TRIP_SHUTTLE_NO_SHOW_ROUTING_KEY = 'trip.shuttle.no_show';
 export const TRIP_SHUTTLE_COMPLETED_ROUTING_KEY = 'trip.shuttle.completed';
 export const TRIP_SHUTTLE_STARTED_ROUTING_KEY = 'trip.shuttle.started';
 export const TRIP_SHUTTLE_REASSIGNED_ROUTING_KEY = 'trip.shuttle.reassigned';
+export const TRIP_SHUTTLE_UNASSIGNED_ROUTING_KEY = 'trip.shuttle.unassigned';
 
 const directionSchema = z.enum(['INBOUND_TO_STATION', 'OUTBOUND_FROM_STATION']);
 
@@ -139,3 +140,33 @@ const tripShuttleReassignedEventSchema = z
 
 export type TripShuttleReassignedEvent = z.infer<typeof tripShuttleReassignedEventSchema>;
 export { tripShuttleReassignedEventSchema as TripShuttleReassignedEventSchema };
+
+const tripShuttleUnassignedEventSchema = z
+  .object({
+    eventId: z.string().uuid(),
+    occurredAt: z.string(),
+    shuttleTripId: z.string().uuid(),
+    mainTripId: z.string().uuid(),
+    operatorId: z.string().uuid(),
+    actorUserId: z.string().uuid(),
+    bookingId: z.string().uuid(),
+    direction: directionSchema,
+    driver: z.object({ userId: z.string().uuid() }).strict(),
+    reason: z.string().trim().min(1),
+    remainingPassengerCount: z.number().int().nonnegative(),
+    shuttleTripCancelled: z.boolean(),
+    passengers: z
+      .array(
+        z
+          .object({
+            passengerUserId: z.string().uuid(),
+            ticketIds: z.array(z.string().uuid()).min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
+export type TripShuttleUnassignedEvent = z.infer<typeof tripShuttleUnassignedEventSchema>;
+export { tripShuttleUnassignedEventSchema as TripShuttleUnassignedEventSchema };

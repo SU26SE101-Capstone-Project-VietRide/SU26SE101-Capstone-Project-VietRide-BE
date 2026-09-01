@@ -17,4 +17,6 @@ public sealed record BookingHistoryItemDto(
     string? PaymentRedirectUrl = null,
     Guid? DropoffStationId = null,
     Guid? DropoffStopId = null,
-    BookingHistoryVehicleDto? Vehicle = null);
+    BookingHistoryVehicleDto? Vehicle = null,
+    BookingHistoryPointDto? PickupPoint = null,
+    BookingHistoryPointDto? DropoffPoint = null);

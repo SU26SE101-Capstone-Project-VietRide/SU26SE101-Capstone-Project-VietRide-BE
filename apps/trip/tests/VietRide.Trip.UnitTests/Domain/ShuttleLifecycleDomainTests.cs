@@ -115,4 +115,42 @@ public sealed class ShuttleLifecycleDomainTests
         FluentActions.Invoking(() => passenger.MarkNoShow(" "))
             .Should().Throw<ArgumentException>();
     }
+
+    [Fact]
+    public void ShuttlePassenger_Unassign_ReturnsPendingPassengerToDispatchQueue()
+    {
+        var passenger = ShuttlePassenger.Request(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "123 Nguyen Hue",
+            10.77m,
+            106.70m);
+        passenger.Assign(Guid.NewGuid(), 3, DateTimeOffset.UtcNow);
+
+        passenger.Unassign();
+
+        passenger.Status.Should().Be(ShuttlePassenger.PendingAssignmentStatus);
+        passenger.ShuttleTripId.Should().BeNull();
+        passenger.PickupOrder.Should().BeNull();
+        passenger.ScheduledPickupTime.Should().BeNull();
+        passenger.CancelReason.Should().BeNull();
+    }
+
+    [Fact]
+    public void ShuttlePassenger_Unassign_RejectsNonPendingManifest()
+    {
+        var passenger = ShuttlePassenger.Request(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "123 Nguyen Hue",
+            10.77m,
+            106.70m);
+
+        FluentActions.Invoking(passenger.Unassign)
+            .Should().Throw<InvalidOperationException>();
+    }
 }

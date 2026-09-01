@@ -1464,6 +1464,20 @@ Response `200`:
         "bookingGroupId": null,
         "tripDirection": null,
         "routeName": "TP.HCM - Hà Nội",
+        "pickupPoint": {
+          "type": "STOP",
+          "id": "pickup-stop-uuid",
+          "displayName": "Điểm đón C",
+          "address": null,
+          "plannedAt": "2026-05-18T10:00:00+07:00"
+        },
+        "dropoffPoint": {
+          "type": "STATION",
+          "id": "destination-station-uuid",
+          "displayName": "Bến xe Mỹ Đình",
+          "address": null,
+          "plannedAt": "2026-05-18T20:00:00+07:00"
+        },
         "tickets": [
           {
             "ticketId": "uuid",
@@ -1533,6 +1547,14 @@ Both active and inactive intents are returned so cancellation does not erase pas
 history. Items are ordered by `requestedAt ASC, id ASC`. This projection does not enrich Trip-owned
 assignment data such as `shuttleTripId`, Vehicle, Driver, pickup order, or dispatch status.
 
+`originName`, `destinationName`, and `routeName` are immutable Route metadata; they do not identify
+the passenger's selected travel leg. `pickupPoint` and `dropoffPoint` are the Booking-owned selected
+point snapshots. Each non-null point contains `type=STATION|STOP`, its canonical point `id`, nullable
+`displayName` and `address`, and nullable `plannedAt`. New and edited Bookings snapshot these values
+from the validated Trip response in the same Booking transaction. History never resolves point names
+from the current Trip. Legacy rows that predate point snapshots return the affected point as `null`
+rather than substituting current Trip data or Route endpoint names.
+
 `paymentRedirectUrl` is the final root property of every item and is always serialized. It is
 non-null only for a `PENDING_PAYMENT` Booking whose latest eligible VNPay Payment lookup matches
 the owner, reference, exact amount, trusted VNPay authority, and a persisted future `dueAt`.
@@ -1549,7 +1571,9 @@ Query: required `userId`, plus the same `status?`, `from?`, `to?`, `page=1`, and
 semantics as the public Booking history endpoint. It preserves Booking ownership, per-Booking
 pagination, nested Ticket summaries, nullable current Vehicle projection, and deterministic
 ordering. It does not load or return the public-only `shuttleRequests` field, so Parcel does not
-receive passenger Shuttle addresses or coordinates.
+receive passenger Shuttle addresses or coordinates. It does return the same Booking-owned
+`pickupPoint` and `dropoffPoint` snapshot contract as public Booking history so the Passenger History
+facade does not need to resolve mutable Trip data.
 
 ### GET `/internal/v1/bookings/{bookingId}`
 
@@ -3793,6 +3817,20 @@ Response `200` item shape:
     "bookingGroupId": null,
     "tripDirection": null,
     "routeName": "TP.HCM - Hà Nội",
+    "pickupPoint": {
+      "type": "STOP",
+      "id": "pickup-stop-uuid",
+      "displayName": "Điểm đón C",
+      "address": null,
+      "plannedAt": "2026-05-18T10:00:00+07:00"
+    },
+    "dropoffPoint": {
+      "type": "STATION",
+      "id": "destination-station-uuid",
+      "displayName": "Bến xe Mỹ Đình",
+      "address": null,
+      "plannedAt": "2026-05-18T20:00:00+07:00"
+    },
     "vehicle": {
       "licensePlate": "51B-123.45",
       "vehicleType": {
@@ -3825,6 +3863,9 @@ For `TICKET`, `ticket.vehicle` is always serialized as
 `{ licensePlate, vehicleType: { code, displayName } | null }` or `null`; Parcel forwards the
 fail-open Booking history projection unchanged and does not call Trip again. The public vehicle
 projection contains only the plate and type identity/display fields.
+For `TICKET`, `ticket.pickupPoint` and `ticket.dropoffPoint` forward Booking's persisted point
+snapshots unchanged. Root `originName` and `destinationName` remain Route endpoint metadata. Parcel
+does not call Trip to fill a missing point, and a legacy missing snapshot remains null.
 `paymentRedirectUrl` is the final root property and is always serialized. `TICKET` forwards the
 value from Booking history without another Payment call. `PARCEL` returns only the latest eligible
 deposit/final VNPay URL for the exact owner/reference/amount/deadline: deposit requires
@@ -7647,11 +7688,130 @@ Errors include `404 SHUTTLE_TRIP_NOT_FOUND`, `404 DRIVER_NOT_FOUND`, `404 VEHICL
 `409 SHUTTLE_TRIP_INVALID_STATE`, `409 SHUTTLE_DRIVER_CONFLICT`, `409 SHUTTLE_VEHICLE_CONFLICT`,
 `409 SHUTTLE_CAPACITY_EXCEEDED`, `422 VALIDATION_ERROR`, and `503 RESOURCE_TRAVEL_TIME_UNAVAILABLE`.
 
+### POST `/v1/operator/shuttle-trips/{shuttleTripId}/bookings/{bookingId}/unassign`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`. Header `Idempotency-Key` UUID v4 là bắt buộc. Tenant
+lấy từ JWT; ShuttleTrip không tồn tại hoặc thuộc tenant khác đều trả
+`404 SHUTTLE_TRIP_NOT_FOUND`.
+
+Endpoint này gỡ **toàn bộ Booking** khỏi một ShuttleTrip còn `SCHEDULED`; không hỗ trợ gỡ riêng
+một ticket hoặc một hành khách trong cùng Booking. `reason` là lý do vận hành nội bộ, bắt buộc
+khác rỗng và không được chuyển sang nội dung thông báo cho khách hoặc tài xế.
+
+```json
+{
+  "reason": "Gán nhầm khách vào xe"
+}
+```
+
+Response `200` dùng `ApiResponse` chuẩn. Instant public được serialize theo
+`Asia/Ho_Chi_Minh` như Global Conventions:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "shuttleTripId": "36000000-0000-4000-8000-000000000001",
+    "bookingId": "36000000-0000-4000-8000-000000000003",
+    "unassignedPassengerCount": 1,
+    "remainingPassengerCount": 1,
+    "shuttleTripStatus": "SCHEDULED",
+    "returnedToPendingAssignment": true,
+    "shuttleTripCancelled": false,
+    "unassignedAt": "2026-09-01T17:00:00+07:00"
+  },
+  "meta": {}
+}
+```
+
+Mọi `ShuttlePassenger` của Booking phải đang `PENDING`. BE đưa cả nhóm về
+`PENDING_ASSIGNMENT`, xóa `shuttleTripId`, `pickupOrder`, `scheduledPickupTime`, rồi compact
+`pickupOrder` của các Booking còn lại và refresh `ResourceReservation`. Nếu Booking bị gỡ là
+Booking cuối, khách vẫn trở lại danh sách chờ nhưng ShuttleTrip tự chuyển `CANCELLED`, hủy toàn bộ
+reservation và trả `shuttleTripCancelled=true`, `shuttleTripStatus=CANCELLED`.
+
+Passenger/Trip/reservation và Outbox commit nguyên tử. Event `trip.shuttle.unassigned` luôn được
+phát cho lần xử lý thành công; nhánh xe rỗng phát thêm `trip.shuttle.cancelled`. Notification gửi
+`SHUTTLE_UNASSIGNED` cho khách đang chờ bố trí lại; tài xế nhận cập nhật manifest khi xe còn khách,
+còn nhánh xe rỗng chỉ nhận `SHUTTLE_CANCELLED` từ lifecycle event.
+
+Errors: `404 SHUTTLE_TRIP_NOT_FOUND`; `404 SHUTTLE_BOOKING_NOT_FOUND`; `409
+SHUTTLE_TRIP_INVALID_STATE`; `409 SHUTTLE_BOOKING_NOT_UNASSIGNABLE`; `422 VALIDATION_ERROR`;
+`422 IDEMPOTENCY_KEY_MISMATCH`; `422 IDEMPOTENCY_KEY_REQUIRED`; các lỗi resource/upstream hiện có
+như `409 SHUTTLE_DRIVER_CONFLICT`, `409 SHUTTLE_VEHICLE_CONFLICT` và `503
+RESOURCE_TRAVEL_TIME_UNAVAILABLE` khi refresh reservation thất bại.
+
 ### POST `/v1/operator/shuttle-trips/availability-check`
 
 Auth: `OPERATOR_ADMIN`. Read-only and requires no `Idempotency-Key`. Body equals Shuttle create
 fields except `notes`; `orderedBookingIds` determines the first/last manifest endpoint. The
 response is the same availability shape and 100-conflict cap documented for DriverSchedule.
+
+### POST `/v1/operator/shuttle-trips/route-preview`
+
+Auth: `OPERATOR_ADMIN`. Đây là query tư vấn read-only và không yêu cầu `Idempotency-Key`.
+Endpoint không gọi resource availability, không lock/reserve resource và không tạo hoặc sửa
+ShuttleTrip, ShuttlePassenger, reservation hay Outbox.
+
+Request:
+
+```json
+{
+  "mainTripId": "36000000-0000-4000-8000-000000000101",
+  "direction": "INBOUND_TO_STATION",
+  "scheduledDepartureTime": "2026-09-01T14:30:00+07:00",
+  "orderedBookingIds": [
+    "36000000-0000-4000-8000-000000000301",
+    "36000000-0000-4000-8000-000000000302"
+  ]
+}
+```
+
+Với inbound, BE giữ nguyên thứ tự Booking và ước tính chuỗi `pickup đầu tiên → các pickup còn
+lại → origin Station`; không cộng quãng đường từ Station tới pickup đầu tiên.
+`hardCutoffAt = mainTrip.departureDateTime - 30 phút` và
+`estimatedFinishAt = scheduledDepartureTime + tổng Goong duration + bookingCount ×
+SHUTTLE_STOP_SERVICE_MINUTES` (mặc định 5 phút). Tuyến dài được chunk theo
+`GOONG_MAX_DESTINATIONS_PER_REQUEST` mà không đổi thứ tự; một chunk không dùng được làm toàn bộ
+kết quả thành `UNKNOWN`.
+
+Response `200 LATE_RISK`:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "status": "LATE_RISK",
+    "estimatedFinishAt": "2026-09-01T15:47:00+07:00",
+    "hardCutoffAt": "2026-09-01T15:30:00+07:00",
+    "delayMinutes": 17,
+    "warningCode": "SHUTTLE_LATE_RISK",
+    "lateRiskBlocksCreate": false,
+    "basis": "GOONG"
+  },
+  "meta": {}
+}
+```
+
+Status semantics:
+
+| `status` | Ý nghĩa | Nullable fields |
+|---|---|---|
+| `SAFE` | ETA không sau cutoff; `delayMinutes=0`. | `warningCode=null`; ETA, cutoff và `basis=GOONG` có giá trị. |
+| `LATE_RISK` | ETA sau cutoff; `delayMinutes` làm tròn lên phút. | Không field nghiệp vụ nào nullable; `warningCode=SHUTTLE_LATE_RISK`. |
+| `UNKNOWN` | Goong/config/timeout/response hoặc tọa độ Station không dùng được. | `estimatedFinishAt`, `delayMinutes`, `warningCode`, `basis` là `null`; `hardCutoffAt` vẫn có nếu Main Trip đã load được. |
+| `NOT_APPLICABLE` | Outbound; BE không gọi Goong. | ETA, cutoff, delay, warning và basis đều `null`. |
+
+`lateRiskBlocksCreate=false` cho mọi status. Đây không phải bảo đảm create thành công:
+`POST /v1/operator/shuttle-trips` giữ nguyên body và `Idempotency-Key`, đồng thời vẫn áp dụng
+capacity, resource conflict, cutoff và Booking-state guards hiện hành. Client không gửi `force`,
+`warningAccepted` hoặc payload split.
+
+Tenant được lấy từ JWT. Main Trip khác tenant trả `404 TRIP_NOT_FOUND`. Mọi Booking group được
+chọn phải còn đầy đủ ở `PENDING_ASSIGNMENT`; selection stale trả `409
+SHUTTLE_REQUEST_SET_CHANGED`. Errors khác: `404 STATION_NOT_FOUND`; `422 VALIDATION_ERROR`.
 
 ### GET `/v1/driver/shuttle-trips`
 

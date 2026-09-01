@@ -21,6 +21,7 @@ namespace VietRide.Trip.Infrastructure.Services;
 internal sealed class ShuttleDispatchService : IShuttleDispatchService
 {
     private const int ArrivalBufferMinutes = 30;
+    private const string EmptyTripCancellationReason = "No assigned Booking remains after unassignment.";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly TripDbContext _db;
     private readonly IIdentityInternalClient _identity;
@@ -1722,6 +1723,169 @@ internal sealed class ShuttleDispatchService : IShuttleDispatchService
         await _db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new ShuttleLifecycleResult(shuttleTripId, shuttleTrip.Status, manifests.Length, now);
+    }
+
+    public async Task<UnassignShuttleBookingResult> UnassignBookingAsync(
+        Guid operatorId,
+        Guid shuttleTripId,
+        Guid bookingId,
+        Guid actorUserId,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new CodedValidationException("VALIDATION_ERROR", "An unassignment reason is required.");
+        }
+
+        await ValidateShuttleMutationEligibilityAsync(operatorId, cancellationToken);
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+        await AcquireLockAsync("shuttle-lifecycle", shuttleTripId, cancellationToken);
+        await AcquireLockAsync("shuttle-assignment", shuttleTripId, cancellationToken);
+        var shuttleTrip = await _db.ShuttleTrips.SingleOrDefaultAsync(
+            trip => trip.Id == shuttleTripId && trip.OperatorId == operatorId,
+            cancellationToken)
+            ?? throw new CodedNotFoundException("SHUTTLE_TRIP_NOT_FOUND", "Shuttle trip was not found.");
+        if (shuttleTrip.Status != ShuttleTrip.ScheduledStatus)
+        {
+            throw new CodedConflictException(
+                "SHUTTLE_TRIP_INVALID_STATE",
+                "Only scheduled Shuttle trips can have a Booking unassigned.");
+        }
+
+        var manifests = await _db.ShuttlePassengers
+            .FromSqlInterpolated($"SELECT * FROM vietride_trip.shuttle_passengers WHERE shuttle_trip_id = {shuttleTripId} FOR UPDATE")
+            .OrderBy(manifest => manifest.PickupOrder)
+            .ThenBy(manifest => manifest.CreatedAt)
+            .ThenBy(manifest => manifest.Id)
+            .ToArrayAsync(cancellationToken);
+        var targetManifests = manifests
+            .Where(manifest => manifest.BookingId == bookingId)
+            .ToArray();
+        if (targetManifests.Length == 0)
+        {
+            throw new CodedNotFoundException(
+                "SHUTTLE_BOOKING_NOT_FOUND",
+                "The Booking was not assigned to this Shuttle trip.");
+        }
+
+        if (manifests.Any(manifest => manifest.Status != ShuttlePassenger.PendingStatus))
+        {
+            throw new CodedConflictException(
+                "SHUTTLE_BOOKING_NOT_UNASSIGNABLE",
+                "Every manifest in the scheduled Shuttle trip must still be pending.");
+        }
+
+        var passengerRecipients = targetManifests
+            .Where(manifest => manifest.PassengerUserId.HasValue)
+            .GroupBy(manifest => manifest.PassengerUserId!.Value)
+            .Select(group => new ShuttleUnassignedIntegrationEvent.PassengerRecipient(
+                group.Key,
+                group.Where(manifest => manifest.TicketId.HasValue)
+                    .Select(manifest => manifest.TicketId!.Value)
+                    .Distinct()
+                    .OrderBy(ticketId => ticketId)
+                    .ToArray()))
+            .ToArray();
+        foreach (var manifest in targetManifests)
+        {
+            manifest.Unassign();
+        }
+
+        var remainingGroups = manifests
+            .Except(targetManifests)
+            .Where(manifest => manifest.BookingId.HasValue)
+            .GroupBy(manifest => manifest.BookingId!.Value)
+            .Select(group => new
+            {
+                BookingId = group.Key,
+                PickupOrder = group.Min(manifest => manifest.PickupOrder)!.Value,
+                CreatedAt = group.Min(manifest => manifest.CreatedAt),
+                Manifests = group.ToArray(),
+            })
+            .OrderBy(group => group.PickupOrder)
+            .ThenBy(group => group.CreatedAt)
+            .ThenBy(group => group.BookingId)
+            .ToArray();
+        for (var index = 0; index < remainingGroups.Length; index++)
+        {
+            foreach (var manifest in remainingGroups[index].Manifests)
+            {
+                manifest.ChangePickupOrder(index + 1);
+            }
+        }
+
+        var now = _clock.UtcNow;
+        var remainingPassengerCount = remainingGroups.Sum(group => group.Manifests.Length);
+        var shuttleTripCancelled = remainingPassengerCount == 0;
+        if (shuttleTripCancelled)
+        {
+            shuttleTrip.Cancel(now, actorUserId, EmptyTripCancellationReason);
+            await _resourceAvailability.CancelShuttleTripAsync(shuttleTripId, now, cancellationToken);
+        }
+        else
+        {
+            await _resourceAvailability.ReserveShuttleTripAsync(
+                shuttleTrip,
+                remainingGroups.Select(group => group.BookingId).ToArray(),
+                cancellationToken);
+        }
+
+        var integrationEvent = new ShuttleUnassignedIntegrationEvent(
+            Guid.NewGuid(),
+            now,
+            shuttleTrip.Id,
+            shuttleTrip.MainTripId,
+            shuttleTrip.OperatorId,
+            actorUserId,
+            bookingId,
+            shuttleTrip.Direction,
+            new ShuttleUnassignedIntegrationEvent.DriverSnapshot(shuttleTrip.DriverUserId),
+            reason.Trim(),
+            remainingPassengerCount,
+            shuttleTripCancelled,
+            passengerRecipients);
+        await _outbox.EnqueueAsync(
+            integrationEvent.EventId,
+            integrationEvent.EventType,
+            JsonSerializer.Serialize(integrationEvent, JsonOptions),
+            cancellationToken);
+        if (shuttleTripCancelled)
+        {
+            var cancellationEventId = Guid.NewGuid();
+            await _outbox.EnqueueAsync(
+                cancellationEventId,
+                "trip.shuttle.cancelled",
+                JsonSerializer.Serialize(new
+                {
+                    eventId = cancellationEventId,
+                    occurredAt = now,
+                    shuttleTripId,
+                    mainTripId = shuttleTrip.MainTripId,
+                    operatorId,
+                    bookingId = (Guid?)null,
+                    passengerUserId = (Guid?)null,
+                    direction = shuttleTrip.Direction,
+                    status = ShuttleTrip.CancelledStatus,
+                    reason = (string?)null,
+                    driverUserId = shuttleTrip.DriverUserId,
+                    cancellationScope = "SHUTTLE_TRIP",
+                }),
+                cancellationToken);
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new UnassignShuttleBookingResult(
+            shuttleTrip.Id,
+            bookingId,
+            targetManifests.Length,
+            remainingPassengerCount,
+            shuttleTrip.Status,
+            true,
+            shuttleTripCancelled,
+            now);
     }
 
     private static ShuttleLatestAssignmentDto ToLatestAssignment(

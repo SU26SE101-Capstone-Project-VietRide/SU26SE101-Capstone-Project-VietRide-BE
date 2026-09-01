@@ -2,9 +2,9 @@
   "version": 3,
   "policy": "system-wide-idempotency-contract",
   "expectedSummary": {
-    "mutationSurfaces": 217,
+    "mutationSurfaces": 218,
     "required": 196,
-    "exemptions": 21
+    "exemptions": 22
   },
   "services": {
     "identity": {
@@ -219,7 +219,7 @@
       "stack": "dotnet",
       "servicePrefix": "trip",
       "requireAllMutations": true,
-      "expectedMutationCount": 85,
+      "expectedMutationCount": 86,
       "endpoints": [
         {
           "method": "POST",
@@ -558,6 +558,12 @@
           "path": "/v1/operator/shuttle-trips/availability-check",
           "policy": "exempt",
           "reason": "Availability preview is read-only and never creates a reservation."
+        },
+        {
+          "method": "POST",
+          "path": "/v1/operator/shuttle-trips/route-preview",
+          "policy": "exempt",
+          "reason": "Shuttle route preview is read-only and never creates a reservation."
         },
         {
           "method": "POST",

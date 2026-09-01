@@ -1280,11 +1280,13 @@ Versioning **bắt buộc** cho mọi public endpoint. Khi breaking change → b
 
 Mọi HTTP action dùng `POST`, `PATCH`, `PUT` hoặc `DELETE` phải yêu cầu
 `Idempotency-Key: <uuid-v4>` theo idempotency v2 bên dưới, không phụ thuộc public/internal hay
-endpoint có behavior-idempotent hay không, trừ đúng 21 action có metadata exemption được khóa ở
-bảng sau. Inventory executable phải giữ tổng `218 mutation surfaces / 197 required / 21 exempt`;
-thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata và inventory trong cùng patch.
+endpoint có behavior-idempotent hay không, trừ đúng 22 action có metadata exemption được khóa ở
+bảng sau. Canonical BSOT tally sau feature này là `220 mutation surfaces / 198 required / 22
+exempt`; executable inventory trên branch hiện còn drift có sẵn, nhưng mọi action thêm hoặc xóa
+vẫn bắt buộc cập nhật contract, runtime metadata và exact inventory theo đúng feature delta trong
+cùng patch.
 
-**Canonical 21 exemptions (không yêu cầu `Idempotency-Key`):**
+**Canonical 22 exemptions (không yêu cầu `Idempotency-Key`):**
 
 | # | Endpoint | Lý do |
 |---:|---|---|
@@ -1308,7 +1310,8 @@ thêm hoặc xóa action bắt buộc cập nhật contract, runtime metadata v�
 | 18 | `POST /v1/admin/rag-config/reload` | Chỉ invalidates in-memory cache và naturally repeatable. |
 | 19 | `POST /v1/operator/driver-schedules/availability-check` | Read-only resource availability preview; không tạo reservation. |
 | 20 | `POST /v1/operator/shuttle-trips/availability-check` | Read-only resource availability preview; không tạo reservation. |
-| 21 | `POST /internal/v1/trips/parcel-availability/search` | Read-only Parcel availability query; bounded Route filter nằm trong request body. |
+| 21 | `POST /v1/operator/shuttle-trips/route-preview` | Read-only Shuttle route-risk preview; không tạo reservation hoặc ShuttleTrip. |
+| 22 | `POST /internal/v1/trips/parcel-availability/search` | Read-only Parcel availability query; bounded Route filter nằm trong request body. |
 
 Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable là nguồn exhaustive):
 
@@ -1383,6 +1386,7 @@ Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable
 | 44 | `POST /v1/operator/route-change-proposals/{proposalId}/reject` | Trip |
 | 45 | `POST /v1/operator/trips/{tripId}/seats/{seatNumber}/disable` | Trip |
 | 46 | `POST /v1/operator/trips/{tripId}/seats/{seatNumber}/enable` | Trip |
+| 47 | `POST /v1/operator/shuttle-trips/{shuttleTripId}/bookings/{bookingId}/unassign` | Trip |
 
 `POST /v1/operator/trips` is deferred outside current v1 and MUST remain absent from the public
 API and Gateway inventories. `Trip.source=MANUAL` is compatibility/readiness only; it does not
@@ -1532,6 +1536,17 @@ chunked without reordering, and `routes[0].legs[].distance.value`/`duration.valu
 across every leg and chunk. Empty/malformed routes, negative or non-finite metrics, wrong leg count,
 or changed waypoint order reject the whole batch. Never log the full request URI/query.
 
+`POST /v1/operator/shuttle-trips/route-preview` is an `OPERATOR_ADMIN` read-only advisory query.
+For inbound, it keeps `orderedBookingIds` exactly and estimates the chain from the first selected
+pickup through the remaining selected pickups to the origin Station; it does not add a
+Station-to-first-pickup deadhead. `hardCutoffAt` is main Trip departure minus 30 minutes and
+`estimatedFinishAt` adds every Goong leg plus `SHUTTLE_STOP_SERVICE_MINUTES` per Booking group
+(default 5). Any missing configuration, timeout, malformed chunk, or unusable provider response
+returns `200 UNKNOWN` without partial estimation. Outbound returns `NOT_APPLICABLE` without a
+provider call. The preview never checks resource availability and never writes ShuttleTrip,
+passenger, reservation, Outbox, or integration-event state; `LATE_RISK` never bypasses the
+existing create guards.
+
 Tracking maps `401`, `403`, `429`, `5xx`, timeout, malformed JSON and strict-validation failure to
 one consistent Local fallback batch and retains the three-failure/300-second cooldown; it never
 mixes partial Goong output with Local output. Trip planned ETA alone may fall back to cumulative
@@ -1663,6 +1678,8 @@ phát integration event.
 | | `SHUTTLE_DISTANCE_EXCEEDED` | 422 | Road distance snapshot lớn hơn 10.000 mét; đúng 10.000 mét vẫn hợp lệ |
 | | `SHUTTLE_DISTANCE_UNAVAILABLE` | 503 | Goong Directions thiếu key, `401`/`403`/`429`/`5xx`, timeout hoặc response không hợp lệ |
 | | `SHUTTLE_REQUEST_NOT_CANCELLABLE` | 409 | Request đã assign hoặc không còn ở trạng thái chưa assign |
+| | `SHUTTLE_BOOKING_NOT_FOUND` | 404 | Booking không thuộc ShuttleTrip được yêu cầu trong cùng tenant |
+| | `SHUTTLE_BOOKING_NOT_UNASSIGNABLE` | 409 | Manifest trong ShuttleTrip không còn đồng nhất ở trạng thái `PENDING` để gỡ nguyên Booking |
 | | `SHUTTLE_TRIP_INVALID_STATE` | 409 | ShuttleTrip không cho phép lifecycle transition được yêu cầu |
 | | `SHUTTLE_PASSENGER_INVALID_STATE` | 409 | ShuttlePassenger không cho phép lifecycle transition được yêu cầu |
 | | `SHUTTLE_PASSENGERS_INCOMPLETE` | 409 | Nhóm passenger shuttle chưa ở trạng thái phù hợp để hoàn tất hoặc huỷ thao tác |
@@ -2482,6 +2499,7 @@ Parcel custody reconciliation; a positive exact Booking pending-count result add
 | `trip.shuttle.unfulfilled` | Trip | Notification | `{ mainTripId, bookingId, passengerUserId, stationId, reason: AUTO_UNFULFILLED_CUTOFF }` |
 | `trip.shuttle.started` | Trip | Notification | `{ eventId, occurredAt, shuttleTripId, mainTripId, operatorId, driverUserId, direction, passengers: [{ passengerUserId, bookingId?, pickupOrder }] }`; phát nguyên tử khi Shuttle Trip chuyển `SCHEDULED -> IN_PROGRESS`; Notification gửi từng Passenger và active `OPERATOR_ADMIN|OPERATOR_STAFF` cùng tenant. |
 | `trip.shuttle.reassigned` | Trip | Notification | `{ eventId, occurredAt, shuttleTripId, mainTripId, operatorId, direction, oldDriverUserId, newDriver: { userId, displayName?, phone? }, oldVehicle: { id, licensePlate }, newVehicle: { id, licensePlate }, reason, passengers: [{ passengerUserId, bookingId?, pickupOrder }] }`; phát nguyên tử cùng thay reservation; Notification gửi Passenger, tài xế mới, tài xế cũ khi bị gỡ và active Shuttle dispatch recipients. |
+| `trip.shuttle.unassigned` | Trip | Notification | Exact `{ eventId, occurredAt, shuttleTripId, mainTripId, operatorId, actorUserId, bookingId, direction, driver: { userId }, reason, remainingPassengerCount, shuttleTripCancelled, passengers: [{ passengerUserId, ticketIds[] }] }`; phát nguyên tử cùng manifest/reservation. Notification không hiển thị `reason`: Passenger nhận `SHUTTLE_UNASSIGNED`, Driver nhận cập nhật manifest khi xe còn khách; xe rỗng phát thêm `trip.shuttle.cancelled` và Driver chỉ nhận `SHUTTLE_CANCELLED`. |
 | `trip.shuttle.cancelled` · `trip.shuttle.picked_up` · `trip.shuttle.delivered` · `trip.shuttle.no_show` · `trip.shuttle.completed` | Trip | Notification | Common `{ eventId, occurredAt, shuttleTripId?, mainTripId, operatorId, bookingId?, passengerUserId?, direction, serviceAddress?, serviceOrder?, status, roadDistanceMeters?, reason?, driverUserId?, cancellationScope? }`; Notification dedupes by `eventId/MessageId`, sends affected Passenger và active `OPERATOR_ADMIN|OPERATOR_STAFF` cho Shuttle operations; full-trip cancellation additionally notifies assigned Driver. |
 | `tracking.gps.off_route` | Tracking | Notification | `{ eventId, occurredAt, tripId, durationSeconds }`; Notification resolves assigned driver, assistant, and operator admins |
 | `tracking.gps.approaching_stop` | Tracking | Notification | `{ tripId, stopId, bookingIds, wave, etaMinutes }` |
@@ -4039,6 +4057,8 @@ ROUTING_PROVIDER=GOONG                # GOONG|LOCAL; LOCAL makes fail-closed Tri
 GOONG_API_KEY=...                     # Secret; never log the full Direction URI/query.
 GOONG_BASE_URL=https://rsapi.goong.io
 GOONG_MAX_DESTINATIONS_PER_REQUEST=10
+SHUTTLE_STOP_SERVICE_MINUTES=5
+SHUTTLE_ROUTE_PREVIEW_TIMEOUT_MS=3000
 TRIP_PLANNED_ETA_TIMEOUT_MS=3000
 RESOURCE_TRAVEL_TIME_TIMEOUT_MS=3000
 TRIP_STOP_DWELL_MINUTES=20
@@ -4384,6 +4404,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.88.0** | 2026-09-01 | Codex | **MINOR** — Thêm Booking-level Shuttle unassignment cho `OPERATOR_ADMIN|OPERATOR_STAFF`: toàn bộ manifest `PENDING` trở lại `PENDING_ASSIGNMENT`, compact pickup order và refresh reservation nguyên tử; xe rỗng tự hủy và phát thêm lifecycle cancellation. Đăng ký `trip.shuttle.unassigned`, `SHUTTLE_UNASSIGNED`, Gateway exact route, hai Shuttle error code và một Notification Prisma migration. Inventory tăng lên 220/198/22; không đổi Trip schema, Booking chính, thanh toán hoặc API hủy hiện có. |
 | **1.87.0** | 2026-09-01 | Codex | **MINOR** — Close Passenger Mobile BE gaps without changing Tracking share lifecycle. Notification resolves Passenger `VEHICLE_SUBSTITUTED` notifications carrying `bookingId` to `OPEN_BOOKING_DETAIL` while preserving Trip-detail fallback. Booking and Parcel history model operational `seatNumber` as nullable. Parcel availability adds backward-compatible destination Station, exact drop-off Stop, and destination Location discovery modes with typed `dropoffPoints`; Trip applies active Stop/`allowDropoff`, fare, Assistant, capacity and pagination filters authoritatively. Parcel pickup remains the Route origin Station, all eligible drop-off points use the same Route fare, and quote tokens remain Trip/Route/station-pair bound rather than Stop-bound. No endpoint path, schema, migration, dependency, Gateway route, event key or Tracking lifecycle change. |
 | **1.86.0** | 2026-08-31 | Codex | **MINOR** — Fix Parcel production E2E defects BE-PCL-001..008: expose stop departure anchors; enforce ordered stop/destination arrival and destination-before-manual-completion while auditing the ETA+30 exception; make forwarding custody/outbox atomic and auto-resolve only after verified unload; align Assistant actions and Passenger incident policy; clarify destination reconciliation semantics with a deprecated `canComplete` alias; and add the Driver unified approval inbox, `parcel.approval.requested`, `PARCEL_APPROVAL_REQUESTED`, native `OPEN_PARCEL_APPROVAL`, reassignment/terminal invalidation, Gateway route and one Notification enum migration. No dependency or Parcel/Trip schema change. |
 | **1.85.0** | 2026-08-30 | Codex | **MINOR** — Let assigned Driver/Assistant resolve a crew manifest seat to its Booking buyer during `BOARDING|IN_PROGRESS`: add nullable `buyerName`, canonical-E.164 `buyerPhone`, and `pickupPointName` to the Booking manifest, mirror buyer contact plus `bookingCode` in QR scan, expose additive Stop `name` in the internal Trip snapshot, retain paid no-show rows, and require private no-store responses. Passenger remains operational-only with no per-seat identity; unmatched Trip `BOOKED` seats are never assigned fabricated contact. No schema, dependency, Gateway route or event change. |

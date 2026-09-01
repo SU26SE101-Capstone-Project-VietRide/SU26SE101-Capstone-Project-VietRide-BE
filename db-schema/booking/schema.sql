@@ -88,6 +88,17 @@ CREATE TABLE bookings (
     pickup_stop_id UUID NULL,
     dropoff_station_id UUID NULL,
     dropoff_stop_id UUID NULL,
+    -- stable passenger-selected point snapshots; nullable for legacy rows
+    pickup_point_type_snapshot VARCHAR(16) NULL,
+    pickup_point_id_snapshot UUID NULL,
+    pickup_point_name_snapshot VARCHAR(255) NULL,
+    pickup_point_address_snapshot VARCHAR(500) NULL,
+    pickup_point_planned_at_snapshot TIMESTAMPTZ NULL,
+    dropoff_point_type_snapshot VARCHAR(16) NULL,
+    dropoff_point_id_snapshot UUID NULL,
+    dropoff_point_name_snapshot VARCHAR(255) NULL,
+    dropoff_point_address_snapshot VARCHAR(500) NULL,
+    dropoff_point_planned_at_snapshot TIMESTAMPTZ NULL,
     -- amounts
     base_fare BIGINT NOT NULL,
     discount_amount BIGINT NOT NULL DEFAULT 0,

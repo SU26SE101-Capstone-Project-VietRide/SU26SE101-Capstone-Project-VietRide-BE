@@ -2,6 +2,7 @@ using MediatR;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Application.Features.Bookings;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -107,7 +108,13 @@ public sealed class EditPickupCommandHandler : IRequestHandler<EditPickupCommand
                 "Pickup edit would change the booking fare. Cancel and rebook to change fare.");
         }
 
-        booking.ChangePickup(request.PickupStationId, request.PickupStopId);
+        booking.ChangePickup(
+            request.PickupStationId,
+            request.PickupStopId,
+            BookingPointSnapshotFactory.ResolvePickup(
+                trip,
+                request.PickupStationId,
+                request.PickupStopId));
         _bookings.Update(booking);
         await ResolveStopDisabledActionAsync(booking.Id, cancellationToken);
 

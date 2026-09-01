@@ -2,6 +2,7 @@ using MediatR;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
+using VietRide.Booking.Application.Features.Bookings;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.UnitOfWork;
@@ -101,7 +102,13 @@ public sealed class EditDropoffCommandHandler : IRequestHandler<EditDropoffComma
             ValidateDropoffStop(booking.PickupStopId, dropoffStop, trip);
         }
 
-        booking.ChangeDropoff(request.DropoffStationId, request.DropoffStopId);
+        booking.ChangeDropoff(
+            request.DropoffStationId,
+            request.DropoffStopId,
+            BookingPointSnapshotFactory.ResolveDropoff(
+                trip,
+                request.DropoffStationId,
+                request.DropoffStopId));
         _bookings.Update(booking);
         await ResolveStopDisabledActionAsync(booking.Id, cancellationToken);
 

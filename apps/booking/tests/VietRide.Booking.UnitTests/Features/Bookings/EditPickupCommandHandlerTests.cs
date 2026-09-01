@@ -55,6 +55,10 @@ public sealed class EditPickupCommandHandlerTests
         result.PaymentRedirectUrl.Should().BeNull();
         booking.PickupStationId.Should().BeNull();
         booking.PickupStopId.Should().Be(EqualFareStopId);
+        booking.PickupPointTypeSnapshot.Should().Be("STOP");
+        booking.PickupPointIdSnapshot.Should().Be(EqualFareStopId);
+        booking.PickupPointNameSnapshot.Should().Be("Equal fare stop");
+        booking.PickupPointPlannedAtSnapshot.Should().Be(Now.AddHours(1));
         _bookings.Received(1).Update(booking);
     }
 
@@ -223,10 +227,10 @@ public sealed class EditPickupCommandHandlerTests
             DestinationStation: new TripStationSnapshot(Guid.NewGuid(), "Đà Nẵng"),
             Stops:
             [
-                new TripStopSnapshot(EqualFareStopId, 1, true, true, Now.AddHours(1), 42.5, baseFare),
-                new TripStopSnapshot(HigherFareStopId, 2, true, true, Now.AddHours(2), 84.0, baseFare + 50_000),
-                new TripStopSnapshot(LowerFareStopId, 3, true, true, Now.AddHours(3), 126.0, baseFare - 50_000),
-                new TripStopSnapshot(DisallowedPickupStopId, 4, false, true, Now.AddHours(4), 168.0, baseFare),
+                new TripStopSnapshot(EqualFareStopId, 1, true, true, Now.AddHours(1), 42.5, baseFare, Name: "Equal fare stop"),
+                new TripStopSnapshot(HigherFareStopId, 2, true, true, Now.AddHours(2), 84.0, baseFare + 50_000, Name: "Higher fare stop"),
+                new TripStopSnapshot(LowerFareStopId, 3, true, true, Now.AddHours(3), 126.0, baseFare - 50_000, Name: "Lower fare stop"),
+                new TripStopSnapshot(DisallowedPickupStopId, 4, false, true, Now.AddHours(4), 168.0, baseFare, Name: "Disallowed stop"),
             ],
             SeatSummary: new TripSeatSummary(40, 38));
 }

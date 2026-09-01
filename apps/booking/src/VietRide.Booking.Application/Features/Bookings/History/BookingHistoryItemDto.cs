@@ -22,5 +22,7 @@ public sealed record BookingHistoryItemDto(
     IReadOnlyList<BookingHistoryShuttleRequestDto>? ShuttleRequests = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     BookingHistoryVehicleDto? Vehicle = null,
+    BookingHistoryPointDto? PickupPoint = null,
+    BookingHistoryPointDto? DropoffPoint = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     string? PaymentRedirectUrl = null);
