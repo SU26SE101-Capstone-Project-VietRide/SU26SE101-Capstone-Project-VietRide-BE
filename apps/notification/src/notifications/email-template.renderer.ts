@@ -57,21 +57,24 @@ export class EmailTemplateRenderer {
     };
   }
 
-  private renderParcelDeliveryLink(data: EmailTemplateData): RenderedEmail {
-    const deliveryUrl = this.requiredString(data, 'deliveryUrl');
-    const parcelCode = this.optionalString(data, 'parcelCode') ?? 'kiện hàng';
-    const subject = 'Xác nhận giao hàng VietRide';
-    const text = `Vui lòng xác nhận giao ${parcelCode} tại: ${deliveryUrl}`;
+ private renderParcelDeliveryLink(data: EmailTemplateData): RenderedEmail {
+  const deliveryUrl = this.requiredString(data, 'deliveryUrl');
+  const parcelCode = this.optionalString(data, 'parcelCode') ?? 'kiện hàng';
+  const subject = 'Xác nhận giao hàng VietRide';
+  const text = `Vui lòng xác nhận giao ${parcelCode} tại: ${deliveryUrl}`;
+  const escapedDeliveryUrl = this.escapeHtml(deliveryUrl);
 
-    return {
-      subject,
-      text,
-      html: this.paragraphs(subject, [
-        `Vui lòng xác nhận giao ${this.escapeHtml(parcelCode)}.`,
-        `<a href="${this.escapeHtml(deliveryUrl)}">Mở liên kết xác nhận</a>`,
-      ]),
-    };
-  }
+  return {
+    subject,
+    text,
+    html: this.paragraphs(subject, [
+      `Vui lòng xác nhận giao ${this.escapeHtml(parcelCode)}.`,
+      `<a href="${escapedDeliveryUrl}">Xác nhận đã nhận hàng</a>`,
+      'Nếu nút không hoạt động, hãy mở hoặc sao chép đường dẫn bên dưới:',
+      `<a href="${escapedDeliveryUrl}" style="word-break: break-all;">${escapedDeliveryUrl}</a>`,
+    ]),
+  };
+}
 
   private renderOperatorSubscriptionNotice(data: EmailTemplateData): RenderedEmail {
     const message = this.requiredString(data, 'message');
