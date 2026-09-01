@@ -5,7 +5,7 @@ namespace VietRide.Parcel.Application.Features.Parcels.AvailableTrips;
 
 public sealed record AvailableTripsQuery(
     Guid OriginStationId,
-    Guid DestinationStationId,
+    Guid? DestinationStationId,
     DateOnly DepartureDate,
     decimal LengthCm,
     decimal WidthCm,
@@ -14,7 +14,10 @@ public sealed record AvailableTripsQuery(
     string? SizeCategory,
     int Page = 1,
     int PageSize = 20,
-    Guid SenderUserId = default) : IQuery<PagedResult<AvailableTripResponse>>
+    Guid SenderUserId = default,
+    Guid? DropoffStopId = null,
+    string? DestinationProvinceCode = null,
+    string? DestinationLocationCode = null) : IQuery<PagedResult<AvailableTripResponse>>
 {
     public AvailableTripsQuery(
         Guid originStationId,

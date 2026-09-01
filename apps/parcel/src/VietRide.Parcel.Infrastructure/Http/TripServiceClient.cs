@@ -418,7 +418,14 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
                             item.EstimatedArrivalTime,
                             item.AvailableCargoWeightKg,
                             item.AvailableCargoVolumeM3,
-                            0))
+                            0,
+                            item.DropoffPoints?.Select(point => new TripDropoffPointDto(
+                                point.Type,
+                                point.StationId,
+                                point.StopId,
+                                point.Name,
+                                point.OrderIndex,
+                                point.EstimatedArrivalTime)).ToArray() ?? []))
                         .ToList();
 
                     return new ParcelTripSearchOutcome(
@@ -471,9 +478,30 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
             pageSize,
             cancellationToken);
 
-    public async Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsForRoutesAsync(
+    public Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsForRoutesAsync(
         Guid originStationId,
         Guid destinationStationId,
+        DateOnly departureDate,
+        decimal estimatedWeightKg,
+        decimal estimatedVolumeM3,
+        ParcelSizeCategory sizeCategory,
+        IReadOnlyCollection<Guid> eligibleRouteIds,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+        => SearchAvailableParcelTripsForRoutesAsync(
+            new ParcelTripAvailabilityFilter(originStationId, destinationStationId, null, null, null),
+            departureDate,
+            estimatedWeightKg,
+            estimatedVolumeM3,
+            sizeCategory,
+            eligibleRouteIds,
+            page,
+            pageSize,
+            cancellationToken);
+
+    public async Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsForRoutesAsync(
+        ParcelTripAvailabilityFilter filter,
         DateOnly departureDate,
         decimal estimatedWeightKg,
         decimal estimatedVolumeM3,
@@ -489,8 +517,11 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
                 "/internal/v1/trips/parcel-availability/search",
                 new
                 {
-                    originStationId,
-                    destinationStationId,
+                    originStationId = filter.OriginStationId,
+                    destinationStationId = filter.DestinationStationId,
+                    dropoffStopId = filter.DropoffStopId,
+                    destinationProvinceCode = filter.DestinationProvinceCode,
+                    destinationLocationCode = filter.DestinationLocationCode,
                     departureDate,
                     estimatedWeightKg,
                     estimatedVolumeM3,
@@ -539,7 +570,14 @@ public sealed class TripServiceClient : ITripServiceClient, IIdempotentTripServi
                 item.EstimatedArrivalTime,
                 item.AvailableCargoWeightKg,
                 item.AvailableCargoVolumeM3,
-                0)).ToArray();
+                0,
+                item.DropoffPoints?.Select(point => new TripDropoffPointDto(
+                    point.Type,
+                    point.StationId,
+                    point.StopId,
+                    point.Name,
+                    point.OrderIndex,
+                    point.EstimatedArrivalTime)).ToArray() ?? [])).ToArray();
 
             return new ParcelTripSearchOutcome(
                 ParcelTripSearchOutcomeKind.Success,

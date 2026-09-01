@@ -139,6 +139,41 @@ public sealed class GetBookingHistoryQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_WhenOperationalSeatIsUnassigned_ReturnsNullWithoutFallingBackToTicketAuditSeat()
+    {
+        var userId = Guid.NewGuid();
+        var booking = CreatePendingBooking(userId, 350_000);
+        booking.AddTicketedPassenger(
+            "A01",
+            TicketCode.Parse("VT-20260701-HIJKLMNO"),
+            Money.FromRaw(350_000),
+            Money.Zero,
+            Money.FromRaw(350_000));
+        booking.Passengers.Single().ApplyVehicleSubstitutionSeat(null);
+        var repository = Substitute.For<IBookingRepository>();
+        repository.ListPassengerHistoryAsync(
+                userId,
+                null,
+                null,
+                null,
+                1,
+                20,
+                Arg.Any<CancellationToken>())
+            .Returns(PagedResult<BookingEntity>.Create([booking], 1, 20, 1));
+        var handler = new GetBookingHistoryQueryHandler(
+            repository,
+            Substitute.For<IPaymentRedirectLookupClient>());
+
+        var result = await handler.Handle(
+            new GetBookingHistoryQuery(userId, null, null, null, 1, 20),
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle().Which.Tickets.Should().ContainSingle()
+            .Which.SeatNumber.Should().BeNull();
+        booking.Tickets.Single().SeatNumber.Should().Be("A01");
+    }
+
+    [Fact]
     public async Task Handle_WhenPublicHistoryIncludesShuttleRequests_MapsActiveAndCancelledIntentsInRequestOrder()
     {
         var userId = Guid.NewGuid();

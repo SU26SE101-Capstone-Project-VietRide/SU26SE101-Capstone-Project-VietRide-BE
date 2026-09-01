@@ -47,7 +47,14 @@ public sealed class AvailableTripsTests
             EstimatedArrival,
             50.0m,
             2.5m,
-            200_000);
+            200_000,
+            [new TripDropoffPointDto(
+                "STATION",
+                DestinationStationId,
+                null,
+                "Bến đến",
+                2,
+                EstimatedArrival)]);
 
         tripClient.SearchAvailableParcelTripsForRoutesAsync(
                 OriginStationId, DestinationStationId, DepartureDate,
@@ -88,6 +95,7 @@ public sealed class AvailableTripsTests
         item.EstimatedArrivalTime.Should().Be(EstimatedArrival);
         item.AvailableCargoWeightKg.Should().Be(50.0m);
         item.AvailableCargoVolumeM3.Should().Be(2.5m);
+        item.DropoffPoints.Should().BeEquivalentTo(tripDto.DropoffPoints);
         item.DepositPercent.Should().Be(20m);
         item.PriceVnd.Should().Be(150_000);
         var json = JsonSerializer.Serialize(item, new JsonSerializerOptions(JsonSerializerDefaults.Web));
@@ -364,6 +372,103 @@ public sealed class AvailableTripsTests
         var result = new AvailableTripsQueryValidator().Validate(query);
 
         result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validator_RejectsMissingMultipleOrOrphanedDestinationModes()
+    {
+        var validator = new AvailableTripsQueryValidator();
+        var stationQuery = new AvailableTripsQuery(
+            OriginStationId,
+            DestinationStationId,
+            DepartureDate,
+            10m,
+            10m,
+            10m,
+            WeightKg,
+            null,
+            Page,
+            PageSize);
+
+        validator.Validate(stationQuery with { DestinationStationId = null }).IsValid.Should().BeFalse();
+        validator.Validate(stationQuery with { DropoffStopId = Guid.NewGuid() }).IsValid.Should().BeFalse();
+        validator.Validate(stationQuery with
+        {
+            DestinationStationId = null,
+            DestinationLocationCode = "760",
+        }).IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Handle_LocationMode_ForwardsHierarchyAndReturnsTypedDropoffPoints()
+    {
+        var tripClient = Substitute.For<ITripServiceClient>();
+        var identityClient = Substitute.For<IIdentityServiceClient>();
+        var fareRepo = Substitute.For<IParcelRouteFareRepository>();
+        var stopId = Guid.NewGuid();
+        var tripDto = CreateTripDto(TripId, RouteId, "Test Operator", Departure, 50m, 2.5m) with
+        {
+            DropoffPoints =
+            [
+                new TripDropoffPointDto(
+                    "STOP",
+                    null,
+                    stopId,
+                    "Điểm trả Quận 1",
+                    1,
+                    Departure.AddHours(2)),
+            ],
+        };
+        tripClient.SearchAvailableParcelTripsForRoutesAsync(
+                Arg.Is<ParcelTripAvailabilityFilter>(filter =>
+                    filter.OriginStationId == OriginStationId
+                    && filter.DestinationStationId == null
+                    && filter.DropoffStopId == null
+                    && filter.DestinationProvinceCode == "79"
+                    && filter.DestinationLocationCode == "760"),
+                DepartureDate,
+                Arg.Any<decimal>(),
+                Arg.Any<decimal>(),
+                Arg.Any<ParcelSizeCategory>(),
+                Arg.Any<IReadOnlyCollection<Guid>>(),
+                Page,
+                PageSize,
+                Arg.Any<CancellationToken>())
+            .Returns(new ParcelTripSearchOutcome(
+                ParcelTripSearchOutcomeKind.Success,
+                [tripDto],
+                1,
+                Page,
+                PageSize,
+                null));
+        var fare = ParcelRouteFare.Create(
+            RouteId,
+            ParcelSizeCategory.SMALL,
+            OperatorId,
+            Money.FromRaw(150_000),
+            Now);
+        fare.UpdateWeightPricing(Money.FromRaw(1), Money.FromRaw(150_000));
+        fareRepo.QueryNoTracking().Returns(new[] { fare }.AsQueryable());
+
+        var handler = new AvailableTripsQueryHandler(tripClient, identityClient, fareRepo);
+        var result = await handler.Handle(
+            new AvailableTripsQuery(
+                OriginStationId,
+                null,
+                DepartureDate,
+                10m,
+                10m,
+                10m,
+                1m,
+                null,
+                Page,
+                PageSize,
+                DestinationProvinceCode: "79",
+                DestinationLocationCode: "760"),
+            CancellationToken.None);
+
+        result.Items.Should().ContainSingle().Which.DropoffPoints
+            .Should().BeEquivalentTo(tripDto.DropoffPoints);
     }
 
     [Fact]

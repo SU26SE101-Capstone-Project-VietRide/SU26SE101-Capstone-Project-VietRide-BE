@@ -22,4 +22,5 @@ public sealed record ParcelTripDto(
     DateTimeOffset EstimatedArrivalTime,
     decimal AvailableCargoWeightKg,
     decimal AvailableCargoVolumeM3,
-    long PriceVnd = 0);
+    long PriceVnd = 0,
+    IReadOnlyList<TripDropoffPointDto>? DropoffPoints = null);

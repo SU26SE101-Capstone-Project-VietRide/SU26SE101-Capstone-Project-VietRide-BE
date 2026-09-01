@@ -1,7 +1,7 @@
 # VietRide — Technical Project Context (Agent-Ready v7)
 
 > **Capstone:** SU26SE101 — SU26
-> **Cập nhật:** 2026-09-01 (Shuttle Booking unassignment lifecycle)
+> **Cập nhật:** 2026-09-01 (Shuttle Booking unassignment lifecycle; Passenger Mobile Parcel destination discovery reconciliation)
 >
 > ## ⚠️ Đọc trước khi dùng — Mục đích của doc này
 >
@@ -3055,48 +3055,40 @@ Hành khách tạo yêu cầu gửi hàng theo chuyến. Có **2 use case** đ�
 - Passenger lên xe cùng hàng tại pickup stop của booking
 
 **Use case B — Gửi hàng không đi cùng (parcel-only, không có booking):**
-- Passenger App có tab riêng "Gửi hàng" → nhập origin/destination/ngày → call **`GET /parcels/available-trips`** (endpoint riêng tách khỏi `/trips/search`)
+- Passenger App có tab riêng "Gửi hàng" → chọn bến gửi, vùng/điểm trả và ngày → call **`GET /parcels/available-trips`** (endpoint riêng tách khỏi `/trips/search`)
 - Endpoint trả về danh sách Trip còn cargo capacity theo full formula
   `maxCargoWeightKg - estimatedPassengerLuggageKg - reservedParcelWeightKg - totalLoadedWeightKg >= estimatedWeightKg`,
-  filter theo route + ngày
-- Passenger chọn chuyến → nhập info hàng + người nhận → thanh toán → hệ thống flag parcel này không có Booking liên quan, người gửi mang hàng đến bến xuất phát trước giờ khởi hành
+  filter theo Route origin + destination Station/Stop/Location scope + ngày
+- Passenger chọn chuyến và một typed `dropoffPoint` → nhập info hàng + người nhận → thanh toán → hệ thống flag parcel này không có Booking liên quan, người gửi mang hàng đến bến xuất phát trước giờ khởi hành
 - Không cần passenger có Booking trên chuyến đó
 
 **`GET /parcels/available-trips` — search criteria spec:**
 ```
 Query params:
-  originCity    string (bắt buộc)       — tên tỉnh/thành phố gửi, ví dụ "Hồ Chí Minh"
-  destCity      string (bắt buộc)       — tỉnh/thành phố nhận
-  date          date ISO 8601 (bắt buộc)— ngày khởi hành
-  weightKg      decimal (optional)      — trọng lượng ước tính để filter cargo capacity
+  originStationId           UUID (bắt buộc) — parcel chỉ nhận tại Route origin Station
+  destinationStationId      UUID (mode 1)   — exact Route destination Station
+  dropoffStopId             UUID (mode 2)   — exact active TripStop cho phép drop-off
+  destinationProvinceCode   string (mode 3) — active top-level Location
+  destinationLocationCode   string optional — active leaf trực tiếp thuộc province
+  departureDate             date ISO 8601
+  dimensions + weight       decimal dương để derive chargeable weight/size/capacity
 
 Flow search:
-  1. User nhập tên tỉnh/thành phố (text input với autocomplete city list)
-  2. Backend query Station WHERE city ILIKE :originCity → trả list Station tại khu vực đó
-     (cùng lúc hoặc lazy load tùy UX)
-  3. User chọn Station cụ thể (ví dụ: "Bến xe Miền Đông" hoặc "Bến xe An Sương")
-     → FE update query với stationId cụ thể
-  4. Backend filter Trip:
-       Route.originStationId IN (stations của originCity)
-       Route.destinationStationId IN (stations của destCity)
-       Trip.departureDateTime::date = :date
-       Trip.status = SCHEDULED
-       Trip.maxCargoWeightKg
-         - Trip.estimatedPassengerLuggageKg
-         - Trip.reservedParcelWeightKg
-         - Trip.totalLoadedWeightKg >= :weightKg (nếu có)
-  5. Response: list Trip với { tripId, routeName, operatorName, departureDateTime,
-       originStationName, destinationStationName, availableCargoKg, parcelFares: { SMALL, MEDIUM, LARGE } }
-
-Lý do search theo city trước rồi đề xuất Station:
-  Người gửi thường biết "gửi từ Sài Gòn đi Hà Nội" nhưng không biết chính xác
-  bến nào — hệ thống liệt kê các bến đang có chuyến để user chọn phù hợp.
-  Nhất quán với cách `/trips/search` hoạt động cho passenger booking.
+  1. User chọn một origin Station cụ thể; không có pickup Stop cho Parcel.
+  2. Destination dùng chính xác một trong ba mode: destination Station, exact Stop, hoặc Location scope.
+  3. Backend lọc Route active có exact origin, Trip SCHEDULED có Assistant, ngày, active Parcel fare,
+     cargo weight/volume và ít nhất một destination point hợp lệ trước count/pagination.
+  4. Stop hợp lệ phải là canonical Stop active/non-deleted, thuộc ordered TripStop snapshot và
+     TripStop.allowDropoff=true. Location mode khớp cả Route destination Station lẫn Stop hợp lệ.
+  5. Response giữ Route origin/destination Station và trả typed `dropoffPoints` với XOR
+     `stationId|stopId`, name, orderIndex, estimatedArrivalTime để FE chọn mà không fan-out Trip detail.
+  6. `dropoffStopId=null` khi create nghĩa là destination Station; non-null phải là Stop đã được
+     Trip snapshot revalidate. Mọi điểm trả dùng cùng `ParcelRouteFare {routeId,sizeCategory}`.
 ```
 
 **Lý do tách endpoint `/parcels/available-trips` thay vì dùng chung `/trips/search`:**
 - Filter logic khác (cargo capacity vs seat availability)
-- UX khác (không hiện sơ đồ ghế, không cho chọn pickup stop dọc tuyến — parcel chỉ giao bến đích)
+- UX khác (không hiện sơ đồ ghế, không cho chọn pickup Stop; destination có thể là bến đích hoặc Stop dọc tuyến)
 - Permission khác (có thể mở rộng v2: parcel-only cho phép guest không cần account, search-trip cần auth)
 
 **Channels khác:**

@@ -1522,6 +1522,10 @@ Response `200`:
 
 Validation failures return `422 VALIDATION_ERROR`.
 
+`tickets[].seatNumber` is the nullable current operational seat from `Passenger.SeatNumber`, not
+the immutable Ticket audit seat. It is `null` while a replacement passenger is legitimately
+waiting for assignment; clients must not fall back to the old Ticket seat.
+
 `vehicle` is always serialized and is either
 `{ "licensePlate": string, "vehicleType": { "code": string, "displayName": string } | null }`
 for the Trip's current Vehicle or `null`. System-defined and operator-custom Vehicle Types use the
@@ -3483,7 +3487,19 @@ Parcel cargo policy:
 
 Auth: `PASSENGER`.
 
-Query: `originStationId`, `destinationStationId`, `departureDate`, `lengthCm`, `widthCm`, `heightCm`, `estimatedWeightKg`; legacy `sizeCategory` is optional and non-authoritative.
+Query always requires `originStationId`, `departureDate`, `lengthCm`, `widthCm`, `heightCm`, and
+`estimatedWeightKg`; legacy `sizeCategory` is optional and non-authoritative. Destination must use
+exactly one mode:
+
+- terminal mode: `destinationStationId`;
+- exact Stop mode: `dropoffStopId`;
+- Location discovery mode: `destinationProvinceCode` plus optional `destinationLocationCode`.
+
+Combining destination modes, supplying `destinationLocationCode` without its province, or supplying
+none returns `422 VALIDATION_ERROR`. The province must be active/top-level. A supplied destination
+Location must be an active leaf directly under that province; omitting it expands to the province
+and all active leaf children. Pickup remains the exact Route origin Station and never accepts a
+pickup Stop.
 
 Only Trips whose status is `SCHEDULED` are eligible. `BOARDING` Trips are excluded before count
 and pagination because the Parcel check-in deadline has already closed when boarding starts.
@@ -3510,6 +3526,24 @@ Response `200`:
         "operatorName": "VietRide Express",
         "originStation": { "id": "uuid", "name": "Bến đi" },
         "destinationStation": { "id": "uuid", "name": "Bến đến" },
+        "dropoffPoints": [
+          {
+            "type": "STOP",
+            "stationId": null,
+            "stopId": "uuid",
+            "name": "Điểm trả Cầu Giấy",
+            "orderIndex": 3,
+            "estimatedArrivalTime": "2026-05-18T15:30:00+07:00"
+          },
+          {
+            "type": "STATION",
+            "stationId": "uuid",
+            "stopId": null,
+            "name": "Bến đến",
+            "orderIndex": 4,
+            "estimatedArrivalTime": "2026-05-18T16:00:00+07:00"
+          }
+        ],
         "departureDateTime": "2026-05-18T08:00:00+07:00",
         "estimatedArrivalTime": "2026-05-18T16:00:00+07:00",
         "quoteToken": "base64url-payload.base64url-signature",
@@ -3537,11 +3571,18 @@ Response `200`:
 under settlement policy v2 and is snapshotted on creation. The public item does not serialize
 `availableCargoWeightKg`, `availableCargoVolumeM3`, or the internal `priceVnd` alias.
 
+`dropoffPoints` is ordered by `orderIndex`, then point ID. Identity is XOR: `STATION` sets only
+`stationId`; `STOP` sets only `stopId`. Terminal mode returns the exact Route destination point;
+exact Stop mode returns that Stop; Location mode returns every matching destination Station/Stop
+for the Trip. Stop points require an active, non-deleted canonical Stop in the Trip's ordered
+snapshot with `allowDropoff=true`. Destination eligibility, fare-route filtering, assigned
+Assistant, cargo capacity, count and pagination are all applied before the public page is returned.
+
 Parcel obtains this page through internal
-`POST /internal/v1/trips/parcel-availability/search`. The read-only POST accepts the existing
-availability filters plus `eligibleRouteIds`; Trip applies that filter before count/pagination and
-also excludes Trips without an assigned Assistant before count/pagination. It returns the existing
-raw `PagedResult<ParcelTripAvailabilityItemDto>`. The legacy internal GET
+`POST /internal/v1/trips/parcel-availability/search`. The read-only POST accepts the public
+destination selector modes, existing availability filters and `eligibleRouteIds`; Trip applies
+those filters before count/pagination and excludes Trips without an assigned Assistant. It returns
+the additive typed `dropoffPoints` in raw `PagedResult<ParcelTripAvailabilityItemDto>`. The legacy internal GET
 `/internal/v1/trips/parcel-availability` remains available during rollout.
 
 ### POST `/v1/parcels`
@@ -3638,6 +3679,11 @@ category, amount, dimensions or weight cannot reinterpret the signed quote. Sign
 policy/fare drift and request mismatch return `409 PARCEL_QUOTE_INVALID`,
 `PARCEL_QUOTE_EXPIRED`, `PARCEL_QUOTE_STALE`, and `PARCEL_QUOTE_MISMATCH`, respectively. Legacy
 requests without a token remain supported.
+
+All eligible Stop and terminal drop-offs use the same Route fare. The quote token therefore remains
+bound to the Trip/Route/station pair and is intentionally not Stop-bound. Create revalidates a
+non-null `dropoffStopId` against current Trip membership, active state and `allowDropoff`; an
+inactive/missing Stop returns `422 DROP_OFF_STOP_NOT_FOUND` without writes.
 
 `quantity` is an immutable positive integer (default `1` for backward compatibility).
 `declaredValueVnd` is optional, non-negative integer VND. The response discloses the exact
@@ -3806,6 +3852,9 @@ Response `200` item shape:
   "paymentRedirectUrl": null
 }
 ```
+
+For `TICKET`, `ticket.tickets[].seatNumber` has the same nullable operational-seat semantics as
+Booking History. Parcel forwards `null` unchanged and never substitutes the immutable Ticket seat.
 
 For `PARCEL`, `ticket` is null and `parcel` is
 `{ bookingId, recipientName, sizeCategory, photoUrl, deliveryMethod }`. Exactly one of `ticket` or
@@ -5469,6 +5518,9 @@ Allowed action types are `OPEN_BOOKING_DETAIL`, `OPEN_CREW_TRIP_BOOKING`, `OPEN_
 navigation data resolves to `NONE`; it never fails the inbox read. IDs remain in `data` and
 `action.params` for client navigation but system-generated `title`/`body` use human-readable
 codes/names or a natural-language fallback instead of raw UUIDs. Existing rows are not backfilled.
+For `VEHICLE_SUBSTITUTED`, a valid `bookingId` takes precedence and resolves to
+`OPEN_BOOKING_DETAIL`; when `bookingId` is absent, a valid `tripId` retains the existing
+`OPEN_TRIP_DETAIL` fallback for Operator/Crew notifications. REST and FCM use this same resolver.
 For Shuttle notifications, `OPEN_SHUTTLE_TRACKING.params` always contains `shuttleTripId` and
 additively preserves `bookingId` plus `pickupOrder` when the event identifies a passenger pickup,
 so clients can select the correct stop when one Shuttle Trip serves multiple Booking groups.

@@ -102,6 +102,36 @@ public interface ITripServiceClient
         CancellationToken cancellationToken = default);
 
     Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsForRoutesAsync(
+        ParcelTripAvailabilityFilter filter,
+        DateOnly departureDate,
+        decimal estimatedWeightKg,
+        decimal estimatedVolumeM3,
+        ParcelSizeCategory sizeCategory,
+        IReadOnlyCollection<Guid> eligibleRouteIds,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+        => filter.DestinationStationId.HasValue
+            ? SearchAvailableParcelTripsForRoutesAsync(
+                filter.OriginStationId,
+                filter.DestinationStationId.Value,
+                departureDate,
+                estimatedWeightKg,
+                estimatedVolumeM3,
+                sizeCategory,
+                eligibleRouteIds,
+                page,
+                pageSize,
+                cancellationToken)
+            : Task.FromResult(new ParcelTripSearchOutcome(
+                ParcelTripSearchOutcomeKind.TransportError,
+                null,
+                0,
+                page,
+                pageSize,
+                "This Trip client does not support Stop or location parcel availability search."));
+
+    Task<ParcelTripSearchOutcome> SearchAvailableParcelTripsForRoutesAsync(
         Guid originStationId,
         Guid destinationStationId,
         DateOnly departureDate,

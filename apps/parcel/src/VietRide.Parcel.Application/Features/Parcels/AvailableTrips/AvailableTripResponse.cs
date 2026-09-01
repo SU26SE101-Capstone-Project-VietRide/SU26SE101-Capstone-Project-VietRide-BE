@@ -30,4 +30,6 @@ public sealed record AvailableTripResponse(
 
     [JsonIgnore]
     public decimal AvailableCargoVolumeM3 { get; init; }
+
+    public IReadOnlyList<TripDropoffPointDto> DropoffPoints { get; init; } = [];
 }

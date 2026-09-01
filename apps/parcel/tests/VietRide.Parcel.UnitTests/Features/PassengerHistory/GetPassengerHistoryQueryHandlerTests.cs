@@ -46,7 +46,10 @@ public sealed class GetPassengerHistoryQueryHandlerTests
             null,
             null,
             "Route",
-            [new BookingHistoryTicketDto(Guid.NewGuid(), "VT-20260701-ABCDEFGH", "A01", "ISSUED", 350_000)],
+            [
+                new BookingHistoryTicketDto(Guid.NewGuid(), "VT-20260701-ABCDEFGH", "A01", "ISSUED", 350_000),
+                new BookingHistoryTicketDto(Guid.NewGuid(), "VT-20260701-HIJKLMNO", null, "ISSUED", 350_000),
+            ],
             "https://sandbox.vnpayment.vn/ticket",
             DropoffStopId: dropoffStopId,
             Vehicle: new BookingHistoryVehicleDto(
@@ -87,7 +90,8 @@ public sealed class GetPassengerHistoryQueryHandlerTests
         result.Items[0].Type.Should().Be("TICKET");
         result.Items[0].Ticket.Should().NotBeNull();
         result.Items[0].Parcel.Should().BeNull();
-        result.Items[0].Ticket!.Tickets.Should().ContainSingle();
+        result.Items[0].Ticket!.Tickets.Select(ticket => ticket.SeatNumber)
+            .Should().Equal("A01", null);
         result.Items[0].Ticket!.Vehicle.Should().BeEquivalentTo(new PassengerHistoryVehicleDto(
             "51B-123.45",
             new PassengerHistoryVehicleTypeDto("LIMOUSINE", "Limousine")));
