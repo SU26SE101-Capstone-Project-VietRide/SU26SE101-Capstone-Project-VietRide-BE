@@ -105,6 +105,56 @@ internal sealed class BookingConfiguration : IEntityTypeConfiguration<BookingEnt
             .HasColumnType("uuid")
             .IsRequired(false);
 
+        builder.Property(x => x.PickupPointTypeSnapshot)
+            .HasColumnName("pickup_point_type_snapshot")
+            .HasMaxLength(16)
+            .IsRequired(false);
+
+        builder.Property(x => x.PickupPointIdSnapshot)
+            .HasColumnName("pickup_point_id_snapshot")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
+        builder.Property(x => x.PickupPointNameSnapshot)
+            .HasColumnName("pickup_point_name_snapshot")
+            .HasMaxLength(255)
+            .IsRequired(false);
+
+        builder.Property(x => x.PickupPointAddressSnapshot)
+            .HasColumnName("pickup_point_address_snapshot")
+            .HasMaxLength(500)
+            .IsRequired(false);
+
+        builder.Property(x => x.PickupPointPlannedAtSnapshot)
+            .HasColumnName("pickup_point_planned_at_snapshot")
+            .HasColumnType("timestamp with time zone")
+            .IsRequired(false);
+
+        builder.Property(x => x.DropoffPointTypeSnapshot)
+            .HasColumnName("dropoff_point_type_snapshot")
+            .HasMaxLength(16)
+            .IsRequired(false);
+
+        builder.Property(x => x.DropoffPointIdSnapshot)
+            .HasColumnName("dropoff_point_id_snapshot")
+            .HasColumnType("uuid")
+            .IsRequired(false);
+
+        builder.Property(x => x.DropoffPointNameSnapshot)
+            .HasColumnName("dropoff_point_name_snapshot")
+            .HasMaxLength(255)
+            .IsRequired(false);
+
+        builder.Property(x => x.DropoffPointAddressSnapshot)
+            .HasColumnName("dropoff_point_address_snapshot")
+            .HasMaxLength(500)
+            .IsRequired(false);
+
+        builder.Property(x => x.DropoffPointPlannedAtSnapshot)
+            .HasColumnName("dropoff_point_planned_at_snapshot")
+            .HasColumnType("timestamp with time zone")
+            .IsRequired(false);
+
         builder.Property(x => x.BaseFare)
             .HasColumnName("base_fare")
             .HasColumnType("bigint")

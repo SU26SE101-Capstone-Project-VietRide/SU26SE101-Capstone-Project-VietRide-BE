@@ -29,6 +29,11 @@ public sealed class RouteChangeResolverTests
         accepted.Action.ResolvedAction.Should().Be(BookingPendingActionResolved.ACCEPTED);
         accepted.Booking.Status.Should().Be(BookingStatus.CONFIRMED);
         accepted.Booking.PickupStopId.Should().Be(accepted.CandidateStopId);
+        accepted.Booking.PickupPointTypeSnapshot.Should().Be(BookingPointSnapshot.StopType);
+        accepted.Booking.PickupPointIdSnapshot.Should().Be(accepted.CandidateStopId);
+        accepted.Booking.PickupPointNameSnapshot.Should().Be("Alternative stop");
+        accepted.Booking.PickupPointAddressSnapshot.Should().BeNull();
+        accepted.Booking.PickupPointPlannedAtSnapshot.Should().Be(Now.AddMinutes(15));
         accepted.Booking.TotalAmount.Amount.Should().Be(100_001);
         await accepted.Outbox.DidNotReceiveWithAnyArgs()
             .EnqueueAsync(default, default!, default!, default);

@@ -37,6 +37,18 @@ public sealed class Booking : BaseEntity<Guid>
     public Guid? DropoffStationId { get; private set; }
     public Guid? DropoffStopId { get; private set; }
 
+    // Stable selected-point snapshots for passenger-visible history.
+    public string? PickupPointTypeSnapshot { get; private set; }
+    public Guid? PickupPointIdSnapshot { get; private set; }
+    public string? PickupPointNameSnapshot { get; private set; }
+    public string? PickupPointAddressSnapshot { get; private set; }
+    public DateTimeOffset? PickupPointPlannedAtSnapshot { get; private set; }
+    public string? DropoffPointTypeSnapshot { get; private set; }
+    public Guid? DropoffPointIdSnapshot { get; private set; }
+    public string? DropoffPointNameSnapshot { get; private set; }
+    public string? DropoffPointAddressSnapshot { get; private set; }
+    public DateTimeOffset? DropoffPointPlannedAtSnapshot { get; private set; }
+
     // Amounts — BIGINT VND; total_amount immutable after INSERT
     public Money BaseFare { get; private set; }
     public Money DiscountAmount { get; private set; }
@@ -105,7 +117,9 @@ public sealed class Booking : BaseEntity<Guid>
         string? buyerDisplayName = null,
         string? buyerPhone = null,
         string? buyerEmail = null,
-        string? buyerAvatarUrl = null)
+        string? buyerAvatarUrl = null,
+        BookingPointSnapshot? pickupPointSnapshot = null,
+        BookingPointSnapshot? dropoffPointSnapshot = null)
     {
         // Pickup: exactly one must be set
         var pickupCount = (pickupStationId.HasValue ? 1 : 0) + (pickupStopId.HasValue ? 1 : 0);
@@ -151,6 +165,9 @@ public sealed class Booking : BaseEntity<Guid>
             BookingGroupId = bookingGroupId,
             TripDirection = tripDirection,
         };
+
+        booking.ApplyPickupPointSnapshot(pickupPointSnapshot);
+        booking.ApplyDropoffPointSnapshot(dropoffPointSnapshot);
 
         if (buyerDisplayName is not null
             || buyerPhone is not null
@@ -325,7 +342,10 @@ public sealed class Booking : BaseEntity<Guid>
     /// Changes the pickup target. Exactly one pickup station or pickup stop must be provided.
     /// Only confirmed bookings may be edited.
     /// </summary>
-    public void ChangePickup(Guid? pickupStationId, Guid? pickupStopId)
+    public void ChangePickup(
+        Guid? pickupStationId,
+        Guid? pickupStopId,
+        BookingPointSnapshot? pointSnapshot = null)
     {
         EnsureConfirmedForEdit();
 
@@ -339,12 +359,16 @@ public sealed class Booking : BaseEntity<Guid>
 
         PickupStationId = pickupStationId;
         PickupStopId = pickupStopId;
+        ApplyPickupPointSnapshot(pointSnapshot);
     }
 
     /// <summary>
     /// Changes the dropoff target. At most one dropoff station or dropoff stop may be provided.
     /// </summary>
-    public void ChangeDropoff(Guid? dropoffStationId, Guid? dropoffStopId)
+    public void ChangeDropoff(
+        Guid? dropoffStationId,
+        Guid? dropoffStopId,
+        BookingPointSnapshot? pointSnapshot = null)
     {
         EnsureConfirmedForEdit();
 
@@ -358,6 +382,25 @@ public sealed class Booking : BaseEntity<Guid>
 
         DropoffStationId = dropoffStationId;
         DropoffStopId = dropoffStopId;
+        ApplyDropoffPointSnapshot(pointSnapshot);
+    }
+
+    private void ApplyPickupPointSnapshot(BookingPointSnapshot? snapshot)
+    {
+        PickupPointTypeSnapshot = snapshot?.Type;
+        PickupPointIdSnapshot = snapshot?.Id;
+        PickupPointNameSnapshot = snapshot?.DisplayName;
+        PickupPointAddressSnapshot = snapshot?.Address;
+        PickupPointPlannedAtSnapshot = snapshot?.PlannedAt;
+    }
+
+    private void ApplyDropoffPointSnapshot(BookingPointSnapshot? snapshot)
+    {
+        DropoffPointTypeSnapshot = snapshot?.Type;
+        DropoffPointIdSnapshot = snapshot?.Id;
+        DropoffPointNameSnapshot = snapshot?.DisplayName;
+        DropoffPointAddressSnapshot = snapshot?.Address;
+        DropoffPointPlannedAtSnapshot = snapshot?.PlannedAt;
     }
 
     /// <summary>

@@ -280,7 +280,15 @@ public class CreateBookingCommandHandlerTests
             Stops =
             [
                 new TripStopSnapshot(
-                    pickupStopId, 1, true, true, ValidTrip.DepartureDateTime, 10, 260_000, true),
+                    pickupStopId,
+                    1,
+                    true,
+                    true,
+                    ValidTrip.DepartureDateTime,
+                    10,
+                    260_000,
+                    true,
+                    Name: "C"),
             ],
         };
         _clock.UtcNow.Returns(now);
@@ -306,7 +314,15 @@ public class CreateBookingCommandHandlerTests
         result.TotalAmount.Should().Be(250_000);
         result.Tickets.Should().ContainSingle().Which.FareAmount.Should().Be(260_000);
         await _bookings.Received(1).AddAsync(
-            Arg.Is<BookingEntity>(booking => booking.BaseFare.Amount == 260_000),
+            Arg.Is<BookingEntity>(booking => booking.BaseFare.Amount == 260_000
+                && booking.PickupPointTypeSnapshot == "STOP"
+                && booking.PickupPointIdSnapshot == pickupStopId
+                && booking.PickupPointNameSnapshot == "C"
+                && booking.PickupPointPlannedAtSnapshot == ValidTrip.DepartureDateTime
+                && booking.DropoffPointTypeSnapshot == "STATION"
+                && booking.DropoffPointIdSnapshot == ValidTrip.DestinationStation.Id
+                && booking.DropoffPointNameSnapshot == ValidTrip.DestinationStation.Name
+                && booking.DropoffPointPlannedAtSnapshot == ValidTrip.EstimatedArrivalTime),
             Arg.Any<CancellationToken>());
         await _voucherService.Received(1).ValidateAndComputeDiscountAsync(
             "HOLIDAY10",

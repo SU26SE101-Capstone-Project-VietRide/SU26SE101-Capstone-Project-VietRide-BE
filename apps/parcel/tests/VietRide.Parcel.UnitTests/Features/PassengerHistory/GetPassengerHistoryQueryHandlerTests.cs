@@ -29,7 +29,10 @@ public sealed class GetPassengerHistoryQueryHandlerTests
         var bookingClient = Substitute.For<IBookingServiceClient>();
         var parcelRepository = Substitute.For<IParcelRepository>();
         var tripClient = Substitute.For<ITripServiceClient>();
+        var pickupStopId = Guid.NewGuid();
         var dropoffStopId = Guid.NewGuid();
+        var pickupPlannedAt = DateTimeOffset.UtcNow.AddHours(2);
+        var dropoffPlannedAt = DateTimeOffset.UtcNow.AddHours(4);
         var booking = new BookingHistoryItemDto(
             Guid.NewGuid(),
             "VR-20260701-ABCDEFGH",
@@ -48,7 +51,19 @@ public sealed class GetPassengerHistoryQueryHandlerTests
             DropoffStopId: dropoffStopId,
             Vehicle: new BookingHistoryVehicleDto(
                 "51B-123.45",
-                new BookingHistoryVehicleTypeDto("LIMOUSINE", "Limousine")));
+                new BookingHistoryVehicleTypeDto("LIMOUSINE", "Limousine")),
+            PickupPoint: new BookingHistoryPointDto(
+                "STOP",
+                pickupStopId,
+                "B",
+                "Điểm B",
+                pickupPlannedAt),
+            DropoffPoint: new BookingHistoryPointDto(
+                "STOP",
+                dropoffStopId,
+                "C",
+                "Điểm C",
+                dropoffPlannedAt));
         bookingClient.GetPassengerHistoryAsync(
                 userId,
                 "CONFIRMED",
@@ -76,6 +91,20 @@ public sealed class GetPassengerHistoryQueryHandlerTests
         result.Items[0].Ticket!.Vehicle.Should().BeEquivalentTo(new PassengerHistoryVehicleDto(
             "51B-123.45",
             new PassengerHistoryVehicleTypeDto("LIMOUSINE", "Limousine")));
+        result.Items[0].OriginName.Should().Be("Origin");
+        result.Items[0].DestinationName.Should().Be("Destination");
+        result.Items[0].Ticket!.PickupPoint.Should().BeEquivalentTo(new PassengerHistoryPointDto(
+            "STOP",
+            pickupStopId,
+            "B",
+            "Điểm B",
+            pickupPlannedAt));
+        result.Items[0].Ticket!.DropoffPoint.Should().BeEquivalentTo(new PassengerHistoryPointDto(
+            "STOP",
+            dropoffStopId,
+            "C",
+            "Điểm C",
+            dropoffPlannedAt));
         result.Items[0].PaymentRedirectUrl.Should().Be("https://sandbox.vnpayment.vn/ticket");
         result.Items[0].TrackingTarget.Should().BeEquivalentTo(new
         {

@@ -29,22 +29,38 @@ public sealed class GetBookingHistoryQueryHandlerTests
         var userId = Guid.NewGuid();
         var createdAt = new DateTimeOffset(2026, 7, 1, 2, 0, 0, TimeSpan.Zero);
         var departure = new DateTimeOffset(2026, 7, 2, 1, 0, 0, TimeSpan.Zero);
+        var pickupStopId = Guid.NewGuid();
+        var dropoffStationId = Guid.NewGuid();
+        var pickupPlannedAt = departure.AddHours(2);
+        var dropoffPlannedAt = departure.AddHours(6);
         var booking = BookingEntity.CreatePendingPayment(
             BookingCode.Parse("VR-20260701-ABCDEFGH"),
             userId,
             Guid.NewGuid(),
             Guid.NewGuid(),
-            Guid.NewGuid(),
             null,
-            Guid.NewGuid(),
+            pickupStopId,
+            dropoffStationId,
             null,
             Money.FromRaw(350_000),
             Money.Zero,
             Money.FromRaw(350_000),
-            "Origin",
-            "Destination",
+            "A",
+            "D",
             departure,
-            "Route name");
+            "A - D",
+            pickupPointSnapshot: new BookingPointSnapshot(
+                "STOP",
+                pickupStopId,
+                "C",
+                "Điểm C",
+                pickupPlannedAt),
+            dropoffPointSnapshot: new BookingPointSnapshot(
+                "STATION",
+                dropoffStationId,
+                "D",
+                "Bến D",
+                dropoffPlannedAt));
         booking.CreatedAt = createdAt;
         booking.AddTicketedPassenger(
             "A01",
@@ -90,7 +106,20 @@ public sealed class GetBookingHistoryQueryHandlerTests
         result.Items.Should().ContainSingle();
         var item = result.Items[0];
         item.BookingCode.Should().Be("VR-20260701-ABCDEFGH");
-        item.OriginName.Should().Be("Origin");
+        item.OriginName.Should().Be("A");
+        item.DestinationName.Should().Be("D");
+        item.PickupPoint.Should().BeEquivalentTo(new BookingHistoryPointDto(
+            "STOP",
+            pickupStopId,
+            "C",
+            "Điểm C",
+            pickupPlannedAt));
+        item.DropoffPoint.Should().BeEquivalentTo(new BookingHistoryPointDto(
+            "STATION",
+            dropoffStationId,
+            "D",
+            "Bến D",
+            dropoffPlannedAt));
         item.DepartureDateTime.Should().Be(departure);
         item.Tickets.Should().ContainSingle();
         item.Tickets[0].Should().BeEquivalentTo(new BookingHistoryTicketDto(

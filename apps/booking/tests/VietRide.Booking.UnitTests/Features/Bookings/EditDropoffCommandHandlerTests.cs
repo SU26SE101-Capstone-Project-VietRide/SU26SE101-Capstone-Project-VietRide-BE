@@ -71,6 +71,10 @@ public sealed class EditDropoffCommandHandlerTests
         result.FareDelta.Should().Be(0);
         booking.DropoffStationId.Should().BeNull();
         booking.DropoffStopId.Should().Be(ValidDropoffStopId);
+        booking.DropoffPointTypeSnapshot.Should().Be("STOP");
+        booking.DropoffPointIdSnapshot.Should().Be(ValidDropoffStopId);
+        booking.DropoffPointNameSnapshot.Should().Be("Valid dropoff stop");
+        booking.DropoffPointPlannedAtSnapshot.Should().Be(Now.AddHours(3));
         _bookings.Received(1).Update(booking);
     }
 
@@ -243,10 +247,10 @@ public sealed class EditDropoffCommandHandlerTests
             DestinationStation: new TripStationSnapshot(DestinationStationId, "Đà Nẵng"),
             Stops:
             [
-                new TripStopSnapshot(EarlierDropoffStopId, 1, true, true, Now.AddHours(1), 42.5, 200_000),
-                new TripStopSnapshot(PickupStopId, 2, true, true, Now.AddHours(2), 84.0, 200_000),
-                new TripStopSnapshot(ValidDropoffStopId, 3, true, true, Now.AddHours(3), 126.0, 200_000),
-                new TripStopSnapshot(DisallowedDropoffStopId, 4, true, false, Now.AddHours(4), 168.0, 200_000),
+                new TripStopSnapshot(EarlierDropoffStopId, 1, true, true, Now.AddHours(1), 42.5, 200_000, Name: "Earlier stop"),
+                new TripStopSnapshot(PickupStopId, 2, true, true, Now.AddHours(2), 84.0, 200_000, Name: "Pickup stop"),
+                new TripStopSnapshot(ValidDropoffStopId, 3, true, true, Now.AddHours(3), 126.0, 200_000, Name: "Valid dropoff stop"),
+                new TripStopSnapshot(DisallowedDropoffStopId, 4, true, false, Now.AddHours(4), 168.0, 200_000, Name: "Disallowed dropoff stop"),
             ],
             SeatSummary: new TripSeatSummary(40, 38));
 }

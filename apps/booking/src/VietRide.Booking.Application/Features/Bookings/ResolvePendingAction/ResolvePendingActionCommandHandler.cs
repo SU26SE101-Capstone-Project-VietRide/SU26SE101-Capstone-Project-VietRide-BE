@@ -7,6 +7,7 @@ using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
 using VietRide.Booking.Domain.Enums;
 using VietRide.Booking.Domain.Services;
+using VietRide.Booking.Domain.ValueObjects;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
@@ -154,16 +155,28 @@ public sealed class ResolvePendingActionCommandHandler(
                 selectedStationId = canonicalization.Resolve(selectedStationId);
             }
 
-            var matched = candidates.Count(candidate =>
+            var matched = candidates.Where(candidate =>
                 candidate.StopId == request.SelectedStopId
                 && (canonicalization?.Resolve(candidate.StationId) ?? candidate.StationId)
-                    == selectedStationId);
-            if (matched != 1)
+                    == selectedStationId)
+                .ToArray();
+            if (matched.Length != 1)
             {
                 throw InvalidSelection("Selected route-change candidate is not present in frozen metadata.");
             }
 
-            booking.ChangePickup(selectedStationId, request.SelectedStopId);
+            var selectedCandidate = matched[0];
+            booking.ChangePickup(
+                selectedStationId,
+                request.SelectedStopId,
+                new BookingPointSnapshot(
+                    selectedCandidate.StopId.HasValue
+                        ? BookingPointSnapshot.StopType
+                        : BookingPointSnapshot.StationType,
+                    selectedCandidate.StopId ?? selectedStationId!.Value,
+                    selectedCandidate.DisplayName,
+                    null,
+                    selectedCandidate.PlannedAt));
             bookings.Update(booking);
         }
         else
@@ -227,7 +240,7 @@ public sealed class ResolvePendingActionCommandHandler(
             cancellationToken);
     }
 
-    private static IReadOnlyList<(Guid? StopId, Guid? StationId)> ParseRouteCandidates(
+    private static IReadOnlyList<RouteChangeCandidate> ParseRouteCandidates(
         BookingPendingAction action)
     {
         try
@@ -251,7 +264,7 @@ public sealed class ResolvePendingActionCommandHandler(
                 throw new InvalidOperationException();
             }
 
-            var candidates = new List<(Guid?, Guid?)>();
+            var candidates = new List<RouteChangeCandidate>();
             var previousSequence = 0;
             foreach (var candidate in root.GetProperty("candidateStops").EnumerateArray())
             {
@@ -266,16 +279,18 @@ public sealed class ResolvePendingActionCommandHandler(
                 var stop = ReadNullableGuid(candidate.GetProperty("stopId"));
                 var station = ReadNullableGuid(candidate.GetProperty("stationId"));
                 var sequence = candidate.GetProperty("sequence").GetInt32();
+                var displayName = candidate.GetProperty("stationName").GetString();
+                var plannedAt = candidate.GetProperty("estimatedArrivalAt").GetDateTimeOffset();
                 if (stop.HasValue == station.HasValue
                     || sequence <= previousSequence
-                    || string.IsNullOrWhiteSpace(candidate.GetProperty("stationName").GetString())
-                    || candidate.GetProperty("estimatedArrivalAt").GetDateTimeOffset() == default)
+                    || string.IsNullOrWhiteSpace(displayName)
+                    || plannedAt == default)
                 {
                     throw new InvalidOperationException();
                 }
 
                 previousSequence = sequence;
-                candidates.Add((stop, station));
+                candidates.Add(new RouteChangeCandidate(stop, station, displayName, plannedAt));
             }
 
             return candidates.Count > 0 ? candidates : throw new InvalidOperationException();
@@ -287,6 +302,12 @@ public sealed class ResolvePendingActionCommandHandler(
             throw NotResolvable();
         }
     }
+
+    private sealed record RouteChangeCandidate(
+        Guid? StopId,
+        Guid? StationId,
+        string DisplayName,
+        DateTimeOffset PlannedAt);
 
     private static Guid? ReadNullableGuid(JsonElement value)
         => value.ValueKind == JsonValueKind.Null ? null : value.GetGuid();

@@ -6,6 +6,7 @@ using VietRide.Booking.Application.Abstractions.ServiceClients;
 using VietRide.Booking.Application.Abstractions.Services;
 using VietRide.Booking.Application.Events;
 using VietRide.Booking.Application.Exceptions;
+using VietRide.Booking.Application.Features.Bookings;
 using VietRide.Booking.Application.Features.Bookings.History;
 using VietRide.Booking.Domain.Constants;
 using VietRide.Booking.Domain.Entities;
@@ -251,7 +252,15 @@ public sealed class CreateBookingCommandHandler
                 buyerDisplayName: buyerProfile.DisplayName,
                 buyerPhone: buyerProfile.Phone,
                 buyerEmail: buyerProfile.Email,
-                buyerAvatarUrl: buyerProfile.AvatarUrl);
+                buyerAvatarUrl: buyerProfile.AvatarUrl,
+                pickupPointSnapshot: BookingPointSnapshotFactory.ResolvePickup(
+                    trip,
+                    request.PickupStationId,
+                    request.PickupStopId),
+                dropoffPointSnapshot: BookingPointSnapshotFactory.ResolveDropoff(
+                    trip,
+                    request.DropoffStationId,
+                    request.DropoffStopId));
 
             // Add passenger rows (operational-only — no PII stored)
             var ticketAllocations = BuildTicketAllocations(request.Seats, perSeatFare, discountAmount, now);

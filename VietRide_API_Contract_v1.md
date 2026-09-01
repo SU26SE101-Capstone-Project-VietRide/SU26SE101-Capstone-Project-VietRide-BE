@@ -1464,6 +1464,20 @@ Response `200`:
         "bookingGroupId": null,
         "tripDirection": null,
         "routeName": "TP.HCM - Hà Nội",
+        "pickupPoint": {
+          "type": "STOP",
+          "id": "pickup-stop-uuid",
+          "displayName": "Điểm đón C",
+          "address": null,
+          "plannedAt": "2026-05-18T10:00:00+07:00"
+        },
+        "dropoffPoint": {
+          "type": "STATION",
+          "id": "destination-station-uuid",
+          "displayName": "Bến xe Mỹ Đình",
+          "address": null,
+          "plannedAt": "2026-05-18T20:00:00+07:00"
+        },
         "tickets": [
           {
             "ticketId": "uuid",
@@ -1529,6 +1543,14 @@ Both active and inactive intents are returned so cancellation does not erase pas
 history. Items are ordered by `requestedAt ASC, id ASC`. This projection does not enrich Trip-owned
 assignment data such as `shuttleTripId`, Vehicle, Driver, pickup order, or dispatch status.
 
+`originName`, `destinationName`, and `routeName` are immutable Route metadata; they do not identify
+the passenger's selected travel leg. `pickupPoint` and `dropoffPoint` are the Booking-owned selected
+point snapshots. Each non-null point contains `type=STATION|STOP`, its canonical point `id`, nullable
+`displayName` and `address`, and nullable `plannedAt`. New and edited Bookings snapshot these values
+from the validated Trip response in the same Booking transaction. History never resolves point names
+from the current Trip. Legacy rows that predate point snapshots return the affected point as `null`
+rather than substituting current Trip data or Route endpoint names.
+
 `paymentRedirectUrl` is the final root property of every item and is always serialized. It is
 non-null only for a `PENDING_PAYMENT` Booking whose latest eligible VNPay Payment lookup matches
 the owner, reference, exact amount, trusted VNPay authority, and a persisted future `dueAt`.
@@ -1545,7 +1567,9 @@ Query: required `userId`, plus the same `status?`, `from?`, `to?`, `page=1`, and
 semantics as the public Booking history endpoint. It preserves Booking ownership, per-Booking
 pagination, nested Ticket summaries, nullable current Vehicle projection, and deterministic
 ordering. It does not load or return the public-only `shuttleRequests` field, so Parcel does not
-receive passenger Shuttle addresses or coordinates.
+receive passenger Shuttle addresses or coordinates. It does return the same Booking-owned
+`pickupPoint` and `dropoffPoint` snapshot contract as public Booking history so the Passenger History
+facade does not need to resolve mutable Trip data.
 
 ### GET `/internal/v1/bookings/{bookingId}`
 
@@ -3747,6 +3771,20 @@ Response `200` item shape:
     "bookingGroupId": null,
     "tripDirection": null,
     "routeName": "TP.HCM - Hà Nội",
+    "pickupPoint": {
+      "type": "STOP",
+      "id": "pickup-stop-uuid",
+      "displayName": "Điểm đón C",
+      "address": null,
+      "plannedAt": "2026-05-18T10:00:00+07:00"
+    },
+    "dropoffPoint": {
+      "type": "STATION",
+      "id": "destination-station-uuid",
+      "displayName": "Bến xe Mỹ Đình",
+      "address": null,
+      "plannedAt": "2026-05-18T20:00:00+07:00"
+    },
     "vehicle": {
       "licensePlate": "51B-123.45",
       "vehicleType": {
@@ -3776,6 +3814,9 @@ For `TICKET`, `ticket.vehicle` is always serialized as
 `{ licensePlate, vehicleType: { code, displayName } | null }` or `null`; Parcel forwards the
 fail-open Booking history projection unchanged and does not call Trip again. The public vehicle
 projection contains only the plate and type identity/display fields.
+For `TICKET`, `ticket.pickupPoint` and `ticket.dropoffPoint` forward Booking's persisted point
+snapshots unchanged. Root `originName` and `destinationName` remain Route endpoint metadata. Parcel
+does not call Trip to fill a missing point, and a legacy missing snapshot remains null.
 `paymentRedirectUrl` is the final root property and is always serialized. `TICKET` forwards the
 value from Booking history without another Payment call. `PARCEL` returns only the latest eligible
 deposit/final VNPay URL for the exact owner/reference/amount/deadline: deposit requires

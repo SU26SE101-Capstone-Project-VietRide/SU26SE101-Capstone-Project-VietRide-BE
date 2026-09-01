@@ -8,4 +8,6 @@ public sealed record TicketHistoryDetailsDto(
     string? RouteName,
     IReadOnlyList<PassengerHistoryTicketDto> Tickets,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    PassengerHistoryVehicleDto? Vehicle = null);
+    PassengerHistoryVehicleDto? Vehicle = null,
+    PassengerHistoryPointDto? PickupPoint = null,
+    PassengerHistoryPointDto? DropoffPoint = null);
