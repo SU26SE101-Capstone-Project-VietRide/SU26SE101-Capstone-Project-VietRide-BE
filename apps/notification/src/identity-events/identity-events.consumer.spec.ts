@@ -5,6 +5,9 @@ import {
   IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
   IDENTITY_OTP_REQUESTED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_APPROVED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_REJECTED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED_ROUTING_KEY,
   IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
   IDENTITY_USER_CREATED_ROUTING_KEY,
 } from '@vietride/contracts';
@@ -85,6 +88,9 @@ describe('IdentityEventsConsumer', () => {
       IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
       IDENTITY_OTP_REQUESTED_ROUTING_KEY,
       IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_APPROVED_ROUTING_KEY,
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_REJECTED_ROUTING_KEY,
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED_ROUTING_KEY,
       IDENTITY_USER_CREATED_ROUTING_KEY,
     ]);
     expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
@@ -104,6 +110,186 @@ describe('IdentityEventsConsumer', () => {
       IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
       expect.any(Function),
       { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
+      'notification.identity.subscription-custom-request.submitted',
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED_ROUTING_KEY,
+      expect.any(Function),
+      { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
+      'notification.identity.subscription-custom-request.approved',
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_APPROVED_ROUTING_KEY,
+      expect.any(Function),
+      { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+    expect(rabbitConsumer.subscribe).toHaveBeenCalledWith(
+      'notification.identity.subscription-custom-request.rejected',
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_REJECTED_ROUTING_KEY,
+      expect.any(Function),
+      { prefetch: 1, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+  });
+
+  it('fans out a submitted custom request to System Admins as web-only notifications', async () => {
+    const secondAdminId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    idempotency.begin.mockResolvedValue('acquired');
+    systemAdminRecipientProvider.resolveSystemAdminRecipientUserIds.mockResolvedValue([
+      USER_ID,
+      secondAdminId,
+      USER_ID,
+    ]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED),
+    );
+    const payload = customRequestSubmittedPayload();
+
+    await consumer.handleSubscriptionCustomRequestSubmitted(payload, createMessage(MESSAGE_ID));
+
+    expect(notificationsService.createNotification).toHaveBeenCalledTimes(2);
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      {
+        userId: USER_ID,
+        type: NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED,
+        title: 'Yêu cầu gói tùy chỉnh mới',
+        body: 'Nhà xe Việt Ride vừa gửi yêu cầu gói tùy chỉnh và đang chờ xét duyệt.',
+        data: payload,
+        dedupeKey: `${IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED}`,
+      },
+      { enqueueFcm: false },
+    );
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('notifies only the owning operator admins when a custom plan is approved', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_APPROVED),
+    );
+    const payload = customRequestApprovedPayload();
+
+    await consumer.handleSubscriptionCustomRequestApproved(payload, createMessage(MESSAGE_ID));
+
+    expect(operatorRecipientProvider.resolveOperatorRecipientUserIds).toHaveBeenCalledWith(
+      OPERATOR_ID,
+    );
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      {
+        userId: USER_ID,
+        type: NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_APPROVED,
+        title: 'Gói tùy chỉnh đã được tạo',
+        body: 'Gói Doanh nghiệp riêng đã được tạo. Vui lòng xem chi tiết và thực hiện nâng cấp để kích hoạt.',
+        data: payload,
+        dedupeKey: `${IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_APPROVED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_APPROVED}`,
+      },
+      { enqueueFcm: false },
+    );
+  });
+
+  it('notifies only the owning operator admins when a custom request is rejected', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockResolvedValue(
+      createNotification(NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_REJECTED),
+    );
+    const payload = customRequestRejectedPayload();
+
+    await consumer.handleSubscriptionCustomRequestRejected(payload, createMessage(MESSAGE_ID));
+
+    expect(notificationsService.createNotification).toHaveBeenCalledWith(
+      {
+        userId: USER_ID,
+        type: NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_REJECTED,
+        title: 'Yêu cầu gói tùy chỉnh bị từ chối',
+        body: 'Yêu cầu gói tùy chỉnh đã bị từ chối. Lý do: Hạn mức chưa phù hợp.',
+        data: payload,
+        dedupeKey: `${IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_REJECTED_ROUTING_KEY}:${MESSAGE_ID}:${USER_ID}:${NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_REJECTED}`,
+      },
+      { enqueueFcm: false },
+    );
+  });
+
+  it('marks a custom request event with no active recipients as processed', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockResolvedValue([]);
+
+    await consumer.handleSubscriptionCustomRequestApproved(
+      customRequestApprovedPayload(),
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_APPROVED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.release).not.toHaveBeenCalled();
+  });
+
+  it('drops malformed custom request payloads without retrying', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+
+    await consumer.handleSubscriptionCustomRequestRejected(
+      { ...customRequestRejectedPayload(), requestId: 'invalid' },
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_REJECTED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+    expect(idempotency.release).not.toHaveBeenCalled();
+  });
+
+  it('skips duplicate custom request events', async () => {
+    idempotency.begin.mockResolvedValue('duplicate');
+
+    await consumer.handleSubscriptionCustomRequestSubmitted(
+      customRequestSubmittedPayload(),
+      createMessage(MESSAGE_ID),
+    );
+
+    expect(systemAdminRecipientProvider.resolveSystemAdminRecipientUserIds).not.toHaveBeenCalled();
+    expect(notificationsService.createNotification).not.toHaveBeenCalled();
+  });
+
+  it('releases the custom request lock when recipient lookup fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    operatorRecipientProvider.resolveOperatorRecipientUserIds.mockRejectedValue(
+      new Error('identity unavailable'),
+    );
+
+    await expect(
+      consumer.handleSubscriptionCustomRequestApproved(
+        customRequestApprovedPayload(),
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('identity unavailable');
+    expect(idempotency.release).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_APPROVED_ROUTING_KEY,
+      MESSAGE_ID,
+    );
+  });
+
+  it('releases the custom request lock when notification persistence fails', async () => {
+    idempotency.begin.mockResolvedValue('acquired');
+    systemAdminRecipientProvider.resolveSystemAdminRecipientUserIds.mockResolvedValue([USER_ID]);
+    notificationsService.createNotification.mockRejectedValue(new Error('database unavailable'));
+
+    await expect(
+      consumer.handleSubscriptionCustomRequestSubmitted(
+        customRequestSubmittedPayload(),
+        createMessage(MESSAGE_ID),
+      ),
+    ).rejects.toThrow('database unavailable');
+    expect(idempotency.release).toHaveBeenCalledWith(
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED_ROUTING_KEY,
+      MESSAGE_ID,
     );
   });
 
@@ -366,7 +552,8 @@ describe('IdentityEventsConsumer', () => {
       templateKey: EmailTemplateKey.OPERATOR_SUBSCRIPTION_NOTICE,
       templateData: {
         title: 'Đơn đăng ký nhà xe bị từ chối',
-        message: 'Đơn đăng ký của Nhà xe Việt Ride bị từ chối. Lý do: Hồ sơ đăng ký không hợp lệ. Bạn có thể gửi lại đơn mới nếu cần.',
+        message:
+          'Đơn đăng ký của Nhà xe Việt Ride bị từ chối. Lý do: Hồ sơ đăng ký không hợp lệ. Bạn có thể gửi lại đơn mới nếu cần.',
       },
     });
     expect(idempotency.markProcessed).toHaveBeenCalledWith(
@@ -751,6 +938,37 @@ function subscriptionUsageWarningPayload(): Record<string, unknown> {
     used: 8,
     limit: 10,
     usagePercent: 80,
+  };
+}
+
+function customRequestSubmittedPayload(): Record<string, unknown> {
+  return {
+    eventId: EVENT_ID,
+    occurredAt: '2026-09-03T08:30:00Z',
+    requestId: '44444444-4444-4444-8444-444444444444',
+    operatorId: OPERATOR_ID,
+    operatorName: 'Việt Ride',
+  };
+}
+
+function customRequestApprovedPayload(): Record<string, unknown> {
+  return {
+    eventId: EVENT_ID,
+    occurredAt: '2026-09-03T08:30:00Z',
+    requestId: '44444444-4444-4444-8444-444444444444',
+    operatorId: OPERATOR_ID,
+    approvedPlanId: '55555555-5555-4555-8555-555555555555',
+    planName: 'Doanh nghiệp riêng',
+  };
+}
+
+function customRequestRejectedPayload(): Record<string, unknown> {
+  return {
+    eventId: EVENT_ID,
+    occurredAt: '2026-09-03T08:30:00Z',
+    requestId: '44444444-4444-4444-8444-444444444444',
+    operatorId: OPERATOR_ID,
+    rejectionReason: 'Hạn mức chưa phù hợp',
   };
 }
 

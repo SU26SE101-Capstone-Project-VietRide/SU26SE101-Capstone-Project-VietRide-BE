@@ -1,0 +1,8 @@
+ALTER TYPE "vietride_notification"."notification_type"
+ADD VALUE IF NOT EXISTS 'SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED';
+
+ALTER TYPE "vietride_notification"."notification_type"
+ADD VALUE IF NOT EXISTS 'SUBSCRIPTION_CUSTOM_REQUEST_APPROVED';
+
+ALTER TYPE "vietride_notification"."notification_type"
+ADD VALUE IF NOT EXISTS 'SUBSCRIPTION_CUSTOM_REQUEST_REJECTED';

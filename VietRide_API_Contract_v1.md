@@ -5518,7 +5518,8 @@ Response `200`: paged notifications. Each item retains the existing `id`, `userI
 
 Allowed action types are `OPEN_BOOKING_DETAIL`, `OPEN_CREW_TRIP_BOOKING`, `OPEN_TRIP_DETAIL`,
 `OPEN_TRIP_TRACKING`, `OPEN_PARCEL_DETAIL`, `OPEN_WALLET`, `OPEN_SUBSCRIPTION`,
-`OPEN_SHUTTLE_TRACKING`, and `NONE`. `NONE` always has empty `params`. Missing or malformed legacy
+`OPEN_ADMIN_SUBSCRIPTION_CUSTOM_REQUEST`, `OPEN_SHUTTLE_TRACKING`, and `NONE`. `NONE` always has
+empty `params`. Missing or malformed legacy
 navigation data resolves to `NONE`; it never fails the inbox read. IDs remain in `data` and
 `action.params` for client navigation but system-generated `title`/`body` use human-readable
 codes/names or a natural-language fallback instead of raw UUIDs. Existing rows are not backfilled.
@@ -5528,6 +5529,14 @@ For `VEHICLE_SUBSTITUTED`, a valid `bookingId` takes precedence and resolves to
 For Shuttle notifications, `OPEN_SHUTTLE_TRACKING.params` always contains `shuttleTripId` and
 additively preserves `bookingId` plus `pickupOrder` when the event identifies a passenger pickup,
 so clients can select the correct stop when one Shuttle Trip serves multiple Booking groups.
+
+Custom Request lifecycle notifications are web-only. `SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED` is
+stored for each active `SYSTEM_ADMIN`, emitted through `notification:created`, and resolves to
+`OPEN_ADMIN_SUBSCRIPTION_CUSTOM_REQUEST { requestId }`. `SUBSCRIPTION_CUSTOM_REQUEST_APPROVED` and
+`SUBSCRIPTION_CUSTOM_REQUEST_REJECTED` are stored only for active `OPERATOR_ADMIN` users of the
+matching operator, emitted through `notification:created`, and resolve to `OPEN_SUBSCRIPTION {}`.
+These three types never enqueue FCM or email; existing notification types keep their current FCM
+behavior. No historical Custom Request is backfilled.
 
 `PARCEL_RESERVED` is emitted to the Assistant currently assigned to the Parcel's Trip only after
 the sender's deposit succeeds and the Trip cargo reservation is confirmed. It is stored in the
@@ -5603,7 +5612,9 @@ envelope:
 
 The payload intentionally omits `userId` and legacy `deepLink`; `action` follows the same semantic
 resolver as the REST inbox. All instant fields use `Asia/Ho_Chi_Minh` and the resolved `+07:00`
-offset. Notification creation persists the row and enqueues FCM before a best-effort realtime emit.
+offset. Notification creation normally persists the row and enqueues FCM before a best-effort
+realtime emit. The three `SUBSCRIPTION_CUSTOM_REQUEST_*` types are the explicit web-only exception:
+they persist and emit realtime without enqueueing FCM.
 An emit failure is logged but never rolls back or fails the durable notification. Delivery is
 at-least-once: replay may emit the same stable notification `id` again, so clients deduplicate by
 `id`. `GET /v1/notifications` remains the durable source of truth after reconnect or missed events.

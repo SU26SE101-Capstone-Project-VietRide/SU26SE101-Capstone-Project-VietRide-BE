@@ -13,10 +13,7 @@ import { sanitizeEmailTemplateData } from './email-sensitive-data';
 import { EmailTemplateRenderer } from './email-template.renderer';
 import { FcmPushQueue } from './fcm-push.queue';
 import { createNotificationLogger } from './notification-logger';
-import {
-  resolveNotificationAction,
-  type NotificationActionDto,
-} from './notification-action';
+import { resolveNotificationAction, type NotificationActionDto } from './notification-action';
 import { NotificationsRepository } from './notifications.repository';
 import { NotificationsRealtimeGateway } from './notifications-realtime.gateway';
 import { normalizeSafeError } from './safe-error';
@@ -70,6 +67,10 @@ export interface EmailDeliveryDto {
   createdAt: string;
 }
 
+export interface CreateNotificationOptions {
+  enqueueFcm?: boolean;
+}
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = createNotificationLogger(NotificationsService.name);
@@ -83,13 +84,18 @@ export class NotificationsService {
     @Optional() private readonly redis?: RedisService,
   ) {}
 
-  async createNotification(dto: CreateNotificationDto): Promise<NotificationItemDto> {
+  async createNotification(
+    dto: CreateNotificationDto,
+    options: CreateNotificationOptions = {},
+  ): Promise<NotificationItemDto> {
     const result = await this.notificationsRepository.create(CreateNotificationSchema.parse(dto));
     const notification = result.notification;
-    await this.fcmPushQueue.enqueue({
-      notificationId: notification.id,
-      userId: notification.userId,
-    });
+    if (options.enqueueFcm ?? true) {
+      await this.fcmPushQueue.enqueue({
+        notificationId: notification.id,
+        userId: notification.userId,
+      });
+    }
 
     const response = this.toDto(notification);
     try {
@@ -113,7 +119,12 @@ export class NotificationsService {
   ): Promise<PagedNotificationsDto> {
     const cursor = query.cursor ? this.decodeCursor(query.cursor, userId) : null;
     const effectiveQuery = cursor
-      ? { ...query, unreadOnly: cursor.unreadOnly, pageSize: cursor.pageSize, page: cursor.pageIndex }
+      ? {
+          ...query,
+          unreadOnly: cursor.unreadOnly,
+          pageSize: cursor.pageSize,
+          page: cursor.pageIndex,
+        }
       : query;
     const snapshotCutoff = cursor ? new Date(cursor.snapshotCutoff) : new Date();
     const result = await this.notificationsRepository.listForUser(userId, effectiveQuery, {
@@ -127,18 +138,19 @@ export class NotificationsService {
     const totalPages = Math.ceil(result.totalItems / effectiveQuery.pageSize);
     const last = result.items.at(-1);
     const hasMore = result.hasMore ?? effectiveQuery.page < totalPages;
-    const nextCursor = hasMore && last
-      ? this.encodeCursor({
-          version: 1,
-          userId,
-          snapshotCutoff: snapshotCutoff.toISOString(),
-          lastCreatedAt: last.createdAt.toISOString(),
-          lastId: last.id,
-          unreadOnly: effectiveQuery.unreadOnly,
-          pageSize: effectiveQuery.pageSize,
-          pageIndex: effectiveQuery.page + 1,
-        })
-      : null;
+    const nextCursor =
+      hasMore && last
+        ? this.encodeCursor({
+            version: 1,
+            userId,
+            snapshotCutoff: snapshotCutoff.toISOString(),
+            lastCreatedAt: last.createdAt.toISOString(),
+            lastId: last.id,
+            unreadOnly: effectiveQuery.unreadOnly,
+            pageSize: effectiveQuery.pageSize,
+            pageIndex: effectiveQuery.page + 1,
+          })
+        : null;
 
     return {
       items: result.items.map((notification) => this.toDto(notification)),

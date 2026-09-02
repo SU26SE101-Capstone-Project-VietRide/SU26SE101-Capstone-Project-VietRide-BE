@@ -10,6 +10,7 @@ export const NOTIFICATION_ACTION_TYPES = [
   'OPEN_PARCEL_APPROVAL',
   'OPEN_WALLET',
   'OPEN_SUBSCRIPTION',
+  'OPEN_ADMIN_SUBSCRIPTION_CUSTOM_REQUEST',
   'OPEN_SHUTTLE_TRACKING',
   'NONE',
 ] as const;
@@ -26,6 +27,7 @@ export type NotificationActionDto =
     }
   | { type: 'OPEN_WALLET'; params: Record<string, never> }
   | { type: 'OPEN_SUBSCRIPTION'; params: Record<string, never> }
+  | { type: 'OPEN_ADMIN_SUBSCRIPTION_CUSTOM_REQUEST'; params: { requestId: string } }
   | {
       type: 'OPEN_SHUTTLE_TRACKING';
       params: { shuttleTripId: string; bookingId?: string; pickupOrder?: number };
@@ -86,6 +88,15 @@ export function resolveNotificationAction(
     type === NotificationType.BOOKING_REFUNDED
   ) {
     return { type: 'OPEN_WALLET', params: {} };
+  }
+  if (type === NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED) {
+    const parsed = actionDataSchema.safeParse(rawData);
+    return parsed.success && parsed.data.requestId
+      ? {
+          type: 'OPEN_ADMIN_SUBSCRIPTION_CUSTOM_REQUEST',
+          params: { requestId: parsed.data.requestId },
+        }
+      : NONE_ACTION;
   }
   if (type.startsWith('SUBSCRIPTION_')) {
     return { type: 'OPEN_SUBSCRIPTION', params: {} };

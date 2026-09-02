@@ -6,6 +6,7 @@ const TRIP_ID = '22222222-2222-4222-8222-222222222222';
 const PARCEL_ID = '33333333-3333-4333-8333-333333333333';
 const SHUTTLE_TRIP_ID = '44444444-4444-4444-8444-444444444444';
 const APPROVAL_REQUEST_ID = '55555555-5555-4555-8555-555555555555';
+const CUSTOM_REQUEST_ID = '66666666-6666-4666-8666-666666666666';
 
 describe('resolveNotificationAction', () => {
   it.each([
@@ -86,7 +87,9 @@ describe('resolveNotificationAction', () => {
   });
 
   it('keeps the trip-detail fallback for vehicle substitution without booking context', () => {
-    expect(resolveNotificationAction(NotificationType.VEHICLE_SUBSTITUTED, { tripId: TRIP_ID })).toEqual({
+    expect(
+      resolveNotificationAction(NotificationType.VEHICLE_SUBSTITUTED, { tripId: TRIP_ID }),
+    ).toEqual({
       type: 'OPEN_TRIP_DETAIL',
       params: { tripId: TRIP_ID },
     });
@@ -165,11 +168,32 @@ describe('resolveNotificationAction', () => {
     NotificationType.SUBSCRIPTION_APPROVED,
     NotificationType.SUBSCRIPTION_PAYMENT_PENDING_WARN,
     NotificationType.SUBSCRIPTION_PAYMENT_AUTO_REVERTED,
+    NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_APPROVED,
+    NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_REJECTED,
   ])('maps %s to subscription', (type) => {
     expect(resolveNotificationAction(type, null)).toEqual({
       type: 'OPEN_SUBSCRIPTION',
       params: {},
     });
+  });
+
+  it('maps a submitted custom request to the System Admin review screen', () => {
+    expect(
+      resolveNotificationAction(NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED, {
+        requestId: CUSTOM_REQUEST_ID,
+      }),
+    ).toEqual({
+      type: 'OPEN_ADMIN_SUBSCRIPTION_CUSTOM_REQUEST',
+      params: { requestId: CUSTOM_REQUEST_ID },
+    });
+  });
+
+  it('returns NONE when a submitted custom request has no valid request id', () => {
+    expect(
+      resolveNotificationAction(NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED, {
+        requestId: 'invalid',
+      }),
+    ).toEqual({ type: 'NONE', params: {} });
   });
 
   it.each([

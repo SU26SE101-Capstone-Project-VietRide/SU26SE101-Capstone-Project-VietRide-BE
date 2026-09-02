@@ -2,8 +2,14 @@ import {
   BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY,
   BookingVoucherConsentRequestedEventSchema,
   IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_APPROVED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_REJECTED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED_ROUTING_KEY,
   IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
   IdentityOperatorRegistrationSubmittedEventSchema,
+  IdentitySubscriptionCustomRequestApprovedEventSchema,
+  IdentitySubscriptionCustomRequestRejectedEventSchema,
+  IdentitySubscriptionCustomRequestSubmittedEventSchema,
   IdentitySubscriptionUsageWarningEventSchema,
   PAYMENT_WALLET_DEBITED_ROUTING_KEY,
   PaymentWalletDebitedEventSchema,
@@ -21,10 +27,90 @@ describe('Notification v1 integration event contracts', () => {
     expect(IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY).toBe(
       'identity.subscription.usage_warning',
     );
-    expect(PAYMENT_WALLET_DEBITED_ROUTING_KEY).toBe('payment.wallet.debited');
-    expect(BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY).toBe(
-      'booking.voucher.consent_requested',
+    expect(IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED_ROUTING_KEY).toBe(
+      'identity.subscription_custom_request.submitted',
     );
+    expect(IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_APPROVED_ROUTING_KEY).toBe(
+      'identity.subscription_custom_request.approved',
+    );
+    expect(IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_REJECTED_ROUTING_KEY).toBe(
+      'identity.subscription_custom_request.rejected',
+    );
+    expect(PAYMENT_WALLET_DEBITED_ROUTING_KEY).toBe('payment.wallet.debited');
+    expect(BOOKING_VOUCHER_CONSENT_REQUESTED_ROUTING_KEY).toBe('booking.voucher.consent_requested');
+  });
+
+  it('accepts the three subscription custom request lifecycle facts', () => {
+    const requestId = '91000000-0000-4000-8000-000000000008';
+    expect(
+      IdentitySubscriptionCustomRequestSubmittedEventSchema.safeParse({
+        eventId,
+        occurredAt,
+        requestId,
+        operatorId,
+        operatorName: 'Nhà xe Việt Ride',
+      }).success,
+    ).toBe(true);
+    expect(
+      IdentitySubscriptionCustomRequestApprovedEventSchema.safeParse({
+        eventId,
+        occurredAt,
+        requestId,
+        operatorId,
+        approvedPlanId: '91000000-0000-4000-8000-000000000009',
+        planName: 'Doanh nghiệp riêng',
+      }).success,
+    ).toBe(true);
+    expect(
+      IdentitySubscriptionCustomRequestRejectedEventSchema.safeParse({
+        eventId,
+        occurredAt,
+        requestId,
+        operatorId,
+        rejectionReason: 'Hạn mức chưa phù hợp.',
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each([
+    { eventId: 'not-a-uuid' },
+    { occurredAt: '2026-07-27' },
+    { requestId: undefined },
+    { operatorId: 'not-a-uuid' },
+    { operatorName: '   ' },
+  ])('rejects malformed custom request submitted facts %#', (override) => {
+    expect(
+      IdentitySubscriptionCustomRequestSubmittedEventSchema.safeParse({
+        eventId,
+        occurredAt,
+        requestId: '91000000-0000-4000-8000-000000000008',
+        operatorId,
+        operatorName: 'Nhà xe Việt Ride',
+        ...override,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects approved and rejected facts with invalid required fields', () => {
+    const common = {
+      eventId,
+      occurredAt,
+      requestId: '91000000-0000-4000-8000-000000000008',
+      operatorId,
+    };
+    expect(
+      IdentitySubscriptionCustomRequestApprovedEventSchema.safeParse({
+        ...common,
+        approvedPlanId: 'not-a-uuid',
+        planName: 'Doanh nghiệp riêng',
+      }).success,
+    ).toBe(false);
+    expect(
+      IdentitySubscriptionCustomRequestRejectedEventSchema.safeParse({
+        ...common,
+        rejectionReason: '   ',
+      }).success,
+    ).toBe(false);
   });
 
   it('accepts operator registration and subscription usage warning facts', () => {

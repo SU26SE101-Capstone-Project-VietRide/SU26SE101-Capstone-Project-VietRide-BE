@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using MediatR;
 using Microsoft.AspNetCore.Hosting;
@@ -16,6 +17,7 @@ using Npgsql;
 using VietRide.Identity.Api.Filters;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Application.Features.Subscriptions;
 using VietRide.Identity.Application.Features.Subscriptions.ConfirmSubscriptionUpgradePayment;
 using VietRide.Identity.Application.Features.Subscriptions.CustomRequests;
@@ -25,12 +27,157 @@ using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure;
 using VietRide.Identity.IntegrationTests.Api;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.ValueObjects;
+using VietRide.Shared.Persistence.Outbox;
 
 namespace VietRide.Identity.IntegrationTests;
 
 public sealed class SubscriptionUpgradePostgresTests
 {
+    [Fact]
+    public async Task CustomRequestTransitions_PersistBusinessActivityAndPendingOutboxAtomically()
+    {
+        using var factory = new SubscriptionFactory();
+        try
+        {
+            await factory.InitializeAsync();
+            var seed = await SeedAsync(factory);
+            var callerUserId = seed.CallerUserId;
+            var created = await SendAsync(
+                factory,
+                new CreateSubscriptionCustomRequestCommand(
+                    callerUserId,
+                    seed.OperatorId,
+                    20,
+                    20,
+                    20,
+                    20,
+                    20,
+                    1_000,
+                    true,
+                    true,
+                    true,
+                    "MONTHLY",
+                    "Cần gói riêng"));
+            var approved = await SendAsync(
+                factory,
+                new ApproveSubscriptionCustomRequestCommand(
+                    callerUserId,
+                    created.RequestId,
+                    "Doanh nghiệp riêng",
+                    null,
+                    1_000_000,
+                    10_000_000,
+                    20,
+                    20,
+                    20,
+                    20,
+                    20,
+                    1_000,
+                    true,
+                    true,
+                    true));
+
+            var rejectedRequest = await SendAsync(
+                factory,
+                new CreateSubscriptionCustomRequestCommand(
+                    callerUserId,
+                    seed.OperatorId,
+                    30,
+                    30,
+                    30,
+                    30,
+                    30,
+                    2_000,
+                    true,
+                    false,
+                    true,
+                    "YEARLY",
+                    null));
+            await SendAsync(
+                factory,
+                new RejectSubscriptionCustomRequestCommand(
+                    callerUserId,
+                    rejectedRequest.RequestId,
+                    "Hạn mức chưa phù hợp"));
+
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var persistedRequests = await db.SubscriptionCustomRequests.AsNoTracking()
+                .OrderBy(item => item.CreatedAt)
+                .ToListAsync();
+            persistedRequests.Should().Contain(item =>
+                item.Id == created.RequestId
+                && item.Status == SubscriptionCustomRequestStatus.APPROVED
+                && item.ApprovedPlanId == approved.ApprovedPlanId);
+            persistedRequests.Should().Contain(item =>
+                item.Id == rejectedRequest.RequestId
+                && item.Status == SubscriptionCustomRequestStatus.REJECTED
+                && item.RejectionReason == "Hạn mức chưa phù hợp");
+
+            var outboxEvents = await db.Set<OutboxEvent>().AsNoTracking()
+                .Where(item => item.EventType.StartsWith("identity.subscription_custom_request."))
+                .ToListAsync();
+            outboxEvents.Should().HaveCount(4);
+            outboxEvents.Should().OnlyContain(item => item.Status == OutboxEventStatus.PENDING);
+            AssertOutboxIdentity(outboxEvents, SubscriptionCustomRequestSubmittedIntegrationEvent.EventType);
+            AssertOutboxIdentity(outboxEvents, SubscriptionCustomRequestApprovedIntegrationEvent.EventType);
+            AssertOutboxIdentity(outboxEvents, SubscriptionCustomRequestRejectedIntegrationEvent.EventType);
+            (await db.ActivityLogs.AsNoTracking().CountAsync(item =>
+                item.Action == ActivityLogAction.CREATE_SUBSCRIPTION_CUSTOM_REQUEST
+                || item.Action == ActivityLogAction.APPROVE_SUBSCRIPTION_CUSTOM_REQUEST
+                || item.Action == ActivityLogAction.REJECT_SUBSCRIPTION_CUSTOM_REQUEST))
+                .Should().Be(4);
+        }
+        finally
+        {
+            await factory.DropDatabaseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CustomRequestSubmitted_WhenOutboxFails_RollsBackRequestAndActivityLog()
+    {
+        using var factory = new FailingOutboxSubscriptionFactory();
+        try
+        {
+            await factory.InitializeAsync();
+            var seed = await SeedAsync(factory);
+
+            var action = () => SendAsync(
+                factory,
+                new CreateSubscriptionCustomRequestCommand(
+                    seed.CallerUserId,
+                    seed.OperatorId,
+                    20,
+                    20,
+                    20,
+                    20,
+                    20,
+                    1_000,
+                    true,
+                    true,
+                    true,
+                    "MONTHLY",
+                    null));
+
+            await action.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("OUTBOX_UNAVAILABLE");
+
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            (await db.SubscriptionCustomRequests.AsNoTracking().CountAsync()).Should().Be(0);
+            (await db.ActivityLogs.AsNoTracking().CountAsync(item =>
+                item.Action == ActivityLogAction.CREATE_SUBSCRIPTION_CUSTOM_REQUEST)).Should().Be(0);
+            (await db.Set<OutboxEvent>().AsNoTracking().CountAsync()).Should().Be(0);
+        }
+        finally
+        {
+            await factory.DropDatabaseAsync();
+        }
+    }
+
     [Fact]
     public async Task ConcurrentConfirm_IsSerializedAndCallsPaymentOnlyOnce()
     {
@@ -368,6 +515,17 @@ public sealed class SubscriptionUpgradePostgresTests
             Money.FromRaw(500_000),
             false);
 
+    private static void AssertOutboxIdentity(IReadOnlyCollection<OutboxEvent> events, string eventType)
+    {
+        foreach (var outboxEvent in events.Where(item => item.EventType == eventType))
+        {
+            using var document = JsonDocument.Parse(outboxEvent.Payload);
+            document.RootElement.GetProperty("eventId").GetGuid().Should().Be(outboxEvent.Id);
+            document.RootElement.GetProperty("occurredAt").GetDateTimeOffset().Offset
+                .Should().Be(TimeSpan.Zero);
+        }
+    }
+
     private static async Task<SubscriptionSeed> SeedAsync(
         SubscriptionFactory factory,
         int sourceLimit = 5,
@@ -418,11 +576,20 @@ public sealed class SubscriptionUpgradePostgresTests
             now.AddDays(29));
         if (currentVehicles > 0)
             subscription.IncrementUsage(SubscriptionUsageResource.VEHICLES, currentVehicles);
+        var caller = User.CreateAdminPendingPassword(
+            $"subscription-admin-{Guid.NewGuid():N}@example.test",
+            "Subscription Admin");
         db.Operators.Add(operatorTenant);
+        db.Users.Add(caller);
         db.SubscriptionPlans.AddRange(source, target);
         db.OperatorSubscriptions.Add(subscription);
         await db.SaveChangesAsync();
-        return new SubscriptionSeed(operatorTenant.Id, subscription.Id, source.Id, target.Id);
+        return new SubscriptionSeed(
+            operatorTenant.Id,
+            subscription.Id,
+            source.Id,
+            target.Id,
+            caller.Id);
     }
 
     private static async Task<T> SendAsync<T>(SubscriptionFactory factory, IRequest<T> request)
@@ -484,11 +651,12 @@ public sealed class SubscriptionUpgradePostgresTests
         Guid OperatorId,
         Guid SubscriptionId,
         Guid SourcePlanId,
-        Guid TargetPlanId);
+        Guid TargetPlanId,
+        Guid CallerUserId);
 
     private sealed record ConfirmOutcome(SubscriptionUpgradeResponseDto? Response, Exception? Exception);
 
-    private sealed class SubscriptionFactory : AdminUsersEndpointsTests.DbBackedAdminUsersFactory
+    private class SubscriptionFactory : AdminUsersEndpointsTests.DbBackedAdminUsersFactory
     {
         public FakeSubscriptionPaymentClient Payments { get; } = new();
 
@@ -501,6 +669,35 @@ public sealed class SubscriptionUpgradePostgresTests
                 services.AddSingleton<ISubscriptionPaymentClient>(Payments);
             });
         }
+    }
+
+    private sealed class FailingOutboxSubscriptionFactory : SubscriptionFactory
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IIntegrationEventOutbox>();
+                services.AddSingleton<IIntegrationEventOutbox, FailingIntegrationEventOutbox>();
+            });
+        }
+    }
+
+    private sealed class FailingIntegrationEventOutbox : IIntegrationEventOutbox
+    {
+        public Task EnqueueAsync(
+            Guid eventId,
+            string eventType,
+            string payloadJson,
+            CancellationToken ct = default)
+            => throw new InvalidOperationException("OUTBOX_UNAVAILABLE");
+
+        public Task EnqueueAsync(
+            string eventType,
+            string payloadJson,
+            CancellationToken ct = default)
+            => throw new InvalidOperationException("OUTBOX_UNAVAILABLE");
     }
 
     private sealed class FakeSubscriptionPaymentClient : ISubscriptionPaymentClient
