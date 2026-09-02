@@ -2,6 +2,7 @@ using FluentAssertions;
 using NSubstitute;
 using VietRide.Booking.Application.Abstractions.Repositories;
 using VietRide.Booking.Application.Features.OperatorReports;
+using VietRide.Booking.Domain.Enums;
 using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Kernel.Abstractions;
 
@@ -14,8 +15,8 @@ public sealed class ExportBookingReportQueryHandlerTests
     private static readonly Guid TripId = Guid.Parse("41000000-0000-4000-8000-000000000003");
 
     [Theory]
-    [InlineData(BookingOperatorReportKind.Bookings, "Bookings", "bookings-report-20260718-20260718.xlsx", false)]
-    [InlineData(BookingOperatorReportKind.Cancellations, "Cancellations", "cancellation-report-20260718-20260718.xlsx", true)]
+    [InlineData(BookingOperatorReportKind.Bookings, "Đặt vé", "bao-cao-dat-ve-20260718-20260718.xlsx", false)]
+    [InlineData(BookingOperatorReportKind.Cancellations, "Hủy vé", "bao-cao-huy-ve-20260718-20260718.xlsx", true)]
     public async Task Handle_UsesTenantRangeAndStableWorkbookContract(
         BookingOperatorReportKind kind,
         string sheet,
@@ -33,14 +34,17 @@ public sealed class ExportBookingReportQueryHandlerTests
                 BookingId,
                 "VR-REPORT",
                 TripId,
-                cancellationOnly ? "CANCELLED" : "COMPLETED",
+                "TP.HCM - Đà Lạt",
+                "Bến xe Miền Đông",
+                "Bến xe Đà Lạt",
+                cancellationOnly ? BookingStatus.CANCELLED : BookingStatus.COMPLETED,
                 2,
                 200_000,
                 new DateTimeOffset(2026, 7, 18, 1, 0, 0, TimeSpan.Zero),
                 new DateTimeOffset(2026, 7, 18, 1, 5, 0, TimeSpan.Zero),
                 new DateTimeOffset(2026, 7, 18, 2, 0, 0, TimeSpan.Zero),
                 new DateTimeOffset(2026, 7, 18, 1, 30, 0, TimeSpan.Zero),
-                "USER_INITIATED")));
+                BookingCancellationReason.USER_INITIATED)));
         var writer = new CapturingWriter();
         var handler = new ExportBookingReportQueryHandler(
             repository,
@@ -58,7 +62,9 @@ public sealed class ExportBookingReportQueryHandlerTests
         writer.Spec!.SheetName.Should().Be(sheet);
         writer.Spec.FileName.Should().Be(fileName);
         writer.Rows.Should().ContainSingle();
-        writer.Rows[0].Cells[0].Text.Should().Be(BookingId.ToString("D"));
+        writer.Rows[0].Cells[0].Text.Should().Be("VR-REPORT");
+        writer.Rows[0].Cells[4].Text.Should().Be(cancellationOnly ? "Đã hủy" : "Hoàn thành");
+        writer.Rows[0].Cells[^2].Text.Should().Be(BookingId.ToString("D"));
         repository.Received(1).StreamOperatorReportRowsAsync(
             OperatorId,
             new DateTimeOffset(2026, 7, 17, 17, 0, 0, TimeSpan.Zero),

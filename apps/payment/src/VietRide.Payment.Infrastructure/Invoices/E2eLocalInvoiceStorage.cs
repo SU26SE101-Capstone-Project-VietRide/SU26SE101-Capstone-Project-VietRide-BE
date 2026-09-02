@@ -35,12 +35,15 @@ public sealed class E2eLocalInvoiceStorage : IInvoiceStorage
     public async Task<string> UploadPdfAsync(
         Guid operatorId,
         Guid invoiceId,
+        string downloadFileName,
         ReadOnlyMemory<byte> content,
         CancellationToken cancellationToken)
     {
         Validate(operatorId, invoiceId);
         if (content.IsEmpty)
             throw new ArgumentException("Invoice PDF content cannot be empty.", nameof(content));
+        if (string.IsNullOrWhiteSpace(downloadFileName))
+            throw new ArgumentException("Invoice download filename is required.", nameof(downloadFileName));
 
         var objectPath = GoogleCloudInvoiceStorage.BuildObjectPath(operatorId, invoiceId);
         var failOncePath = Path.Combine(_options.LocalRootPath, ".fail-next-upload");

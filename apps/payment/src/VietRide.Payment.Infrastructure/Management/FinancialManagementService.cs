@@ -654,26 +654,28 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         var allocations = transactions.SelectMany(transaction =>
             (transaction.Allocations ?? []).Select(allocation => (transaction, allocation))).ToArray();
         var spec = new FinancialWorkbookSpec(
-            $"platform-wallet-reconciliation-{reportDate:yyyyMMdd}.xlsx",
+            $"doi-soat-vi-nen-tang-{reportDate:yyyyMMdd}.xlsx",
             [
                 new FinancialWorkbookSheet(
-                    "Summary",
-                    ["metric", "value"],
-                    AsAsyncRows(ToAdminSummaryRows(summary)),
-                    new HashSet<int> { 1 }),
+                    "Tổng quan",
+                    ["Chỉ số", "Giá trị"],
+                    AsAsyncRows(ToAdminSummaryRows(summary))),
                 new FinancialWorkbookSheet(
-                    "Transactions",
-                    ["transaction_id", "transaction_code", "type", "amount_vnd", "balance_before_vnd", "balance_after_vnd", "reference_type", "reference_id", "business_group", "cash_flow_purpose", "actor_type", "note", "created_at_asia_ho_chi_minh"],
+                    "Giao dịch",
+                    ["Mã giao dịch", "Loại giao dịch", "Số tiền", "Số dư trước", "Số dư sau", "Loại tham chiếu", "Nhóm nghiệp vụ", "Mục đích dòng tiền", "Chủ thể thực hiện", "Diễn giải", "Thời gian tạo", "Mã hệ thống giao dịch", "Mã hệ thống tham chiếu"],
                     AsAsyncRows(transactions.Select(ToPlatformTransactionExportRow)),
-                    new HashSet<int> { 3, 4, 5 }),
+                    new HashSet<int> { 2, 3, 4 }),
                 new FinancialWorkbookSheet(
-                    "Allocations",
-                    ["transaction_id", "transaction_code", "allocated_amount_vnd", "operator_id", "operator_name", "trip_id", "trip_code", "reference_type", "reference_id", "reference_code", "settlement_id", "settlement_code"],
+                    "Phân bổ",
+                    ["Mã giao dịch", "Số tiền phân bổ", "Nhà xe", "Mã chuyến", "Loại tham chiếu", "Mã tham chiếu", "Mã quyết toán", "Mã hệ thống giao dịch", "Mã hệ thống nhà xe", "Mã hệ thống chuyến", "Mã hệ thống tham chiếu", "Mã hệ thống quyết toán"],
                     AsAsyncRows(allocations.Select(item => ToPlatformAllocationExportRow(
                         item.transaction,
                         item.allocation))),
-                    new HashSet<int> { 2 }),
-            ]);
+                    new HashSet<int> { 1 }),
+            ],
+            "Đối soát ví nền tảng",
+            $"{summary.Period.From:dd/MM/yyyy} - {summary.Period.To:dd/MM/yyyy}",
+            _clock.UtcNow);
         return await _workbookWriter.WriteAsync(spec, ct);
     }
 
@@ -721,29 +723,31 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         }
 
         var spec = new FinancialWorkbookSpec(
-            $"operator-wallet-reconciliation-{range.From:yyyyMMdd}-{range.To:yyyyMMdd}.xlsx",
+            $"doi-soat-vi-nha-xe-{range.From:yyyyMMdd}-{range.To:yyyyMMdd}.xlsx",
             [
                 new FinancialWorkbookSheet(
-                    "Summary",
-                    ["metric", "value"],
-                    AsAsyncRows(ToOperatorSummaryRows(summary, range)),
-                    new HashSet<int> { 1 }),
+                    "Tổng quan",
+                    ["Chỉ số", "Giá trị"],
+                    AsAsyncRows(ToOperatorSummaryRows(summary, range))),
                 new FinancialWorkbookSheet(
-                    "Ledger",
-                    ["ledger_entry_id", "business_group", "operator_effect", "entry_type", "amount_vnd", "trip_id", "trip_code", "route_name", "reference_type", "reference_id", "reference_code", "occurred_at_asia_ho_chi_minh", "note"],
+                    "Sổ cái",
+                    ["Nhóm nghiệp vụ", "Ảnh hưởng đến nhà xe", "Nội dung nghiệp vụ", "Số tiền", "Mã chuyến", "Tuyến", "Loại tham chiếu", "Mã tham chiếu", "Thời gian phát sinh", "Diễn giải", "Mã hệ thống sổ cái", "Mã hệ thống chuyến", "Mã hệ thống tham chiếu"],
                     AsAsyncRows(ledger.Select(ToOperatorLedgerExportRow)),
-                    new HashSet<int> { 4 }),
+                    new HashSet<int> { 3 }),
                 new FinancialWorkbookSheet(
-                    "Trip Settlements",
-                    ["settlement_id", "settlement_code", "trip_id", "trip_code", "status", "net_amount_vnd", "method", "eligible_at_asia_ho_chi_minh", "settled_at_asia_ho_chi_minh", "processing_state", "attempt_count"],
+                    "Quyết toán chuyến",
+                    ["Mã quyết toán", "Mã chuyến", "Trạng thái", "Số tiền thuần", "Phương thức", "Đủ điều kiện lúc", "Quyết toán lúc", "Trạng thái xử lý", "Số lần thử", "Mã hệ thống quyết toán", "Mã hệ thống chuyến"],
                     AsAsyncRows(settlements.Select(ToSettlementExportRow)),
-                    new HashSet<int> { 5 }),
+                    new HashSet<int> { 3 }),
                 new FinancialWorkbookSheet(
-                    "Wallet Transactions",
-                    ["transaction_id", "transaction_code", "business_group", "cash_flow_purpose", "type", "signed_amount_vnd", "balance_before_vnd", "balance_after_vnd", "reference_type", "reference_id", "created_at_asia_ho_chi_minh", "note"],
+                    "Biến động ví",
+                    ["Mã giao dịch", "Nhóm nghiệp vụ", "Mục đích dòng tiền", "Loại giao dịch", "Số tiền", "Số dư trước", "Số dư sau", "Loại tham chiếu", "Thời gian tạo", "Diễn giải", "Mã hệ thống giao dịch", "Mã hệ thống tham chiếu"],
                     AsAsyncRows(transactions.Select(ToOperatorWalletTransactionExportRow)),
-                    new HashSet<int> { 5, 6, 7 }),
-            ]);
+                    new HashSet<int> { 4, 5, 6 }),
+            ],
+            "Đối soát ví nhà xe",
+            $"{range.From:dd/MM/yyyy} - {range.To:dd/MM/yyyy}",
+            _clock.UtcNow);
         return await _workbookWriter.WriteAsync(spec, ct);
     }
 
@@ -1638,19 +1642,19 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         PlatformWalletReconciliationSummaryDto summary)
         =>
         [
-            Metric("platform_wallet_balance_vnd", summary.Snapshot.PlatformWalletBalanceVnd),
-            Metric("outstanding_operator_payable_vnd", summary.Snapshot.OutstandingOperatorPayableVnd),
-            Metric("awaiting_trip_completion_vnd", summary.Snapshot.AwaitingTripCompletionVnd),
-            Metric("pending_hold_vnd", summary.Snapshot.PendingHoldVnd),
-            Metric("eligible_for_settlement_vnd", summary.Snapshot.EligibleForSettlementVnd),
-            Metric("eligible_operator_count", summary.Snapshot.EligibleOperatorCount),
-            Metric("stuck_settlement_count", summary.Snapshot.StuckSettlementCount),
-            Metric("partial_reconciliation_transaction_count", summary.Snapshot.PartialReconciliationTransactionCount),
-            Metric("subscription_revenue_vnd", summary.Period.SubscriptionRevenueVnd),
-            Metric("paid_to_operators_vnd", summary.Period.PaidToOperatorsVnd),
-            TextMetric("period_from", summary.Period.From.ToString("yyyy-MM-dd")),
-            TextMetric("period_to", summary.Period.To.ToString("yyyy-MM-dd")),
-            TextMetric("timezone", summary.Period.Timezone),
+            CurrencyMetric("Số dư ví nền tảng", summary.Snapshot.PlatformWalletBalanceVnd),
+            CurrencyMetric("Phải trả nhà xe", summary.Snapshot.OutstandingOperatorPayableVnd),
+            CurrencyMetric("Chờ chuyến hoàn thành", summary.Snapshot.AwaitingTripCompletionVnd),
+            CurrencyMetric("Đang tạm giữ", summary.Snapshot.PendingHoldVnd),
+            CurrencyMetric("Đủ điều kiện quyết toán", summary.Snapshot.EligibleForSettlementVnd),
+            CountMetric("Số nhà xe đủ điều kiện", summary.Snapshot.EligibleOperatorCount),
+            CountMetric("Số quyết toán bị kẹt", summary.Snapshot.StuckSettlementCount),
+            CountMetric("Số giao dịch đối soát chưa đầy đủ", summary.Snapshot.PartialReconciliationTransactionCount),
+            CurrencyMetric("Doanh thu gói dịch vụ", summary.Period.SubscriptionRevenueVnd),
+            CurrencyMetric("Đã chi trả nhà xe", summary.Period.PaidToOperatorsVnd),
+            TextMetric("Từ ngày", summary.Period.From.ToString("dd/MM/yyyy")),
+            TextMetric("Đến ngày", summary.Period.To.ToString("dd/MM/yyyy")),
+            TextMetric("Múi giờ", "Giờ Việt Nam (Asia/Ho_Chi_Minh)"),
         ];
 
     private static IReadOnlyList<ExcelReportRow> ToOperatorSummaryRows(
@@ -1661,104 +1665,116 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             ?? new OperatorWalletReconciliationDto(0, 0, 0, 0);
         return
         [
-            Metric("wallet_balance_vnd", summary.Balance),
-            Metric("outstanding_payable_vnd", reconciliation.OutstandingPayableVnd),
-            Metric("awaiting_trip_completion_payable_vnd", reconciliation.AwaitingTripCompletionPayableVnd),
-            Metric("pending_hold_payable_vnd", reconciliation.PendingHoldPayableVnd),
-            Metric("eligible_for_settlement_vnd", reconciliation.EligibleForSettlementVnd),
-            Metric("lifetime_settled_amount_vnd", summary.LifetimeSettledAmount),
-            TextMetric("period_from", range.From.ToString("yyyy-MM-dd")),
-            TextMetric("period_to", range.To.ToString("yyyy-MM-dd")),
-            TextMetric("timezone", BusinessTime.TimeZoneId),
+            CurrencyMetric("Số dư ví", summary.Balance),
+            CurrencyMetric("Khoản đang được nhận", reconciliation.OutstandingPayableVnd),
+            CurrencyMetric("Chờ chuyến hoàn thành", reconciliation.AwaitingTripCompletionPayableVnd),
+            CurrencyMetric("Đang tạm giữ", reconciliation.PendingHoldPayableVnd),
+            CurrencyMetric("Đủ điều kiện quyết toán", reconciliation.EligibleForSettlementVnd),
+            CurrencyMetric("Tổng tiền đã quyết toán", summary.LifetimeSettledAmount),
+            TextMetric("Từ ngày", range.From.ToString("dd/MM/yyyy")),
+            TextMetric("Đến ngày", range.To.ToString("dd/MM/yyyy")),
+            TextMetric("Múi giờ", "Giờ Việt Nam (Asia/Ho_Chi_Minh)"),
         ];
     }
 
     private static ExcelReportRow ToPlatformTransactionExportRow(PlatformWalletTransactionDto item)
         => new([
-            ExcelReportCell.TextValue(item.TransactionId.ToString("D")),
             ExcelReportCell.TextValue(item.TransactionCode ?? string.Empty),
-            ExcelReportCell.TextValue(item.Type),
+            ExcelReportCell.TextValue(FinancialReportLabels.TransactionType(item.Type)),
             ExcelReportCell.IntegerValue(item.Amount),
             ExcelReportCell.IntegerValue(item.BalanceBefore),
             ExcelReportCell.IntegerValue(item.BalanceAfter),
-            ExcelReportCell.TextValue(item.ReferenceType),
-            ExcelReportCell.TextValue(item.ReferenceId?.ToString("D") ?? string.Empty),
-            ExcelReportCell.TextValue(item.BusinessGroup ?? string.Empty),
-            ExcelReportCell.TextValue(item.CashFlowPurpose ?? string.Empty),
-            ExcelReportCell.TextValue(item.ActorType),
-            ExcelReportCell.TextValue(item.Note ?? string.Empty),
+            ExcelReportCell.TextValue(FinancialReportLabels.ReferenceType(item.ReferenceType)),
+            ExcelReportCell.TextValue(FinancialReportLabels.BusinessGroup(item.BusinessGroup)),
+            ExcelReportCell.TextValue(FinancialReportLabels.CashFlowPurpose(item.CashFlowPurpose)),
+            ExcelReportCell.TextValue(FinancialReportLabels.ActorType(item.ActorType)),
+            ExcelReportCell.TextValue(FinancialReportLabels.TransactionDescription(
+                null,
+                item.Note,
+                item.ReferenceType)),
             ExcelReportCell.DateTimeValue(item.CreatedAt),
+            ExcelReportCell.TextValue(item.TransactionId.ToString("D")),
+            ExcelReportCell.TextValue(item.ReferenceId?.ToString("D") ?? string.Empty),
         ]);
 
     private static ExcelReportRow ToPlatformAllocationExportRow(
         PlatformWalletTransactionDto transaction,
         PlatformWalletAllocationDto allocation)
         => new([
-            ExcelReportCell.TextValue(transaction.TransactionId.ToString("D")),
             ExcelReportCell.TextValue(transaction.TransactionCode ?? string.Empty),
             ExcelReportCell.IntegerValue(allocation.AllocatedAmountVnd),
-            ExcelReportCell.TextValue(allocation.Operator?.OperatorId.ToString("D") ?? string.Empty),
             ExcelReportCell.TextValue(allocation.Operator?.Name ?? string.Empty),
-            ExcelReportCell.TextValue(allocation.TripId?.ToString("D") ?? string.Empty),
             ExcelReportCell.TextValue(allocation.TripCode ?? string.Empty),
-            ExcelReportCell.TextValue(allocation.ReferenceType),
-            ExcelReportCell.TextValue(allocation.ReferenceId?.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(FinancialReportLabels.ReferenceType(allocation.ReferenceType)),
             ExcelReportCell.TextValue(allocation.ReferenceCode ?? string.Empty),
-            ExcelReportCell.TextValue(allocation.RelatedSettlement?.SettlementId.ToString("D") ?? string.Empty),
             ExcelReportCell.TextValue(allocation.RelatedSettlement?.SettlementCode ?? string.Empty),
+            ExcelReportCell.TextValue(transaction.TransactionId.ToString("D")),
+            ExcelReportCell.TextValue(allocation.Operator?.OperatorId.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(allocation.TripId?.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(allocation.ReferenceId?.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(allocation.RelatedSettlement?.SettlementId.ToString("D") ?? string.Empty),
         ]);
 
     private static ExcelReportRow ToOperatorLedgerExportRow(LedgerEntryDto item)
         => new([
-            ExcelReportCell.TextValue(item.LedgerEntryId.ToString("D")),
-            ExcelReportCell.TextValue(item.BusinessGroup ?? string.Empty),
-            ExcelReportCell.TextValue(item.OperatorEffect ?? string.Empty),
-            ExcelReportCell.TextValue(item.EntryType),
+            ExcelReportCell.TextValue(FinancialReportLabels.BusinessGroup(item.BusinessGroup)),
+            ExcelReportCell.TextValue(FinancialReportLabels.OperatorEffect(item.OperatorEffect)),
+            ExcelReportCell.TextValue(FinancialReportLabels.LedgerEntryType(item.EntryType)),
             ExcelReportCell.IntegerValue(item.Amount),
-            ExcelReportCell.TextValue(item.TripId?.ToString("D") ?? string.Empty),
             ExcelReportCell.TextValue(item.Trip?.TripCode ?? string.Empty),
             ExcelReportCell.TextValue(item.Trip?.RouteName ?? string.Empty),
-            ExcelReportCell.TextValue(item.ReferenceType),
-            ExcelReportCell.TextValue(item.ReferenceId.ToString("D")),
+            ExcelReportCell.TextValue(FinancialReportLabels.ReferenceType(item.ReferenceType)),
             ExcelReportCell.TextValue(item.ReferenceCode ?? string.Empty),
             ExcelReportCell.DateTimeValue(item.OccurredAt),
-            ExcelReportCell.TextValue(item.Note ?? string.Empty),
+            ExcelReportCell.TextValue(FinancialReportLabels.Description(
+                item.EntryType,
+                item.AdjustmentReason,
+                item.Note)),
+            ExcelReportCell.TextValue(item.LedgerEntryId.ToString("D")),
+            ExcelReportCell.TextValue(item.TripId?.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(item.ReferenceId.ToString("D")),
         ]);
 
     private static ExcelReportRow ToSettlementExportRow(SettlementDto item)
         => new([
-            ExcelReportCell.TextValue(item.SettlementId.ToString("D")),
             ExcelReportCell.TextValue(item.SettlementCode ?? string.Empty),
-            ExcelReportCell.TextValue(item.TripId.ToString("D")),
             ExcelReportCell.TextValue(item.Trip?.TripCode ?? string.Empty),
-            ExcelReportCell.TextValue(item.Status),
+            ExcelReportCell.TextValue(FinancialReportLabels.SettlementStatus(item.Status)),
             ExcelReportCell.IntegerValue(item.NetAmount),
-            ExcelReportCell.TextValue(item.SettlementMethod ?? string.Empty),
+            ExcelReportCell.TextValue(FinancialReportLabels.SettlementMethod(item.SettlementMethod)),
             ExcelReportCell.DateTimeValue(item.EligibleAt),
             item.SettledAt.HasValue
                 ? ExcelReportCell.DateTimeValue(item.SettledAt.Value)
                 : ExcelReportCell.BlankValue(),
-            ExcelReportCell.TextValue(item.ProcessingState),
+            ExcelReportCell.TextValue(FinancialReportLabels.ProcessingState(item.ProcessingState)),
             ExcelReportCell.IntegerValue(item.AttemptCount),
+            ExcelReportCell.TextValue(item.SettlementId.ToString("D")),
+            ExcelReportCell.TextValue(item.TripId.ToString("D")),
         ]);
 
     private static ExcelReportRow ToOperatorWalletTransactionExportRow(WalletTransactionDto item)
         => new([
-            ExcelReportCell.TextValue(item.TransactionId.ToString("D")),
             ExcelReportCell.TextValue(item.TransactionCode ?? string.Empty),
-            ExcelReportCell.TextValue(item.BusinessGroup ?? string.Empty),
-            ExcelReportCell.TextValue(item.CashFlowPurpose ?? string.Empty),
-            ExcelReportCell.TextValue(item.Type),
+            ExcelReportCell.TextValue(FinancialReportLabels.BusinessGroup(item.BusinessGroup)),
+            ExcelReportCell.TextValue(FinancialReportLabels.CashFlowPurpose(item.CashFlowPurpose)),
+            ExcelReportCell.TextValue(FinancialReportLabels.TransactionType(item.Type)),
             ExcelReportCell.IntegerValue(item.SignedAmount),
             ExcelReportCell.IntegerValue(item.BalanceBefore),
             ExcelReportCell.IntegerValue(item.BalanceAfter),
-            ExcelReportCell.TextValue(item.ReferenceType),
-            ExcelReportCell.TextValue(item.ReferenceId?.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(FinancialReportLabels.ReferenceType(item.ReferenceType)),
             ExcelReportCell.DateTimeValue(item.CreatedAt),
-            ExcelReportCell.TextValue(item.Note ?? string.Empty),
+            ExcelReportCell.TextValue(FinancialReportLabels.TransactionDescription(
+                item.AdjustmentReason,
+                item.Note,
+                item.ReferenceType)),
+            ExcelReportCell.TextValue(item.TransactionId.ToString("D")),
+            ExcelReportCell.TextValue(item.ReferenceId?.ToString("D") ?? string.Empty),
         ]);
 
-    private static ExcelReportRow Metric(string name, long value)
+    private static ExcelReportRow CurrencyMetric(string name, long value)
+        => new([ExcelReportCell.TextValue(name), ExcelReportCell.CurrencyValue(value)]);
+
+    private static ExcelReportRow CountMetric(string name, long value)
         => new([ExcelReportCell.TextValue(name), ExcelReportCell.IntegerValue(value)]);
 
     private static ExcelReportRow TextMetric(string name, string value)

@@ -2,6 +2,7 @@ using FluentAssertions;
 using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Parcels.Reports;
+using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Kernel.Abstractions;
 
@@ -24,8 +25,12 @@ public sealed class ExportParcelXlsxQueryHandlerTests
                 parcelId,
                 "VRP-REPORT",
                 Guid.NewGuid(),
-                "DELIVERY_CONFIRMED",
-                "SMALL",
+                "TP.HCM - Đà Lạt",
+                "Bến xe Miền Đông",
+                "Bến xe Đà Lạt",
+                "51B-123.45",
+                ParcelStatus.DELIVERY_CONFIRMED,
+                ParcelSizeCategory.SMALL,
                 150_000,
                 100_000,
                 50_000,
@@ -42,11 +47,14 @@ public sealed class ExportParcelXlsxQueryHandlerTests
                 new DateOnly(2026, 7, 18)),
             CancellationToken.None);
 
-        writer.Spec!.SheetName.Should().Be("Parcels");
-        writer.Spec.FileName.Should().Be("parcels-report-20260718-20260718.xlsx");
-        writer.Spec.CurrencyColumns.Should().BeEquivalentTo([5, 6, 7, 8]);
+        writer.Spec!.SheetName.Should().Be("Bưu kiện");
+        writer.Spec.FileName.Should().Be("bao-cao-buu-kien-20260718-20260718.xlsx");
+        writer.Spec.CurrencyColumns.Should().BeEquivalentTo([7, 8, 9, 10]);
         writer.Rows.Should().ContainSingle();
-        writer.Rows[0].Cells[0].Text.Should().Be(parcelId.ToString("D"));
+        writer.Rows[0].Cells[0].Text.Should().Be("VRP-REPORT");
+        writer.Rows[0].Cells[5].Text.Should().Be("Đã xác nhận nhận hàng");
+        writer.Rows[0].Cells[6].Text.Should().Be("Nhỏ");
+        writer.Rows[0].Cells[^2].Text.Should().Be(parcelId.ToString("D"));
         repository.Received(1).StreamOperatorReportRowsAsync(
             operatorId,
             new DateTimeOffset(2026, 7, 17, 17, 0, 0, TimeSpan.Zero),

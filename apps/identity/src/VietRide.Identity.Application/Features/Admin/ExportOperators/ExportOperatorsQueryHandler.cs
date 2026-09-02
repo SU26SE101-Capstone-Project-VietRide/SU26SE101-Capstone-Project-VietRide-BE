@@ -55,17 +55,18 @@ public sealed class ExportOperatorsQueryHandler(IOperatorRepository operators, I
             cancellationToken);
 
         var csv = new StringBuilder();
-        csv.AppendLine("operatorId,name,contactEmail,contactPhone,businessRegistrationNumber,taxCode,registrationStatus,isActive,createdAt,approvedAt,suspendedAt");
+        csv.AppendLine("Tên nhà xe,Email liên hệ,Số điện thoại liên hệ,Số đăng ký kinh doanh,Mã số thuế,Trạng thái đăng ký,Đang hoạt động,Ngày tạo,Ngày duyệt,Ngày tạm ngưng,Mã hệ thống");
         foreach (var row in rows)
         {
             csv.AppendLine(string.Join(',', new[]
             {
-                Escape(row.Id.ToString()), Escape(row.Name), Escape(row.ContactEmail),
-                Escape(row.ContactPhone), Escape(row.BusinessRegistrationNumber), Escape(row.TaxCode),
-                Escape(row.RegistrationStatus.ToString()), row.IsActive ? "true" : "false",
-                Escape(row.CreatedAt.ToString("O", CultureInfo.InvariantCulture)),
-                Escape(row.ApprovedAt?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty),
-                Escape(row.SuspendedAt?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty),
+                Escape(row.Name), Escape(row.ContactEmail), Escape(row.ContactPhone),
+                Escape(row.BusinessRegistrationNumber), Escape(row.TaxCode),
+                Escape(OperatorExportLabels.RegistrationStatus(row.RegistrationStatus)), row.IsActive ? "Có" : "Không",
+                Escape(FormatDateTime(row.CreatedAt)),
+                Escape(row.ApprovedAt.HasValue ? FormatDateTime(row.ApprovedAt.Value) : string.Empty),
+                Escape(row.SuspendedAt.HasValue ? FormatDateTime(row.SuspendedAt.Value) : string.Empty),
+                Escape(row.Id.ToString("D")),
             }));
         }
 
@@ -77,11 +78,19 @@ public sealed class ExportOperatorsQueryHandler(IOperatorRepository operators, I
         return new ExportOperatorsResult(
             content,
             "text/csv; charset=utf-8",
-            $"operators-{BusinessTime.ToLocalDate((clock ?? new SystemClock()).UtcNow):yyyyMMdd}.csv");
+            $"danh-sach-nha-xe-{BusinessTime.ToLocalDate((clock ?? new SystemClock()).UtcNow):yyyyMMdd}.csv");
     }
 
+    private static string FormatDateTime(DateTimeOffset value)
+        => BusinessTime.ToLocalDateTime(value).ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
+
     private static string Escape(string value)
-        => value.IndexOfAny([',', '"', '\r', '\n']) >= 0
-            ? $"\"{value.Replace("\"", "\"\"")}\""
+    {
+        var safe = value.Length > 0 && value[0] is '=' or '+' or '-' or '@'
+            ? $"'{value}"
             : value;
+        return safe.IndexOfAny([',', '"', '\r', '\n']) >= 0
+            ? $"\"{safe.Replace("\"", "\"\"")}\""
+            : safe;
+    }
 }

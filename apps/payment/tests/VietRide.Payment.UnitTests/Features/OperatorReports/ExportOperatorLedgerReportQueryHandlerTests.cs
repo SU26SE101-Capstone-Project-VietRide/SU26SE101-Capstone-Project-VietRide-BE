@@ -12,8 +12,8 @@ public sealed class ExportOperatorLedgerReportQueryHandlerTests
     private static readonly Guid OperatorId = Guid.Parse("41000000-0000-4000-8000-000000000011");
 
     [Theory]
-    [InlineData(OperatorLedgerReportKind.Revenue, "Revenue", "revenue-report-20260718-20260718.xlsx", false)]
-    [InlineData(OperatorLedgerReportKind.Refunds, "Refunds", "refunds-report-20260718-20260718.xlsx", true)]
+    [InlineData(OperatorLedgerReportKind.Revenue, "Doanh thu", "bao-cao-doanh-thu-20260718-20260718.xlsx", false)]
+    [InlineData(OperatorLedgerReportKind.Refunds, "Hoàn tiền", "bao-cao-hoan-tien-20260718-20260718.xlsx", true)]
     public async Task Handle_UsesLedgerTenantAndStableWorkbookContract(
         OperatorLedgerReportKind kind,
         string sheet,
@@ -39,12 +39,13 @@ public sealed class ExportOperatorLedgerReportQueryHandlerTests
         writer.Spec!.SheetName.Should().Be(sheet);
         writer.Spec.FileName.Should().Be(fileName);
         writer.Spec.Headers.Should().Equal(
-            "entry_id", "reference_code", "trip_code", "entry_type", "reference_type",
-            "reference_id", "trip_id", "amount_vnd", "occurred_at_asia_ho_chi_minh", "note");
+            "Mã tham chiếu", "Mã chuyến", "Nội dung nghiệp vụ", "Nguồn phát sinh", "Số tiền",
+            "Thời gian", "Diễn giải", "Mã hệ thống giao dịch", "Mã hệ thống tham chiếu", "Mã hệ thống chuyến");
         writer.Rows.Should().ContainSingle();
-        writer.Rows[0].Cells[1].Text.Should().Be("VR-20260718-7K3M2QPX");
-        writer.Rows[0].Cells[2].Text.Should().Be("TRIP-20260718-M5Q7WV3D");
-        writer.Rows[0].Cells[7].Integer.Should().Be(refundOnly ? -50_000 : 50_000);
+        writer.Rows[0].Cells[0].Text.Should().Be("VR-20260718-7K3M2QPX");
+        writer.Rows[0].Cells[1].Text.Should().Be("TRIP-20260718-M5Q7WV3D");
+        writer.Rows[0].Cells[2].Text.Should().Be(refundOnly ? "Hoàn tiền vé" : "Doanh thu vé");
+        writer.Rows[0].Cells[4].Integer.Should().Be(refundOnly ? -50_000 : 50_000);
     }
 
     private sealed class ReportLedgerRepository : IOperatorLedgerEntryRepository
@@ -69,6 +70,7 @@ public sealed class ExportOperatorLedgerReportQueryHandlerTests
                 Guid.NewGuid(),
                 refundOnly ? "BOOKING_REFUND" : "BOOKING_REVENUE",
                 "BOOKING",
+                null,
                 Guid.NewGuid(),
                 Guid.NewGuid(),
                 refundOnly ? -50_000 : 50_000,

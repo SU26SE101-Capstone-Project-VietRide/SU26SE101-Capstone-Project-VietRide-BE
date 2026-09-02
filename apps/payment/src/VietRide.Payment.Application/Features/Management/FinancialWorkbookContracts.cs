@@ -10,7 +10,10 @@ public sealed record FinancialWorkbookSheet(
 
 public sealed record FinancialWorkbookSpec(
     string FileName,
-    IReadOnlyList<FinancialWorkbookSheet> Sheets);
+    IReadOnlyList<FinancialWorkbookSheet> Sheets,
+    string Title,
+    string ReportPeriod,
+    DateTimeOffset ExportedAt);
 
 public interface IFinancialWorkbookWriter
 {

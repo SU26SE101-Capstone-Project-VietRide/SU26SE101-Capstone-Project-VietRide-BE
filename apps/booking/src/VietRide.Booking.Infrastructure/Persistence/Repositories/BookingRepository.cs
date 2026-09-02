@@ -697,14 +697,17 @@ internal sealed class BookingRepository : IBookingRepository
                 booking.Id,
                 booking.BookingCode.Value,
                 booking.TripId,
-                booking.Status.ToString(),
+                booking.TripSnapshotRouteName,
+                booking.TripSnapshotOriginName,
+                booking.TripSnapshotDestName,
+                booking.Status,
                 booking.Passengers.Count,
                 booking.TotalAmount.Amount,
                 booking.CreatedAt,
                 booking.ConfirmedAt,
                 booking.CompletedAt,
                 booking.CancelledAt,
-                booking.CancellationReason == null ? null : booking.CancellationReason.ToString()));
+                booking.CancellationReason));
 
         await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(ct).ConfigureAwait(false))
         {

@@ -8566,7 +8566,7 @@
     },
     {
       "name": "Day 41-43 - XLSX, platform report và DLQ",
-      "description": "Các request Gateway của Day 41-43. XLSX trả raw workbook; lỗi validation/auth dùng ADR 0004. E2E real-stack và kiểm tra persistence/asynchronous nằm trong harness riêng.",
+      "description": "Các request Gateway của Day 41-43. XLSX trả raw workbook đã Việt hóa; lỗi validation/auth dùng ADR 0004. FE chỉ tải blob, không dịch nội dung file. E2E real-stack và kiểm tra persistence/asynchronous nằm trong harness riêng.",
       "item": [
         {
           "name": "01. Operator bookings XLSX",
@@ -8576,7 +8576,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('XLSX bookings response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                  "pm.test('XLSX bookings response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); pm.expect(pm.response.headers.get('Content-Disposition')).to.include('bao-cao-dat-ve-'); });"
                 ]
               }
             }
@@ -8595,7 +8595,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('XLSX cancellation response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                  "pm.test('XLSX cancellation response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); pm.expect(pm.response.headers.get('Content-Disposition')).to.include('bao-cao-huy-ve-'); });"
                 ]
               }
             }
@@ -8614,7 +8614,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('XLSX parcels response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                  "pm.test('XLSX parcels response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); pm.expect(pm.response.headers.get('Content-Disposition')).to.include('bao-cao-buu-kien-'); });"
                 ]
               }
             }
@@ -8633,7 +8633,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('XLSX revenue response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                  "pm.test('XLSX revenue response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); pm.expect(pm.response.headers.get('Content-Disposition')).to.include('bao-cao-doanh-thu-'); });"
                 ]
               }
             }
@@ -8652,7 +8652,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('XLSX refunds response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                  "pm.test('XLSX refunds response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); pm.expect(pm.response.headers.get('Content-Disposition')).to.include('bao-cao-hoan-tien-'); });"
                 ]
               }
             }
@@ -8671,7 +8671,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('XLSX occupancy response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); });"
+                  "pm.test('XLSX occupancy response', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); pm.expect(pm.response.headers.get('Content-Disposition')).to.include('bao-cao-ty-le-lap-day-'); });"
                 ]
               }
             }
@@ -8683,7 +8683,83 @@
           }
         },
         {
-          "name": "07. System admin platform report",
+          "name": "07. Operator Parcel CSV tiếng Việt",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CSV Parcel tiếng Việt', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv'); pm.expect(pm.response.headers.get('Content-Disposition')).to.include('bao-cao-tong-hop-buu-kien-'); pm.expect(pm.response.text().replace(/^\\uFEFF/, '')).to.startWith('Từ ngày,Đến ngày,Tổng bưu kiện'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/parcels/reports/export?from={{day41ReportFrom}}&to={{day41ReportTo}}&format=csv"
+          }
+        },
+        {
+          "name": "08. Operator wallet reconciliation XLSX",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('XLSX ví nhà xe tiếng Việt', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); pm.expect(pm.response.headers.get('Content-Disposition')).to.include('doi-soat-vi-nha-xe-'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{operatorAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/operator/wallet/reconciliation/export?from={{day41ReportFrom}}&to={{day41ReportTo}}"
+          }
+        },
+        {
+          "name": "09. Admin platform wallet reconciliation XLSX",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('XLSX ví nền tảng tiếng Việt', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('spreadsheetml.sheet'); pm.expect(pm.response.headers.get('Content-Disposition')).to.include('doi-soat-vi-nen-tang-'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/admin/platform-wallet/transactions/export?from={{day41ReportFrom}}&to={{day41ReportTo}}"
+          }
+        },
+        {
+          "name": "10. Admin operator CSV tiếng Việt",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CSV nhà xe tiếng Việt', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv'); pm.expect(pm.response.headers.get('Content-Disposition')).to.include('danh-sach-nha-xe-'); pm.expect(pm.response.text().replace(/^\\uFEFF/, '')).to.startWith('Tên nhà xe,Email liên hệ'); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{systemAdminAccessToken}}" }],
+            "url": "{{baseUrl}}/v1/admin/operators/export"
+          }
+        },
+        {
+          "name": "11. System admin platform report",
           "event": [
             {
               "listen": "test",
@@ -8702,7 +8778,7 @@
           }
         },
         {
-          "name": "08. System admin DLQ review",
+          "name": "12. System admin DLQ review",
           "event": [
             {
               "listen": "test",

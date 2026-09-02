@@ -8,6 +8,27 @@ namespace VietRide.Payment.UnitTests.Infrastructure.Invoices;
 
 public sealed class PdfSharpInvoicePdfGeneratorTests
 {
+    [Theory]
+    [InlineData("MONTHLY", "Hàng tháng")]
+    [InlineData("YEARLY", "Hàng năm")]
+    [InlineData("UNKNOWN", "Không xác định")]
+    public void DisplayLabels_UseVietnameseContract(string period, string expected)
+    {
+        InvoicePdfDisplayLabels.BillingPeriod(period).Should().Be(expected);
+        InvoicePdfDisplayLabels.Amount(500_000).Should().EndWith("VNĐ");
+        InvoicePdfDisplayLabels.IssuedAt(new DateTimeOffset(2026, 7, 14, 1, 0, 0, TimeSpan.Zero))
+            .Should().Be("14/07/2026 08:00 (giờ Việt Nam)");
+    }
+
+    [Fact]
+    public void FileMetadata_UsesFriendlyVietnameseDownloadName()
+    {
+        var fileName = InvoicePdfFileMetadata.DownloadFileName("VR-INV-202607-000001");
+        fileName.Should().Be("hoa-don-VR-INV-202607-000001.pdf");
+        InvoicePdfFileMetadata.ContentDisposition(fileName)
+            .Should().Be("attachment; filename*=UTF-8''hoa-don-VR-INV-202607-000001.pdf");
+    }
+
     [Fact]
     public async Task GenerateAsync_WithVietnameseSnapshot_ProducesNonEmptyReadablePdf()
     {

@@ -484,21 +484,24 @@ internal sealed class TripRepository : ITripRepository
         DateTimeOffset toUtc,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var rows = _dbContext.Trips
-            .AsNoTracking()
-            .Where(trip => trip.OperatorId == operatorId
+        var rows = from trip in _dbContext.Trips.AsNoTracking()
+            join route in _dbContext.Routes.AsNoTracking() on trip.RouteId equals route.Id
+            join vehicle in _dbContext.Vehicles.AsNoTracking() on trip.VehicleId equals vehicle.Id
+            where trip.OperatorId == operatorId
                 && trip.DepartureDateTime >= fromUtc
-                && trip.DepartureDateTime < toUtc)
-            .OrderBy(trip => trip.DepartureDateTime)
-            .ThenBy(trip => trip.Id)
-            .Select(trip => new TripOperatorOccupancyRow(
+                && trip.DepartureDateTime < toUtc
+            orderby trip.DepartureDateTime, trip.Id
+            select new TripOperatorOccupancyRow(
                 trip.Id,
                 trip.RouteId,
-                trip.Status.ToString(),
+                trip.TripCode ?? string.Empty,
+                route.Name,
+                vehicle.LicensePlate,
+                trip.Status,
                 trip.DepartureDateTime,
                 trip.Seats.LongCount(seat => seat.SeatType != TripSeatType.DRIVER_AREA
                     && seat.Status != TripSeatStatus.UNAVAILABLE),
-                trip.Seats.LongCount(seat => seat.Status == TripSeatStatus.BOOKED)));
+                trip.Seats.LongCount(seat => seat.Status == TripSeatStatus.BOOKED));
 
         await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(cancellationToken).ConfigureAwait(false))
         {

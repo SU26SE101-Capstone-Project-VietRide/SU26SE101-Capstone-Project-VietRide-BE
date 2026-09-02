@@ -1,4 +1,5 @@
 using Google.Apis.Auth.OAuth2;
+using StorageObject = Google.Apis.Storage.v1.Data.Object;
 using Google.Cloud.Storage.V1;
 using Microsoft.Extensions.Options;
 using VietRide.Payment.Application.Abstractions.Services;
@@ -36,19 +37,26 @@ public sealed class GoogleCloudInvoiceStorage : IInvoiceStorage
     public async Task<string> UploadPdfAsync(
         Guid operatorId,
         Guid invoiceId,
+        string downloadFileName,
         ReadOnlyMemory<byte> content,
         CancellationToken cancellationToken)
     {
         ValidateIds(operatorId, invoiceId);
         if (content.IsEmpty)
             throw new ArgumentException("Invoice PDF content cannot be empty.", nameof(content));
+        if (string.IsNullOrWhiteSpace(downloadFileName))
+            throw new ArgumentException("Invoice download filename is required.", nameof(downloadFileName));
 
         var objectPath = BuildObjectPath(operatorId, invoiceId);
         await using var stream = new MemoryStream(content.ToArray(), writable: false);
         await _storageClient.UploadObjectAsync(
-            _options.Bucket,
-            objectPath,
-            PdfContentType,
+            new StorageObject
+            {
+                Bucket = _options.Bucket,
+                Name = objectPath,
+                ContentType = PdfContentType,
+                ContentDisposition = InvoicePdfFileMetadata.ContentDisposition(downloadFileName),
+            },
             stream,
             cancellationToken: cancellationToken).ConfigureAwait(false);
         return objectPath;

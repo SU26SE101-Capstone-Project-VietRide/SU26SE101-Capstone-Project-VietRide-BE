@@ -5237,9 +5237,11 @@ Auth: public VNPay Web return. The complete VNPay query string, including
 `vnp_TxnRef`, `vnp_TmnCode`, and `vnp_SecureHash`, is required. Payment verifies
 HMAC-SHA512, configured merchant, amount, and persisted `OPERATOR_WEB` mode before reading the transaction.
 
-This endpoint is read-only. It never transitions Payment or Booking; only the signed
-VNPay IPN can move `PENDING_REDIRECT` to a terminal state and publish the corresponding
-integration event.
+For `referenceType=SUBSCRIPTION` only, a signed `vnp_ResponseCode=24` whose transaction status is
+not successful atomically moves a still-pending Payment from `PENDING_REDIRECT` to `FAILED`, stores
+response code `24`, and enqueues `payment.subscription.payment_failed`. Replaying the same signed
+return is an idempotent no-op and never emits a duplicate event. Booking returns and all other
+return outcomes remain read-only. Only the signed VNPay IPN can confirm a successful payment.
 
 Response `200`:
 ```json
@@ -5257,8 +5259,10 @@ Response `200`:
 }
 ```
 
-The Manager Web SPA uses this read-only resource after VNPay redirects it to
-`VNPAY_WEB_RETURN_URL`. There is no Gateway payment bridge. Errors:
+The Manager Web SPA uses this resource after VNPay redirects it to `VNPAY_WEB_RETURN_URL`. A
+subscription cancellation returns `status=FAILED`; FE then polls the operator subscription until
+the failed terminal event is consumed and calls the existing retry-payment endpoint with a fresh
+Idempotency-Key. There is no Gateway payment bridge. Errors:
 `401 PAYMENT_SIGNATURE_INVALID`, `404 PAYMENT_NOT_FOUND`, `422 PAYMENT_AMOUNT_INVALID`.
 
 ### GET `/v1/payments/vnpay-mobile-sdk-return`
@@ -6570,7 +6574,9 @@ Auth: `OPERATOR_ADMIN`. `Idempotency-Key` bắt buộc. Chỉ cho phép khi atte
 
 Response `202` dùng cùng `SubscriptionUpgradeResponseDto` với `paymentRedirectUrl` mới. Errors: `403 SUBSCRIPTION_UPGRADE_FORBIDDEN`; `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_UPGRADE_EXPIRED`; `409 SUBSCRIPTION_PAYMENT_NOT_RETRYABLE`; `422 IDEMPOTENCY_KEY_REQUIRED`; `503 VNPAY_WEB_DISABLED` while the Web channel rollout flag is off.
 
-VNPay gọi canonical `GET|POST /v1/payments/vnpay-ipn`. `returnUrl` chỉ đưa browser về FE và không được phép mutate Payment hoặc Subscription.
+VNPay gọi canonical `GET|POST /v1/payments/vnpay-ipn`. Thành công chỉ được mutate bởi IPN. Riêng
+signed Web return code `24` của subscription được phép terminalize payment đang pending thành
+`FAILED`; Identity chỉ thay đổi sau khi consume `payment.subscription.payment_failed`.
 
 ## Invoice, OperatorWallet and Settlement — Day 38
 
@@ -6626,6 +6632,11 @@ Auth: `OPERATOR_ADMIN`. Rate limit: 10 requests/minute per `(userId, invoiceId)`
 ```
 
 The signed URL is generated after authorization, expires within 60 minutes and is never persisted, logged or emitted. Errors: `404 INVOICE_NOT_FOUND`; `500 INVOICE_PDF_GENERATION_FAILED`; `429 RATE_LIMIT_EXCEEDED`.
+
+PDF giữ layout hóa đơn hiện tại, hiển thị thời gian phát hành theo `Asia/Ho_Chi_Minh`, đơn vị tiền
+`VNĐ`, tên hiển thị của gói và kỳ thanh toán `MONTHLY -> Hàng tháng`, `YEARLY -> Hàng năm`.
+Storage object path vẫn là UUID, nhưng metadata tải xuống dùng filename
+`hoa-don-{invoiceNumber}.pdf` qua `Content-Disposition`.
 
 ### POST `/v1/admin/invoices/{invoiceId}/retry`
 
@@ -6726,8 +6737,11 @@ Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`. Query: `page?`, `pageSize?`, `tripId?`,
 
 Auth: `OPERATOR_ADMIN | OPERATOR_STAFF`; tenant chỉ lấy từ JWT, không nhận `operatorId`. `from/to`
 cùng có hoặc cùng bỏ, theo lịch Asia/Ho_Chi_Minh, tối đa 366 ngày. Trả XLSX gồm đúng bốn sheet
-`Summary`, `Ledger`, `Trip Settlements`, `Wallet Transactions`. Export fail-closed với `503
-UPSTREAM_UNAVAILABLE` nếu Trip enrichment bắt buộc không đầy đủ. Hai export Revenue/Refunds cũ giữ nguyên.
+`Tổng quan`, `Sổ cái`, `Quyết toán chuyến`, `Biến động ví`. Chỉ sheet `Tổng quan` có khối tiêu đề,
+kỳ báo cáo và thời gian xuất; các sheet dữ liệu có header ở dòng 1. Tên file là
+`doi-soat-vi-nha-xe-{from:yyyyMMdd}-{to:yyyyMMdd}.xlsx`. Giá trị enum/taxonomy được Việt hóa trong
+file; JSON API vẫn giữ mã tiếng Anh. Export fail-closed với `503 UPSTREAM_UNAVAILABLE` nếu Trip
+enrichment bắt buộc không đầy đủ.
 
 Không được parse `note` để lấy tiền. `VOUCHER_OPERATOR_FUNDED_AUDIT.amount` luôn `0`; số voucher
 nhà xe tài trợ nằm riêng trong `operatorFundedVoucherAmount` và không bị trừ net lần hai. Row cũ
@@ -6905,8 +6919,10 @@ settlement `SETTLED` theo `settledAt` trong kỳ.
 ### GET `/v1/admin/platform-wallet/transactions/export`
 
 Auth: `SYSTEM_ADMIN`. Dùng cùng filter list nhưng không nhận paging. Trả XLSX gồm đúng ba sheet
-`Summary`, `Transactions`, `Allocations`; fail-closed `503 UPSTREAM_UNAVAILABLE` nếu enrichment hoặc
-allocation cần thiết không đầy đủ.
+`Tổng quan`, `Giao dịch`, `Phân bổ`; chỉ `Tổng quan` có metadata và các sheet dữ liệu có header ở
+dòng 1. Tên file là `doi-soat-vi-nen-tang-{yyyyMMdd}.xlsx`. Metric, business group, cash-flow
+purpose, actor type và reference type trong file đều là tiếng Việt; JSON API không đổi. Export
+fail-closed `503 UPSTREAM_UNAVAILABLE` nếu enrichment hoặc allocation cần thiết không đầy đủ.
 
 ### POST `/v1/admin/platform-wallet/adjust`
 
@@ -10592,19 +10608,17 @@ owns the source database:
 
 | Route | Owner | Sheet | Filename prefix |
 |---|---|---|---|
-| `GET /v1/operator/reports/bookings/export` | Booking | `Bookings` | `bookings-report` |
-| `GET /v1/operator/reports/parcels/export` | Parcel | `Parcels` | `parcels-report` |
-| `GET /v1/operator/reports/revenue/export` | Payment | `Revenue` | `revenue-report` |
-| `GET /v1/operator/reports/occupancy/export` | Trip | `Occupancy` | `occupancy-report` |
-| `GET /v1/operator/reports/cancellation/export` | Booking | `Cancellations` | `cancellation-report` |
-| `GET /v1/operator/reports/refunds/export` | Payment | `Refunds` | `refunds-report` |
+| `GET /v1/operator/reports/bookings/export` | Booking | `Đặt vé` | `bao-cao-dat-ve` |
+| `GET /v1/operator/reports/parcels/export` | Parcel | `Bưu kiện` | `bao-cao-buu-kien` |
+| `GET /v1/operator/reports/revenue/export` | Payment | `Doanh thu` | `bao-cao-doanh-thu` |
+| `GET /v1/operator/reports/occupancy/export` | Trip | `Tỷ lệ lấp đầy` | `bao-cao-ty-le-lap-day` |
+| `GET /v1/operator/reports/cancellation/export` | Booking | `Hủy vé` | `bao-cao-huy-ve` |
+| `GET /v1/operator/reports/refunds/export` | Payment | `Hoàn tiền` | `bao-cao-hoan-tien` |
 
-Payment revenue/refund workbooks preserve every legacy identifier column and add reconciliation
-columns in this exact order: `entry_id`, `reference_code`, `trip_code`, `entry_type`,
-`reference_type`, `reference_id`, `trip_id`, `amount_vnd`,
-`occurred_at_asia_ho_chi_minh`, `note`. `reference_code` is the persisted Booking/Parcel code.
-`trip_code` prefers the Payment settlement snapshot and may be blank when Trip enrichment is
-temporarily unavailable; the workbook still succeeds and retains `trip_id`.
+Payment revenue/refund workbooks dùng thứ tự cột: `Mã tham chiếu`, `Mã chuyến`, `Nội dung nghiệp vụ`,
+`Nguồn phát sinh`, `Số tiền`, `Thời gian`, `Diễn giải`, `Mã hệ thống giao dịch`,
+`Mã hệ thống tham chiếu`, `Mã hệ thống chuyến`. Mã chuyến ưu tiên settlement snapshot và có thể
+trống khi Trip enrichment tạm thời không khả dụng; UUID vẫn ở các cột cuối để đối soát.
 
 All routes require `OPERATOR_ADMIN` or `OPERATOR_STAFF`. `operatorId` is read only from the
 authenticated operator claim; query/body values are ignored and are not accepted. `from` and `to`
@@ -10616,25 +10630,23 @@ Success is a raw file response with media type
 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `Content-Disposition:
 attachment`, and a deterministic filename ending in `.xlsx`. Errors use the ADR 0004 envelope.
 Empty ranges still produce a valid workbook. No report contains passenger, sender or recipient
-PII. Legacy CSV `GET /v1/operator/parcels/reports/export?format=csv` vẫn giữ filename/MIME/counts,
-nhưng breaking đổi ba cột tiền thành `grossParcelRevenueVnd`, signed `parcelRefundsVnd` và
-`netParcelRevenueVnd`; cả ba lấy từ Payment cho cùng khoảng ngày Asia/Ho_Chi_Minh.
+PII. Mỗi single-sheet workbook có tiêu đề, kỳ báo cáo, thời gian xuất theo `Asia/Ho_Chi_Minh`, một
+dòng trống rồi header ở dòng 5; filter và freeze đặt theo dòng 5. Ngày giờ dùng `dd/MM/yyyy HH:mm`,
+tiền dùng `#,##0 "₫"`, tỷ lệ dùng `0.00"%"`. API JSON/database enum không đổi; file hiển thị tiếng
+Việt và fallback `Không xác định`, không lộ raw code.
 
 Workbook columns are stable and typed as follows:
 
-- `Bookings`: `booking_id`, `booking_code`, `trip_id`, `status`, `passenger_count`,
-  `total_amount_vnd`, `created_at`, `confirmed_at`, `completed_at`.
-- `Parcels`: `parcel_id`, `parcel_code`, `trip_id`, `status`, `size_category`,
-  `total_price_vnd`, `deposit_amount_vnd`, `additional_amount_vnd`, `refund_amount_vnd`,
-  `created_at`, `confirmed_at`.
-- `Revenue`: `entry_id`, `entry_type`, `reference_type`, `reference_id`, `trip_id`, `amount_vnd`,
-  `occurred_at`, `note`.
-- `Occupancy`: `trip_id`, `route_id`, `status`, `departure_at`, `sellable_seat_count`,
-  `booked_seat_count`, `occupancy_percent`.
-- `Cancellations`: `booking_id`, `booking_code`, `trip_id`, `status`, `cancelled_at`,
-  `cancellation_reason`, `total_amount_vnd`.
-- `Refunds`: `entry_id`, `entry_type`, `reference_type`, `reference_id`, `trip_id`, `amount_vnd`,
-  `occurred_at`, `note`.
+- `Đặt vé`: `Mã đặt vé`, `Tuyến`, `Điểm đi`, `Điểm đến`, `Trạng thái`, `Số hành khách`,
+  `Tổng tiền`, ba mốc thời gian, rồi UUID đặt vé/chuyến.
+- `Hủy vé`: `Mã đặt vé`, tuyến, điểm đi/đến, trạng thái, thời gian/lý do hủy, tổng tiền,
+  rồi UUID đặt vé/chuyến.
+- `Bưu kiện`: mã bưu kiện, tuyến, điểm gửi/nhận, biển số, trạng thái, kích thước, bốn cột tiền,
+  hai mốc thời gian, rồi UUID bưu kiện/chuyến.
+- `Tỷ lệ lấp đầy`: mã chuyến, tuyến, biển số, trạng thái, khởi hành, ghế mở bán, ghế đã đặt,
+  tỷ lệ lấp đầy, rồi UUID chuyến/tuyến.
+- `Doanh thu` và `Hoàn tiền`: mã tham chiếu/chuyến, nội dung, nguồn, số tiền, thời gian,
+  diễn giải, rồi UUID giao dịch/tham chiếu/chuyến.
 
 Revenue and refund rows come from immutable Payment `OperatorLedgerEntry`. `BOOKING_GROUP`
 allocations are read from the existing Payment context and are not duplicated in a new attribution
@@ -11095,7 +11107,7 @@ tối đa một retry GET transient, circuit mở sau 5 operation lỗi trong 30
 probe. Unavailable, timeout, malformed hoặc circuit-open trả `503 UPSTREAM_UNAVAILABLE`; không
 fallback sang BookingStats/ParcelStats money.
 
-### Operator Parcel report summary và legacy CSV
+### Operator Parcel report summary và CSV tiếng Việt
 
 `GET /v1/operator/parcels/reports/summary?from=&to=` giữ counts từ Parcel nhưng money từ Payment.
 Response data là `{ operatorId, from, to, totalParcels, totalLoaded, totalDelivered, totalRejected,
@@ -11104,11 +11116,12 @@ totalReturned, grossParcelRevenueVnd, parcelRefundsVnd, netParcelRevenueVnd, sou
 parcelRefundsVnd`. `source` chỉ mô tả nguồn counts (`ParcelStats|ParcelsFallback`), không mô tả nguồn
 money; money luôn từ Payment. Hai field cũ `totalRevenue`/`totalRefunded` không còn alias.
 
-`GET /v1/operator/parcels/reports/export?format=csv` dùng đúng cùng summary và header:
-`operatorId,from,to,totalParcels,totalLoaded,totalDelivered,totalRejected,totalReturned,
-grossParcelRevenueVnd,parcelRefundsVnd,netParcelRevenueVnd,source`. Parcel không cache full response;
-độ trễ tài chính tối đa chỉ do Payment cache 60 giây. `GET /v1/operator/parcel-stats` giữ nguyên
-count/status/route và không phải financial endpoint.
+`GET /v1/operator/parcels/reports/export?format=csv` dùng UTF-8 BOM và header:
+`Từ ngày,Đến ngày,Tổng bưu kiện,Đã xếp lên xe,Đã giao,Bị từ chối,Đã hoàn trả,Doanh thu gộp,
+Tiền hoàn,Doanh thu thuần,Mã hệ thống nhà xe`. CSV không còn cột `source`; UUID nhà xe ở cột cuối.
+Ngày dùng `dd/MM/yyyy`; mọi cell bắt đầu bằng `=`, `+`, `-`, `@` được thêm dấu nháy đơn để tránh
+formula injection. Đây là breaking change có chủ ý đối với consumer parse header cũ. Parcel không
+cache full response; độ trễ tài chính tối đa chỉ do Payment cache 60 giây.
 
 ### Breaking field mapping cho FE/BI
 
@@ -11338,7 +11351,10 @@ unknown query keys with `422 VALIDATION_ERROR`; sort fields remain explicit allo
 - `GET /v1/admin/operators` additionally accepts `isActive`, `from`, `to`, and
   `dateField=createdAt|approvedAt`. `GET /v1/admin/operators/summary` accepts no query and returns
   `{total,pending,approved,suspended,rejected,active}`. `GET /v1/admin/operators/export` accepts
-  the list filters/sort except paging and returns UTF-8 BOM RFC-4180 CSV. `GET /v1/admin/users`
+  the list filters/sort except paging and returns UTF-8 BOM RFC-4180 CSV. Header, status, boolean
+  và ngày giờ đều là tiếng Việt; UUID ở cột cuối `Mã hệ thống`, ngày giờ dùng `dd/MM/yyyy HH:mm`
+  theo `Asia/Ho_Chi_Minh`, filename `danh-sach-nha-xe-{yyyyMMdd}.csv`, và cell có nguy cơ formula
+  injection được thêm dấu nháy đơn. `GET /v1/admin/users`
   additionally accepts `from` and `to` over `createdAt`.
 - `GET /v1/operator/invoices` additionally accepts `search`, matching `invoiceNumber` by
   case-insensitive contains and exact `paymentId` when the value is a UUID.

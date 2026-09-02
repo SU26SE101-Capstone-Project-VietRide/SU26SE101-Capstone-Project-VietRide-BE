@@ -4,6 +4,7 @@ public sealed record OperatorLedgerReportRow(
     Guid EntryId,
     string EntryType,
     string ReferenceType,
+    string? AdjustmentReason,
     Guid ReferenceId,
     Guid? TripId,
     long AmountVnd,

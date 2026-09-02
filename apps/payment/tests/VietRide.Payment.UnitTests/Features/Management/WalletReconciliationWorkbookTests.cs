@@ -15,18 +15,23 @@ public sealed class WalletReconciliationWorkbookTests
         var spec = new FinancialWorkbookSpec(
             "reconciliation.xlsx",
             [
-                Sheet("Summary", "metric", "value"),
-                Sheet("Transactions", "id", "amount"),
-                Sheet("Allocations", "id", "amount"),
-            ]);
+                Sheet("Tổng quan", "Chỉ số", "Giá trị"),
+                Sheet("Giao dịch", "Mã", "Số tiền"),
+                Sheet("Phân bổ", "Mã", "Số tiền"),
+            ],
+            "Đối soát ví nền tảng",
+            "18/07/2026 - 18/07/2026",
+            new DateTimeOffset(2026, 7, 18, 12, 0, 0, TimeSpan.Zero));
 
         await using var report = await writer.WriteAsync(spec);
         using var workbook = new XLWorkbook(report.Content);
 
         workbook.Worksheets.Select(item => item.Name)
-            .Should().Equal("Summary", "Transactions", "Allocations");
-        workbook.Worksheet("Summary").Cell(2, 2).GetValue<long>().Should().Be(125_000);
-        workbook.Worksheet("Summary").Cell(2, 2).Style.NumberFormat.Format.Should().Be("#,##0");
+            .Should().Equal("Tổng quan", "Giao dịch", "Phân bổ");
+        workbook.Worksheet("Tổng quan").Cell(6, 2).GetValue<long>().Should().Be(125_000);
+        workbook.Worksheet("Tổng quan").Cell(6, 2).Style.NumberFormat.Format.Should().Be("#,##0 \"₫\"");
+        workbook.Worksheet("Tổng quan").Cell(1, 1).GetString().Should().Be("Đối soát ví nền tảng");
+        workbook.Worksheet("Giao dịch").Cell(1, 1).GetString().Should().Be("Mã");
     }
 
     [Fact]
@@ -36,17 +41,20 @@ public sealed class WalletReconciliationWorkbookTests
         var spec = new FinancialWorkbookSpec(
             "operator-reconciliation.xlsx",
             [
-                Sheet("Summary", "metric", "value"),
-                Sheet("Ledger", "id", "amount"),
-                Sheet("Trip Settlements", "id", "amount"),
-                Sheet("Wallet Transactions", "id", "amount"),
-            ]);
+                Sheet("Tổng quan", "Chỉ số", "Giá trị"),
+                Sheet("Sổ cái", "Mã", "Số tiền"),
+                Sheet("Quyết toán chuyến", "Mã", "Số tiền"),
+                Sheet("Biến động ví", "Mã", "Số tiền"),
+            ],
+            "Đối soát ví nhà xe",
+            "18/07/2026 - 18/07/2026",
+            new DateTimeOffset(2026, 7, 18, 12, 0, 0, TimeSpan.Zero));
 
         await using var report = await writer.WriteAsync(spec);
         using var workbook = new XLWorkbook(report.Content);
 
         workbook.Worksheets.Select(item => item.Name)
-            .Should().Equal("Summary", "Ledger", "Trip Settlements", "Wallet Transactions");
+            .Should().Equal("Tổng quan", "Sổ cái", "Quyết toán chuyến", "Biến động ví");
     }
 
     private static FinancialWorkbookSheet Sheet(string name, params string[] headers)

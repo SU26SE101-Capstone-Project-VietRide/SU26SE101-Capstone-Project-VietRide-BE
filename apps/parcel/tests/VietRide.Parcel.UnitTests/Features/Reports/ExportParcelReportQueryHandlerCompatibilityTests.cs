@@ -12,7 +12,7 @@ namespace VietRide.Parcel.UnitTests.Features.Reports;
 public sealed class ExportParcelReportQueryHandlerCompatibilityTests
 {
     [Fact]
-    public async Task Handle_Csv_PreservesLegacyFilenameMimeHeaderAndRowLayout()
+    public async Task Handle_Csv_UsesVietnameseExcelSafeContract()
     {
         var operatorId = Guid.Parse("41000000-0000-4000-8000-000000000041");
         var stats = ParcelStats.Create(operatorId, new DateOnly(2026, 7, 18));
@@ -39,11 +39,12 @@ public sealed class ExportParcelReportQueryHandlerCompatibilityTests
                 "csv"),
             CancellationToken.None);
 
-        const string header = "operatorId,from,to,totalParcels,totalLoaded,totalDelivered,totalRejected,totalReturned,grossParcelRevenueVnd,parcelRefundsVnd,netParcelRevenueVnd,source";
-        var row = $"{operatorId:D},2026-07-18,2026-07-18,0,0,0,0,0,700,-200,500,ParcelStats";
-        result.FileName.Should().Be("parcel-report-20260718-20260718.csv");
-        result.ContentType.Should().Be("text/csv");
-        result.Content.Should().Be($"{header}{Environment.NewLine}{row}{Environment.NewLine}");
+        const string header = "Từ ngày,Đến ngày,Tổng bưu kiện,Đã xếp lên xe,Đã giao,Bị từ chối,Đã hoàn trả,Doanh thu gộp,Tiền hoàn,Doanh thu thuần,Mã hệ thống nhà xe";
+        var row = $"18/07/2026,18/07/2026,0,0,0,0,0,700,'-200,500,{operatorId:D}";
+        result.FileName.Should().Be("bao-cao-tong-hop-buu-kien-20260718-20260718.csv");
+        result.ContentType.Should().Be("text/csv; charset=utf-8");
+        result.Content.Should().Be($"\uFEFF{header}{Environment.NewLine}{row}{Environment.NewLine}");
+        result.Content.Should().NotContain("source");
     }
 
     private sealed class FixedClock : IClock

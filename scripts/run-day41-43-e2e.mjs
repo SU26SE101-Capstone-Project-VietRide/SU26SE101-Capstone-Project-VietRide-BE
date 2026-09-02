@@ -489,14 +489,14 @@ function inspectWorkbook(buffer, sheetName, headers, minimumDataRows = 0) {
     .join('\n');
   assert(sheetXml.length > 0, 'XLSX worksheet XML is missing');
   const rows = (sheetXml.match(/<(?:[A-Za-z_][\w.-]*:)?row(?:\s|>)/g) ?? []).length;
-  assert(rows >= minimumDataRows + 1, `XLSX has ${rows - 1} data rows; expected at least ${minimumDataRows}`);
+  assert(rows >= minimumDataRows + 4, `XLSX has ${rows - 4} data rows; expected at least ${minimumDataRows}`);
   return { rows, bytes: buffer.length, xml };
 }
 
 function assertExactTenantWorkbook(workbook, reportName, expectedIds, forbiddenIdentifiers) {
   assert(
-    workbook.rows === expectedIds.length + 1,
-    `${reportName} tenant B row count drifted: expected ${expectedIds.length}, got ${workbook.rows - 1}`,
+    workbook.rows === expectedIds.length + 4,
+    `${reportName} tenant B row count drifted: expected ${expectedIds.length}, got ${workbook.rows - 4}`,
   );
   for (const id of expectedIds) {
     assert(workbook.xml.includes(id), `${reportName} tenant B workbook is missing ${id}`);
@@ -706,12 +706,12 @@ function seed() {
 async function runExcelScenario() {
   const range = reportDateRange(32);
   const reports = [
-    ['bookings', 'booking', 'Bookings', ['booking_id', 'booking_code', 'trip_id', 'status'], 10000, [bookingB, cancellationB]],
-    ['parcels', 'parcel', 'Parcels', ['parcel_id', 'parcel_code', 'trip_id', 'status'], 10000, [parcelB]],
-    ['revenue', 'payment', 'Revenue', ['entry_id', 'entry_type', 'reference_type', 'amount_vnd'], 10000, [bookingRevenueB, parcelRevenueB, cancellationRevenueB]],
-    ['occupancy', 'trip', 'Occupancy', ['trip_id', 'route_id', 'status', 'occupancy_percent'], 10000, [tripB]],
-    ['cancellation', 'booking', 'Cancellations', ['booking_id', 'booking_code', 'cancelled_at'], 10000, [cancellationB]],
-    ['refunds', 'payment', 'Refunds', ['entry_id', 'entry_type', 'reference_type', 'amount_vnd'], 10000, [refundB]],
+    ['bookings', 'booking', 'Đặt vé', ['Mã đặt vé', 'Tuyến', 'Trạng thái', 'Mã hệ thống đặt vé'], 10000, [bookingB, cancellationB]],
+    ['parcels', 'parcel', 'Bưu kiện', ['Mã bưu kiện', 'Tuyến', 'Trạng thái', 'Mã hệ thống bưu kiện'], 10000, [parcelB]],
+    ['revenue', 'payment', 'Doanh thu', ['Mã tham chiếu', 'Nội dung nghiệp vụ', 'Nguồn phát sinh', 'Số tiền'], 10000, [bookingRevenueB, parcelRevenueB, cancellationRevenueB]],
+    ['occupancy', 'trip', 'Tỷ lệ lấp đầy', ['Mã chuyến', 'Tuyến', 'Trạng thái', 'Tỷ lệ lấp đầy'], 10000, [tripB]],
+    ['cancellation', 'booking', 'Hủy vé', ['Mã đặt vé', 'Trạng thái', 'Thời gian hủy'], 10000, [cancellationB]],
+    ['refunds', 'payment', 'Hoàn tiền', ['Mã tham chiếu', 'Nội dung nghiệp vụ', 'Nguồn phát sinh', 'Số tiền'], 10000, [refundB]],
   ];
   const tenantAIdentifiers = [operatorA, routeId, baseTrip, '41430000-0000-4000-8001-', '41430000-0000-4000-8002-', '41430000-0000-4000-8003-', '41430000-0000-4000-8004-'];
   for (const [name, service, sheet, headers, minimumRows, tenantBIds] of reports) {
@@ -733,7 +733,7 @@ async function runExcelScenario() {
   }
   const empty = await api('GET', `/v1/operator/reports/bookings/export?from=2030-01-01&to=2030-01-01`, { token: tokens.operatorA });
   assert(empty.response.ok, `Empty workbook failed: ${empty.text}`);
-  inspectWorkbook(empty.buffer, 'Bookings', ['booking_id', 'booking_code'], 0);
+  inspectWorkbook(empty.buffer, 'Đặt vé', ['Mã đặt vé', 'Tuyến'], 0);
   const invalid = await api('GET', `/v1/operator/reports/bookings/export?from=2026-01-01&to=2026-04-10`, { token: tokens.operatorA });
   expectError(invalid, [422], 'REPORT_RANGE_INVALID');
   const missingOperator = await api('GET', reportPath('bookings', range), { token: tokens.systemAdmin });
@@ -741,8 +741,11 @@ async function runExcelScenario() {
   const unauthenticated = await api('GET', reportPath('bookings', range));
   assert(unauthenticated.response.status === 401, unauthenticated.text);
   const csv = await api('GET', '/v1/operator/parcels/reports/export?format=csv', { token: tokens.operatorA });
-  assert(csv.response.ok, `Legacy Parcel CSV failed: ${csv.text}`);
-  assert(csv.response.headers.get('content-type')?.includes('text/csv'), 'Legacy Parcel CSV content type drifted');
+  assert(csv.response.ok, `Parcel CSV failed: ${csv.text}`);
+  assert(csv.response.headers.get('content-type')?.includes('text/csv'), 'Parcel CSV content type drifted');
+  assert(csv.buffer.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])), 'Parcel CSV UTF-8 BOM is missing');
+  assert(csv.text.includes('Tổng bưu kiện'), 'Parcel CSV Vietnamese header is missing');
+  assert(!csv.text.includes('source'), 'Parcel CSV must not expose source');
 
   const abort = new AbortController();
   const abortedDownload = fetch(`${urls.gateway}${reportPath('bookings', range)}`, {
@@ -980,20 +983,20 @@ async function runRevenueScenario() {
   const csvHeaders = csvLines[0].split(',');
   const csvValues = csvLines[1].split(',');
   const csv = Object.fromEntries(csvHeaders.map((header, index) => [header, csvValues[index]]));
-  assert(Number(csv.grossParcelRevenueVnd) === parcelSummary.grossParcelRevenueVnd, 'Parcel CSV gross revenue drifted from summary');
-  assert(Number(csv.parcelRefundsVnd) === parcelSummary.parcelRefundsVnd, 'Parcel CSV refunds drifted from summary');
-  assert(Number(csv.netParcelRevenueVnd) === parcelSummary.netParcelRevenueVnd, 'Parcel CSV net revenue drifted from summary');
+  assert(Number(csv['Doanh thu gộp']) === parcelSummary.grossParcelRevenueVnd, 'Parcel CSV gross revenue drifted from summary');
+  assert(Number(csv['Tiền hoàn'].replace(/^'/, '')) === parcelSummary.parcelRefundsVnd, 'Parcel CSV refunds drifted from summary');
+  assert(Number(csv['Doanh thu thuần']) === parcelSummary.netParcelRevenueVnd, 'Parcel CSV net revenue drifted from summary');
   checkedRequests.push('GET Gateway operator Parcel report CSV');
 
   const exportRange = { from: exportFrom, to };
   const revenueExport = await api('GET', reportPath('revenue', exportRange), { token: tokens.operatorA });
   assert(revenueExport.response.status === 200, `Payment revenue XLSX failed: ${revenueExport.text}`);
-  inspectWorkbook(revenueExport.buffer, 'Revenue', ['entry_id', 'entry_type', 'reference_type', 'amount_vnd'], 1);
+  inspectWorkbook(revenueExport.buffer, 'Doanh thu', ['Mã tham chiếu', 'Nội dung nghiệp vụ', 'Nguồn phát sinh', 'Số tiền'], 1);
   checkedRequests.push('GET Gateway Payment revenue XLSX');
 
   const refundExport = await api('GET', reportPath('refunds', exportRange), { token: tokens.operatorA });
   assert(refundExport.response.status === 200, `Payment refund XLSX failed: ${refundExport.text}`);
-  inspectWorkbook(refundExport.buffer, 'Refunds', ['entry_id', 'entry_type', 'reference_type', 'amount_vnd'], 1);
+  inspectWorkbook(refundExport.buffer, 'Hoàn tiền', ['Mã tham chiếu', 'Nội dung nghiệp vụ', 'Nguồn phát sinh', 'Số tiền'], 1);
   checkedRequests.push('GET Gateway Payment refund XLSX');
 
   let paymentStopped = false;

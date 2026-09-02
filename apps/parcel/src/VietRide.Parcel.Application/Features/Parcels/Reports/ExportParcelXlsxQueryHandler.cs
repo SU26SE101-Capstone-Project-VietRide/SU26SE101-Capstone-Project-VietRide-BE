@@ -26,10 +26,13 @@ public sealed class ExportParcelXlsxQueryHandler
     {
         var range = OperatorReportRange.Create(request.From, request.To, _clock);
         var spec = new ExcelReportSpec(
-            "Parcels",
-            ["parcel_id", "parcel_code", "trip_id", "status", "size_category", "total_price_vnd", "deposit_amount_vnd", "additional_amount_vnd", "refund_amount_vnd", "created_at_asia_ho_chi_minh", "confirmed_at_asia_ho_chi_minh"],
-            $"parcels-report-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.xlsx",
-            new HashSet<int> { 5, 6, 7, 8 });
+            "Bưu kiện",
+            ["Mã bưu kiện", "Tuyến", "Điểm gửi", "Điểm nhận", "Biển số xe", "Trạng thái", "Kích thước", "Tổng cước", "Tiền cọc", "Phụ thu", "Hoàn tiền", "Thời gian tạo", "Thời gian xác nhận", "Mã hệ thống bưu kiện", "Mã hệ thống chuyến"],
+            $"bao-cao-buu-kien-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.xlsx",
+            new HashSet<int> { 7, 8, 9, 10 },
+            Title: "Báo cáo bưu kiện",
+            ReportPeriod: $"{range.FromDate:dd/MM/yyyy} - {range.ToDate:dd/MM/yyyy}",
+            ExportedAt: _clock.UtcNow);
 
         return _writer.WriteAsync(spec, ToRowsAsync(request.OperatorId, range, ct), ct);
     }
@@ -45,11 +48,13 @@ public sealed class ExportParcelXlsxQueryHandler
             .ConfigureAwait(false))
         {
             yield return new ExcelReportRow([
-                ExcelReportCell.TextValue(row.ParcelId.ToString("D")),
                 ExcelReportCell.TextValue(row.ParcelCode),
-                ExcelReportCell.TextValue(row.TripId.ToString("D")),
-                ExcelReportCell.TextValue(row.Status),
-                ExcelReportCell.TextValue(row.SizeCategory),
+                ExcelReportCell.TextValue(row.RouteName ?? string.Empty),
+                ExcelReportCell.TextValue(row.OriginStationName ?? string.Empty),
+                ExcelReportCell.TextValue(row.DestinationStationName ?? string.Empty),
+                ExcelReportCell.TextValue(row.VehicleLicensePlate ?? string.Empty),
+                ExcelReportCell.TextValue(ParcelReportLabels.Status(row.Status)),
+                ExcelReportCell.TextValue(ParcelReportLabels.Size(row.SizeCategory)),
                 ExcelReportCell.IntegerValue(row.TotalPriceVnd),
                 ExcelReportCell.IntegerValue(row.DepositAmountVnd),
                 ExcelReportCell.IntegerValue(row.AdditionalAmountVnd),
@@ -58,6 +63,8 @@ public sealed class ExportParcelXlsxQueryHandler
                 row.ConfirmedAt.HasValue
                     ? ExcelReportCell.DateTimeValue(row.ConfirmedAt.Value)
                     : ExcelReportCell.BlankValue(),
+                ExcelReportCell.TextValue(row.ParcelId.ToString("D")),
+                ExcelReportCell.TextValue(row.TripId.ToString("D")),
             ]);
         }
     }

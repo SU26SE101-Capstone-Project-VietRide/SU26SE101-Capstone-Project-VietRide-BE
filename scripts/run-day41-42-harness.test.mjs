@@ -26,18 +26,18 @@ function collectFiles(relativeDirectory, extensions) {
 
 test('Day 41 asserts exact non-empty tenant B rows for all six XLSX reports', () => {
   const expected = [
-    ['bookings', 'booking', 'Bookings'],
-    ['parcels', 'parcel', 'Parcels'],
-    ['revenue', 'payment', 'Revenue'],
-    ['occupancy', 'trip', 'Occupancy'],
-    ['cancellation', 'booking', 'Cancellations'],
-    ['refunds', 'payment', 'Refunds'],
+    ['bookings', 'booking', 'Đặt vé'],
+    ['parcels', 'parcel', 'Bưu kiện'],
+    ['revenue', 'payment', 'Doanh thu'],
+    ['occupancy', 'trip', 'Tỷ lệ lấp đầy'],
+    ['cancellation', 'booking', 'Hủy vé'],
+    ['refunds', 'payment', 'Hoàn tiền'],
   ];
   for (const report of expected) {
     const tuple = report.map((value) => `'${value}'`).join(',\\s*');
     assert.match(harness, new RegExp(tuple), `missing ${report.join('/')}`);
   }
-  assert.match(harness, /workbook\.rows === expectedIds\.length \+ 1/);
+  assert.match(harness, /workbook\.rows === expectedIds\.length \+ 4/);
   assert.match(harness, /tenant B workbook is missing/);
   assert.match(harness, /leaked tenant A aggregate/);
   assert.match(harness, /\[bookingB, cancellationB\]/);

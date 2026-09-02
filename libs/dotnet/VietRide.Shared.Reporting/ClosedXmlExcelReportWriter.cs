@@ -7,8 +7,11 @@ namespace VietRide.Shared.Reporting;
 public sealed class ClosedXmlExcelReportWriter : IExcelReportWriter
 {
     private const string ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-    private const int HeaderRow = 1;
-    private const int FirstDataRow = 2;
+    private const int TitleRow = 1;
+    private const int PeriodRow = 2;
+    private const int ExportedAtRow = 3;
+    private const int HeaderRow = 5;
+    private const int FirstDataRow = 6;
 
     public async Task<ExcelReportStream> WriteAsync(
         ExcelReportSpec spec,
@@ -31,6 +34,18 @@ public sealed class ClosedXmlExcelReportWriter : IExcelReportWriter
             using (var workbook = new XLWorkbook())
             {
                 var sheet = workbook.Worksheets.Add(spec.SheetName);
+                sheet.Cell(TitleRow, 1).Value = spec.Title;
+                sheet.Range(TitleRow, 1, TitleRow, spec.Headers.Count).Merge();
+                sheet.Cell(TitleRow, 1).Style.Font.Bold = true;
+                sheet.Cell(TitleRow, 1).Style.Font.FontSize = 16;
+
+                sheet.Cell(PeriodRow, 1).Value = "Kỳ báo cáo";
+                sheet.Cell(PeriodRow, 2).Value = spec.ReportPeriod;
+                sheet.Cell(ExportedAtRow, 1).Value = "Thời gian xuất";
+                sheet.Cell(ExportedAtRow, 2).Value = BusinessTime.ToLocalDateTime(spec.ExportedAt!.Value);
+                sheet.Cell(ExportedAtRow, 2).Style.DateFormat.Format = "dd/MM/yyyy HH:mm";
+                sheet.Range(PeriodRow, 1, ExportedAtRow, 1).Style.Font.Bold = true;
+
                 for (var column = 0; column < spec.Headers.Count; column++)
                 {
                     sheet.Cell(HeaderRow, column + 1).Value = spec.Headers[column];
@@ -40,7 +55,7 @@ public sealed class ClosedXmlExcelReportWriter : IExcelReportWriter
                 header.Style.Font.Bold = true;
                 header.Style.Fill.BackgroundColor = XLColor.FromHtml("#E2E8F0");
                 header.SetAutoFilter();
-                sheet.SheetView.FreezeRows(1);
+                sheet.SheetView.FreezeRows(HeaderRow);
 
                 var rowNumber = FirstDataRow;
                 await foreach (var row in rows.WithCancellation(cancellationToken).ConfigureAwait(false))
@@ -53,7 +68,11 @@ public sealed class ClosedXmlExcelReportWriter : IExcelReportWriter
 
                     for (var column = 0; column < row.Cells.Count; column++)
                     {
-                        SetCell(sheet.Cell(rowNumber, column + 1), row.Cells[column], spec.CurrencyColumns?.Contains(column) == true);
+                        SetCell(
+                            sheet.Cell(rowNumber, column + 1),
+                            row.Cells[column],
+                            spec.CurrencyColumns?.Contains(column) == true,
+                            spec.PercentageColumns?.Contains(column) == true);
                     }
 
                     rowNumber++;
@@ -84,7 +103,7 @@ public sealed class ClosedXmlExcelReportWriter : IExcelReportWriter
         }
     }
 
-    private static void SetCell(IXLCell cell, ExcelReportCell value, bool currency)
+    private static void SetCell(IXLCell cell, ExcelReportCell value, bool currency, bool percentage)
     {
         switch (value.Type)
         {
@@ -99,13 +118,13 @@ public sealed class ClosedXmlExcelReportWriter : IExcelReportWriter
                 break;
             case ExcelReportCellType.Date:
                 cell.Value = value.Date?.ToDateTime(TimeOnly.MinValue) ?? DateTime.MinValue;
-                cell.Style.DateFormat.Format = "yyyy-mm-dd";
+                cell.Style.DateFormat.Format = "dd/MM/yyyy";
                 break;
             case ExcelReportCellType.DateTime:
                 cell.Value = value.Instant.HasValue
                     ? BusinessTime.ToLocalDateTime(value.Instant.Value)
                     : DateTime.MinValue;
-                cell.Style.DateFormat.Format = "yyyy-mm-dd hh:mm:ss";
+                cell.Style.DateFormat.Format = "dd/MM/yyyy HH:mm";
                 break;
             case ExcelReportCellType.Boolean:
                 cell.Value = value.Boolean ?? false;
@@ -117,9 +136,14 @@ public sealed class ClosedXmlExcelReportWriter : IExcelReportWriter
                 throw new InvalidDataException("Unsupported report cell type.");
         }
 
-        if (currency)
+        if (currency || value.IsCurrency)
         {
-            cell.Style.NumberFormat.Format = "#,##0";
+            cell.Style.NumberFormat.Format = "#,##0 \"₫\"";
+        }
+
+        if (percentage)
+        {
+            cell.Style.NumberFormat.Format = "0.00\"%\"";
         }
     }
 
@@ -129,7 +153,10 @@ public sealed class ClosedXmlExcelReportWriter : IExcelReportWriter
             || spec.SheetName.Length > 31
             || spec.Headers.Count == 0
             || spec.Headers.Any(string.IsNullOrWhiteSpace)
-            || string.IsNullOrWhiteSpace(spec.FileName))
+            || string.IsNullOrWhiteSpace(spec.FileName)
+            || string.IsNullOrWhiteSpace(spec.Title)
+            || string.IsNullOrWhiteSpace(spec.ReportPeriod)
+            || !spec.ExportedAt.HasValue)
         {
             throw new ArgumentException("The XLSX report specification is invalid.", nameof(spec));
         }
