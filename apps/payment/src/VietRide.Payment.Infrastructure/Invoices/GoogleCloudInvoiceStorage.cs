@@ -1,9 +1,9 @@
 using Google.Apis.Auth.OAuth2;
-using StorageObject = Google.Apis.Storage.v1.Data.Object;
 using Google.Cloud.Storage.V1;
 using Microsoft.Extensions.Options;
 using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Shared.Kernel.Abstractions;
+using StorageObject = Google.Apis.Storage.v1.Data.Object;
 
 namespace VietRide.Payment.Infrastructure.Invoices;
 
