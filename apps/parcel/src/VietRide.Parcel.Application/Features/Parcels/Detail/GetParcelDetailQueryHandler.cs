@@ -114,6 +114,7 @@ public sealed class GetParcelDetailQueryHandler
             parcel.ActualVolumeM3,
             parcel.ActualDimWeightKg,
             parcel.ActualChargeableWeightKg,
+            parcel.DeclaredValueVnd,
             parcel.EstimatedGrossPriceVnd.Amount,
             parcel.FinalGrossPriceVnd.Amount,
             parcel.DiscountAmountVnd.Amount,

@@ -315,6 +315,78 @@ public sealed class AlternativeRouteHandlersTests
     }
 
     [Fact]
+    public async Task GetAlternativeRoute_ReturnsPersistedGeometryAndSortedStops_WhenCallerOwnsRoute()
+    {
+        var route = CreateRoute(OperatorId);
+        var alternativeRoute = AlternativeRoute.Create(route.Id, "Alt", Guid.NewGuid(), 42.5m, 75);
+        const string pathPolyline = "_p~iF~ps|U_ulLnnqC_mqNvxq`@";
+        alternativeRoute.SetPathGeometry(pathPolyline);
+        var firstStopId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var secondStopId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var repository = new FakeAlternativeRouteRepository([alternativeRoute], [route]);
+        repository.Stops.AddRange([
+            AlternativeRouteStop.Create(alternativeRoute.Id, secondStopId, 2, 35, 15.2m),
+            AlternativeRouteStop.Create(alternativeRoute.Id, firstStopId, 1, 20, 8.4m),
+        ]);
+        var handler = new GetAlternativeRouteHandler(repository);
+
+        var result = await handler.Handle(
+            new GetAlternativeRouteQuery(OperatorId, alternativeRoute.Id),
+            CancellationToken.None);
+
+        result.Id.Should().Be(alternativeRoute.Id);
+        result.PathPolyline.Should().Be(pathPolyline);
+        result.IsActive.Should().BeTrue();
+        result.Stops.Select(stop => stop.StopId).Should().Equal(firstStopId, secondStopId);
+    }
+
+    [Fact]
+    public async Task GetAlternativeRoute_ReturnsInactiveRouteAndPreservesNullGeometry()
+    {
+        var route = CreateRoute(OperatorId);
+        var alternativeRoute = AlternativeRoute.Create(route.Id, "Inactive alt", Guid.NewGuid(), null, null);
+        alternativeRoute.Deactivate();
+        var handler = new GetAlternativeRouteHandler(
+            new FakeAlternativeRouteRepository([alternativeRoute], [route]));
+
+        var result = await handler.Handle(
+            new GetAlternativeRouteQuery(OperatorId, alternativeRoute.Id),
+            CancellationToken.None);
+
+        result.IsActive.Should().BeFalse();
+        result.PathPolyline.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetAlternativeRoute_ThrowsRouteNotFound_WhenAlternativeRouteDoesNotExist()
+    {
+        var handler = new GetAlternativeRouteHandler(new FakeAlternativeRouteRepository([]));
+
+        var act = () => handler.Handle(
+            new GetAlternativeRouteQuery(OperatorId, Guid.NewGuid()),
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<CodedNotFoundException>();
+        exception.Which.ErrorCode.Should().Be("ROUTE_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task GetAlternativeRoute_ThrowsRouteNotFound_ForCrossOperatorAlternativeRoute()
+    {
+        var otherRoute = CreateRoute(OtherOperatorId);
+        var alternativeRoute = AlternativeRoute.Create(otherRoute.Id, "Other alt", Guid.NewGuid(), null, null);
+        var handler = new GetAlternativeRouteHandler(
+            new FakeAlternativeRouteRepository([alternativeRoute], [otherRoute]));
+
+        var act = () => handler.Handle(
+            new GetAlternativeRouteQuery(OperatorId, alternativeRoute.Id),
+            CancellationToken.None);
+
+        var exception = await act.Should().ThrowAsync<CodedNotFoundException>();
+        exception.Which.ErrorCode.Should().Be("ROUTE_NOT_FOUND");
+    }
+
+    [Fact]
     public async Task DeactivateAlternativeRoute_DeactivatesButDoesNotRemoveEntity()
     {
         var route = CreateRoute(OperatorId);
@@ -379,6 +451,43 @@ public sealed class AlternativeRouteHandlersTests
         command.PathPolyline.Should().Be(pathPolyline);
         typeof(OperatorAlternativeRoutesController).GetMethod(nameof(OperatorAlternativeRoutesController.PutGeometryAsync))!
             .GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_ADMIN");
+    }
+
+    [Fact]
+    public async Task OperatorAlternativeRoutesController_GetById_UsesReadRolesAndDispatchesQuery()
+    {
+        var alternativeRouteId = Guid.NewGuid();
+        var responseDto = new AlternativeRouteDto(
+            alternativeRouteId,
+            Guid.NewGuid(),
+            "Alt",
+            null,
+            Guid.NewGuid(),
+            null,
+            null,
+            null,
+            false,
+            [],
+            default,
+            default);
+        var mediator = new CapturingMediator(responseDto);
+        var controller = CreateAlternativeRoutesController(mediator);
+
+        var response = await controller.GetByIdAsync(alternativeRouteId, CancellationToken.None);
+
+        response.Result.Should().BeOfType<OkObjectResult>();
+        mediator.LastRequest.Should().BeOfType<GetAlternativeRouteQuery>()
+            .Which.Should().BeEquivalentTo(new GetAlternativeRouteQuery(OperatorId, alternativeRouteId));
+        var method = typeof(OperatorAlternativeRoutesController)
+            .GetMethod(nameof(OperatorAlternativeRoutesController.GetByIdAsync))!;
+        method.GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be("OPERATOR_STAFF,OPERATOR_ADMIN");
+        method.GetCustomAttributes<ProducesResponseTypeAttribute>()
+            .Select(attribute => attribute.StatusCode)
+            .Should().BeEquivalentTo([
+                StatusCodes.Status200OK,
+                StatusCodes.Status403Forbidden,
+                StatusCodes.Status404NotFound,
+            ]);
     }
 
     [Fact]

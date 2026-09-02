@@ -44,6 +44,7 @@ public sealed record ParcelDetailResponse(
     decimal? ActualVolumeM3,
     decimal? ActualDimWeightKg,
     decimal? ActualChargeableWeightKg,
+    long? DeclaredValueVnd,
     long EstimatedGrossPriceVnd,
     long FinalGrossPriceVnd,
     long DiscountAmountVnd,

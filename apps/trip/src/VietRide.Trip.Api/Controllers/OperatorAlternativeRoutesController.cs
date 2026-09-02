@@ -12,6 +12,7 @@ namespace VietRide.Trip.Api.Controllers;
 [Route("v1/operator/alternative-routes")]
 public sealed class OperatorAlternativeRoutesController : ControllerBase
 {
+    private const string OperatorReadRoles = "OPERATOR_STAFF,OPERATOR_ADMIN";
     private const string OperatorWriteRoles = "OPERATOR_ADMIN";
 
     private readonly IMediator mediator;
@@ -19,6 +20,20 @@ public sealed class OperatorAlternativeRoutesController : ControllerBase
     public OperatorAlternativeRoutesController(IMediator mediator)
     {
         this.mediator = mediator;
+    }
+
+    [HttpGet("{id:guid}")]
+    [Authorize(Roles = OperatorReadRoles)]
+    [ProducesResponseType(typeof(ApiResponse<AlternativeRouteDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AlternativeRouteDto>> GetByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await mediator.Send(
+            new GetAlternativeRouteQuery(GetRequiredOperatorId(), id),
+            cancellationToken));
     }
 
     [HttpPatch("{id:guid}")]

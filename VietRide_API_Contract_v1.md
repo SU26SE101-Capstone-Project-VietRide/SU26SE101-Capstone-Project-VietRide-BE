@@ -8713,7 +8713,9 @@ Response `200`: `PagedResult<RouteStopFareTemplateDto>` in the ADR 0004 success 
 Each main Route may have any number of active AlternativeRoutes; there is no global active-count cap.
 AlternativeRoute stops are an independent stop sequence and do not reuse RouteStop rows.
 
-`pathPolyline` is nullable and appears on create/update/geometry responses only. The paged alternative-route list uses `AlternativeRouteListItemDto` without `pathPolyline`.
+`pathPolyline` is nullable and appears on detail/create/update/geometry responses only. The paged
+alternative-route list uses `AlternativeRouteListItemDto`, which has the same fields as
+`AlternativeRouteDto` except `pathPolyline`, so list payloads remain lightweight.
 
 ### POST `/v1/operator/routes/{id}/alternative-routes`
 
@@ -8756,7 +8758,23 @@ Query: `page?`, `pageSize?`.
 
 Pagination follows BSOT §5.7 defaults (`page=1`, `pageSize=20`, max `100`).
 
-Response `200`: `PagedResult<AlternativeRouteDto>` in the ADR 0004 success envelope.
+Response `200`: `PagedResult<AlternativeRouteListItemDto>` in the ADR 0004 success envelope.
+
+### GET `/v1/operator/alternative-routes/{altId}`
+
+Auth: `OPERATOR_ADMIN`, `OPERATOR_STAFF`.
+
+Response `200`: `AlternativeRouteDto` in the ADR 0004 success envelope. `pathPolyline` is the exact
+nullable Google encoded polyline precision-5 value persisted for this AlternativeRoute. The endpoint
+does not synthesize geometry when the value is `null`. Stops are ordered by `orderIndex ASC`, then
+`stopId ASC`. Both active and inactive AlternativeRoutes are readable.
+
+Missing AlternativeRoute or an AlternativeRoute whose parent Route belongs to another operator
+returns `404 ROUTE_NOT_FOUND`. A valid operator role without an `operatorId` scope returns
+`403 FORBIDDEN`. A malformed UUID path value does not match the `{altId:guid}` route and returns
+HTTP `404` before query dispatch.
+The success-envelope `message` field is optional; clients must rely on `success`, `statusCode`,
+`data`, and `meta`.
 
 ### PATCH `/v1/operator/alternative-routes/{altId}`
 
