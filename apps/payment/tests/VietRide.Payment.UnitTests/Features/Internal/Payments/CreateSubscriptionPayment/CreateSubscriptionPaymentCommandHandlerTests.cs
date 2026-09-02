@@ -52,6 +52,26 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_WalletProratedAmount_PreservesExactDongAmount()
+    {
+        const long proratedAmount = 77_205_356;
+        var fixture = new Fixture(100_000_000);
+
+        var result = await fixture.Handler.Handle(
+            fixture.Command("WALLET", amount: proratedAmount),
+            CancellationToken.None);
+
+        result.Status.Should().Be("SUCCEEDED");
+        fixture.OperatorWallet.Balance.Amount.Should().Be(22_794_644);
+        fixture.Payments.Items.Should().ContainSingle()
+            .Which.Amount.Amount.Should().Be(proratedAmount);
+        fixture.OperatorTransactions.Items.Should().ContainSingle()
+            .Which.Amount.Amount.Should().Be(proratedAmount);
+        fixture.PlatformWallets.Transactions.Should().ContainSingle()
+            .Which.Amount.Amount.Should().Be(proratedAmount);
+    }
+
+    [Fact]
     public async Task Handle_WalletInsufficient_DoesNotCreatePaymentOrMoveMoney()
     {
         var fixture = new Fixture(100_000);
@@ -240,14 +260,17 @@ public sealed class CreateSubscriptionPaymentCommandHandlerTests
                 new FrozenClock(Now));
         }
 
-        public CreateSubscriptionPaymentCommand Command(string method, string idempotencyKey = "idem-subscription") => new(
+        public CreateSubscriptionPaymentCommand Command(
+            string method,
+            string idempotencyKey = "idem-subscription",
+            long amount = 500_000) => new(
             UpgradeAttemptId,
             SubscriptionId,
             OperatorId,
             PlanId,
             "MONTHLY",
             method,
-            500_000,
+            amount,
             new SubscriptionPaymentContextV1(
                 1,
                 SubscriptionId,

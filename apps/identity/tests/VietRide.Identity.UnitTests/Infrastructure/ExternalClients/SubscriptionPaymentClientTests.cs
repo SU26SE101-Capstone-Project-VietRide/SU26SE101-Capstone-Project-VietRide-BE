@@ -5,6 +5,7 @@ using System.Text.Json;
 using FluentAssertions;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Infrastructure.ExternalClients;
+using VietRide.Shared.Application.Exceptions;
 
 namespace VietRide.Identity.UnitTests.Infrastructure.ExternalClients;
 
@@ -104,6 +105,41 @@ public sealed class SubscriptionPaymentClientTests
         var exception = await action.Should().ThrowAsync<SubscriptionPaymentClientException>();
         exception.Which.StatusCode.Should().Be(502);
         exception.Which.ErrorCode.Should().Be("PAYMENT_SERVICE_ERROR");
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenPaymentReturnsValidationFields_PreservesFieldDetails()
+    {
+        var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.UnprocessableEntity)
+        {
+            Content = JsonContent.Create(new
+            {
+                success = false,
+                statusCode = 422,
+                error = new
+                {
+                    code = "VALIDATION_ERROR",
+                    message = "One or more validation errors occurred.",
+                    fields = new[]
+                    {
+                        new { field = "Amount", message = "Amount must be greater than 0." },
+                    },
+                },
+                meta = new
+                {
+                    traceId = "payment-validation-test",
+                    timestamp = DateTimeOffset.UtcNow,
+                },
+            }),
+        }));
+
+        var action = () => client.CreateAsync(CreateRequest());
+
+        var exception = await action.Should().ThrowAsync<CodedValidationException>();
+        exception.Which.ErrorCode.Should().Be("VALIDATION_ERROR");
+        exception.Which.Errors.Should().ContainSingle(error =>
+            error.Field == "Amount"
+            && error.Message == "Amount must be greater than 0.");
     }
 
     [Fact]

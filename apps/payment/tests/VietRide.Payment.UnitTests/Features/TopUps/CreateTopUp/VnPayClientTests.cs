@@ -65,13 +65,14 @@ public sealed class VnPayClientTests
         var url = client.CreateSubscriptionPaymentRedirectUrl(
             Guid.NewGuid(),
             Guid.NewGuid(),
-            Money.FromRaw(500_000),
+            Money.FromRaw(77_205_356),
             Guid.NewGuid().ToString("D"),
             "203.0.113.10",
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow.AddMinutes(15),
             VnPayReturnMode.OPERATOR_WEB);
 
+        url.Should().Contain("vnp_Amount=7720535600");
         Uri.UnescapeDataString(ExtractQueryValue(url, "vnp_ReturnUrl"))
             .Should().Be("https://app.vietride.online/payments/return");
     }
