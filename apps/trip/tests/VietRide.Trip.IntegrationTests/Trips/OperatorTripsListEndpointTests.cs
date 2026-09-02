@@ -15,6 +15,7 @@ using Microsoft.IdentityModel.Tokens;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.ValueObjects;
 using VietRide.Trip.Application.Abstractions.Repositories;
+using VietRide.Trip.Application.Features.Trips.GetOperatorCargoCapacity;
 using VietRide.Trip.Application.Features.Trips.ListOperatorTrips;
 using VietRide.Trip.Domain.Entities;
 using VietRide.Trip.Infrastructure;
@@ -26,6 +27,47 @@ namespace VietRide.Trip.IntegrationTests.Trips;
 public sealed class OperatorTripsListEndpointTests
 {
     private const string TestSecret = "test-secret-at-least-32-chars-long-xxxxx";
+
+    [Fact]
+    public async Task CargoCapacity_ReturnsHistoricalLoadedTotalsAndDispatchesOperatorScope()
+    {
+        var operatorId = Guid.NewGuid();
+        var tripId = Guid.NewGuid();
+        var result = new OperatorCargoCapacityDto(
+            tripId,
+            0m,
+            0m,
+            0m,
+            0m,
+            500m,
+            5m,
+            500m,
+            5m,
+            0m,
+            12.5m,
+            0.2m);
+        var mediator = new StubMediator(_ => result);
+        using var factory = new OperatorTripsEndpointFactory(mediator);
+        using var client = factory.CreateClient();
+        using var request = CreateRequest(
+            $"/v1/operator/trips/{tripId}/cargo-capacity",
+            "OPERATOR_STAFF",
+            operatorId);
+
+        using var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        data.GetProperty("loadedWeightKg").GetDecimal().Should().Be(0m);
+        data.GetProperty("historicalLoadedWeightKg").GetDecimal().Should().Be(12.5m);
+        data.GetProperty("historicalLoadedVolumeM3").GetDecimal().Should().Be(0.2m);
+
+        mediator.LastRequest.Should().BeOfType<GetOperatorCargoCapacityQuery>();
+        var query = (GetOperatorCargoCapacityQuery)mediator.LastRequest!;
+        query.TripId.Should().Be(tripId);
+        query.OperatorId.Should().Be(operatorId);
+    }
 
     [Fact]
     public async Task OperatorAdmin_ReturnsEnvelopeAndDispatchesJwtTenantWithFilters()

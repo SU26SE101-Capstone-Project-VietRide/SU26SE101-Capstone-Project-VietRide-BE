@@ -65,6 +65,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IOperatorAnalyticsRepository, OperatorAnalyticsRepository>();
         services.AddScoped<IDriverScheduleRepository, DriverScheduleRepository>();
         services.AddScoped<IDriverScheduleAuditLogRepository, DriverScheduleAuditLogRepository>();
+        services.AddScoped<IOperatorCargoCapacityReadRepository, OperatorCargoCapacityReadRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
         services.AddScoped<ITripAuditLogRepository, TripAuditLogRepository>();
         services.AddScoped<ITripVehicleSwapService, TripVehicleSwapService>();
