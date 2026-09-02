@@ -44,6 +44,7 @@ public sealed class GetParcelDetailQueryHandlerTests
         result.CheckInPhotoUrls.Should().Equal(CheckInPhotoUrl);
         result.DeliveryPhotoUrls.Should().Equal(DeliveryPhotoUrl);
         result.BookingId.Should().Be(parcel.BookingId);
+        result.DeclaredValueVnd.Should().Be(12_000_000);
         result.SettlementPolicyVersion.Should().Be(2);
         result.EstimatedSizeCategory.Should().Be("SMALL");
         result.EstimatedGrossPriceVnd.Should().Be(50_000);
@@ -98,6 +99,7 @@ public sealed class GetParcelDetailQueryHandlerTests
             6000m,
             DateTimeOffset.UtcNow.AddHours(2),
             DateTimeOffset.UtcNow.AddHours(1));
+        parcel.AcceptDeclaration(12_000_000, 1, DateTimeOffset.UtcNow);
         SetPrivateProperty(parcel, nameof(ParcelEntity.CheckInPhotoUrls), new[] { CheckInPhotoUrl });
         SetPrivateProperty(parcel, nameof(ParcelEntity.DeliveryPhotoUrls), new[] { DeliveryPhotoUrl });
         return parcel;
