@@ -485,23 +485,23 @@ internal sealed class TripRepository : ITripRepository
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var rows = from trip in _dbContext.Trips.AsNoTracking()
-            join route in _dbContext.Routes.AsNoTracking() on trip.RouteId equals route.Id
-            join vehicle in _dbContext.Vehicles.AsNoTracking() on trip.VehicleId equals vehicle.Id
-            where trip.OperatorId == operatorId
-                && trip.DepartureDateTime >= fromUtc
-                && trip.DepartureDateTime < toUtc
-            orderby trip.DepartureDateTime, trip.Id
-            select new TripOperatorOccupancyRow(
-                trip.Id,
-                trip.RouteId,
-                trip.TripCode ?? string.Empty,
-                route.Name,
-                vehicle.LicensePlate,
-                trip.Status,
-                trip.DepartureDateTime,
-                trip.Seats.LongCount(seat => seat.SeatType != TripSeatType.DRIVER_AREA
-                    && seat.Status != TripSeatStatus.UNAVAILABLE),
-                trip.Seats.LongCount(seat => seat.Status == TripSeatStatus.BOOKED));
+                   join route in _dbContext.Routes.AsNoTracking() on trip.RouteId equals route.Id
+                   join vehicle in _dbContext.Vehicles.AsNoTracking() on trip.VehicleId equals vehicle.Id
+                   where trip.OperatorId == operatorId
+                       && trip.DepartureDateTime >= fromUtc
+                       && trip.DepartureDateTime < toUtc
+                   orderby trip.DepartureDateTime, trip.Id
+                   select new TripOperatorOccupancyRow(
+                       trip.Id,
+                       trip.RouteId,
+                       trip.TripCode ?? string.Empty,
+                       route.Name,
+                       vehicle.LicensePlate,
+                       trip.Status,
+                       trip.DepartureDateTime,
+                       trip.Seats.LongCount(seat => seat.SeatType != TripSeatType.DRIVER_AREA
+                           && seat.Status != TripSeatStatus.UNAVAILABLE),
+                       trip.Seats.LongCount(seat => seat.Status == TripSeatStatus.BOOKED));
 
         await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(cancellationToken).ConfigureAwait(false))
         {
