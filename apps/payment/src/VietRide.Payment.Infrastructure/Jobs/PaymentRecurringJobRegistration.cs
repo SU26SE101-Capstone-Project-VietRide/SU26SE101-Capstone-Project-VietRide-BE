@@ -60,6 +60,11 @@ public static class PaymentRecurringJobRegistration
             job => job.RunAsync(CancellationToken.None),
             "*/5 * * * *",
             UtcOptions());
+        recurringJobs.AddOrUpdate<PlatformWalletTransactionLinkBackfillJob>(
+            PlatformWalletTransactionLinkBackfillJob.RecurringJobId,
+            job => job.RunAsync(CancellationToken.None),
+            "*/5 * * * *",
+            UtcOptions());
     }
 
     public static void RegisterInvoiceJobs(

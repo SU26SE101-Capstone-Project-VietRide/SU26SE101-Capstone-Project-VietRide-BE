@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Payment.Application.Models;
 using VietRide.Shared.Application.Behaviors;
+using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Kernel.Primitives;
 
 namespace VietRide.Payment.Application.Features.Management;
@@ -29,7 +30,14 @@ public sealed record OperatorWalletDto(
     long LifetimeSettledAmount = 0,
     LastSettlementDto? LastSettlement = null,
     bool WithdrawalSupported = false,
-    DateTimeOffset CalculatedAt = default);
+    DateTimeOffset CalculatedAt = default,
+    OperatorWalletReconciliationDto? Reconciliation = null);
+
+public sealed record OperatorWalletReconciliationDto(
+    long OutstandingPayableVnd,
+    long AwaitingTripCompletionPayableVnd,
+    long PendingHoldPayableVnd,
+    long EligibleForSettlementVnd);
 
 public sealed record LastSettlementDto(
     Guid SettlementId,
@@ -57,7 +65,9 @@ public sealed record WalletTransactionDto(
     string? AdjustmentReason = null,
     string DataCompleteness = "COMPLETE",
     IReadOnlyList<string>? MissingFields = null,
-    string? TransactionCode = null);
+    string? TransactionCode = null,
+    string? BusinessGroup = null,
+    string? CashFlowPurpose = null);
 
 public sealed record RelatedSettlementDto(
     Guid SettlementId,
@@ -149,7 +159,22 @@ public sealed record PlatformWalletTransactionDto(
     DateTimeOffset CreatedAt,
     string ActorType,
     FinancialActorDto? Actor,
-    string? TransactionCode = null);
+    string? TransactionCode = null,
+    string? BusinessGroup = null,
+    string? CashFlowPurpose = null,
+    IReadOnlyList<PlatformWalletAllocationDto>? Allocations = null,
+    string DataCompleteness = "COMPLETE",
+    IReadOnlyList<string>? MissingFields = null);
+
+public sealed record PlatformWalletAllocationDto(
+    long AllocatedAmountVnd,
+    FinancialOperatorDto? Operator,
+    Guid? TripId,
+    string? TripCode,
+    string ReferenceType,
+    Guid? ReferenceId,
+    string? ReferenceCode,
+    LedgerSettlementDto? RelatedSettlement);
 
 public sealed record LedgerEntryDto(
     Guid LedgerEntryId,
@@ -171,7 +196,18 @@ public sealed record LedgerEntryDto(
     bool AffectsSettlement = false,
     LedgerSettlementDto? Settlement = null,
     string DataCompleteness = "COMPLETE",
-    IReadOnlyList<string>? MissingFields = null);
+    IReadOnlyList<string>? MissingFields = null,
+    string? BusinessGroup = null,
+    string? OperatorEffect = null,
+    LedgerTripDto? Trip = null);
+
+public sealed record LedgerTripDto(
+    Guid TripId,
+    string? TripCode,
+    DateTimeOffset DepartureAt,
+    string RouteName,
+    string OriginName,
+    string DestinationName);
 
 public sealed record LedgerSettlementDto(
     Guid SettlementId,
@@ -213,6 +249,28 @@ public sealed record InvoiceDetailDto(
     string DownloadApiUrl);
 
 public sealed record PlatformWalletDto(Guid PlatformWalletId, long Balance, DateTimeOffset UpdatedAt);
+
+public sealed record PlatformWalletReconciliationSummaryDto(
+    PlatformWalletReconciliationSnapshotDto Snapshot,
+    PlatformWalletReconciliationPeriodDto Period,
+    DateTimeOffset CalculatedAt);
+
+public sealed record PlatformWalletReconciliationSnapshotDto(
+    long PlatformWalletBalanceVnd,
+    long OutstandingOperatorPayableVnd,
+    long AwaitingTripCompletionVnd,
+    long PendingHoldVnd,
+    long EligibleForSettlementVnd,
+    int EligibleOperatorCount,
+    int StuckSettlementCount,
+    long PartialReconciliationTransactionCount);
+
+public sealed record PlatformWalletReconciliationPeriodDto(
+    DateOnly From,
+    DateOnly To,
+    string Timezone,
+    long SubscriptionRevenueVnd,
+    long PaidToOperatorsVnd);
 
 public sealed record AdjustmentRequest(string Type, long Amount, string Note);
 
@@ -256,7 +314,35 @@ public interface IFinancialManagementService
     Task<InvoiceDetailDto> GetInvoiceAsync(Guid operatorId, Guid invoiceId, CancellationToken cancellationToken);
     Task<PagedResult<AdminSettlementDto>> ListAdminSettlementsAsync(PageOptions options, Guid? operatorId, string? status, Guid? tripId, bool stuckOnly, string? severity, CancellationToken cancellationToken, string? search = null);
     Task<PlatformWalletDto> GetPlatformWalletAsync(CancellationToken cancellationToken);
-    Task<PagedResult<PlatformWalletTransactionDto>> ListPlatformTransactionsAsync(PageOptions options, string? type, string? referenceType, CancellationToken cancellationToken, string? search = null);
+    Task<PagedResult<PlatformWalletTransactionDto>> ListPlatformTransactionsAsync(
+        PageOptions options,
+        string? type,
+        string? referenceType,
+        CancellationToken cancellationToken,
+        string? search = null,
+        Guid? operatorId = null,
+        Guid? tripId = null,
+        string? businessGroup = null,
+        string? cashFlowPurpose = null);
+    Task<PlatformWalletReconciliationSummaryDto> GetPlatformWalletReconciliationSummaryAsync(
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken cancellationToken);
+    Task<ExcelReportStream> ExportPlatformTransactionsAsync(
+        PageOptions filters,
+        string? type,
+        string? referenceType,
+        string? search,
+        Guid? operatorId,
+        Guid? tripId,
+        string? businessGroup,
+        string? cashFlowPurpose,
+        CancellationToken cancellationToken);
+    Task<ExcelReportStream> ExportOperatorWalletReconciliationAsync(
+        Guid operatorId,
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken cancellationToken);
     Task<AdjustmentResult> AdjustPlatformWalletAsync(AdjustmentRequest request, Guid actorUserId, CancellationToken cancellationToken);
     Task<AdjustmentResult> AdjustOperatorWalletAsync(Guid operatorId, AdjustmentRequest request, Guid actorUserId, CancellationToken cancellationToken);
     Task<ManualSettlementResult> SettleAsync(Guid settlementId, Guid actorUserId, CancellationToken cancellationToken);
@@ -270,7 +356,30 @@ public sealed record ListOperatorInvoicesQuery(Guid OperatorId, PageOptions Opti
 public sealed record GetOperatorInvoiceQuery(Guid OperatorId, Guid InvoiceId) : IRequest<InvoiceDetailDto>;
 public sealed record ListAdminSettlementsQuery(PageOptions Options, Guid? OperatorId, string? Status, Guid? TripId, bool StuckOnly, string? Severity, string? Search = null) : IRequest<PagedResult<AdminSettlementDto>>;
 public sealed record GetPlatformWalletQuery : IRequest<PlatformWalletDto>;
-public sealed record ListPlatformTransactionsQuery(PageOptions Options, string? Type, string? ReferenceType, string? Search = null) : IRequest<PagedResult<PlatformWalletTransactionDto>>;
+public sealed record ListPlatformTransactionsQuery(
+    PageOptions Options,
+    string? Type,
+    string? ReferenceType,
+    string? Search = null,
+    Guid? OperatorId = null,
+    Guid? TripId = null,
+    string? BusinessGroup = null,
+    string? CashFlowPurpose = null) : IRequest<PagedResult<PlatformWalletTransactionDto>>;
+public sealed record GetPlatformWalletReconciliationSummaryQuery(DateOnly? From, DateOnly? To)
+    : IRequest<PlatformWalletReconciliationSummaryDto>;
+public sealed record ExportPlatformTransactionsQuery(
+    PageOptions Filters,
+    string? Type,
+    string? ReferenceType,
+    string? Search,
+    Guid? OperatorId,
+    Guid? TripId,
+    string? BusinessGroup,
+    string? CashFlowPurpose) : IRequest<ExcelReportStream>;
+public sealed record ExportOperatorWalletReconciliationQuery(
+    Guid OperatorId,
+    DateOnly? From,
+    DateOnly? To) : IRequest<ExcelReportStream>;
 [SkipTransaction]
 public sealed record AdjustPlatformWalletCommand(AdjustmentRequest Request, Guid ActorUserId) : IRequest<AdjustmentResult>;
 
@@ -290,6 +399,9 @@ public sealed class FinancialManagementHandlers :
     IRequestHandler<ListAdminSettlementsQuery, PagedResult<AdminSettlementDto>>,
     IRequestHandler<GetPlatformWalletQuery, PlatformWalletDto>,
     IRequestHandler<ListPlatformTransactionsQuery, PagedResult<PlatformWalletTransactionDto>>,
+    IRequestHandler<GetPlatformWalletReconciliationSummaryQuery, PlatformWalletReconciliationSummaryDto>,
+    IRequestHandler<ExportPlatformTransactionsQuery, ExcelReportStream>,
+    IRequestHandler<ExportOperatorWalletReconciliationQuery, ExcelReportStream>,
     IRequestHandler<AdjustPlatformWalletCommand, AdjustmentResult>,
     IRequestHandler<AdjustOperatorWalletCommand, AdjustmentResult>,
     IRequestHandler<SettleTripManuallyCommand, ManualSettlementResult>
@@ -306,7 +418,10 @@ public sealed class FinancialManagementHandlers :
     public Task<InvoiceDetailDto> Handle(GetOperatorInvoiceQuery request, CancellationToken ct) => _service.GetInvoiceAsync(request.OperatorId, request.InvoiceId, ct);
     public Task<PagedResult<AdminSettlementDto>> Handle(ListAdminSettlementsQuery request, CancellationToken ct) => _service.ListAdminSettlementsAsync(request.Options, request.OperatorId, request.Status, request.TripId, request.StuckOnly, request.Severity, ct, request.Search);
     public Task<PlatformWalletDto> Handle(GetPlatformWalletQuery request, CancellationToken ct) => _service.GetPlatformWalletAsync(ct);
-    public Task<PagedResult<PlatformWalletTransactionDto>> Handle(ListPlatformTransactionsQuery request, CancellationToken ct) => _service.ListPlatformTransactionsAsync(request.Options, request.Type, request.ReferenceType, ct, request.Search);
+    public Task<PagedResult<PlatformWalletTransactionDto>> Handle(ListPlatformTransactionsQuery request, CancellationToken ct) => _service.ListPlatformTransactionsAsync(request.Options, request.Type, request.ReferenceType, ct, request.Search, request.OperatorId, request.TripId, request.BusinessGroup, request.CashFlowPurpose);
+    public Task<PlatformWalletReconciliationSummaryDto> Handle(GetPlatformWalletReconciliationSummaryQuery request, CancellationToken ct) => _service.GetPlatformWalletReconciliationSummaryAsync(request.From, request.To, ct);
+    public Task<ExcelReportStream> Handle(ExportPlatformTransactionsQuery request, CancellationToken ct) => _service.ExportPlatformTransactionsAsync(request.Filters, request.Type, request.ReferenceType, request.Search, request.OperatorId, request.TripId, request.BusinessGroup, request.CashFlowPurpose, ct);
+    public Task<ExcelReportStream> Handle(ExportOperatorWalletReconciliationQuery request, CancellationToken ct) => _service.ExportOperatorWalletReconciliationAsync(request.OperatorId, request.From, request.To, ct);
     public Task<AdjustmentResult> Handle(AdjustPlatformWalletCommand request, CancellationToken ct) => _service.AdjustPlatformWalletAsync(request.Request, request.ActorUserId, ct);
     public Task<AdjustmentResult> Handle(AdjustOperatorWalletCommand request, CancellationToken ct) => _service.AdjustOperatorWalletAsync(request.OperatorId, request.Request, request.ActorUserId, ct);
     public Task<ManualSettlementResult> Handle(SettleTripManuallyCommand request, CancellationToken ct) => _service.SettleAsync(request.SettlementId, request.ActorUserId, ct);

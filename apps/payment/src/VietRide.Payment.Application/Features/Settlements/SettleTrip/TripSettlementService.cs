@@ -119,11 +119,18 @@ public sealed class TripSettlementService
 
             try
             {
-                var platformTransaction = await _platformWallets.DebitAsync(
+                var platformTransaction = await _platformWallets.DebitWithLinksAsync(
                     Money.FromRaw(netAmount),
                     PlatformWalletTransactionRef.TRIP_SETTLEMENT,
                     settlement.Id,
                     "Operator trip settlement",
+                    [new PlatformWalletTransactionLinkInput(
+                        PlatformWalletTransactionLinkType.TRIP_SETTLEMENT,
+                        netAmount,
+                        settlement.OperatorId,
+                        settlement.TripId,
+                        settlement.Id,
+                        settlement.SettlementCode)],
                     cancellationToken);
                 if (settledBy is not null)
                     platformTransaction.AssignUserActor(settledBy);

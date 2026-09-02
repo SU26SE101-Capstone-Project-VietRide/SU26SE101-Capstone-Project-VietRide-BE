@@ -7,6 +7,7 @@ using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Events;
 using VietRide.Payment.Application.Exceptions;
 using VietRide.Payment.Application.Models;
+using VietRide.Payment.Application.Services;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -273,7 +274,12 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
                 "Refund amount exceeds the paid allocation amount.");
         }
         var amount = Money.FromRaw(refundAmount);
-        await DebitPlatformWalletAsync(amount, referenceType, request.ReferenceId, cancellationToken).ConfigureAwait(false);
+        await DebitPlatformWalletAsync(
+            amount,
+            referenceType,
+            request.ReferenceId,
+            source.Context,
+            cancellationToken).ConfigureAwait(false);
         WalletTransaction transaction;
         if (referenceType == WalletTransactionRef.PARCEL_REFUND)
         {
@@ -354,17 +360,19 @@ public sealed class RefundToWalletCommandHandler : IRequestHandler<RefundToWalle
         Money amount,
         WalletTransactionRef referenceType,
         Guid referenceId,
+        PaymentContextV1 context,
         CancellationToken cancellationToken)
     {
         try
         {
-            await _platformWallets.DebitAsync(
+            await _platformWallets.DebitWithLinksAsync(
                     amount,
                     referenceType == WalletTransactionRef.PARCEL_REFUND
                         ? PlatformWalletTransactionRef.PARCEL_REFUND
                         : PlatformWalletTransactionRef.BOOKING_REFUND,
                     referenceId,
                     referenceType == WalletTransactionRef.PARCEL_REFUND ? "Parcel refund" : "Booking refund",
+                    PlatformWalletLinkFactory.ForRefund(context, referenceId, amount.Amount),
                     cancellationToken)
                 .ConfigureAwait(false);
         }

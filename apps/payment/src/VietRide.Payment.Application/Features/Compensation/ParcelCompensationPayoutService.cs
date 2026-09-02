@@ -188,11 +188,17 @@ public sealed class ParcelCompensationPayoutService
             var platform = await _platformWallets.QueryNoTracking().SingleAsync(cancellationToken);
             if (platform.Balance < amount)
                 return false;
-            await _platformWallets.DebitAsync(
+            await _platformWallets.DebitWithLinksAsync(
                 amount,
                 PlatformWalletTransactionRef.PARCEL_COMPENSATION,
                 payout.ClaimId,
                 $"Parcel compensation for operator {payout.OperatorId:D}",
+                [new PlatformWalletTransactionLinkInput(
+                    PlatformWalletTransactionLinkType.PARCEL_CLAIM,
+                    amount.Amount,
+                    payout.OperatorId,
+                    payout.TripId,
+                    payout.ClaimId)],
                 cancellationToken);
             return true;
         }

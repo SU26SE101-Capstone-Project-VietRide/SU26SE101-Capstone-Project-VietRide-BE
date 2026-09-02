@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using VietRide.Payment.Application.Features.Management;
 
 namespace VietRide.Payment.Infrastructure.Persistence.Repositories;
@@ -31,8 +30,7 @@ internal static class CanonicalTripFinancialProjectionQuery
                     AND (entry_type <> 'VOUCHER_OPERATOR_FUNDED_AUDIT'
                          OR operator_funded_voucher_amount IS NOT NULL)) AS "MetadataComplete"
         FROM vietride_payment.operator_ledger_entries
-        WHERE operator_id = @operator_id
-          AND trip_id IS NOT NULL
+        WHERE trip_id IS NOT NULL
           AND ((reference_type = 'BOOKING'
                 AND (entry_type IN ('BOOKING_REVENUE', 'BOOKING_REFUND', 'VOUCHER_VIETRIDE_FUNDED_CREDIT')
                      OR entry_type = 'ADJUSTMENT'
@@ -45,10 +43,11 @@ internal static class CanonicalTripFinancialProjectionQuery
         GROUP BY operator_id, trip_id
         """;
 
+    public static IQueryable<TripFinancialProjection> ForAll(PaymentDbContext db)
+        => db.Database.SqlQueryRaw<TripFinancialProjection>(ProjectionSql);
+
     public static IQueryable<TripFinancialProjection> ForOperator(
         PaymentDbContext db,
         Guid operatorId)
-        => db.Database.SqlQueryRaw<TripFinancialProjection>(
-            ProjectionSql,
-            new NpgsqlParameter("operator_id", operatorId));
+        => ForAll(db).Where(item => item.OperatorId == operatorId);
 }

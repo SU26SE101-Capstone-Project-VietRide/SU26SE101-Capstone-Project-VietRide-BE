@@ -58,6 +58,10 @@ CREATE TYPE platform_wallet_transaction_ref AS ENUM (
     'PARCEL_COMPENSATION'
 );
 
+CREATE TYPE platform_wallet_transaction_link_type AS ENUM (
+    'BOOKING', 'PARCEL', 'TRIP_SETTLEMENT', 'SUBSCRIPTION', 'PARCEL_CLAIM'
+);
+
 CREATE TYPE operator_ledger_entry_type AS ENUM (
     'BOOKING_REVENUE', 'PARCEL_REVENUE',
     'BOOKING_REFUND', 'PARCEL_REFUND',
@@ -358,6 +362,47 @@ CREATE INDEX idx_platform_wallet_transactions_actor_user_id
 
 COMMENT ON TABLE platform_wallet_transactions IS
     'Immutable ledger for PlatformWallet. INSERT atomic with UPDATE platform_wallets via optimistic lock.';
+
+-- -----------------------------------------------------------------------------
+-- platform_wallet_transaction_links (normalized immutable business projection)
+-- -----------------------------------------------------------------------------
+CREATE TABLE platform_wallet_transaction_links (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    platform_wallet_transaction_id UUID NOT NULL,
+    operator_id UUID NULL, -- logical FK identity.operators; no cross-database FK
+    trip_id UUID NULL, -- logical FK trip.trips; no cross-database FK
+    link_type platform_wallet_transaction_link_type NOT NULL,
+    reference_id UUID NULL,
+    reference_code VARCHAR(64) NULL,
+    allocated_amount BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT fk_platform_wallet_transaction_links_transaction
+        FOREIGN KEY (platform_wallet_transaction_id)
+        REFERENCES platform_wallet_transactions (id) ON DELETE RESTRICT,
+    CONSTRAINT chk_platform_wallet_tx_links_amount_non_negative
+        CHECK (allocated_amount >= 0)
+);
+
+CREATE INDEX idx_platform_wallet_transaction_links_transaction
+    ON platform_wallet_transaction_links (platform_wallet_transaction_id);
+CREATE INDEX idx_platform_wallet_transaction_links_operator
+    ON platform_wallet_transaction_links (operator_id)
+    WHERE operator_id IS NOT NULL;
+CREATE INDEX idx_platform_wallet_transaction_links_trip
+    ON platform_wallet_transaction_links (trip_id)
+    WHERE trip_id IS NOT NULL;
+CREATE INDEX idx_platform_wallet_transaction_links_reference
+    ON platform_wallet_transaction_links (reference_id, reference_code)
+    WHERE reference_id IS NOT NULL OR reference_code IS NOT NULL;
+CREATE UNIQUE INDEX uq_platform_wallet_transaction_links_identity
+    ON platform_wallet_transaction_links (
+        platform_wallet_transaction_id,
+        link_type,
+        reference_id
+    ) NULLS NOT DISTINCT;
+
+COMMENT ON TABLE platform_wallet_transaction_links IS
+    'Normalized immutable allocation links for PlatformWallet movements. Written atomically with the movement; legacy rows remain unlinked when provenance cannot be proven.';
 
 -- -----------------------------------------------------------------------------
 -- deleted_financial_actor_markers (durable privacy fence for manual actors)

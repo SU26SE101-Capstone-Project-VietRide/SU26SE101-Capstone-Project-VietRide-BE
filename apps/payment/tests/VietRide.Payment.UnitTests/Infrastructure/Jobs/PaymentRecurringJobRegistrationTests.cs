@@ -15,7 +15,7 @@ public sealed class PaymentRecurringJobRegistrationTests
         PaymentRecurringJobRegistration.Register(manager);
         PaymentRecurringJobRegistration.RegisterInvoiceJobs(manager, "15 * * * *");
 
-        manager.Registrations.Should().HaveCount(12);
+        manager.Registrations.Should().HaveCount(13);
         manager.Registrations.Select(item => item.Id).Should().OnlyHaveUniqueItems();
         manager.Registrations.Should().OnlyContain(item => item.Options.TimeZone == TimeZoneInfo.Utc);
         manager.Registrations.Should().ContainSingle(item =>
@@ -29,6 +29,9 @@ public sealed class PaymentRecurringJobRegistrationTests
             && item.Cron == "15 * * * *");
         manager.Registrations.Should().ContainSingle(item =>
             item.Id == PaymentBusinessCodeBackfillJob.RecurringJobId
+            && item.Cron == "*/5 * * * *");
+        manager.Registrations.Should().ContainSingle(item =>
+            item.Id == PlatformWalletTransactionLinkBackfillJob.RecurringJobId
             && item.Cron == "*/5 * * * *");
     }
 

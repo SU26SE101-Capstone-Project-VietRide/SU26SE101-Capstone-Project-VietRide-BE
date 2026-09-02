@@ -118,11 +118,16 @@ public sealed class ConfirmSubscriptionPaymentCommandHandler
 
             payment.MarkSucceeded(responseCode, _clock.UtcNow);
             _payments.Update(payment);
-            await _platformWallets.CreditAsync(
+            await _platformWallets.CreditWithLinksAsync(
                 payment.Amount,
                 PlatformWalletTransactionRef.SUBSCRIPTION_PAYMENT,
                 payment.Id,
                 "Subscription VNPay payment",
+                [new PlatformWalletTransactionLinkInput(
+                    PlatformWalletTransactionLinkType.SUBSCRIPTION,
+                    payment.Amount.Amount,
+                    payment.OperatorId,
+                    ReferenceId: payment.Id)],
                 cancellationToken).ConfigureAwait(false);
             var evt = new SubscriptionPaymentSucceededIntegrationEvent(
                 payment.Id,

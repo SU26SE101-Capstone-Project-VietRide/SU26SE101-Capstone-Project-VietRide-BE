@@ -57,8 +57,25 @@ internal sealed class PlatformWalletRepository : IPlatformWalletRepository
             referenceType,
             referenceId,
             note,
+            [],
             cancellationToken);
     }
+
+    public Task<PlatformWalletTransaction> CreditWithLinksAsync(
+        Money amount,
+        PlatformWalletTransactionRef referenceType,
+        Guid? referenceId,
+        string? note,
+        IReadOnlyCollection<PlatformWalletTransactionLinkInput> links,
+        CancellationToken cancellationToken)
+        => ApplyAsync(
+            PlatformWalletTransactionType.CREDIT,
+            amount,
+            referenceType,
+            referenceId,
+            note,
+            links,
+            cancellationToken);
 
     public Task<PlatformWalletTransaction> DebitAsync(
         Money amount,
@@ -73,8 +90,25 @@ internal sealed class PlatformWalletRepository : IPlatformWalletRepository
             referenceType,
             referenceId,
             note,
+            [],
             cancellationToken);
     }
+
+    public Task<PlatformWalletTransaction> DebitWithLinksAsync(
+        Money amount,
+        PlatformWalletTransactionRef referenceType,
+        Guid? referenceId,
+        string? note,
+        IReadOnlyCollection<PlatformWalletTransactionLinkInput> links,
+        CancellationToken cancellationToken)
+        => ApplyAsync(
+            PlatformWalletTransactionType.DEBIT,
+            amount,
+            referenceType,
+            referenceId,
+            note,
+            links,
+            cancellationToken);
 
     private async Task<PlatformWalletTransaction> ApplyAsync(
         PlatformWalletTransactionType type,
@@ -82,10 +116,16 @@ internal sealed class PlatformWalletRepository : IPlatformWalletRepository
         PlatformWalletTransactionRef referenceType,
         Guid? referenceId,
         string? note,
+        IReadOnlyCollection<PlatformWalletTransactionLinkInput> links,
         CancellationToken cancellationToken)
     {
         if (amount.Amount <= 0)
             throw new ArgumentOutOfRangeException(nameof(amount), "Platform wallet transaction amount must be positive.");
+        ArgumentNullException.ThrowIfNull(links);
+        if (links.Count > 0 && links.Sum(item => checked(item.AllocatedAmount)) != amount.Amount)
+            throw new ArgumentException("Platform wallet link allocations must equal the movement amount.", nameof(links));
+        if (links.GroupBy(item => (item.LinkType, item.ReferenceId)).Any(group => group.Count() > 1))
+            throw new ArgumentException("Platform wallet link allocations must be unique by type and reference.", nameof(links));
 
         await _db.Database.ExecuteSqlRawAsync(
             "SELECT pg_advisory_xact_lock(hashtext('payment:platform-wallet')::bigint)",
@@ -124,6 +164,18 @@ internal sealed class PlatformWalletRepository : IPlatformWalletRepository
             _clock.UtcNow);
 
         await _db.PlatformWalletTransactions.AddAsync(transaction, cancellationToken);
+        if (links.Count > 0)
+        {
+            var entities = links.Select(item => PlatformWalletTransactionLink.Create(
+                transaction.Id,
+                item.LinkType,
+                item.AllocatedAmount,
+                item.OperatorId,
+                item.TripId,
+                item.ReferenceId,
+                item.ReferenceCode));
+            await _db.PlatformWalletTransactionLinks.AddRangeAsync(entities, cancellationToken);
+        }
 
         return transaction;
     }

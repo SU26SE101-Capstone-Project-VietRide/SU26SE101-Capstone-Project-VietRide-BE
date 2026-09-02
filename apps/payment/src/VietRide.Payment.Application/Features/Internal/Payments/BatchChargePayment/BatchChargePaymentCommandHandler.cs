@@ -4,6 +4,7 @@ using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Events;
 using VietRide.Payment.Application.Models;
+using VietRide.Payment.Application.Services;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Payment.Domain.Exceptions;
@@ -99,11 +100,12 @@ public sealed class BatchChargePaymentCommandHandler
             _db.AddPayment(payment);
             _db.AddWalletTransaction(transaction);
             await EnqueueWalletDebitedAsync(transaction, now, cancellationToken).ConfigureAwait(false);
-            await _platformWallets.CreditAsync(
+            await _platformWallets.CreditWithLinksAsync(
                 amount,
                 PlatformWalletTransactionRef.BOOKING_PAYMENT_HOLD,
                 item.ReferenceId,
                 "BOOKING payment hold",
+                PlatformWalletLinkFactory.FromPaymentContext(PaymentContextCodec.DeserializeTrusted(contexts[item.ReferenceId])),
                 cancellationToken).ConfigureAwait(false);
             await EnqueuePaymentSucceededAsync(payment, cancellationToken).ConfigureAwait(false);
 

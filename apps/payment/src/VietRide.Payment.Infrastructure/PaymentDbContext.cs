@@ -26,6 +26,7 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
     public DbSet<WalletTransaction> WalletTransactions => Set<WalletTransaction>();
     public DbSet<PlatformWallet> PlatformWallets => Set<PlatformWallet>();
     public DbSet<PlatformWalletTransaction> PlatformWalletTransactions => Set<PlatformWalletTransaction>();
+    public DbSet<PlatformWalletTransactionLink> PlatformWalletTransactionLinks => Set<PlatformWalletTransactionLink>();
     public DbSet<RefundFailureLog> RefundFailureLogs => Set<RefundFailureLog>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceNumberCounter> InvoiceNumberCounters => Set<InvoiceNumberCounter>();
@@ -49,6 +50,7 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
         dataSourceBuilder.MapEnum<WalletTransactionRef>($"{SchemaName}.wallet_transaction_ref", translator);
         dataSourceBuilder.MapEnum<PlatformWalletTransactionType>($"{SchemaName}.platform_wallet_transaction_type", translator);
         dataSourceBuilder.MapEnum<PlatformWalletTransactionRef>($"{SchemaName}.platform_wallet_transaction_ref", translator);
+        dataSourceBuilder.MapEnum<PlatformWalletTransactionLinkType>($"{SchemaName}.platform_wallet_transaction_link_type", translator);
         dataSourceBuilder.MapEnum<InvoiceStatus>($"{SchemaName}.invoice_status", translator);
         dataSourceBuilder.MapEnum<InvoicePdfGenerationStatus>($"{SchemaName}.invoice_pdf_generation_status", translator);
         dataSourceBuilder.MapEnum<OperatorWalletTransactionType>($"{SchemaName}.operator_wallet_transaction_type", translator);
@@ -101,6 +103,7 @@ public sealed class PaymentDbContext : VietRideDbContextBase, IBatchChargePaymen
         modelBuilder.HasPostgresEnum(SchemaName, "wallet_transaction_ref", Enum.GetNames<WalletTransactionRef>());
         modelBuilder.HasPostgresEnum(SchemaName, "platform_wallet_transaction_type", Enum.GetNames<PlatformWalletTransactionType>());
         modelBuilder.HasPostgresEnum(SchemaName, "platform_wallet_transaction_ref", Enum.GetNames<PlatformWalletTransactionRef>());
+        modelBuilder.HasPostgresEnum(SchemaName, "platform_wallet_transaction_link_type", Enum.GetNames<PlatformWalletTransactionLinkType>());
         modelBuilder.HasPostgresEnum(SchemaName, "invoice_status", Enum.GetNames<InvoiceStatus>());
         modelBuilder.HasPostgresEnum(SchemaName, "invoice_pdf_generation_status", Enum.GetNames<InvoicePdfGenerationStatus>());
         modelBuilder.HasPostgresEnum(SchemaName, "operator_wallet_transaction_type", Enum.GetNames<OperatorWalletTransactionType>());
