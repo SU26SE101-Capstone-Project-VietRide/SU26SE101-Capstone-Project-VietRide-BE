@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.87.0
+> **Phiên bản:** 1.89.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-09-01
+> **Cập nhật lần cuối:** 2026-09-02
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -1088,7 +1088,7 @@ Idempotent: chạy migration 2 lần không lỗi (EF Core / Prisma migrations h
 
 #### Payment & Wallet (`vietride_payment`)
 
-`Payment` · `TopUpRequest` · `Wallet` · `WalletTransaction` · `Invoice` · `PlatformWallet` · `PlatformWalletTransaction` · `OperatorLedgerEntry` · `OperatorWallet` · `OperatorWalletTransaction` · `OperatorTripSettlement` · `ParcelCompensationPayout` · `RefundFailureLog` · `OutboxEvent`
+`Payment` · `TopUpRequest` · `Wallet` · `WalletTransaction` · `Invoice` · `PlatformWallet` · `PlatformWalletTransaction` · `PlatformWalletTransactionLink` · `OperatorLedgerEntry` · `OperatorWallet` · `OperatorWalletTransaction` · `OperatorTripSettlement` · `ParcelCompensationPayout` · `RefundFailureLog` · `OutboxEvent`
 
 #### Parcel (`vietride_parcel`)
 
@@ -3034,6 +3034,30 @@ settlement thêm `tripTerminalAt|eligibleAt|settledAt`, ledger thêm `occurredAt
 `INVALID_FILTER`. Schedule helper canonical giữ hold 7 ngày, eligibility `0 19 * * *` UTC và auto
 settlement `0 2 * * 1` UTC; tên response dùng `nextScheduled...`, không cam kết chuyển tiền chắc chắn.
 
+#### Đồng bộ đối soát PlatformWallet và OperatorWallet (2026-09-02)
+
+`platform_wallet_transaction_links` là projection immutable chuẩn hóa của từng PlatformWallet
+movement theo operator, trip và booking/parcel/settlement/subscription/claim. Movement và links được
+ghi atomically trong cùng transaction; tổng `allocated_amount` của links mới bằng đúng movement
+amount. `BOOKING_GROUP` có nhiều allocation. Manual adjustment không bắt buộc link. Unique
+`(platform_wallet_transaction_id, link_type, reference_id) NULLS NOT DISTINCT` chặn duplicate khi
+replay. Bounded Hangfire job chỉ backfill dữ liệu chứng minh được từ `Payment.Context`, `Payment.OperatorId`,
+`OperatorTripSettlement` hoặc `ParcelCompensationPayout`; legacy còn thiếu giữ nguyên và read trả
+`PARTIAL`. Migration chỉ tạo enum/table/FK/index, không chạy backfill lớn.
+
+Admin và operator dùng chung canonical payable theo `(operator_id, trip_id)`: clamp từng trip bằng
+`max(net_entitlement_amount, 0)`; chưa có marker là awaiting, `PENDING_HOLD` là pending,
+`ELIGIBLE` là eligible, còn `SETTLED|CANCELLED` bị loại. Vì vậy
+`Admin.outstandingOperatorPayableVnd = SUM Operator.reconciliation.outstandingPayableVnd` và
+`Admin.eligibleForSettlementVnd = SUM Operator.reconciliation.eligibleForSettlementVnd`.
+`Admin.paidToOperatorsVnd` là tổng settlement `SETTLED` theo `settled_at` trong cùng kỳ ICT.
+
+Movement invariant không đổi: customer payment chỉ credit PlatformWallet; refund debit PlatformWallet
+và giảm operator entitlement; settlement tạo đúng một PlatformWallet debit và một OperatorWallet
+credit cùng settlement ID/amount; subscription là platform revenue, không phải commission. Nếu
+subscription trả bằng OperatorWallet thì debit/credit hai ví dùng cùng payment reference. Không tạo
+commission/platform-fee row và không đổi công thức balance, refund hoặc settlement hiện hành.
+
 ---
 
 ## 8. Status Machines
@@ -3923,6 +3947,7 @@ permitted.
 | `InvoicePdfRetryJob` | Triggered (retry) | Post-payment-success event | Generate PDF, retry max 5 nếu fail |
 | `RefundFailureRetryJob` | Recurring | Every 10 phút | Retry refund từ RefundFailureLog, max 5 lần |
 | `ParcelCompensationFundingRetryJob` | Recurring every 10 minutes | `parcel_compensation_payouts.status=FUNDING_PENDING` | Retry at most 100 oldest payouts against the same operator's current funding source; unique claim/wallet references prevent double credit and operator wallet cannot become negative |
+| `PlatformWalletTransactionLinkBackfillJob` | Recurring every 5 minutes | PlatformWallet transaction chưa có link và khác manual adjustment | Bounded tối đa 100 dòng/lần; chỉ insert link khi chứng minh được từ dữ liệu Payment-owned, không đoán hoặc rewrite ledger; unique identity làm replay idempotent |
 
 ### 10.2 BullMQ jobs (NestJS services)
 
@@ -4404,6 +4429,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.89.0** | 2026-09-02 | Codex | **MINOR** — Đồng bộ đối soát PlatformWallet Admin và OperatorWallet tenant-scoped: thêm projection link allocation immutable, bounded idempotent backfill, canonical positive payable dùng chung, taxonomy/enrichment/completeness additive, summary Admin và hai XLSX reconciliation export fail-closed. Mọi payment/refund/settlement/subscription/compensation movement mới ghi link atomically; giữ nguyên balance/refund/settlement, không thêm commission, dependency hoặc Gateway route. |
 | **1.88.0** | 2026-09-01 | Codex | **MINOR** — Thêm Booking-level Shuttle unassignment cho `OPERATOR_ADMIN|OPERATOR_STAFF`: toàn bộ manifest `PENDING` trở lại `PENDING_ASSIGNMENT`, compact pickup order và refresh reservation nguyên tử; xe rỗng tự hủy và phát thêm lifecycle cancellation. Đăng ký `trip.shuttle.unassigned`, `SHUTTLE_UNASSIGNED`, Gateway exact route, hai Shuttle error code và một Notification Prisma migration. Inventory tăng lên 220/198/22; không đổi Trip schema, Booking chính, thanh toán hoặc API hủy hiện có. |
 | **1.87.0** | 2026-09-01 | Codex | **MINOR** — Close Passenger Mobile BE gaps without changing Tracking share lifecycle. Notification resolves Passenger `VEHICLE_SUBSTITUTED` notifications carrying `bookingId` to `OPEN_BOOKING_DETAIL` while preserving Trip-detail fallback. Booking and Parcel history model operational `seatNumber` as nullable. Parcel availability adds backward-compatible destination Station, exact drop-off Stop, and destination Location discovery modes with typed `dropoffPoints`; Trip applies active Stop/`allowDropoff`, fare, Assistant, capacity and pagination filters authoritatively. Parcel pickup remains the Route origin Station, all eligible drop-off points use the same Route fare, and quote tokens remain Trip/Route/station-pair bound rather than Stop-bound. No endpoint path, schema, migration, dependency, Gateway route, event key or Tracking lifecycle change. |
 | **1.86.0** | 2026-08-31 | Codex | **MINOR** — Fix Parcel production E2E defects BE-PCL-001..008: expose stop departure anchors; enforce ordered stop/destination arrival and destination-before-manual-completion while auditing the ETA+30 exception; make forwarding custody/outbox atomic and auto-resolve only after verified unload; align Assistant actions and Passenger incident policy; clarify destination reconciliation semantics with a deprecated `canComplete` alias; and add the Driver unified approval inbox, `parcel.approval.requested`, `PARCEL_APPROVAL_REQUESTED`, native `OPEN_PARCEL_APPROVAL`, reassignment/terminal invalidation, Gateway route and one Notification enum migration. No dependency or Parcel/Trip schema change. |

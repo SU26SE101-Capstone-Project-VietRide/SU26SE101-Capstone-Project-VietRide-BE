@@ -59,7 +59,6 @@ public static class InfrastructureServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.AddSingleton<IExcelReportWriter, ClosedXmlExcelReportWriter>();
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
 
@@ -86,6 +85,8 @@ public static class InfrastructureServiceCollectionExtensions
         IConfiguration configuration,
         bool registerConsumers = true)
     {
+        services.AddSingleton<IExcelReportWriter, ClosedXmlExcelReportWriter>();
+        services.AddSingleton<IFinancialWorkbookWriter, ClosedXmlFinancialWorkbookWriter>();
         services.AddScoped<IWalletRepository, WalletRepository>();
         services.AddScoped<IPaymentRepository, PaymentRepository>();
         services.AddScoped<ITopUpRequestRepository, TopUpRequestRepository>();
@@ -128,6 +129,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ParcelCompensationPayoutService>();
         services.AddScoped<ParcelCompensationFundingRetryJob>();
         services.AddScoped<PaymentBusinessCodeBackfillJob>();
+        services.AddScoped<PlatformWalletTransactionLinkBackfillJob>();
         services.Configure<VnPayOptions>(options =>
         {
             configuration.GetSection(VnPayOptions.SectionName).Bind(options);

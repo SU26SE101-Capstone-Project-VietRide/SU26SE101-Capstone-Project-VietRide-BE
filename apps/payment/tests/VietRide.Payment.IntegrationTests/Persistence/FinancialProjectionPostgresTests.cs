@@ -87,6 +87,18 @@ public sealed class FinancialProjectionPostgresTests
         movement.ActorUserId.Should().Be(adminId);
         movement.ActorDisplayName.Should().Be("System Admin");
         movement.ActorSnapshotResolved.Should().BeTrue();
+        var link = await db.PlatformWalletTransactionLinks.SingleAsync(item =>
+            item.PlatformWalletTransactionId == movement.Id);
+        link.LinkType.Should().Be(PlatformWalletTransactionLinkType.TRIP_SETTLEMENT);
+        link.OperatorId.Should().Be(operatorId);
+        link.TripId.Should().Be(tripId);
+        link.ReferenceId.Should().Be(settlement.Id);
+        link.ReferenceCode.Should().Be(settlement.SettlementCode);
+        link.AllocatedAmount.Should().Be(500_000);
+        var operatorMovement = await db.OperatorWalletTransactions.SingleAsync(item =>
+            item.ReferenceType == OperatorWalletTransactionRef.TRIP_SETTLEMENT
+            && item.ReferenceId == settlement.Id);
+        operatorMovement.Amount.Amount.Should().Be(movement.Amount.Amount);
 
         var adjustment = await service.AdjustPlatformWalletAsync(
             new AdjustmentRequest("CREDIT", 10_000, "manual correction"),

@@ -57,11 +57,29 @@ public sealed class OperatorFinancialController : ControllerBase
         => Ok(await _sender.Send(new ListOperatorLedgerQuery(GetOperatorId(),
             new PageOptions(page, pageSize, sortBy, sortDir, from, to), tripId, entryType, referenceType, search, dateField), ct));
 
+    [HttpGet("wallet/reconciliation/export")]
+    [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ExportWalletReconciliation(
+        [FromQuery] DateOnly? from = null,
+        [FromQuery] DateOnly? to = null,
+        CancellationToken ct = default)
+    {
+        var report = await _sender.Send(new ExportOperatorWalletReconciliationQuery(
+            GetOperatorId(),
+            from,
+            to), ct);
+        return File(report.Content, report.ContentType, report.FileName, enableRangeProcessing: false);
+    }
+
     private Guid GetOperatorId()
     {
         var value = User.FindFirstValue("operatorId") ?? User.FindFirstValue("operator_id");
         if (Guid.TryParse(value, out var operatorId))
             return operatorId;
-        throw new UnauthorizedAccessException("Authenticated caller operatorId claim is missing or invalid.");
+        throw new VietRide.Shared.Application.Exceptions.ForbiddenException(
+            "FORBIDDEN",
+            "Operator scope is required.");
     }
 }

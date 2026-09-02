@@ -7,6 +7,7 @@ using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Events;
 using VietRide.Payment.Application.Models;
+using VietRide.Payment.Application.Services;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
@@ -151,11 +152,15 @@ public sealed class ConfirmBookingPaymentCommandHandler
             _payments.Update(payment);
 
             var platformRef = MapHoldRef(payment.ReferenceType);
-            await _platformWallets.CreditAsync(
+            var platformLinks = PaymentContextCodec.IsMissing(payment.Context)
+                ? []
+                : PlatformWalletLinkFactory.FromPaymentContext(PaymentContextCodec.DeserializeTrusted(payment.Context));
+            await _platformWallets.CreditWithLinksAsync(
                     payment.Amount,
                     platformRef,
                     payment.ReferenceId,
                     $"{payment.ReferenceType} payment hold",
+                    platformLinks,
                     cancellationToken)
                 .ConfigureAwait(false);
 

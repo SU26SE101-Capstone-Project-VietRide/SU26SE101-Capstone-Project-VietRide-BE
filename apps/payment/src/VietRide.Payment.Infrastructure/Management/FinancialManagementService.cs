@@ -19,8 +19,10 @@ using VietRide.Payment.Domain.ValueObjects;
 using VietRide.Payment.Infrastructure.Invoices;
 using VietRide.Payment.Infrastructure.Persistence.Repositories;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Kernel.Time;
 using VietRide.Shared.Kernel.ValueObjects;
 
 namespace VietRide.Payment.Infrastructure.Management;
@@ -39,6 +41,7 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     private readonly InvoiceStorageOptions _invoiceStorage;
     private readonly IClock _clock;
     private readonly ILogger<FinancialManagementService> _logger;
+    private readonly IFinancialWorkbookWriter _workbookWriter;
 
     public FinancialManagementService(
         PaymentDbContext db,
@@ -51,7 +54,8 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         IOptions<OperatorWebOptions> operatorWeb,
         IOptions<InvoiceStorageOptions> invoiceStorage,
         IClock clock,
-        ILogger<FinancialManagementService> logger)
+        ILogger<FinancialManagementService> logger,
+        IFinancialWorkbookWriter workbookWriter)
     {
         _db = db;
         _ledger = ledger;
@@ -64,6 +68,7 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         _invoiceStorage = invoiceStorage.Value;
         _clock = clock;
         _logger = logger;
+        _workbookWriter = workbookWriter;
     }
 
     public async Task<OperatorWalletDto> GetOperatorWalletAsync(Guid operatorId, CancellationToken ct)
@@ -90,6 +95,14 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         var settledRows = settlements
             .Where(item => item.Status == OperatorTripSettlementStatus.SETTLED)
             .ToArray();
+        var reconciliation = WalletReconciliationCalculator.Calculate(
+                projections,
+                settlements.Select(item => new WalletReconciliationSettlementMarker(
+                    item.OperatorId,
+                    item.TripId,
+                    item.Status)).ToArray())
+            .SingleOrDefault()
+            ?? new OperatorWalletReconciliationProjection(operatorId, 0, 0, 0, 0);
         var calculatedAt = _clock.UtcNow;
         var nextScheduledAttempt = pendingRows
             .Concat(eligibleRows)
@@ -130,7 +143,12 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                     lastSettlement.SettlementCode,
                     lastSettlement.TripCode),
             WithdrawalSupported: false,
-            CalculatedAt: calculatedAt);
+            CalculatedAt: calculatedAt,
+            Reconciliation: new OperatorWalletReconciliationDto(
+                reconciliation.OutstandingPayableVnd,
+                reconciliation.AwaitingTripCompletionPayableVnd,
+                reconciliation.PendingHoldPayableVnd,
+                reconciliation.EligibleForSettlementVnd));
         if (readTransaction is not null)
             await readTransaction.CommitAsync(ct);
         return result;
@@ -302,7 +320,9 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                 .Where(item => item.OperatorId == operatorId && tripIds.Contains(item.TripId))
                 .ToListAsync(ct);
         var settlementByTrip = relatedSettlements.ToDictionary(item => item.TripId);
-        var items = rows.Select(item => ToLedgerEntry(item, actorFallbacks, settlementByTrip)).ToList();
+        var tripSummaries = await LoadTripSummariesSafeAsync(tripIds, ct);
+        var tripById = tripSummaries.ToDictionary(item => item.TripId);
+        var items = rows.Select(item => ToLedgerEntry(item, actorFallbacks, settlementByTrip, tripById)).ToList();
         return PagedResult<LedgerEntryDto>.Create(items, options.Page, options.PageSize, total);
     }
 
@@ -411,20 +431,40 @@ internal sealed class FinancialManagementService : IFinancialManagementService
     }
 
     public async Task<PagedResult<PlatformWalletTransactionDto>> ListPlatformTransactionsAsync(
-        PageOptions options, string? type, string? referenceType, CancellationToken ct, string? search = null)
+        PageOptions options,
+        string? type,
+        string? referenceType,
+        CancellationToken ct,
+        string? search = null,
+        Guid? operatorId = null,
+        Guid? tripId = null,
+        string? businessGroup = null,
+        string? cashFlowPurpose = null)
     {
         ValidatePage(options, ["createdAt", "amount"]);
         var query = _db.PlatformWalletTransactions.AsNoTracking().AsQueryable();
+        var links = _db.PlatformWalletTransactionLinks.AsNoTracking();
         if (ParseOptional<PlatformWalletTransactionType>(type) is { } parsedType)
             query = query.Where(item => item.Type == parsedType);
         if (ParseOptional<PlatformWalletTransactionRef>(referenceType) is { } parsedReference)
             query = query.Where(item => item.ReferenceType == parsedReference);
+        if (operatorId.HasValue)
+            query = query.Where(item => links.Any(link =>
+                link.PlatformWalletTransactionId == item.Id && link.OperatorId == operatorId));
+        if (tripId.HasValue)
+            query = query.Where(item => links.Any(link =>
+                link.PlatformWalletTransactionId == item.Id && link.TripId == tripId));
+        query = ApplyPlatformTaxonomyFilter(query, businessGroup, true);
+        query = ApplyPlatformTaxonomyFilter(query, cashFlowPurpose, false);
         var normalizedSearch = NormalizeSearch(search);
         if (normalizedSearch is not null)
         {
             if (Guid.TryParse(normalizedSearch, out var id))
             {
-                query = query.Where(item => item.Id == id || item.ReferenceId == id);
+                query = query.Where(item => item.Id == id
+                    || item.ReferenceId == id
+                    || links.Any(link => link.PlatformWalletTransactionId == item.Id
+                        && (link.ReferenceId == id || link.OperatorId == id || link.TripId == id)));
             }
             else
             {
@@ -441,28 +481,270 @@ internal sealed class FinancialManagementService : IFinancialManagementService
                         (item.Note != null && EF.Functions.ILike(item.Note, pattern, "\\"))
                         || (item.ActorDisplayName != null && EF.Functions.ILike(item.ActorDisplayName, pattern, "\\"))
                         || (item.TransactionCode != null && EF.Functions.ILike(item.TransactionCode, prefixPattern, "\\"))
+                        || links.Any(link => link.PlatformWalletTransactionId == item.Id
+                            && link.ReferenceCode != null
+                            && EF.Functions.ILike(link.ReferenceCode, prefixPattern, "\\"))
                         || item.ReferenceType == parsedSearchReference.Value)
                     : query.Where(item =>
                         (item.Note != null && EF.Functions.ILike(item.Note, pattern, "\\"))
                         || (item.ActorDisplayName != null && EF.Functions.ILike(item.ActorDisplayName, pattern, "\\"))
-                        || (item.TransactionCode != null && EF.Functions.ILike(item.TransactionCode, prefixPattern, "\\")));
+                        || (item.TransactionCode != null && EF.Functions.ILike(item.TransactionCode, prefixPattern, "\\"))
+                        || links.Any(link => link.PlatformWalletTransactionId == item.Id
+                            && link.ReferenceCode != null
+                            && EF.Functions.ILike(link.ReferenceCode, prefixPattern, "\\")));
             }
         }
         query = ApplyDates(query, options);
         var total = await query.LongCountAsync(ct);
         query = (options.SortBy ?? "createdAt", IsAscending(options)) switch
         {
-            ("amount", true) => query.OrderBy(item => item.Amount),
-            ("amount", false) => query.OrderByDescending(item => item.Amount),
-            (_, true) => query.OrderBy(item => item.CreatedAt),
-            _ => query.OrderByDescending(item => item.CreatedAt),
+            ("amount", true) => query.OrderBy(item => item.Amount).ThenBy(item => item.Id),
+            ("amount", false) => query.OrderByDescending(item => item.Amount).ThenByDescending(item => item.Id),
+            (_, true) => query.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id),
+            _ => query.OrderByDescending(item => item.CreatedAt).ThenByDescending(item => item.Id),
         };
         var rows = await query.Skip(Offset(options)).Take(options.PageSize).ToListAsync(ct);
         var actorFallbacks = await LoadPlatformActorFallbacksAsync(rows, ct);
-        var items = rows.Select(item => new PlatformWalletTransactionDto(item.Id, item.Type.ToString(), item.Amount.Amount,
-            item.BalanceBefore.Amount, item.BalanceAfter.Amount, item.ReferenceType.ToString(), item.ReferenceId,
-            item.Note, item.CreatedAt, item.ActorType.ToString(), ToActor(item, actorFallbacks), item.TransactionCode)).ToList();
+        var transactionIds = rows.Select(item => item.Id).ToArray();
+        var allocationRows = transactionIds.Length == 0
+            ? []
+            : await links.Where(item => transactionIds.Contains(item.PlatformWalletTransactionId))
+                .OrderBy(item => item.PlatformWalletTransactionId)
+                .ThenBy(item => item.CreatedAt)
+                .ThenBy(item => item.Id)
+                .ToListAsync(ct);
+        var operatorIds = allocationRows.Where(item => item.OperatorId.HasValue)
+            .Select(item => item.OperatorId!.Value).Distinct().ToArray();
+        var tripIds = allocationRows.Where(item => item.TripId.HasValue)
+            .Select(item => item.TripId!.Value).Distinct().ToArray();
+        var operators = await LoadOperatorsSafeAsync(operatorIds, ct);
+        var trips = (await LoadTripSummariesSafeAsync(tripIds, ct)).ToDictionary(item => item.TripId);
+        var relatedSettlements = tripIds.Length == 0
+            ? []
+            : await _db.OperatorTripSettlements.AsNoTracking()
+                .Where(item => tripIds.Contains(item.TripId))
+                .ToListAsync(ct);
+        var allocationsByTransaction = allocationRows
+            .GroupBy(item => item.PlatformWalletTransactionId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<PlatformWalletTransactionLink>)group.ToArray());
+        var settlementByOperatorTrip = relatedSettlements
+            .ToDictionary(item => (item.OperatorId, item.TripId));
+        var items = rows.Select(item => ToPlatformTransaction(
+            item,
+            actorFallbacks,
+            allocationsByTransaction.GetValueOrDefault(item.Id) ?? [],
+            operators,
+            trips,
+            settlementByOperatorTrip)).ToList();
         return PagedResult<PlatformWalletTransactionDto>.Create(items, options.Page, options.PageSize, total);
+    }
+
+    public async Task<PlatformWalletReconciliationSummaryDto> GetPlatformWalletReconciliationSummaryAsync(
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken ct)
+    {
+        await using var readTransaction = _db.Database.CurrentTransaction is null
+            ? await _db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct)
+            : null;
+        var range = CreateReconciliationRange(from, to);
+        var wallet = await _db.PlatformWallets.AsNoTracking().SingleAsync(ct);
+        var projections = await CanonicalTripFinancialProjectionQuery.ForAll(_db)
+            .OrderBy(item => item.OperatorId)
+            .ThenBy(item => item.TripId)
+            .ToListAsync(ct);
+        var markers = await _db.OperatorTripSettlements.AsNoTracking()
+            .Select(item => new WalletReconciliationSettlementMarker(item.OperatorId, item.TripId, item.Status))
+            .ToListAsync(ct);
+        var reconciliations = WalletReconciliationCalculator.Calculate(projections, markers);
+        var aggregate = WalletReconciliationCalculator.Aggregate(reconciliations);
+        var stuckCount = await _db.OperatorTripSettlements.AsNoTracking()
+            .CountAsync(item => item.Status == OperatorTripSettlementStatus.ELIGIBLE
+                && item.ActiveFailureCode != null, ct);
+        var transactionLinks = _db.PlatformWalletTransactionLinks.AsNoTracking();
+        var partialCount = await _db.PlatformWalletTransactions.AsNoTracking()
+            .LongCountAsync(item => item.ReferenceType != PlatformWalletTransactionRef.MANUAL_ADJUSTMENT
+                && (!transactionLinks.Any(link => link.PlatformWalletTransactionId == item.Id)
+                    || transactionLinks.Any(link => link.PlatformWalletTransactionId == item.Id
+                        && (link.ReferenceId == null
+                            || link.OperatorId == null
+                            || link.LinkType != PlatformWalletTransactionLinkType.SUBSCRIPTION && link.TripId == null
+                            || (link.LinkType == PlatformWalletTransactionLinkType.BOOKING
+                                    || link.LinkType == PlatformWalletTransactionLinkType.PARCEL)
+                                && link.ReferenceCode == null
+                            || link.LinkType == PlatformWalletTransactionLinkType.TRIP_SETTLEMENT
+                                && !_db.OperatorTripSettlements.Any(settlement =>
+                                    settlement.Id == link.ReferenceId
+                                    && settlement.OperatorId == link.OperatorId
+                                    && settlement.TripId == link.TripId)))), ct);
+        var subscriptionAmounts = await _db.PlatformWalletTransactions.AsNoTracking()
+            .Where(item => item.ReferenceType == PlatformWalletTransactionRef.SUBSCRIPTION_PAYMENT
+                && item.Type == PlatformWalletTransactionType.CREDIT
+                && item.CreatedAt >= range.FromUtc
+                && item.CreatedAt < range.ToUtcExclusive)
+            .Select(item => item.Amount)
+            .ToListAsync(ct);
+        var subscriptionRevenue = subscriptionAmounts.Sum(item => item.Amount);
+        var paidToOperators = await _db.OperatorTripSettlements.AsNoTracking()
+            .Where(item => item.Status == OperatorTripSettlementStatus.SETTLED
+                && item.SettledAt >= range.FromUtc
+                && item.SettledAt < range.ToUtcExclusive)
+            .SumAsync(item => (long?)item.NetAmount, ct) ?? 0;
+        var result = new PlatformWalletReconciliationSummaryDto(
+            new PlatformWalletReconciliationSnapshotDto(
+                wallet.Balance.Amount,
+                aggregate.OutstandingOperatorPayableVnd,
+                aggregate.AwaitingTripCompletionVnd,
+                aggregate.PendingHoldVnd,
+                aggregate.EligibleForSettlementVnd,
+                aggregate.EligibleOperatorCount,
+                stuckCount,
+                partialCount),
+            new PlatformWalletReconciliationPeriodDto(
+                range.From,
+                range.To,
+                BusinessTime.TimeZoneId,
+                subscriptionRevenue,
+                paidToOperators),
+            _clock.UtcNow);
+        if (readTransaction is not null)
+            await readTransaction.CommitAsync(ct);
+        return result;
+    }
+
+    public async Task<ExcelReportStream> ExportPlatformTransactionsAsync(
+        PageOptions filters,
+        string? type,
+        string? referenceType,
+        string? search,
+        Guid? operatorId,
+        Guid? tripId,
+        string? businessGroup,
+        string? cashFlowPurpose,
+        CancellationToken ct)
+    {
+        var transactions = new List<PlatformWalletTransactionDto>();
+        for (var pageNumber = 1; ; pageNumber++)
+        {
+            var page = await ListPlatformTransactionsAsync(
+                filters with { Page = pageNumber, PageSize = 100 },
+                type,
+                referenceType,
+                ct,
+                search,
+                operatorId,
+                tripId,
+                businessGroup,
+                cashFlowPurpose);
+            transactions.AddRange(page.Items);
+            if (!page.HasNextPage)
+                break;
+        }
+
+        if (transactions.Any(item => item.DataCompleteness != "COMPLETE"))
+            throw new UpstreamUnavailableException();
+        var summaryFrom = filters.From.HasValue && filters.To.HasValue
+            ? BusinessTime.ToLocalDate(filters.From.Value)
+            : (DateOnly?)null;
+        var summaryTo = filters.From.HasValue && filters.To.HasValue
+            ? BusinessTime.ToLocalDate(filters.To.Value)
+            : (DateOnly?)null;
+        var summary = await GetPlatformWalletReconciliationSummaryAsync(summaryFrom, summaryTo, ct);
+        var reportDate = BusinessTime.ToLocalDate(_clock.UtcNow);
+        var allocations = transactions.SelectMany(transaction =>
+            (transaction.Allocations ?? []).Select(allocation => (transaction, allocation))).ToArray();
+        var spec = new FinancialWorkbookSpec(
+            $"platform-wallet-reconciliation-{reportDate:yyyyMMdd}.xlsx",
+            [
+                new FinancialWorkbookSheet(
+                    "Summary",
+                    ["metric", "value"],
+                    AsAsyncRows(ToAdminSummaryRows(summary)),
+                    new HashSet<int> { 1 }),
+                new FinancialWorkbookSheet(
+                    "Transactions",
+                    ["transaction_id", "transaction_code", "type", "amount_vnd", "balance_before_vnd", "balance_after_vnd", "reference_type", "reference_id", "business_group", "cash_flow_purpose", "actor_type", "note", "created_at_asia_ho_chi_minh"],
+                    AsAsyncRows(transactions.Select(ToPlatformTransactionExportRow)),
+                    new HashSet<int> { 3, 4, 5 }),
+                new FinancialWorkbookSheet(
+                    "Allocations",
+                    ["transaction_id", "transaction_code", "allocated_amount_vnd", "operator_id", "operator_name", "trip_id", "trip_code", "reference_type", "reference_id", "reference_code", "settlement_id", "settlement_code"],
+                    AsAsyncRows(allocations.Select(item => ToPlatformAllocationExportRow(
+                        item.transaction,
+                        item.allocation))),
+                    new HashSet<int> { 2 }),
+            ]);
+        return await _workbookWriter.WriteAsync(spec, ct);
+    }
+
+    public async Task<ExcelReportStream> ExportOperatorWalletReconciliationAsync(
+        Guid operatorId,
+        DateOnly? from,
+        DateOnly? to,
+        CancellationToken ct)
+    {
+        var range = CreateReconciliationRange(from, to);
+        var options = new PageOptions(
+            1,
+            100,
+            From: range.FromUtc,
+            To: range.ToUtcExclusive.AddTicks(-1));
+        var summary = await GetOperatorWalletAsync(operatorId, ct);
+        var ledger = await LoadAllPagesAsync(
+            page => ListOperatorLedgerAsync(
+                operatorId,
+                options with { Page = page },
+                null,
+                null,
+                null,
+                ct,
+                dateField: "occurredAt"));
+        var settlements = await LoadAllPagesAsync(
+            page => ListOperatorSettlementsAsync(
+                operatorId,
+                options with { Page = page },
+                null,
+                null,
+                ct,
+                dateField: "createdAt"));
+        var transactions = await LoadAllPagesAsync(
+            page => ListOperatorTransactionsAsync(
+                operatorId,
+                options with { Page = page },
+                null,
+                null,
+                ct));
+        if (ledger.Any(item => item.TripId.HasValue && item.Trip is null)
+            || settlements.Any(item => item.Trip is null))
+        {
+            throw new UpstreamUnavailableException();
+        }
+
+        var spec = new FinancialWorkbookSpec(
+            $"operator-wallet-reconciliation-{range.From:yyyyMMdd}-{range.To:yyyyMMdd}.xlsx",
+            [
+                new FinancialWorkbookSheet(
+                    "Summary",
+                    ["metric", "value"],
+                    AsAsyncRows(ToOperatorSummaryRows(summary, range)),
+                    new HashSet<int> { 1 }),
+                new FinancialWorkbookSheet(
+                    "Ledger",
+                    ["ledger_entry_id", "business_group", "operator_effect", "entry_type", "amount_vnd", "trip_id", "trip_code", "route_name", "reference_type", "reference_id", "reference_code", "occurred_at_asia_ho_chi_minh", "note"],
+                    AsAsyncRows(ledger.Select(ToOperatorLedgerExportRow)),
+                    new HashSet<int> { 4 }),
+                new FinancialWorkbookSheet(
+                    "Trip Settlements",
+                    ["settlement_id", "settlement_code", "trip_id", "trip_code", "status", "net_amount_vnd", "method", "eligible_at_asia_ho_chi_minh", "settled_at_asia_ho_chi_minh", "processing_state", "attempt_count"],
+                    AsAsyncRows(settlements.Select(ToSettlementExportRow)),
+                    new HashSet<int> { 5 }),
+                new FinancialWorkbookSheet(
+                    "Wallet Transactions",
+                    ["transaction_id", "transaction_code", "business_group", "cash_flow_purpose", "type", "signed_amount_vnd", "balance_before_vnd", "balance_after_vnd", "reference_type", "reference_id", "created_at_asia_ho_chi_minh", "note"],
+                    AsAsyncRows(transactions.Select(ToOperatorWalletTransactionExportRow)),
+                    new HashSet<int> { 5, 6, 7 }),
+            ]);
+        return await _workbookWriter.WriteAsync(spec, ct);
     }
 
     public Task<AdjustmentResult> AdjustPlatformWalletAsync(
@@ -628,6 +910,7 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         if (relatedSettlementEntity?.SettledByUserId is not null && actor is null)
             missing.Add("actor");
 
+        var taxonomy = FinancialTaxonomy.OperatorWallet(item.ReferenceType);
         return new WalletTransactionDto(
             item.Id,
             item.Type.ToString(),
@@ -651,13 +934,16 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             AdjustmentReason: adjustment?.AdjustmentReason?.ToString(),
             DataCompleteness: missing.Count == 0 ? "COMPLETE" : "PARTIAL",
             MissingFields: missing,
-            TransactionCode: item.TransactionCode);
+            TransactionCode: item.TransactionCode,
+            BusinessGroup: taxonomy.BusinessGroup,
+            CashFlowPurpose: taxonomy.CashFlowPurpose);
     }
 
     private static LedgerEntryDto ToLedgerEntry(
         OperatorLedgerEntry item,
         IReadOnlyDictionary<Guid, IdentityFinancialUser> actorFallbacks,
-        IReadOnlyDictionary<Guid, OperatorTripSettlement> settlements)
+        IReadOnlyDictionary<Guid, OperatorTripSettlement> settlements,
+        IReadOnlyDictionary<Guid, TripRevenueSummaryItem> trips)
     {
         var missing = new List<string>();
         if (item.ReferenceType is OperatorLedgerReferenceType.BOOKING or OperatorLedgerReferenceType.PARCEL
@@ -671,6 +957,13 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             && !item.OperatorFundedVoucherAmount.HasValue)
         {
             missing.Add("operatorFundedVoucherAmount");
+        }
+        TripRevenueSummaryItem? trip = null;
+        if (item.TripId.HasValue)
+        {
+            trip = trips.GetValueOrDefault(item.TripId.Value);
+            if (trip is null)
+                missing.Add("trip");
         }
 
         var actor = ToActor(item, actorFallbacks);
@@ -712,7 +1005,18 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             AffectsSettlement: affectsRevenue && item.TripId.HasValue,
             Settlement: settlement,
             DataCompleteness: missing.Count == 0 ? "COMPLETE" : "PARTIAL",
-            MissingFields: missing);
+            MissingFields: missing,
+            BusinessGroup: FinancialTaxonomy.LedgerBusinessGroup(item),
+            OperatorEffect: FinancialTaxonomy.OperatorEffect(item),
+            Trip: trip is null
+                ? null
+                : new LedgerTripDto(
+                    trip.TripId,
+                    trip.TripCode,
+                    trip.DepartureAt,
+                    trip.RouteName,
+                    trip.OriginName,
+                    trip.DestinationName));
     }
 
     private static SettlementDto ToSettlement(
@@ -974,6 +1278,141 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         return users.ToDictionary(item => item.UserId);
     }
 
+    private async Task<IReadOnlyDictionary<Guid, IdentityFinancialOperator>> LoadOperatorsSafeAsync(
+        IReadOnlyList<Guid> operatorIds,
+        CancellationToken ct)
+    {
+        if (operatorIds.Count == 0)
+            return new Dictionary<Guid, IdentityFinancialOperator>();
+        try
+        {
+            var operators = await _identity.GetOperatorsAsync(operatorIds, ct);
+            return operators.ToDictionary(item => item.OperatorId);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                exception,
+                "Operator enrichment is unavailable for {OperatorCount} platform wallet allocations; returning partial financial data.",
+                operatorIds.Count);
+            return new Dictionary<Guid, IdentityFinancialOperator>();
+        }
+    }
+
+    private static PlatformWalletTransactionDto ToPlatformTransaction(
+        PlatformWalletTransaction item,
+        IReadOnlyDictionary<Guid, IdentityFinancialUser> actorFallbacks,
+        IReadOnlyList<PlatformWalletTransactionLink> links,
+        IReadOnlyDictionary<Guid, IdentityFinancialOperator> operators,
+        IReadOnlyDictionary<Guid, TripRevenueSummaryItem> trips,
+        IReadOnlyDictionary<(Guid OperatorId, Guid TripId), OperatorTripSettlement> settlements)
+    {
+        var missing = new List<string>();
+        if (item.ReferenceType != PlatformWalletTransactionRef.MANUAL_ADJUSTMENT && links.Count == 0)
+            missing.Add("allocations");
+        if (links.Count > 0 && links.Sum(link => link.AllocatedAmount) != item.Amount.Amount)
+            missing.Add("allocations.allocatedAmountVnd");
+
+        var allocations = links.Select((link, index) =>
+        {
+            var allocationPath = $"allocations[{index}]";
+            var needsBusinessReference = link.LinkType is PlatformWalletTransactionLinkType.BOOKING
+                or PlatformWalletTransactionLinkType.PARCEL;
+            var needsOperator = link.LinkType is PlatformWalletTransactionLinkType.BOOKING
+                or PlatformWalletTransactionLinkType.PARCEL
+                or PlatformWalletTransactionLinkType.TRIP_SETTLEMENT
+                or PlatformWalletTransactionLinkType.SUBSCRIPTION
+                or PlatformWalletTransactionLinkType.PARCEL_CLAIM;
+            var needsTrip = link.LinkType is PlatformWalletTransactionLinkType.BOOKING
+                or PlatformWalletTransactionLinkType.PARCEL
+                or PlatformWalletTransactionLinkType.TRIP_SETTLEMENT
+                or PlatformWalletTransactionLinkType.PARCEL_CLAIM;
+            if (needsBusinessReference && string.IsNullOrWhiteSpace(link.ReferenceCode))
+                AddMissing(missing, $"{allocationPath}.referenceCode");
+            if (link.ReferenceId is null)
+                AddMissing(missing, $"{allocationPath}.referenceId");
+            if (needsOperator && link.OperatorId is null)
+                AddMissing(missing, $"{allocationPath}.operator");
+            if (needsTrip && link.TripId is null)
+                AddMissing(missing, $"{allocationPath}.tripId");
+
+            FinancialOperatorDto? operatorDto = null;
+            if (link.OperatorId.HasValue)
+            {
+                if (operators.TryGetValue(link.OperatorId.Value, out var operatorItem))
+                {
+                    operatorDto = new FinancialOperatorDto(
+                        operatorItem.OperatorId,
+                        operatorItem.Name,
+                        operatorItem.LogoUrl,
+                        operatorItem.ContactPhone);
+                }
+                else
+                {
+                    AddMissing(missing, $"{allocationPath}.operator");
+                }
+            }
+
+            TripRevenueSummaryItem? trip = null;
+            if (link.TripId.HasValue)
+            {
+                trip = trips.GetValueOrDefault(link.TripId.Value);
+                if (trip is null)
+                    AddMissing(missing, $"{allocationPath}.trip");
+            }
+
+            OperatorTripSettlement? settlement = null;
+            if (link.OperatorId.HasValue && link.TripId.HasValue)
+                settlement = settlements.GetValueOrDefault((link.OperatorId.Value, link.TripId.Value));
+            var relatedSettlement = settlement is null
+                ? null
+                : new LedgerSettlementDto(
+                    settlement.Id,
+                    settlement.Status.ToString(),
+                    settlement.EligibleAt,
+                    settlement.SettledAt,
+                    settlement.WalletTransactionId,
+                    settlement.SettlementCode,
+                    settlement.TripCode);
+            if (link.LinkType == PlatformWalletTransactionLinkType.TRIP_SETTLEMENT
+                && (settlement is null || settlement.Id != link.ReferenceId))
+            {
+                AddMissing(missing, $"{allocationPath}.relatedSettlement");
+            }
+            return new PlatformWalletAllocationDto(
+                link.AllocatedAmount,
+                operatorDto,
+                link.TripId,
+                trip?.TripCode ?? settlement?.TripCode,
+                link.LinkType.ToString(),
+                link.ReferenceId,
+                link.ReferenceCode,
+                relatedSettlement);
+        }).ToArray();
+        var taxonomy = FinancialTaxonomy.Platform(item.ReferenceType);
+        var actor = ToActor(item, actorFallbacks);
+        if (item.ActorType == FinancialActorType.USER && actor is null)
+            AddMissing(missing, "actor");
+        return new PlatformWalletTransactionDto(
+            item.Id,
+            item.Type.ToString(),
+            item.Amount.Amount,
+            item.BalanceBefore.Amount,
+            item.BalanceAfter.Amount,
+            item.ReferenceType.ToString(),
+            item.ReferenceId,
+            item.Note,
+            item.CreatedAt,
+            item.ActorType.ToString(),
+            actor,
+            item.TransactionCode,
+            taxonomy.BusinessGroup,
+            taxonomy.CashFlowPurpose,
+            allocations,
+            missing.Count == 0 ? "COMPLETE" : "PARTIAL",
+            missing);
+    }
+
     private async Task<IReadOnlyDictionary<Guid, IdentityFinancialUser>> LoadLedgerActorFallbacksAsync(
         IReadOnlyCollection<OperatorLedgerEntry> rows, CancellationToken ct)
     {
@@ -1195,10 +1634,196 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         => new(item.Id, item.Type.ToString(), item.Amount.Amount, item.BalanceBefore.Amount, item.BalanceAfter.Amount,
             item.ReferenceType.ToString(), item.ReferenceId, note, item.CreatedAt, item.TransactionCode);
 
+    private static IReadOnlyList<ExcelReportRow> ToAdminSummaryRows(
+        PlatformWalletReconciliationSummaryDto summary)
+        =>
+        [
+            Metric("platform_wallet_balance_vnd", summary.Snapshot.PlatformWalletBalanceVnd),
+            Metric("outstanding_operator_payable_vnd", summary.Snapshot.OutstandingOperatorPayableVnd),
+            Metric("awaiting_trip_completion_vnd", summary.Snapshot.AwaitingTripCompletionVnd),
+            Metric("pending_hold_vnd", summary.Snapshot.PendingHoldVnd),
+            Metric("eligible_for_settlement_vnd", summary.Snapshot.EligibleForSettlementVnd),
+            Metric("eligible_operator_count", summary.Snapshot.EligibleOperatorCount),
+            Metric("stuck_settlement_count", summary.Snapshot.StuckSettlementCount),
+            Metric("partial_reconciliation_transaction_count", summary.Snapshot.PartialReconciliationTransactionCount),
+            Metric("subscription_revenue_vnd", summary.Period.SubscriptionRevenueVnd),
+            Metric("paid_to_operators_vnd", summary.Period.PaidToOperatorsVnd),
+            TextMetric("period_from", summary.Period.From.ToString("yyyy-MM-dd")),
+            TextMetric("period_to", summary.Period.To.ToString("yyyy-MM-dd")),
+            TextMetric("timezone", summary.Period.Timezone),
+        ];
+
+    private static IReadOnlyList<ExcelReportRow> ToOperatorSummaryRows(
+        OperatorWalletDto summary,
+        ReconciliationRange range)
+    {
+        var reconciliation = summary.Reconciliation
+            ?? new OperatorWalletReconciliationDto(0, 0, 0, 0);
+        return
+        [
+            Metric("wallet_balance_vnd", summary.Balance),
+            Metric("outstanding_payable_vnd", reconciliation.OutstandingPayableVnd),
+            Metric("awaiting_trip_completion_payable_vnd", reconciliation.AwaitingTripCompletionPayableVnd),
+            Metric("pending_hold_payable_vnd", reconciliation.PendingHoldPayableVnd),
+            Metric("eligible_for_settlement_vnd", reconciliation.EligibleForSettlementVnd),
+            Metric("lifetime_settled_amount_vnd", summary.LifetimeSettledAmount),
+            TextMetric("period_from", range.From.ToString("yyyy-MM-dd")),
+            TextMetric("period_to", range.To.ToString("yyyy-MM-dd")),
+            TextMetric("timezone", BusinessTime.TimeZoneId),
+        ];
+    }
+
+    private static ExcelReportRow ToPlatformTransactionExportRow(PlatformWalletTransactionDto item)
+        => new([
+            ExcelReportCell.TextValue(item.TransactionId.ToString("D")),
+            ExcelReportCell.TextValue(item.TransactionCode ?? string.Empty),
+            ExcelReportCell.TextValue(item.Type),
+            ExcelReportCell.IntegerValue(item.Amount),
+            ExcelReportCell.IntegerValue(item.BalanceBefore),
+            ExcelReportCell.IntegerValue(item.BalanceAfter),
+            ExcelReportCell.TextValue(item.ReferenceType),
+            ExcelReportCell.TextValue(item.ReferenceId?.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(item.BusinessGroup ?? string.Empty),
+            ExcelReportCell.TextValue(item.CashFlowPurpose ?? string.Empty),
+            ExcelReportCell.TextValue(item.ActorType),
+            ExcelReportCell.TextValue(item.Note ?? string.Empty),
+            ExcelReportCell.DateTimeValue(item.CreatedAt),
+        ]);
+
+    private static ExcelReportRow ToPlatformAllocationExportRow(
+        PlatformWalletTransactionDto transaction,
+        PlatformWalletAllocationDto allocation)
+        => new([
+            ExcelReportCell.TextValue(transaction.TransactionId.ToString("D")),
+            ExcelReportCell.TextValue(transaction.TransactionCode ?? string.Empty),
+            ExcelReportCell.IntegerValue(allocation.AllocatedAmountVnd),
+            ExcelReportCell.TextValue(allocation.Operator?.OperatorId.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(allocation.Operator?.Name ?? string.Empty),
+            ExcelReportCell.TextValue(allocation.TripId?.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(allocation.TripCode ?? string.Empty),
+            ExcelReportCell.TextValue(allocation.ReferenceType),
+            ExcelReportCell.TextValue(allocation.ReferenceId?.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(allocation.ReferenceCode ?? string.Empty),
+            ExcelReportCell.TextValue(allocation.RelatedSettlement?.SettlementId.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(allocation.RelatedSettlement?.SettlementCode ?? string.Empty),
+        ]);
+
+    private static ExcelReportRow ToOperatorLedgerExportRow(LedgerEntryDto item)
+        => new([
+            ExcelReportCell.TextValue(item.LedgerEntryId.ToString("D")),
+            ExcelReportCell.TextValue(item.BusinessGroup ?? string.Empty),
+            ExcelReportCell.TextValue(item.OperatorEffect ?? string.Empty),
+            ExcelReportCell.TextValue(item.EntryType),
+            ExcelReportCell.IntegerValue(item.Amount),
+            ExcelReportCell.TextValue(item.TripId?.ToString("D") ?? string.Empty),
+            ExcelReportCell.TextValue(item.Trip?.TripCode ?? string.Empty),
+            ExcelReportCell.TextValue(item.Trip?.RouteName ?? string.Empty),
+            ExcelReportCell.TextValue(item.ReferenceType),
+            ExcelReportCell.TextValue(item.ReferenceId.ToString("D")),
+            ExcelReportCell.TextValue(item.ReferenceCode ?? string.Empty),
+            ExcelReportCell.DateTimeValue(item.OccurredAt),
+            ExcelReportCell.TextValue(item.Note ?? string.Empty),
+        ]);
+
+    private static ExcelReportRow ToSettlementExportRow(SettlementDto item)
+        => new([
+            ExcelReportCell.TextValue(item.SettlementId.ToString("D")),
+            ExcelReportCell.TextValue(item.SettlementCode ?? string.Empty),
+            ExcelReportCell.TextValue(item.TripId.ToString("D")),
+            ExcelReportCell.TextValue(item.Trip?.TripCode ?? string.Empty),
+            ExcelReportCell.TextValue(item.Status),
+            ExcelReportCell.IntegerValue(item.NetAmount),
+            ExcelReportCell.TextValue(item.SettlementMethod ?? string.Empty),
+            ExcelReportCell.DateTimeValue(item.EligibleAt),
+            item.SettledAt.HasValue
+                ? ExcelReportCell.DateTimeValue(item.SettledAt.Value)
+                : ExcelReportCell.BlankValue(),
+            ExcelReportCell.TextValue(item.ProcessingState),
+            ExcelReportCell.IntegerValue(item.AttemptCount),
+        ]);
+
+    private static ExcelReportRow ToOperatorWalletTransactionExportRow(WalletTransactionDto item)
+        => new([
+            ExcelReportCell.TextValue(item.TransactionId.ToString("D")),
+            ExcelReportCell.TextValue(item.TransactionCode ?? string.Empty),
+            ExcelReportCell.TextValue(item.BusinessGroup ?? string.Empty),
+            ExcelReportCell.TextValue(item.CashFlowPurpose ?? string.Empty),
+            ExcelReportCell.TextValue(item.Type),
+            ExcelReportCell.IntegerValue(item.SignedAmount),
+            ExcelReportCell.IntegerValue(item.BalanceBefore),
+            ExcelReportCell.IntegerValue(item.BalanceAfter),
+            ExcelReportCell.TextValue(item.ReferenceType),
+            ExcelReportCell.TextValue(item.ReferenceId?.ToString("D") ?? string.Empty),
+            ExcelReportCell.DateTimeValue(item.CreatedAt),
+            ExcelReportCell.TextValue(item.Note ?? string.Empty),
+        ]);
+
+    private static ExcelReportRow Metric(string name, long value)
+        => new([ExcelReportCell.TextValue(name), ExcelReportCell.IntegerValue(value)]);
+
+    private static ExcelReportRow TextMetric(string name, string value)
+        => new([ExcelReportCell.TextValue(name), ExcelReportCell.TextValue(value)]);
+
+    private static async IAsyncEnumerable<ExcelReportRow> AsAsyncRows(
+        IEnumerable<ExcelReportRow> rows)
+    {
+        foreach (var row in rows)
+            yield return row;
+        await Task.CompletedTask;
+    }
+
+    private static async Task<IReadOnlyList<T>> LoadAllPagesAsync<T>(
+        Func<int, Task<PagedResult<T>>> loadPage)
+    {
+        var items = new List<T>();
+        for (var pageNumber = 1; ; pageNumber++)
+        {
+            var page = await loadPage(pageNumber);
+            items.AddRange(page.Items);
+            if (!page.HasNextPage)
+                return items;
+        }
+    }
+
     private static long SumCurrentEntitlement(
         IReadOnlyCollection<OperatorTripSettlement> settlements,
         IReadOnlyDictionary<Guid, TripFinancialProjection> projections)
         => settlements.Sum(item => projections.GetValueOrDefault(item.TripId)?.NetEntitlementAmount ?? 0);
+
+    private static IQueryable<PlatformWalletTransaction> ApplyPlatformTaxonomyFilter(
+        IQueryable<PlatformWalletTransaction> query,
+        string? value,
+        bool businessGroup)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return query;
+        var normalized = value.Trim();
+        var references = Enum.GetValues<PlatformWalletTransactionRef>()
+            .Where(reference => string.Equals(
+                businessGroup
+                    ? FinancialTaxonomy.Platform(reference).BusinessGroup
+                    : FinancialTaxonomy.Platform(reference).CashFlowPurpose,
+                normalized,
+                StringComparison.Ordinal))
+            .ToArray();
+        if (references.Length == 0)
+            throw new BadRequestException("INVALID_FILTER", $"Unsupported {(businessGroup ? "businessGroup" : "cashFlowPurpose")} value '{value}'.");
+        return query.Where(item => references.Contains(item.ReferenceType));
+    }
+
+    private ReconciliationRange CreateReconciliationRange(DateOnly? from, DateOnly? to)
+    {
+        if (from.HasValue != to.HasValue)
+            throw new BadRequestException("INVALID_FILTER", "from and to must be supplied together.");
+        var today = BusinessTime.ToLocalDate(_clock.UtcNow);
+        var fromDate = from ?? new DateOnly(today.Year, today.Month, 1);
+        var toDate = to ?? new DateOnly(today.Year, today.Month, 1).AddMonths(1).AddDays(-1);
+        var inclusiveDays = toDate.DayNumber - fromDate.DayNumber + 1;
+        if (fromDate > toDate || inclusiveDays is < 1 or > 366 || toDate == DateOnly.MaxValue)
+            throw new BadRequestException("INVALID_FILTER", "Reconciliation range must contain 1 to 366 ICT calendar days.");
+        var utc = BusinessTime.GetUtcRange(fromDate, toDate);
+        return new ReconciliationRange(fromDate, toDate, utc.FromUtc, utc.ToUtcExclusive);
+    }
 
     private static string? NormalizeSearch(string? search)
     {
@@ -1233,6 +1858,12 @@ internal sealed class FinancialManagementService : IFinancialManagementService
             .Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("%", "\\%", StringComparison.Ordinal)
             .Replace("_", "\\_", StringComparison.Ordinal);
+
+    private static void AddMissing(ICollection<string> missing, string field)
+    {
+        if (!missing.Contains(field))
+            missing.Add(field);
+    }
 
     private static IQueryable<OperatorWalletTransaction> ApplyTransactionDates(
         IQueryable<OperatorWalletTransaction> query,
@@ -1329,6 +1960,12 @@ internal sealed class FinancialManagementService : IFinancialManagementService
         IReadOnlyList<OperatorTripSettlement> Rows,
         long Total,
         IReadOnlyDictionary<Guid, TripFinancialProjection>? Projections = null);
+
+    private sealed record ReconciliationRange(
+        DateOnly From,
+        DateOnly To,
+        DateTimeOffset FromUtc,
+        DateTimeOffset ToUtcExclusive);
 
     private static IQueryable<T> ApplyDates<T>(IQueryable<T> query, PageOptions options) where T : BaseEntity<Guid>
     {

@@ -123,11 +123,16 @@ public sealed class CreateSubscriptionPaymentCommandHandler
                     "Subscription payment",
                     now),
                 cancellationToken).ConfigureAwait(false);
-            await _platformWallets.CreditAsync(
+            await _platformWallets.CreditWithLinksAsync(
                 amount,
                 PlatformWalletTransactionRef.SUBSCRIPTION_PAYMENT,
                 walletPayment.Id,
                 "OperatorWallet subscription payment",
+                [new PlatformWalletTransactionLinkInput(
+                    PlatformWalletTransactionLinkType.SUBSCRIPTION,
+                    amount.Amount,
+                    request.OperatorId,
+                    ReferenceId: walletPayment.Id)],
                 cancellationToken).ConfigureAwait(false);
             await EnqueueSucceededAsync(walletPayment, request.Context, cancellationToken).ConfigureAwait(false);
             return ToResult(walletPayment);

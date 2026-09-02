@@ -145,7 +145,9 @@ public sealed class AdminFinancialProjectionEndpointTests
             [
                 new PlatformWalletTransactionDto(
                     Guid.NewGuid(), "CREDIT", 100_000, 0, 100_000, "SUBSCRIPTION_PAYMENT",
-                    Guid.NewGuid(), "automated", DateTimeOffset.UtcNow, "SYSTEM", null),
+                    Guid.NewGuid(), "automated", DateTimeOffset.UtcNow, "SYSTEM", null,
+                    BusinessGroup: "SUBSCRIPTION", CashFlowPurpose: "PLATFORM_REVENUE",
+                    Allocations: []),
                 new PlatformWalletTransactionDto(
                     Guid.NewGuid(), "DEBIT", 10_000, 100_000, 90_000, "MANUAL_ADJUSTMENT",
                     null, "manual", DateTimeOffset.UtcNow, "USER",
@@ -160,6 +162,9 @@ public sealed class AdminFinancialProjectionEndpointTests
         using var document = JsonDocument.Parse(body);
         var items = document.RootElement.GetProperty("data").GetProperty("items");
         items[0].GetProperty("actorType").GetString().Should().Be("SYSTEM");
+        items[0].GetProperty("businessGroup").GetString().Should().Be("SUBSCRIPTION");
+        items[0].GetProperty("cashFlowPurpose").GetString().Should().Be("PLATFORM_REVENUE");
+        items[0].GetProperty("allocations").GetArrayLength().Should().Be(0);
         items[0].GetProperty("actor").ValueKind.Should().Be(JsonValueKind.Null);
         items[1].GetProperty("actorType").GetString().Should().Be("USER");
         items[1].GetProperty("actor").GetProperty("email").GetString()
@@ -202,6 +207,155 @@ public sealed class AdminFinancialProjectionEndpointTests
     }
 
     [Fact]
+    public async Task AdminFinancialProjection_ForwardsAllocationFiltersBeforePaging()
+    {
+        _factory.Reset();
+        var operatorId = Guid.NewGuid();
+        var tripId = Guid.NewGuid();
+        _factory.Financial.ListPlatformTransactionsAsync(
+                default!, default, default, default, default, default, default, default, default)
+            .ReturnsForAnyArgs(PagedResult<PlatformWalletTransactionDto>.Create([], 1, 20, 0));
+        using var client = _factory.CreateRoleClient("SYSTEM_ADMIN");
+
+        var response = await client.GetAsync(
+            $"/v1/admin/platform-wallet/transactions?operatorId={operatorId:D}&tripId={tripId:D}&businessGroup=SETTLEMENT&cashFlowPurpose=OPERATOR_PAYOUT");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await _factory.Financial.Received(1).ListPlatformTransactionsAsync(
+            Arg.Is<PageOptions>(item => item.Page == 1 && item.PageSize == 20),
+            null,
+            null,
+            Arg.Any<CancellationToken>(),
+            null,
+            operatorId,
+            tripId,
+            "SETTLEMENT",
+            "OPERATOR_PAYOUT");
+    }
+
+    [Fact]
+    public async Task AdminFinancialProjection_ReconciliationSummaryUsesIctRange()
+    {
+        _factory.Reset();
+        _factory.Financial.GetPlatformWalletReconciliationSummaryAsync(
+                default, default, default)
+            .ReturnsForAnyArgs(new PlatformWalletReconciliationSummaryDto(
+                new PlatformWalletReconciliationSnapshotDto(1_000, 600, 100, 200, 300, 1, 0, 0),
+                new PlatformWalletReconciliationPeriodDto(
+                    new DateOnly(2026, 9, 1),
+                    new DateOnly(2026, 9, 30),
+                    "Asia/Ho_Chi_Minh",
+                    50,
+                    400),
+                DateTimeOffset.UtcNow));
+        using var client = _factory.CreateRoleClient("SYSTEM_ADMIN");
+
+        var response = await client.GetAsync(
+            "/v1/admin/platform-wallet/reconciliation-summary?from=2026-09-01&to=2026-09-30");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using var document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("data").GetProperty("snapshot")
+            .GetProperty("outstandingOperatorPayableVnd").GetInt64().Should().Be(600);
+        await _factory.Financial.Received(1).GetPlatformWalletReconciliationSummaryAsync(
+            new DateOnly(2026, 9, 1),
+            new DateOnly(2026, 9, 30),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task WalletReconciliation_OperatorSummaryAndLedgerRemainTenantScoped()
+    {
+        _factory.Reset();
+        var operatorId = Guid.NewGuid();
+        _factory.Financial.GetOperatorWalletAsync(operatorId, default)
+            .ReturnsForAnyArgs(new OperatorWalletDto(
+                operatorId,
+                400,
+                200,
+                300,
+                DateTimeOffset.UtcNow,
+                Reconciliation: new OperatorWalletReconciliationDto(600, 100, 200, 300)));
+        using var client = _factory.CreateOperatorRoleClient("OPERATOR_ADMIN", operatorId);
+
+        var response = await client.GetAsync("/v1/operator/wallet");
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using var document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("data").GetProperty("reconciliation")
+            .GetProperty("eligibleForSettlementVnd").GetInt64().Should().Be(300);
+        await _factory.Financial.Received(1).GetOperatorWalletAsync(
+            operatorId,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task WalletReconciliation_OperatorMissingTenantReturnsForbidden()
+    {
+        _factory.Reset();
+        using var client = _factory.CreateRoleClient("OPERATOR_ADMIN");
+
+        var response = await client.GetAsync("/v1/operator/wallet");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task AdminFinancialProjection_ExportUsesSameAllocationFilters()
+    {
+        _factory.Reset();
+        var operatorId = Guid.NewGuid();
+        _factory.Financial.ExportPlatformTransactionsAsync(
+                default!, default, default, default, default, default, default, default, default)
+            .ReturnsForAnyArgs(new VietRide.Shared.Application.Reporting.ExcelReportStream(
+                new MemoryStream([1, 2, 3]),
+                "platform-wallet.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        using var client = _factory.CreateRoleClient("SYSTEM_ADMIN");
+
+        var response = await client.GetAsync(
+            $"/v1/admin/platform-wallet/transactions/export?operatorId={operatorId:D}&businessGroup=SETTLEMENT");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await _factory.Financial.Received(1).ExportPlatformTransactionsAsync(
+            Arg.Any<PageOptions>(),
+            null,
+            null,
+            null,
+            operatorId,
+            null,
+            "SETTLEMENT",
+            null,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task WalletReconciliation_OperatorExportUsesJwtTenant()
+    {
+        _factory.Reset();
+        var operatorId = Guid.NewGuid();
+        _factory.Financial.ExportOperatorWalletReconciliationAsync(
+                default, default, default, default)
+            .ReturnsForAnyArgs(new VietRide.Shared.Application.Reporting.ExcelReportStream(
+                new MemoryStream([1, 2, 3]),
+                "operator-wallet.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        using var client = _factory.CreateOperatorRoleClient("OPERATOR_ADMIN", operatorId);
+
+        var response = await client.GetAsync(
+            "/v1/operator/wallet/reconciliation/export?from=2026-09-01&to=2026-09-30");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await _factory.Financial.Received(1).ExportOperatorWalletReconciliationAsync(
+            operatorId,
+            new DateOnly(2026, 9, 1),
+            new DateOnly(2026, 9, 30),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ManualPlatformAdjustment_UsesAuthenticatedSubAndRequiresIdempotencyKey()
     {
         _factory.Reset();
@@ -239,6 +393,8 @@ public sealed class AdminFinancialProjectionEndpointTests
     [Theory]
     [InlineData("/v1/admin/trip-settlements")]
     [InlineData("/v1/admin/platform-wallet/transactions")]
+    [InlineData("/v1/admin/platform-wallet/reconciliation-summary")]
+    [InlineData("/v1/admin/platform-wallet/transactions/export")]
     public async Task FinancialProjectionReads_RejectOperatorAdmin(string path)
     {
         _factory.Reset();

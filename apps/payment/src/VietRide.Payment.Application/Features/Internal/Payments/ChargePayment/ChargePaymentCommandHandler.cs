@@ -6,6 +6,7 @@ using VietRide.Payment.Application.Abstractions.Services;
 using VietRide.Payment.Application.Events;
 using VietRide.Payment.Application.Exceptions;
 using VietRide.Payment.Application.Models;
+using VietRide.Payment.Application.Services;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
@@ -122,11 +123,12 @@ public sealed class ChargePaymentCommandHandler : IRequestHandler<ChargePaymentC
                 walletRef,
                 cancellationToken)
             .ConfigureAwait(false);
-        await _platformWallets.CreditAsync(
+        await _platformWallets.CreditWithLinksAsync(
                 amount,
                 platformRef,
                 request.ReferenceId,
                 $"{referenceType} payment hold",
+                PlatformWalletLinkFactory.FromPaymentContext(PaymentContextCodec.DeserializeTrusted(contextJson)),
                 cancellationToken)
             .ConfigureAwait(false);
         await _payments.AddAsync(payment, cancellationToken).ConfigureAwait(false);

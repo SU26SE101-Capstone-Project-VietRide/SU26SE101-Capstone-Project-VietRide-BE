@@ -132,6 +132,10 @@ if (registerMessaging)
         PaymentBusinessCodeBackfillJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
         "*/5 * * * *");
+    recurringJobs.AddOrUpdate<PlatformWalletTransactionLinkBackfillJob>(
+        PlatformWalletTransactionLinkBackfillJob.RecurringJobId,
+        job => job.RunAsync(CancellationToken.None),
+        "*/5 * * * *");
     recurringJobs.AddOrUpdate<ParcelCompensationFundingRetryJob>(
         ParcelCompensationFundingRetryJob.RecurringJobId,
         job => job.RunAsync(CancellationToken.None),
