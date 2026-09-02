@@ -37,8 +37,9 @@ public sealed class VnPayBookingIpnController : ControllerBase
     }
 
     /// <summary>
-    /// Read-only status used by the Manager Web return page. Signed VNPay query parameters
-    /// authenticate the lookup; this endpoint never changes Payment state.
+    /// Status used by the Manager Web return page. Signed VNPay query parameters authenticate
+    /// the lookup. A signed subscription cancellation terminalizes its pending Payment as failed;
+    /// all other return outcomes remain read-only and successful capture stays IPN-owned.
     /// </summary>
     [HttpGet("vnpay-return-status")]
     [ProducesResponseType(typeof(ApiResponse<VnPayReturnStatusResponse>), StatusCodes.Status200OK)]
