@@ -101,6 +101,7 @@ public sealed class InvoicePdfGenerationJob
             var objectPath = await _storage.UploadPdfAsync(
                 invoice.OperatorId,
                 invoice.Id,
+                InvoicePdfFileMetadata.DownloadFileName(invoice.InvoiceNumber),
                 contents,
                 cancellationToken);
             await CompleteAsync(invoice, objectPath, cancellationToken);

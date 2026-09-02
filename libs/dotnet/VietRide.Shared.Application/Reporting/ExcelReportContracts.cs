@@ -21,10 +21,13 @@ public readonly record struct ExcelReportCell(
     decimal? Decimal = null,
     DateOnly? Date = null,
     DateTimeOffset? Instant = null,
-    bool? Boolean = null)
+    bool? Boolean = null,
+    bool IsCurrency = false)
 {
     public static ExcelReportCell TextValue(string value) => new(ExcelReportCellType.Text, Text: value);
     public static ExcelReportCell IntegerValue(long value) => new(ExcelReportCellType.Integer, Integer: value);
+    public static ExcelReportCell CurrencyValue(long value) =>
+        new(ExcelReportCellType.Integer, Integer: value, IsCurrency: true);
     public static ExcelReportCell DecimalValue(decimal value) => new(ExcelReportCellType.Decimal, Decimal: value);
     public static ExcelReportCell DateValue(DateOnly value) => new(ExcelReportCellType.Date, Date: value);
     public static ExcelReportCell DateTimeValue(DateTimeOffset value) =>
@@ -37,7 +40,11 @@ public sealed record ExcelReportSpec(
     string SheetName,
     IReadOnlyList<string> Headers,
     string FileName,
-    IReadOnlySet<int>? CurrencyColumns = null);
+    IReadOnlySet<int>? CurrencyColumns = null,
+    IReadOnlySet<int>? PercentageColumns = null,
+    string? Title = null,
+    string? ReportPeriod = null,
+    DateTimeOffset? ExportedAt = null);
 
 public sealed record ExcelReportRow(IReadOnlyList<ExcelReportCell> Cells);
 

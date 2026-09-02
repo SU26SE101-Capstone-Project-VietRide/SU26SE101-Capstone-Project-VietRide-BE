@@ -1,4 +1,3 @@
-using System.Globalization;
 using Microsoft.Extensions.Options;
 using MigraDoc.DocumentObjectModel;
 using MigraDoc.DocumentObjectModel.Tables;
@@ -11,7 +10,6 @@ namespace VietRide.Payment.Infrastructure.Invoices;
 public sealed class PdfSharpInvoicePdfGenerator : IInvoicePdfGenerator
 {
     private static readonly object FontResolverLock = new();
-    private static readonly CultureInfo VietnameseCulture = CultureInfo.GetCultureInfo("vi-VN");
     private readonly InvoicePdfOptions _options;
 
     public PdfSharpInvoicePdfGenerator(IOptions<InvoicePdfOptions> options)
@@ -106,7 +104,8 @@ public sealed class PdfSharpInvoicePdfGenerator : IInvoicePdfGenerator
         number.Format.Alignment = ParagraphAlignment.Center;
         number.Format.Font.Bold = true;
 
-        var issuedAt = section.AddParagraph($"Ngày phát hành: {invoice.IssuedAt:dd/MM/yyyy HH:mm} (UTC)");
+        var issuedAt = section.AddParagraph(
+            $"Ngày phát hành: {InvoicePdfDisplayLabels.IssuedAt(invoice.IssuedAt)}");
         issuedAt.Format.Alignment = ParagraphAlignment.Center;
         issuedAt.Format.SpaceAfter = Unit.FromCentimeter(0.7);
     }
@@ -147,9 +146,9 @@ public sealed class PdfSharpInvoicePdfGenerator : IInvoicePdfGenerator
         header.Cells[2].AddParagraph("Thành tiền");
 
         var row = table.AddRow();
-        row.Cells[0].AddParagraph($"{invoice.PlanName} ({FormatBillingPeriod(invoice.BillingPeriod)})");
+        row.Cells[0].AddParagraph($"{invoice.PlanName} ({InvoicePdfDisplayLabels.BillingPeriod(invoice.BillingPeriod)})");
         row.Cells[1].AddParagraph($"{invoice.PeriodFrom:dd/MM/yyyy} - {invoice.PeriodTo:dd/MM/yyyy}");
-        var amount = row.Cells[2].AddParagraph(FormatVnd(invoice.AmountVnd));
+        var amount = row.Cells[2].AddParagraph(InvoicePdfDisplayLabels.Amount(invoice.AmountVnd));
         amount.Format.Alignment = ParagraphAlignment.Right;
     }
 
@@ -160,7 +159,7 @@ public sealed class PdfSharpInvoicePdfGenerator : IInvoicePdfGenerator
         total.Format.Font.Bold = true;
         total.Format.Font.Size = 12;
         total.Format.SpaceBefore = Unit.FromCentimeter(0.5);
-        total.AddText($"TỔNG CỘNG: {FormatVnd(amountVnd)}");
+        total.AddText($"TỔNG CỘNG: {InvoicePdfDisplayLabels.Amount(amountVnd)}");
     }
 
     private static void AddRow(Table table, string label, string value, bool boldValue = false)
@@ -182,17 +181,6 @@ public sealed class PdfSharpInvoicePdfGenerator : IInvoicePdfGenerator
         var address = string.Join(", ", components.Where(value => !string.IsNullOrWhiteSpace(value)));
         return string.IsNullOrWhiteSpace(address) ? "Không cung cấp" : address;
     }
-
-    private static string FormatBillingPeriod(string billingPeriod)
-        => billingPeriod switch
-        {
-            "MONTHLY" => "Hàng tháng",
-            "YEARLY" => "Hàng năm",
-            _ => billingPeriod,
-        };
-
-    private static string FormatVnd(long amountVnd)
-        => string.Format(VietnameseCulture, "{0:N0} VND", amountVnd);
 
     private static void Validate(InvoicePdfDocument invoice)
     {

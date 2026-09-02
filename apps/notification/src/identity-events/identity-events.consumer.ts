@@ -5,6 +5,9 @@ import {
   IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY,
   IDENTITY_OPERATOR_SUSPENDED_ROUTING_KEY,
   IDENTITY_OTP_REQUESTED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_APPROVED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_REJECTED_ROUTING_KEY,
+  IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED_ROUTING_KEY,
   IDENTITY_SUBSCRIPTION_USAGE_WARNING_ROUTING_KEY,
   IDENTITY_USER_CREATED_ROUTING_KEY,
   IdentityOperatorApprovedEventSchema,
@@ -12,6 +15,9 @@ import {
   IdentityOperatorRegistrationSubmittedEventSchema,
   IdentityOperatorSuspendedEventSchema,
   IdentityOtpRequestedEventSchema,
+  IdentitySubscriptionCustomRequestApprovedEventSchema,
+  IdentitySubscriptionCustomRequestRejectedEventSchema,
+  IdentitySubscriptionCustomRequestSubmittedEventSchema,
   IdentitySubscriptionUsageWarningEventSchema,
   IdentityUserCreatedEventSchema,
 } from '@vietride/contracts';
@@ -95,6 +101,27 @@ export class IdentityEventsConsumer implements OnModuleInit {
     );
 
     await this.consumer.subscribe(
+      'notification.identity.subscription-custom-request.submitted',
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED_ROUTING_KEY,
+      (payload, raw) => this.handleSubscriptionCustomRequestSubmitted(payload, raw),
+      { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+
+    await this.consumer.subscribe(
+      'notification.identity.subscription-custom-request.approved',
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_APPROVED_ROUTING_KEY,
+      (payload, raw) => this.handleSubscriptionCustomRequestApproved(payload, raw),
+      { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+
+    await this.consumer.subscribe(
+      'notification.identity.subscription-custom-request.rejected',
+      IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_REJECTED_ROUTING_KEY,
+      (payload, raw) => this.handleSubscriptionCustomRequestRejected(payload, raw),
+      { prefetch: RABBITMQ_PREFETCH_ONE, deadLetter: true, maxRetries: 5, retryDelayMs: 10_000 },
+    );
+
+    await this.consumer.subscribe(
       'notification.identity.otp.requested',
       IDENTITY_OTP_REQUESTED_ROUTING_KEY,
       (payload, raw) => this.handleOtpRequested(payload, raw),
@@ -113,10 +140,7 @@ export class IdentityEventsConsumer implements OnModuleInit {
     );
   }
 
-  async handleOperatorRegistrationSubmitted(
-    payload: unknown,
-    raw: ConsumeMessage,
-  ): Promise<void> {
+  async handleOperatorRegistrationSubmitted(payload: unknown, raw: ConsumeMessage): Promise<void> {
     const routingKey = IDENTITY_OPERATOR_REGISTRATION_SUBMITTED_ROUTING_KEY;
     const messageId = getMessageId(raw);
     if (!messageId) throw new Error(`MISSING_MESSAGE_ID_${routingKey}`);
@@ -225,8 +249,9 @@ export class IdentityEventsConsumer implements OnModuleInit {
 
     try {
       const event = IdentitySubscriptionUsageWarningEventSchema.parse(payload);
-      const recipientUserIds =
-        await this.operatorRecipientProvider.resolveOperatorRecipientUserIds(event.operatorId);
+      const recipientUserIds = await this.operatorRecipientProvider.resolveOperatorRecipientUserIds(
+        event.operatorId,
+      );
       if (recipientUserIds.length === 0) {
         this.logger.warn(
           `No active operator admin recipients for ${routingKey} operatorId=${event.operatorId} messageId=${messageId}`,
@@ -263,6 +288,59 @@ export class IdentityEventsConsumer implements OnModuleInit {
       await this.idempotency.release(routingKey, messageId);
       throw error;
     }
+  }
+
+  async handleSubscriptionCustomRequestSubmitted(
+    payload: unknown,
+    raw: ConsumeMessage,
+  ): Promise<void> {
+    await this.handleSubscriptionCustomRequestEvent({
+      routingKey: IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED_ROUTING_KEY,
+      payload,
+      raw,
+      schema: IdentitySubscriptionCustomRequestSubmittedEventSchema,
+      type: NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_SUBMITTED,
+      title: 'Yêu cầu gói tùy chỉnh mới',
+      buildBody: (event) =>
+        `Nhà xe ${event.operatorName} vừa gửi yêu cầu gói tùy chỉnh và đang chờ xét duyệt.`,
+      resolveRecipients: () =>
+        this.systemAdminRecipientProvider.resolveSystemAdminRecipientUserIds(),
+    });
+  }
+
+  async handleSubscriptionCustomRequestApproved(
+    payload: unknown,
+    raw: ConsumeMessage,
+  ): Promise<void> {
+    await this.handleSubscriptionCustomRequestEvent({
+      routingKey: IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_APPROVED_ROUTING_KEY,
+      payload,
+      raw,
+      schema: IdentitySubscriptionCustomRequestApprovedEventSchema,
+      type: NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_APPROVED,
+      title: 'Gói tùy chỉnh đã được tạo',
+      buildBody: (event) =>
+        `Gói ${event.planName} đã được tạo. Vui lòng xem chi tiết và thực hiện nâng cấp để kích hoạt.`,
+      resolveRecipients: (event) =>
+        this.operatorRecipientProvider.resolveOperatorRecipientUserIds(event.operatorId),
+    });
+  }
+
+  async handleSubscriptionCustomRequestRejected(
+    payload: unknown,
+    raw: ConsumeMessage,
+  ): Promise<void> {
+    await this.handleSubscriptionCustomRequestEvent({
+      routingKey: IDENTITY_SUBSCRIPTION_CUSTOM_REQUEST_REJECTED_ROUTING_KEY,
+      payload,
+      raw,
+      schema: IdentitySubscriptionCustomRequestRejectedEventSchema,
+      type: NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_REJECTED,
+      title: 'Yêu cầu gói tùy chỉnh bị từ chối',
+      buildBody: (event) => `Yêu cầu gói tùy chỉnh đã bị từ chối. Lý do: ${event.rejectionReason}.`,
+      resolveRecipients: (event) =>
+        this.operatorRecipientProvider.resolveOperatorRecipientUserIds(event.operatorId),
+    });
   }
 
   async handleOtpRequested(payload: unknown, raw: ConsumeMessage): Promise<void> {
@@ -382,6 +460,75 @@ export class IdentityEventsConsumer implements OnModuleInit {
       }
 
       await this.idempotency.release(routingKey, messageId);
+      throw error;
+    }
+  }
+
+  private async handleSubscriptionCustomRequestEvent<
+    TEvent extends { operatorId: string },
+  >(options: {
+    routingKey: string;
+    payload: unknown;
+    raw: ConsumeMessage;
+    schema: { parse(value: unknown): TEvent };
+    type: NotificationType;
+    title: string;
+    buildBody: (event: TEvent) => string;
+    resolveRecipients: (event: TEvent) => Promise<string[]>;
+  }): Promise<void> {
+    const messageId = getMessageId(options.raw);
+    if (!messageId) throw new Error(`MISSING_MESSAGE_ID_${options.routingKey}`);
+
+    const processingState = await this.idempotency.begin(
+      options.routingKey,
+      messageId,
+      options.raw.content,
+    );
+    if (processingState === 'duplicate') return;
+    if (processingState === 'locked') {
+      throw new Error(`MESSAGE_LOCKED_${options.routingKey}_${messageId}`);
+    }
+
+    try {
+      const event = options.schema.parse(options.payload);
+      const recipientUserIds = [...new Set(await options.resolveRecipients(event))];
+      if (recipientUserIds.length === 0) {
+        this.logger.warn(
+          `No active recipients for ${options.routingKey} operatorId=${event.operatorId} messageId=${messageId}`,
+        );
+        await this.idempotency.markProcessed(options.routingKey, messageId);
+        return;
+      }
+
+      await Promise.all(
+        recipientUserIds.map((userId) =>
+          this.notificationsService.createNotification(
+            {
+              userId,
+              type: options.type,
+              title: options.title,
+              body: options.buildBody(event),
+              data: event,
+              dedupeKey: buildNotificationDedupeKey(
+                options.routingKey,
+                messageId,
+                userId,
+                options.type,
+              ),
+            },
+            { enqueueFcm: false },
+          ),
+        ),
+      );
+      await this.idempotency.markProcessed(options.routingKey, messageId);
+    } catch (error) {
+      if (error instanceof ZodError) {
+        this.logger.warn(`Dropping malformed ${options.routingKey} messageId=${messageId}`);
+        await this.idempotency.markProcessed(options.routingKey, messageId);
+        return;
+      }
+
+      await this.idempotency.release(options.routingKey, messageId);
       throw error;
     }
   }

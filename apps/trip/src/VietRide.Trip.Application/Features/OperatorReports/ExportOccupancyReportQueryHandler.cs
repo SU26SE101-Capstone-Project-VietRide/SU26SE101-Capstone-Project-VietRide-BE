@@ -26,9 +26,13 @@ public sealed class ExportOccupancyReportQueryHandler
     {
         var range = OperatorReportRange.Create(request.From, request.To, _clock);
         var spec = new ExcelReportSpec(
-            "Occupancy",
-            ["trip_id", "route_id", "status", "departure_at_asia_ho_chi_minh", "sellable_seat_count", "booked_seat_count", "occupancy_percent"],
-            $"occupancy-report-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.xlsx");
+            "Tỷ lệ lấp đầy",
+            ["Mã chuyến", "Tuyến", "Biển số xe", "Trạng thái", "Thời gian khởi hành", "Ghế mở bán", "Ghế đã đặt", "Tỷ lệ lấp đầy", "Mã hệ thống chuyến", "Mã hệ thống tuyến"],
+            $"bao-cao-ty-le-lap-day-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.xlsx",
+            PercentageColumns: new HashSet<int> { 7 },
+            Title: "Báo cáo tỷ lệ lấp đầy",
+            ReportPeriod: $"{range.FromDate:dd/MM/yyyy} - {range.ToDate:dd/MM/yyyy}",
+            ExportedAt: _clock.UtcNow);
         return _writer.WriteAsync(spec, ToRowsAsync(request.OperatorId, range, ct), ct);
     }
 
@@ -46,13 +50,16 @@ public sealed class ExportOccupancyReportQueryHandler
                 ? 0m
                 : Math.Round(row.BookedSeatCount * 100m / row.SellableSeatCount, 2, MidpointRounding.AwayFromZero);
             yield return new ExcelReportRow([
-                ExcelReportCell.TextValue(row.TripId.ToString("D")),
-                ExcelReportCell.TextValue(row.RouteId.ToString("D")),
-                ExcelReportCell.TextValue(row.Status),
+                ExcelReportCell.TextValue(row.TripCode),
+                ExcelReportCell.TextValue(row.RouteName),
+                ExcelReportCell.TextValue(row.VehicleLicensePlate),
+                ExcelReportCell.TextValue(TripReportLabels.Status(row.Status)),
                 ExcelReportCell.DateTimeValue(row.DepartureAt),
                 ExcelReportCell.IntegerValue(row.SellableSeatCount),
                 ExcelReportCell.IntegerValue(row.BookedSeatCount),
                 ExcelReportCell.DecimalValue(occupancy),
+                ExcelReportCell.TextValue(row.TripId.ToString("D")),
+                ExcelReportCell.TextValue(row.RouteId.ToString("D")),
             ]);
         }
     }

@@ -6,8 +6,8 @@ using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Web.Idempotency;
 using VietRide.Shared.Web.Middleware;
 using VietRide.Trip.Api.Controllers.Requests;
-using VietRide.Trip.Application.Features.Internal.Trips.Cargo;
 using VietRide.Trip.Application.Features.Trips.EditTrip;
+using VietRide.Trip.Application.Features.Trips.GetOperatorCargoCapacity;
 using VietRide.Trip.Application.Features.Trips.GetTripDetail;
 using VietRide.Trip.Application.Features.Trips.GetTripSeatMap;
 using VietRide.Trip.Application.Features.Trips.ListOperatorTrips;
@@ -121,15 +121,15 @@ public sealed class OperatorTripsController : ControllerBase
 
     [HttpGet("{tripId:guid}/cargo-capacity")]
     [Authorize(Roles = OperatorReadRoles)]
-    [ProducesResponseType(typeof(ApiResponse<CargoCapacityDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<OperatorCargoCapacityDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<CargoCapacityDto>> GetCargoCapacityAsync(
+    public async Task<ActionResult<OperatorCargoCapacityDto>> GetCargoCapacityAsync(
         Guid tripId,
         CancellationToken cancellationToken)
     {
         return Ok(await mediator.Send(
-            new GetCargoCapacityQuery(tripId, GetRequiredOperatorId()),
+            new GetOperatorCargoCapacityQuery(tripId, GetRequiredOperatorId()),
             cancellationToken));
     }
 

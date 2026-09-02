@@ -89,7 +89,10 @@ tự dựng lại, lọc hoặc đổi tên các query parameter VNPay:
 GET /v1/payments/vnpay-return-status?<nguyên-query-VNPay>
 ```
 
-Endpoint này là public; chữ ký trong query VNPay xác thực request.
+Endpoint này là public; chữ ký trong query VNPay xác thực request. Riêng payment gói có
+`vnp_ResponseCode=24` và transaction không thành công, Backend chuyển payment đang
+`PENDING_REDIRECT` sang `FAILED` ngay và phát event đồng bộ sang Identity. Các kết quả khác vẫn
+chỉ đọc trạng thái; thanh toán thành công vẫn chỉ được xác nhận bởi IPN.
 
 ```ts
 const rawQuery = window.location.search;
@@ -123,13 +126,27 @@ Authorization: Bearer <operator-token>
 FE chỉ hiển thị thành công khi trạng thái backend đã chuyển sang trạng thái thành công tương ứng.
 Không gọi `/v1/payments/vnpay-ipn` từ FE.
 
+Nếu query VNPay có `vnp_ResponseCode=24` và status API trả `FAILED`, FE hiển thị “Đã hủy thanh
+toán”, sau đó poll ngắn `GET /v1/operator/subscription` cho tới khi
+`pendingUpgrade.latestPayment.status=FAILED` và `pendingUpgrade.latestPayment.canRetry=true`. FE
+cho phép thanh toán lại bằng attempt hiện tại:
+
+```http
+POST /v1/operator/subscription/upgrade/{upgradeAttemptId}/retry-payment
+Authorization: Bearer <operator-token>
+Idempotency-Key: <UUID mới>
+```
+
+Mỗi lần người dùng chủ động thanh toán lại phải dùng `Idempotency-Key` mới. Retry tạo payment URL
+mới nhưng không kéo dài `dueAt`; nếu quote đã hết hạn thì FE tạo quote mới.
+
 ### 2.3. Lỗi Web cần xử lý
 
 | HTTP | `error.code` | Hành vi đề xuất |
 |---|---|---|
 | 401 | `PAYMENT_SIGNATURE_INVALID` | Hiển thị kết quả không hợp lệ; không tự xác nhận thanh toán. |
 | 404 | `PAYMENT_NOT_FOUND` | Hiển thị không tìm thấy giao dịch và cho phép quay về trang gói. |
-| 409 | `SUBSCRIPTION_PAYMENT_PENDING` | Mở trạng thái payment hiện tại thay vì tạo payment mới. |
+| 409 | `SUBSCRIPTION_PAYMENT_PENDING` | Poll trạng thái hiện tại; sau cancel signed code `24`, dùng `retry-payment` khi latest payment đã `FAILED`, không chờ đủ 15 phút. |
 | 422 | `PAYMENT_AMOUNT_INVALID` | Hiển thị giao dịch không hợp lệ; không retry tự động. |
 | 503 | `VNPAY_WEB_DISABLED` | Giữ người dùng tại trang gói và thông báo kênh đang tạm khóa. |
 
@@ -321,6 +338,7 @@ luôn dùng `vnpaySdk.isSandbox` từ response.
 - [ ] Route `/payments/return` hoạt động cả khi điều hướng trực tiếp và hard refresh.
 - [ ] FE chuyển nguyên query VNPay sang `/v1/payments/vnpay-return-status`.
 - [ ] Return đến trước IPN hiển thị trạng thái đang xử lý, không báo thành công sớm.
+- [ ] Cancel code `24` hiển thị đã hủy và mở lại thao tác thanh toán qua `retry-payment`.
 - [ ] Retry mạng dùng lại cùng `Idempotency-Key` và cùng body.
 
 ### Passenger Mobile

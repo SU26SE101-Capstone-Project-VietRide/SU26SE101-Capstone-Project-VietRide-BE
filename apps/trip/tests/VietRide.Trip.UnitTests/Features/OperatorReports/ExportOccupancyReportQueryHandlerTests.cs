@@ -3,6 +3,7 @@ using VietRide.Shared.Application.Reporting;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Trip.Application.Abstractions.Repositories;
 using VietRide.Trip.Application.Features.OperatorReports;
+using VietRide.Trip.Domain.Entities;
 using TripEntity = VietRide.Trip.Domain.Entities.Trip;
 
 namespace VietRide.Trip.UnitTests.Features.OperatorReports;
@@ -17,7 +18,10 @@ public sealed class ExportOccupancyReportQueryHandlerTests
         var repository = new ReportTripRepository(new TripOperatorOccupancyRow(
             tripId,
             Guid.NewGuid(),
-            "COMPLETED",
+            "TRIP-20260718-ABC123",
+            "TP.HCM - Đà Lạt",
+            "51B-123.45",
+            TripStatus.COMPLETED,
             new DateTimeOffset(2026, 7, 18, 1, 0, 0, TimeSpan.Zero),
             3,
             2));
@@ -34,11 +38,13 @@ public sealed class ExportOccupancyReportQueryHandlerTests
         repository.OperatorId.Should().Be(operatorId);
         repository.FromUtc.Should().Be(new DateTimeOffset(2026, 7, 17, 17, 0, 0, TimeSpan.Zero));
         repository.ToUtc.Should().Be(new DateTimeOffset(2026, 7, 18, 17, 0, 0, TimeSpan.Zero));
-        writer.Spec!.SheetName.Should().Be("Occupancy");
-        writer.Spec.FileName.Should().Be("occupancy-report-20260718-20260718.xlsx");
+        writer.Spec!.SheetName.Should().Be("Tỷ lệ lấp đầy");
+        writer.Spec.FileName.Should().Be("bao-cao-ty-le-lap-day-20260718-20260718.xlsx");
         writer.Rows.Should().ContainSingle();
-        writer.Rows[0].Cells[0].Text.Should().Be(tripId.ToString("D"));
-        writer.Rows[0].Cells[6].Decimal.Should().Be(66.67m);
+        writer.Rows[0].Cells[0].Text.Should().Be("TRIP-20260718-ABC123");
+        writer.Rows[0].Cells[3].Text.Should().Be("Hoàn thành");
+        writer.Rows[0].Cells[7].Decimal.Should().Be(66.67m);
+        writer.Rows[0].Cells[8].Text.Should().Be(tripId.ToString("D"));
     }
 
     private sealed class ReportTripRepository : ITripRepository

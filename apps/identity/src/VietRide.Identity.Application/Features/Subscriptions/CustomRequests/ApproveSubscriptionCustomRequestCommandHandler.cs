@@ -1,9 +1,11 @@
 using System.Text.Json;
 using MediatR;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
 
@@ -12,10 +14,13 @@ namespace VietRide.Identity.Application.Features.Subscriptions.CustomRequests;
 public sealed class ApproveSubscriptionCustomRequestCommandHandler
     : IRequestHandler<ApproveSubscriptionCustomRequestCommand, SubscriptionCustomRequestDto>
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly ISubscriptionCustomRequestRepository _requests;
     private readonly IOperatorSubscriptionRepository _subscriptions;
     private readonly ISubscriptionPlanRepository _plans;
     private readonly IActivityLogRepository _activityLogs;
+    private readonly IIntegrationEventOutbox _outbox;
     private readonly IClock _clock;
 
     public ApproveSubscriptionCustomRequestCommandHandler(
@@ -23,12 +28,14 @@ public sealed class ApproveSubscriptionCustomRequestCommandHandler
         IOperatorSubscriptionRepository subscriptions,
         ISubscriptionPlanRepository plans,
         IActivityLogRepository activityLogs,
+        IIntegrationEventOutbox outbox,
         IClock clock)
     {
         _requests = requests;
         _subscriptions = subscriptions;
         _plans = plans;
         _activityLogs = activityLogs;
+        _outbox = outbox;
         _clock = clock;
     }
 
@@ -90,6 +97,18 @@ public sealed class ApproveSubscriptionCustomRequestCommandHandler
                     operatorId = request.OperatorId,
                     planId = plan.Id,
                 })),
+            cancellationToken);
+        var integrationEvent = new SubscriptionCustomRequestApprovedIntegrationEvent(
+            Guid.NewGuid(),
+            _clock.UtcNow,
+            request.Id,
+            request.OperatorId,
+            plan.Id,
+            plan.Name);
+        await _outbox.EnqueueAsync(
+            integrationEvent.EventId,
+            SubscriptionCustomRequestApprovedIntegrationEvent.EventType,
+            JsonSerializer.Serialize(integrationEvent, JsonOptions),
             cancellationToken);
         return SubscriptionCustomRequestMapper.ToDto(request);
     }

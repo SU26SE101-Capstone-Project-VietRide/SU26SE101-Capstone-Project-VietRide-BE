@@ -30,12 +30,16 @@ public sealed class ExportOperatorLedgerReportQueryHandler
     {
         var range = OperatorReportRange.Create(request.From, request.To, _clock);
         var refundOnly = request.Kind == OperatorLedgerReportKind.Refunds;
-        var prefix = refundOnly ? "refunds" : "revenue";
+        var prefix = refundOnly ? "bao-cao-hoan-tien" : "bao-cao-doanh-thu";
+        var title = refundOnly ? "Báo cáo hoàn tiền" : "Báo cáo doanh thu";
         var spec = new ExcelReportSpec(
-            refundOnly ? "Refunds" : "Revenue",
-            ["entry_id", "reference_code", "trip_code", "entry_type", "reference_type", "reference_id", "trip_id", "amount_vnd", "occurred_at_asia_ho_chi_minh", "note"],
-            $"{prefix}-report-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.xlsx",
-            new HashSet<int> { 7 });
+            refundOnly ? "Hoàn tiền" : "Doanh thu",
+            ["Mã tham chiếu", "Mã chuyến", "Nội dung nghiệp vụ", "Nguồn phát sinh", "Số tiền", "Thời gian", "Diễn giải", "Mã hệ thống giao dịch", "Mã hệ thống tham chiếu", "Mã hệ thống chuyến"],
+            $"{prefix}-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.xlsx",
+            new HashSet<int> { 4 },
+            Title: title,
+            ReportPeriod: $"{range.FromDate:dd/MM/yyyy} - {range.ToDate:dd/MM/yyyy}",
+            ExportedAt: _clock.UtcNow);
 
         var tripCodes = await LoadTripCodesSafeAsync(request.OperatorId, range, ct);
         return await _writer.WriteAsync(spec, ToRowsAsync(request.OperatorId, range, refundOnly, tripCodes, ct), ct);
@@ -83,18 +87,21 @@ public sealed class ExportOperatorLedgerReportQueryHandler
             .ConfigureAwait(false))
         {
             yield return new ExcelReportRow([
-                ExcelReportCell.TextValue(row.EntryId.ToString("D")),
                 ExcelReportCell.TextValue(row.ReferenceCode ?? string.Empty),
                 ExcelReportCell.TextValue(row.TripCode
                     ?? (row.TripId.HasValue ? tripCodes.GetValueOrDefault(row.TripId.Value) : null)
                     ?? string.Empty),
-                ExcelReportCell.TextValue(row.EntryType),
-                ExcelReportCell.TextValue(row.ReferenceType),
-                ExcelReportCell.TextValue(row.ReferenceId.ToString("D")),
-                ExcelReportCell.TextValue(row.TripId?.ToString("D") ?? string.Empty),
+                ExcelReportCell.TextValue(PaymentReportLabels.EntryType(row.EntryType)),
+                ExcelReportCell.TextValue(PaymentReportLabels.ReferenceType(row.ReferenceType)),
                 ExcelReportCell.IntegerValue(row.AmountVnd),
                 ExcelReportCell.DateTimeValue(row.OccurredAt),
-                ExcelReportCell.TextValue(row.Note ?? string.Empty),
+                ExcelReportCell.TextValue(PaymentReportLabels.Description(
+                    row.EntryType,
+                    row.AdjustmentReason,
+                    row.Note)),
+                ExcelReportCell.TextValue(row.EntryId.ToString("D")),
+                ExcelReportCell.TextValue(row.ReferenceId.ToString("D")),
+                ExcelReportCell.TextValue(row.TripId?.ToString("D") ?? string.Empty),
             ]);
         }
     }

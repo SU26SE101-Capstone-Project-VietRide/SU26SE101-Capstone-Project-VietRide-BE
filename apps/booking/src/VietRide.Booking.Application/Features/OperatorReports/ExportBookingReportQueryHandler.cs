@@ -28,18 +28,22 @@ public sealed class ExportBookingReportQueryHandler
     {
         var range = OperatorReportRange.Create(request.From, request.To, _clock);
         var isCancellation = request.Kind == BookingOperatorReportKind.Cancellations;
-        var prefix = isCancellation ? "cancellation" : "bookings";
+        var prefix = isCancellation ? "bao-cao-huy-ve" : "bao-cao-dat-ve";
         IReadOnlyList<string> headers = isCancellation
-            ? ["booking_id", "booking_code", "trip_id", "status", "cancelled_at_asia_ho_chi_minh", "cancellation_reason", "total_amount_vnd"]
-            : ["booking_id", "booking_code", "trip_id", "status", "passenger_count", "total_amount_vnd", "created_at_asia_ho_chi_minh", "confirmed_at_asia_ho_chi_minh", "completed_at_asia_ho_chi_minh"];
+            ? ["Mã đặt vé", "Tuyến", "Điểm đi", "Điểm đến", "Trạng thái", "Thời gian hủy", "Lý do hủy", "Tổng tiền", "Mã hệ thống đặt vé", "Mã hệ thống chuyến"]
+            : ["Mã đặt vé", "Tuyến", "Điểm đi", "Điểm đến", "Trạng thái", "Số hành khách", "Tổng tiền", "Thời gian đặt", "Thời gian xác nhận", "Thời gian hoàn thành", "Mã hệ thống đặt vé", "Mã hệ thống chuyến"];
         var currencyColumns = isCancellation
-            ? (IReadOnlySet<int>)new HashSet<int> { 6 }
-            : new HashSet<int> { 5 };
+            ? (IReadOnlySet<int>)new HashSet<int> { 7 }
+            : new HashSet<int> { 6 };
+        var title = isCancellation ? "Báo cáo hủy vé" : "Báo cáo đặt vé";
         var spec = new ExcelReportSpec(
-            isCancellation ? "Cancellations" : "Bookings",
+            isCancellation ? "Hủy vé" : "Đặt vé",
             headers,
-            $"{prefix}-report-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.xlsx",
-            currencyColumns);
+            $"{prefix}-{range.FromDate:yyyyMMdd}-{range.ToDate:yyyyMMdd}.xlsx",
+            currencyColumns,
+            Title: title,
+            ReportPeriod: $"{range.FromDate:dd/MM/yyyy} - {range.ToDate:dd/MM/yyyy}",
+            ExportedAt: _clock.UtcNow);
 
         return _writer.WriteAsync(
             spec,
@@ -61,24 +65,28 @@ public sealed class ExportBookingReportQueryHandler
             if (cancellationOnly)
             {
                 yield return new ExcelReportRow([
-                    ExcelReportCell.TextValue(row.BookingId.ToString("D")),
                     ExcelReportCell.TextValue(row.BookingCode),
-                    ExcelReportCell.TextValue(row.TripId.ToString("D")),
-                    ExcelReportCell.TextValue(row.Status),
+                    ExcelReportCell.TextValue(row.RouteName ?? string.Empty),
+                    ExcelReportCell.TextValue(row.OriginName ?? string.Empty),
+                    ExcelReportCell.TextValue(row.DestinationName ?? string.Empty),
+                    ExcelReportCell.TextValue(BookingReportLabels.Status(row.Status)),
                     row.CancelledAt.HasValue
                         ? ExcelReportCell.DateTimeValue(row.CancelledAt.Value)
                         : ExcelReportCell.BlankValue(),
-                    ExcelReportCell.TextValue(row.CancellationReason ?? string.Empty),
+                    ExcelReportCell.TextValue(BookingReportLabels.CancellationReason(row.CancellationReason)),
                     ExcelReportCell.IntegerValue(row.TotalAmountVnd),
+                    ExcelReportCell.TextValue(row.BookingId.ToString("D")),
+                    ExcelReportCell.TextValue(row.TripId.ToString("D")),
                 ]);
             }
             else
             {
                 yield return new ExcelReportRow([
-                    ExcelReportCell.TextValue(row.BookingId.ToString("D")),
                     ExcelReportCell.TextValue(row.BookingCode),
-                    ExcelReportCell.TextValue(row.TripId.ToString("D")),
-                    ExcelReportCell.TextValue(row.Status),
+                    ExcelReportCell.TextValue(row.RouteName ?? string.Empty),
+                    ExcelReportCell.TextValue(row.OriginName ?? string.Empty),
+                    ExcelReportCell.TextValue(row.DestinationName ?? string.Empty),
+                    ExcelReportCell.TextValue(BookingReportLabels.Status(row.Status)),
                     ExcelReportCell.IntegerValue(row.PassengerCount),
                     ExcelReportCell.IntegerValue(row.TotalAmountVnd),
                     ExcelReportCell.DateTimeValue(row.CreatedAt),
@@ -88,6 +96,8 @@ public sealed class ExportBookingReportQueryHandler
                     row.CompletedAt.HasValue
                         ? ExcelReportCell.DateTimeValue(row.CompletedAt.Value)
                         : ExcelReportCell.BlankValue(),
+                    ExcelReportCell.TextValue(row.BookingId.ToString("D")),
+                    ExcelReportCell.TextValue(row.TripId.ToString("D")),
                 ]);
             }
         }

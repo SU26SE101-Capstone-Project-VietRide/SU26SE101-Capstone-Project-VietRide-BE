@@ -5,6 +5,7 @@ public interface IInvoiceStorage
     Task<string> UploadPdfAsync(
         Guid operatorId,
         Guid invoiceId,
+        string downloadFileName,
         ReadOnlyMemory<byte> content,
         CancellationToken cancellationToken);
 

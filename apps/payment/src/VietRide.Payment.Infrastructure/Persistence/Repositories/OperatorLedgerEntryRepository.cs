@@ -92,6 +92,7 @@ internal sealed class OperatorLedgerEntryRepository : IOperatorLedgerEntryReposi
             SELECT entry.id,
                    entry.entry_type::text,
                    entry.reference_type::text,
+                   entry.adjustment_reason::text,
                    entry.reference_id,
                    entry.trip_id,
                    entry.amount,
@@ -121,13 +122,14 @@ internal sealed class OperatorLedgerEntryRepository : IOperatorLedgerEntryReposi
                 reader.GetGuid(0),
                 reader.GetString(1),
                 reader.GetString(2),
-                reader.GetGuid(3),
-                reader.IsDBNull(4) ? null : reader.GetGuid(4),
-                reader.GetInt64(5),
-                reader.GetFieldValue<DateTimeOffset>(6),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.GetGuid(4),
+                reader.IsDBNull(5) ? null : reader.GetGuid(5),
+                reader.GetInt64(6),
+                reader.GetFieldValue<DateTimeOffset>(7),
                 reader.IsDBNull(8) ? null : reader.GetString(8),
-                reader.IsDBNull(9) ? null : reader.GetString(9));
+                reader.IsDBNull(9) ? null : reader.GetString(9),
+                reader.IsDBNull(10) ? null : reader.GetString(10));
         }
     }
 

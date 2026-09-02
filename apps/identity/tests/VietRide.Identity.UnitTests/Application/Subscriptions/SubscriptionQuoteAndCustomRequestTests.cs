@@ -2,6 +2,7 @@ using FluentAssertions;
 using NSubstitute;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Repositories;
+using VietRide.Identity.Application.Events;
 using VietRide.Identity.Application.Features.Subscriptions.ConfirmSubscriptionUpgradePayment;
 using VietRide.Identity.Application.Features.Subscriptions.CustomRequests;
 using VietRide.Identity.Application.Features.Subscriptions.QuoteSubscriptionUpgrade;
@@ -9,6 +10,7 @@ using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
 using VietRide.Identity.Infrastructure.ExternalClients;
 using VietRide.Shared.Application.Exceptions;
+using VietRide.Shared.Application.Outbox;
 using VietRide.Shared.Application.UnitOfWork;
 using VietRide.Shared.Kernel.Abstractions;
 using VietRide.Shared.Kernel.ValueObjects;
@@ -163,6 +165,211 @@ public sealed class SubscriptionQuoteAndCustomRequestTests
     }
 
     [Fact]
+    public async Task CreateCustomRequest_EnqueuesSubmittedEventWithOperatorSnapshot()
+    {
+        var operatorTenant = CreateOperator("Nhà xe Việt Ride");
+        var requests = Substitute.For<ISubscriptionCustomRequestRepository>();
+        var subscriptions = Substitute.For<IOperatorSubscriptionRepository>();
+        var operators = Substitute.For<IOperatorRepository>();
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        subscriptions.GetCurrentByOperatorIdAsync(operatorTenant.Id, Arg.Any<CancellationToken>())
+            .Returns(OperatorSubscription.CreateActiveTrial(
+                operatorTenant.Id,
+                SubscriptionPlan.StarterPlanId,
+                Now.AddDays(-1),
+                Now.AddDays(29)));
+        operators.GetByIdNoTrackingAsync(operatorTenant.Id, Arg.Any<CancellationToken>())
+            .Returns(operatorTenant);
+        var handler = new CreateSubscriptionCustomRequestCommandHandler(
+            requests,
+            subscriptions,
+            operators,
+            Substitute.For<IActivityLogRepository>(),
+            outbox,
+            CreateClock());
+
+        var result = await handler.Handle(
+            new CreateSubscriptionCustomRequestCommand(
+                Guid.NewGuid(), operatorTenant.Id, 10, 10, 10, 10, 10, 100,
+                true, false, true, "MONTHLY", "Cần gói riêng"),
+            CancellationToken.None);
+
+        await outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(),
+            SubscriptionCustomRequestSubmittedIntegrationEvent.EventType,
+            Arg.Is<string>(payload => EventPayloadMatches(
+                payload,
+                result.RequestId,
+                operatorTenant.Id,
+                new KeyValuePair<string, string>("operatorName", operatorTenant.Name))),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateCustomRequest_WhenPendingExists_DoesNotEnqueueEvent()
+    {
+        var operatorId = Guid.NewGuid();
+        var requests = Substitute.For<ISubscriptionCustomRequestRepository>();
+        var subscriptions = Substitute.For<IOperatorSubscriptionRepository>();
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        subscriptions.GetCurrentByOperatorIdAsync(operatorId, Arg.Any<CancellationToken>())
+            .Returns(OperatorSubscription.CreateActiveTrial(
+                operatorId,
+                SubscriptionPlan.StarterPlanId,
+                Now.AddDays(-1),
+                Now.AddDays(29)));
+        requests.GetPendingByOperatorIdAsync(operatorId, Arg.Any<CancellationToken>())
+            .Returns(CreateCustomRequest(operatorId));
+        var handler = new CreateSubscriptionCustomRequestCommandHandler(
+            requests,
+            subscriptions,
+            Substitute.For<IOperatorRepository>(),
+            Substitute.For<IActivityLogRepository>(),
+            outbox,
+            CreateClock());
+
+        var action = () => handler.Handle(
+            new CreateSubscriptionCustomRequestCommand(
+                Guid.NewGuid(), operatorId, 10, 10, 10, 10, 10, 100,
+                true, false, true, "MONTHLY", null),
+            CancellationToken.None);
+
+        (await action.Should().ThrowAsync<CodedConflictException>()).Which.ErrorCode
+            .Should().Be("CUSTOM_REQUEST_ALREADY_PENDING");
+        await outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ApproveCustomRequest_EnqueuesApprovedEventWithCreatedPlan()
+    {
+        var operatorId = Guid.NewGuid();
+        var request = CreateCustomRequest(operatorId);
+        var requests = Substitute.For<ISubscriptionCustomRequestRepository>();
+        var subscriptions = Substitute.For<IOperatorSubscriptionRepository>();
+        var plans = Substitute.For<ISubscriptionPlanRepository>();
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        requests.GetByIdForUpdateAsync(request.Id, Arg.Any<CancellationToken>()).Returns(request);
+        subscriptions.GetCurrentByOperatorIdForUpdateAsync(operatorId, Arg.Any<CancellationToken>())
+            .Returns(OperatorSubscription.CreateActiveTrial(
+                operatorId,
+                SubscriptionPlan.StarterPlanId,
+                Now.AddDays(-1),
+                Now.AddDays(29)));
+        var handler = new ApproveSubscriptionCustomRequestCommandHandler(
+            requests,
+            subscriptions,
+            plans,
+            Substitute.For<IActivityLogRepository>(),
+            outbox,
+            CreateClock());
+
+        var result = await handler.Handle(
+            new ApproveSubscriptionCustomRequestCommand(
+                Guid.NewGuid(), request.Id, "Doanh nghiệp riêng", null,
+                1_000_000, 10_000_000, 10, 10, 10, 10, 10, 100,
+                true, true, true),
+            CancellationToken.None);
+
+        result.ApprovedPlanId.Should().NotBeNull();
+        await outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(),
+            SubscriptionCustomRequestApprovedIntegrationEvent.EventType,
+            Arg.Is<string>(payload => EventPayloadMatches(
+                payload,
+                request.Id,
+                operatorId,
+                new KeyValuePair<string, string>(
+                    "approvedPlanId",
+                    result.ApprovedPlanId!.Value.ToString()),
+                new KeyValuePair<string, string>("planName", "Doanh nghiệp riêng"))),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RejectCustomRequest_EnqueuesRejectedEventWithTrimmedReason()
+    {
+        var operatorId = Guid.NewGuid();
+        var request = CreateCustomRequest(operatorId);
+        var requests = Substitute.For<ISubscriptionCustomRequestRepository>();
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        requests.GetByIdForUpdateAsync(request.Id, Arg.Any<CancellationToken>()).Returns(request);
+        var handler = new RejectSubscriptionCustomRequestCommandHandler(
+            requests,
+            Substitute.For<IActivityLogRepository>(),
+            outbox,
+            CreateClock());
+
+        await handler.Handle(
+            new RejectSubscriptionCustomRequestCommand(
+                Guid.NewGuid(), request.Id, "  Hạn mức chưa phù hợp  "),
+            CancellationToken.None);
+
+        await outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(),
+            SubscriptionCustomRequestRejectedIntegrationEvent.EventType,
+            Arg.Is<string>(payload => EventPayloadMatches(
+                payload,
+                request.Id,
+                operatorId,
+                new KeyValuePair<string, string>(
+                    "rejectionReason",
+                    "Hạn mức chưa phù hợp"))),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ApproveCustomRequest_WhenAlreadyReviewed_DoesNotEnqueueEvent()
+    {
+        var request = CreateCustomRequest(Guid.NewGuid());
+        request.Reject(Guid.NewGuid(), "Không phù hợp", Now);
+        var requests = Substitute.For<ISubscriptionCustomRequestRepository>();
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        requests.GetByIdForUpdateAsync(request.Id, Arg.Any<CancellationToken>()).Returns(request);
+        var handler = new ApproveSubscriptionCustomRequestCommandHandler(
+            requests,
+            Substitute.For<IOperatorSubscriptionRepository>(),
+            Substitute.For<ISubscriptionPlanRepository>(),
+            Substitute.For<IActivityLogRepository>(),
+            outbox,
+            CreateClock());
+
+        var action = () => handler.Handle(
+            new ApproveSubscriptionCustomRequestCommand(
+                Guid.NewGuid(), request.Id, "Doanh nghiệp riêng", null,
+                1_000_000, 10_000_000, 10, 10, 10, 10, 10, 100,
+                true, true, true),
+            CancellationToken.None);
+
+        (await action.Should().ThrowAsync<CodedConflictException>()).Which.ErrorCode
+            .Should().Be("CUSTOM_REQUEST_ALREADY_REVIEWED");
+        await outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task RejectCustomRequest_WhenAlreadyReviewed_DoesNotEnqueueEvent()
+    {
+        var request = CreateCustomRequest(Guid.NewGuid());
+        request.Reject(Guid.NewGuid(), "Không phù hợp", Now);
+        var requests = Substitute.For<ISubscriptionCustomRequestRepository>();
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        requests.GetByIdForUpdateAsync(request.Id, Arg.Any<CancellationToken>()).Returns(request);
+        var handler = new RejectSubscriptionCustomRequestCommandHandler(
+            requests,
+            Substitute.For<IActivityLogRepository>(),
+            outbox,
+            CreateClock());
+
+        var action = () => handler.Handle(
+            new RejectSubscriptionCustomRequestCommand(
+                Guid.NewGuid(), request.Id, "Lý do khác"),
+            CancellationToken.None);
+
+        (await action.Should().ThrowAsync<CodedConflictException>()).Which.ErrorCode
+            .Should().Be("CUSTOM_REQUEST_ALREADY_REVIEWED");
+        await outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default, default!, default!, default);
+    }
+
+    [Fact]
     public async Task ApproveCustomRequest_WhenGrantedQuotaBelowUsage_RejectsWithoutCreatingPlan()
     {
         var operatorId = Guid.NewGuid();
@@ -188,6 +395,7 @@ public sealed class SubscriptionQuoteAndCustomRequestTests
         var requests = Substitute.For<ISubscriptionCustomRequestRepository>();
         var subscriptions = Substitute.For<IOperatorSubscriptionRepository>();
         var plans = Substitute.For<ISubscriptionPlanRepository>();
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
         requests.GetByIdForUpdateAsync(request.Id, Arg.Any<CancellationToken>()).Returns(request);
         subscriptions.GetCurrentByOperatorIdForUpdateAsync(operatorId, Arg.Any<CancellationToken>())
             .Returns(subscription);
@@ -196,6 +404,7 @@ public sealed class SubscriptionQuoteAndCustomRequestTests
             subscriptions,
             plans,
             Substitute.For<IActivityLogRepository>(),
+            outbox,
             CreateClock());
 
         var action = () => handler.Handle(
@@ -224,6 +433,7 @@ public sealed class SubscriptionQuoteAndCustomRequestTests
             && error.Message.Contains("granted 2", StringComparison.Ordinal)
             && error.Message.Contains("current usage 3", StringComparison.Ordinal));
         await plans.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
+        await outbox.DidNotReceiveWithAnyArgs().EnqueueAsync(default, default!, default!, default);
     }
 
     [Fact]
@@ -429,6 +639,29 @@ public sealed class SubscriptionQuoteAndCustomRequestTests
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
         return clock;
+    }
+
+    private static bool EventPayloadMatches(
+        string payload,
+        Guid requestId,
+        Guid operatorId,
+        params KeyValuePair<string, string>[] expectedStrings)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("eventId", out var eventId)
+            || !Guid.TryParse(eventId.GetString(), out var parsedEventId)
+            || parsedEventId == Guid.Empty
+            || !root.TryGetProperty("occurredAt", out var occurredAt)
+            || !DateTimeOffset.TryParse(occurredAt.GetString(), out _)
+            || root.GetProperty("requestId").GetGuid() != requestId
+            || root.GetProperty("operatorId").GetGuid() != operatorId)
+        {
+            return false;
+        }
+
+        return expectedStrings.All(expected =>
+            root.GetProperty(expected.Key).GetString() == expected.Value);
     }
 
     private sealed record ConfirmFixture(

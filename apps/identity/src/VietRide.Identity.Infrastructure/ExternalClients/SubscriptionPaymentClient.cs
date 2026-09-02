@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
+using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
 using VietRide.Shared.Kernel.Serialization;
 
@@ -74,10 +75,20 @@ public sealed class SubscriptionPaymentClient : ISubscriptionPaymentClient
                     // Preserve the upstream status when a proxy or service returns a non-ADR response.
                 }
 
+                var errorCode = failure?.Error.Code ?? "PAYMENT_SERVICE_ERROR";
+                var errorMessage = failure?.Error.Message ?? "Payment subscription creation failed.";
+                if (response.StatusCode == System.Net.HttpStatusCode.UnprocessableEntity)
+                {
+                    var errors = failure?.Error.Fields?
+                        .Select(field => new ValidationError(field.Field, field.Message))
+                        .ToList();
+                    throw new CodedValidationException(errorCode, errorMessage, errors);
+                }
+
                 throw new SubscriptionPaymentClientException(
                     (int)response.StatusCode,
-                    failure?.Error.Code ?? "PAYMENT_SERVICE_ERROR",
-                    failure?.Error.Message ?? "Payment subscription creation failed.");
+                    errorCode,
+                    errorMessage);
             }
 
             ApiResponse<SubscriptionPaymentCreationResult>? envelope;

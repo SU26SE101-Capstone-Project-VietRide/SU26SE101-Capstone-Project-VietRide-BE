@@ -47,22 +47,34 @@ public sealed class ExportParcelReportQueryHandler
             to,
             cancellationToken);
 
-        var csv = new StringBuilder();
-        csv.AppendLine("operatorId,from,to,totalParcels,totalLoaded,totalDelivered,totalRejected,totalReturned,grossParcelRevenueVnd,parcelRefundsVnd,netParcelRevenueVnd,source");
-        csv.Append(summary.OperatorId).Append(',')
-            .Append(summary.From.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append(',')
-            .Append(summary.To.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append(',')
-            .Append(summary.TotalParcels).Append(',')
-            .Append(summary.TotalLoaded).Append(',')
-            .Append(summary.TotalDelivered).Append(',')
-            .Append(summary.TotalRejected).Append(',')
-            .Append(summary.TotalReturned).Append(',')
-            .Append(summary.GrossParcelRevenueVnd).Append(',')
-            .Append(summary.ParcelRefundsVnd).Append(',')
-            .Append(summary.NetParcelRevenueVnd).Append(',')
-            .Append(summary.Source).AppendLine();
+        var csv = new StringBuilder("\uFEFF");
+        csv.AppendLine("Từ ngày,Đến ngày,Tổng bưu kiện,Đã xếp lên xe,Đã giao,Bị từ chối,Đã hoàn trả,Doanh thu gộp,Tiền hoàn,Doanh thu thuần,Mã hệ thống nhà xe");
+        csv.AppendLine(string.Join(',', new[]
+        {
+            Escape(summary.From.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)),
+            Escape(summary.To.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)),
+            summary.TotalParcels.ToString(CultureInfo.InvariantCulture),
+            summary.TotalLoaded.ToString(CultureInfo.InvariantCulture),
+            summary.TotalDelivered.ToString(CultureInfo.InvariantCulture),
+            summary.TotalRejected.ToString(CultureInfo.InvariantCulture),
+            summary.TotalReturned.ToString(CultureInfo.InvariantCulture),
+            summary.GrossParcelRevenueVnd.ToString(CultureInfo.InvariantCulture),
+            Escape(summary.ParcelRefundsVnd.ToString(CultureInfo.InvariantCulture)),
+            summary.NetParcelRevenueVnd.ToString(CultureInfo.InvariantCulture),
+            Escape(summary.OperatorId.ToString("D")),
+        }));
 
-        var fileName = $"parcel-report-{from:yyyyMMdd}-{to:yyyyMMdd}.csv";
-        return new ParcelReportExportResponse(fileName, "text/csv", csv.ToString());
+        var fileName = $"bao-cao-tong-hop-buu-kien-{from:yyyyMMdd}-{to:yyyyMMdd}.csv";
+        return new ParcelReportExportResponse(fileName, "text/csv; charset=utf-8", csv.ToString());
+    }
+
+    private static string Escape(string value)
+    {
+        var safe = value.Length > 0 && value[0] is '=' or '+' or '-' or '@'
+            ? $"'{value}"
+            : value;
+        return safe.IndexOfAny([',', '"', '\r', '\n']) >= 0
+            ? $"\"{safe.Replace("\"", "\"\"")}\""
+            : safe;
     }
 }

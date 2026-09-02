@@ -4,6 +4,11 @@
 - **Prior checklist**: `docs/handoff/day-40-checklist.md` — `not found` tại thời điểm lập kế hoạch; không coi platform report Day 40 là dependency đã hoàn tất
 - **Plan status**: APPROVED — các quyết định contract được khóa cho mục tiêu Day 41–43; Task 41.0 cập nhật SOT/API contract trước feature implementation
 
+> **Cập nhật contract 2026-09-03:** giả định tương thích byte-for-byte của file xuất cũ không còn
+> áp dụng. Sáu XLSX và CSV Parcel được Việt hóa tại endpoint hiện tại; filename, sheet/header và
+> giá trị hiển thị thay đổi có chủ ý. API JSON, dữ liệu nguồn, tenant, quyền, query và MIME giữ nguyên.
+> FE chỉ tải blob; consumer nào parse header cũ phải cập nhật theo `FE-EXPORT-FILES-VI.md`.
+
 ## Objective
 
 Cung cấp sáu báo cáo operator dưới dạng `.xlsx`: booking, parcel, revenue, occupancy, cancellation và refund, luôn giới hạn theo operator trong JWT. Mỗi service chỉ xuất dữ liệu thuộc database mình sở hữu; Gateway chỉ proxy theo route canonical được khóa ở Task 41.0 và không tổng hợp domain data. Dùng một writer ClosedXML dùng chung với response dạng stream-backed file để tránh thêm full byte-array/full row-list buffer, đồng thời giữ tương thích endpoint CSV Parcel hiện hữu. Day 41 hoàn tất khi cả sáu file tải được xuyên Gateway và fixture 10.000 dòng chứng minh không OOM, không lẫn tenant.
@@ -16,7 +21,8 @@ Cung cấp sáu báo cáo operator dưới dạng `.xlsx`: booking, parcel, reve
 - [ ] Booking/Parcel/Payment/Trip chỉ đọc database của chính service; không cross-DB query/FK, không Gateway aggregation và không tạo integration event mới.
 - [ ] Export không materialize đồng thời full dataset và full workbook bytes; response dùng seekable temp-file stream, cleanup ở success/error/cancellation/client disconnect.
 - [ ] Real-stack fixture 10.000 data rows cho từng report hoàn tất không `OutOfMemoryException`, file không hỏng và process peak memory được ghi vào test artifact.
-- [ ] Endpoint CSV Parcel hiện hữu `/v1/operator/parcels/reports/export?format=csv` vẫn pass compatibility tests; không delete/rename hoặc âm thầm đổi content type.
+- [ ] Endpoint CSV Parcel hiện hữu `/v1/operator/parcels/reports/export?format=csv` giữ route và MIME,
+  nhưng dùng filename/header tiếng Việt, UTF-8 BOM, bỏ `source`, UUID ở cuối và chống formula injection.
 - [ ] Release build, `dotnet format --verify-no-changes`, unit/integration/architecture tests của Booking, Parcel, Payment, Trip và Gateway lint/test/E2E/build đều xanh.
 
 ## Contract changes
@@ -27,7 +33,8 @@ Cung cấp sáu báo cáo operator dưới dạng `.xlsx`: booking, parcel, reve
 - Success response là raw file, không bọc ADR 0004; mọi validation/auth/server error vẫn dùng `ApiResponse` ADR 0004. Đây là read-only GET nên không dùng `Idempotency-Key`.
 - `operatorId` không được nhận từ query/body. Existing operator controllers dùng `OPERATOR_ADMIN,OPERATOR_STAFF` và claim scope; role cuối cùng vẫn phải được khóa trong Task 41.0 vì API contract chưa có report endpoint.
 - Không có migration/event mới được timeline yêu cầu. Payment dùng `OperatorLedgerEntry` đã có từ Day 38 làm source attribution theo operator/trip; không tạo `payment_attributions` hoặc backfill mới.
-- Endpoint CSV Parcel hiện hữu được giữ nguyên để tránh breaking change. XLSX dùng route mới hoặc report type mới theo quyết định OQ-1.
+- Endpoint CSV Parcel giữ nguyên route/MIME nhưng chấp nhận breaking contract ở filename/header/cột;
+  test compatibility cũ được thay bằng test contract tiếng Việt và an toàn khi mở bằng Excel.
 
 ### Chưa có contract canonical — phải khóa trước implementation
 
@@ -49,7 +56,7 @@ Cung cấp sáu báo cáo operator dưới dạng `.xlsx`: booking, parcel, reve
 | forbidden scope | Không viết implementation, migration hoặc generated code; không sửa service/Gateway/package files; không đổi endpoint CSV Parcel hiện hữu; không thêm bảng/event/reporting service; không sửa `.agents/**`, `.codex/**`, `.claude/**`, `.env`, secret hoặc git ops. |
 | depends on | Human resolution cho OQ-1..OQ-6. Timeline không ghi dependency cứng vào Day 40; Day 38 ledger/context hiện hữu là source runtime cần verify, không được redesign trong task này. |
 | invariant flags | Docs/JSON LF; tiếng Việt đầy đủ dấu trong `docs/`; ADR 0004 cho error nhưng raw XLSX cho success; role + tenant claim explicit; GET không idempotency; Money BIGINT đến đơn vị đồng, không floor 1.000 (BSOT v1.11.0); UTC storage và range timezone explicit; no cross-DB FK/query; no new event; no commercial dependency. |
-| acceptance | Contract freeze đủ sáu route/report type, owner service, auth, query defaults/limits, inclusive/exclusive boundary, date anchor, exact workbook/sheet/column/cell type, filename/MIME, empty result, metrics, row-limit behavior và error codes; ghi rõ legacy CSV compatibility; ghi explicit approval + exact CPM version cho ClosedXML; contract không còn TBD mâu thuẫn timeline/technical context và reviewer trả APPROVE PLAN. |
+| acceptance | Contract freeze đủ sáu route/report type, owner service, auth, query defaults/limits, inclusive/exclusive boundary, date anchor, exact workbook/sheet/column/cell type, filename/MIME, empty result, metrics, row-limit behavior và error codes; ghi rõ breaking contract CSV tiếng Việt; ghi explicit approval + exact CPM version cho ClosedXML; contract không còn TBD mâu thuẫn timeline/technical context và reviewer trả APPROVE PLAN. |
 | source citations | `BE_TIMELINE_VU.md` Day 41 dòng 417–423 và standing items dòng 507–510; technical context v7 §4.3 dòng 571–572, §4.5(d) dòng 898–907; API contract hiện không có operator report export; BSOT §1.2 service ownership, §3.2 Clean Architecture, §5.9 error registry, §9.4 timezone, §9.5 money; source hiện hữu `OperatorParcelsController.cs`. |
 
 ### Task 41.1 — Shared XLSX writer, stream lifecycle và 10k harness
@@ -93,7 +100,7 @@ Cung cấp sáu báo cáo operator dưới dạng `.xlsx`: booking, parcel, reve
 | owned files (write set) | `apps/parcel/src/VietRide.Parcel.Application/Features/Parcels/Reports/**`; report read methods trong `IParcelRepository`/`ParcelRepository` nếu cần; `OperatorParcelsController.cs` hoặc controller report canonical mới theo Task 41.0; Parcel DI/project references chỉ cho Shared.Reporting; Parcel report unit/integration/compatibility tests |
 | forbidden scope | Không đổi behavior/content type/filename của CSV endpoint hiện hữu ngoài annotation deprecated nếu Task 41.0 yêu cầu; không sửa parcel lifecycle/payment/capacity/stats consumer/schema/migration, service khác, Gateway, shared writer internals hoặc API contract; không dùng `ParcelsFallback` của summary hiện hữu làm canonical revenue/refund nếu metric contract chọn Payment ledger; không cross-DB enrich; không `.env`, secrets hoặc git ops. |
 | depends on | 41.1 |
-| invariant flags | Thin controller → MediatR; OPERATOR claim scope; `AsNoTracking` projection; tenant predicate trước range/status; raw XLSX success; legacy CSV byte-for-byte/semantic compatibility test; Money `long`; no PII ngoài frozen columns; cancellation cleanup; .NET CRLF. |
+| invariant flags | Thin controller → MediatR; OPERATOR claim scope; `AsNoTracking` projection; tenant predicate trước range/status; raw XLSX success; CSV giữ route/MIME nhưng dùng contract tiếng Việt mới; Money `long`; no PII ngoài frozen columns; cancellation cleanup; .NET CRLF. |
 | acceptance | PARCEL workbook đúng exact columns/metrics/date anchor của Task 41.0, deterministic order, valid empty result và không lẫn tenant; existing CSV route vẫn trả `text/csv` với contract cũ. Tests cover parcel statuses, initial/additional amounts theo contract, boundary dates, cap/range error, auth/tenant, 10k rows và client cancellation; Parcel build/format/unit/integration/architecture xanh. |
 | source citations | `BE_TIMELINE_VU.md` Day 41 dòng 419, 421–423; technical context v7 §4.5(d) parcel count/revenue; `db-schema/parcel/schema.sql` `parcels`/`parcel_stats`; BSOT §4.2 Parcel inventory; source `OperatorParcelsController.cs`, `ExportParcelReportQueryHandler.cs`, `ParcelReportQuerySupport.cs`, `ParcelStats.cs`. |
 

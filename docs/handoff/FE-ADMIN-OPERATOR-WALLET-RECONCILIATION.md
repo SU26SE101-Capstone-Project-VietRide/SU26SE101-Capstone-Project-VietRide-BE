@@ -246,11 +246,12 @@ GET /v1/admin/platform-wallet/transactions/export
 
 Endpoint nhận cùng filter với list nhưng không nhận paging, trả file XLSX gồm đúng ba sheet:
 
-- `Summary`
-- `Transactions`
-- `Allocations`
+- `Tổng quan`
+- `Giao dịch`
+- `Phân bổ`
 
-FE gửi access token, nhận response dạng file/blob và lấy tên file từ header nếu có. Nếu enrichment
+Tên file là `doi-soat-vi-nen-tang-{yyyyMMdd}.xlsx`. FE gửi access token, nhận response dạng
+file/blob và lấy tên file từ header; không parse hoặc tự dịch nội dung workbook. Nếu enrichment
 bắt buộc chưa đầy đủ, BE trả `503 UPSTREAM_UNAVAILABLE`; FE phải hiển thị lỗi và cho tải lại, không
 tự xuất file từ dữ liệu list đang paging.
 
@@ -402,9 +403,9 @@ GET /v1/operator/wallet/reconciliation/export?from=2026-09-01&to=2026-09-30
 
 - Không gửi `operatorId`; BE lấy tenant từ JWT.
 - `from/to` cùng có hoặc cùng bỏ, tối đa 366 ngày theo lịch ICT.
-- Response là XLSX gồm đúng bốn sheet: `Summary`, `Ledger`, `Trip Settlements`,
-  `Wallet Transactions`.
-- Revenue/Refund exports cũ vẫn giữ nguyên.
+- Response là XLSX gồm đúng bốn sheet: `Tổng quan`, `Sổ cái`, `Quyết toán chuyến`,
+  `Biến động ví`.
+- Filename, sheet/header và giá trị hiển thị đã được Việt hóa tại BE; FE không dịch blob.
 - Nếu Trip enrichment bắt buộc thiếu, BE trả `503 UPSTREAM_UNAVAILABLE`; FE hiển thị lỗi và cho thử lại.
 
 ## Cách xử lý dữ liệu `PARTIAL`

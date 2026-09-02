@@ -1,6 +1,10 @@
 # Day 41 — Independent audit checklist
 
 > Re-audited with fresh isolated XLSX generation on 2026-08-02.
+>
+> Cập nhật 2026-09-03: harness phải đọc header dữ liệu ở dòng 5, kiểm tra sheet/header/filename
+> tiếng Việt và CSV Parcel breaking contract; các giả định tên sheet/header tiếng Anh trước đây
+> không còn là compatibility gate.
 
 - **Status**: ✅ READY
 - [x] All six XLSX exports stream and clean temporary files.

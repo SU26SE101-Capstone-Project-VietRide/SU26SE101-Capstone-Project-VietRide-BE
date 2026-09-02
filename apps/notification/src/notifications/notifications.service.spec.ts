@@ -132,6 +132,31 @@ describe('NotificationsService', () => {
     );
   });
 
+  it('persists and emits a web-only notification without enqueueing FCM', async () => {
+    repository.create.mockResolvedValue({
+      notification: createNotification({
+        type: NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_APPROVED,
+      }),
+      created: true,
+    });
+
+    await service.createNotification(
+      {
+        userId: OWNER_USER_ID,
+        type: NotificationType.SUBSCRIPTION_CUSTOM_REQUEST_APPROVED,
+        title: 'Gói tùy chỉnh đã được tạo',
+        body: 'Gói Doanh nghiệp đã được tạo.',
+      },
+      { enqueueFcm: false },
+    );
+
+    expect(repository.create).toHaveBeenCalledTimes(1);
+    expect(fcmPushQueue.enqueue).not.toHaveBeenCalled();
+    expect(realtimeGateway.publishCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ id: NOTIFICATION_ID, userId: OWNER_USER_ID }),
+    );
+  });
+
   it('keeps the durable notification successful when realtime publishing fails', async () => {
     repository.create.mockResolvedValue({
       notification: createNotification({ type: NotificationType.BOOKING_CONFIRMED }),
@@ -141,12 +166,14 @@ describe('NotificationsService', () => {
       throw new Error('socket adapter unavailable');
     });
 
-    await expect(service.createNotification({
-      userId: OWNER_USER_ID,
-      type: NotificationType.BOOKING_CONFIRMED,
-      title: 'Đặt vé thành công',
-      body: 'Vé của bạn đã được xác nhận.',
-    })).resolves.toEqual(expect.objectContaining({ id: NOTIFICATION_ID }));
+    await expect(
+      service.createNotification({
+        userId: OWNER_USER_ID,
+        type: NotificationType.BOOKING_CONFIRMED,
+        title: 'Đặt vé thành công',
+        body: 'Vé của bạn đã được xác nhận.',
+      }),
+    ).resolves.toEqual(expect.objectContaining({ id: NOTIFICATION_ID }));
   });
 
   it('persisted VEHICLE_SUBSTITUTED row survives enqueue failure and redelivery re-enqueues the same deduped notification without creating a second row', async () => {
@@ -258,13 +285,13 @@ describe('NotificationsService', () => {
 
   it('rejects a malformed notification cursor', async () => {
     const act = service.listForUser(OWNER_USER_ID, {
-        unreadOnly: false,
-        page: 1,
-        pageSize: 20,
-        sortBy: 'createdAt',
-        sortDir: 'desc',
-        cursor: 'not-a-valid-cursor',
-      });
+      unreadOnly: false,
+      page: 1,
+      pageSize: 20,
+      sortBy: 'createdAt',
+      sortDir: 'desc',
+      cursor: 'not-a-valid-cursor',
+    });
 
     await expect(act).rejects.toBeInstanceOf(BadRequestException);
     await expect(act).rejects.toMatchObject({
@@ -280,10 +307,7 @@ describe('NotificationsService', () => {
     redisClient.set.mockResolvedValue('OK');
     repository.markAllRead.mockResolvedValue(3);
 
-    const result = await service.markAllRead(
-      OWNER_USER_ID,
-      '55555555-5555-4555-8555-555555555555',
-    );
+    const result = await service.markAllRead(OWNER_USER_ID, '55555555-5555-4555-8555-555555555555');
 
     expect(redisClient.set).toHaveBeenCalledWith(
       `notification:read-all:${OWNER_USER_ID}:55555555-5555-4555-8555-555555555555`,
