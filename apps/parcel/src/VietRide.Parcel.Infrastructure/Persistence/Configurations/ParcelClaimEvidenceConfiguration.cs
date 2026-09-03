@@ -13,7 +13,10 @@ internal sealed class ParcelClaimEvidenceConfiguration : IEntityTypeConfiguratio
         builder.Property(x => x.Id).HasColumnName("id").HasColumnType("uuid").HasDefaultValueSql("gen_random_uuid()");
         builder.Property(x => x.ClaimId).HasColumnName("claim_id").HasColumnType("uuid").IsRequired();
         builder.Property(x => x.EvidenceType).HasColumnName("evidence_type").HasMaxLength(64).IsRequired();
-        builder.Property(x => x.Reference).HasColumnName("reference").HasMaxLength(2000).IsRequired();
+        builder.Property(x => x.Reference)
+            .HasColumnName("reference")
+            .HasMaxLength(ParcelClaimEvidence.MaximumReferenceLength)
+            .IsRequired();
         builder.Property(x => x.Note).HasColumnName("note").HasColumnType("text");
         builder.Property(x => x.UploadedByUserId).HasColumnName("uploaded_by_user_id").HasColumnType("uuid").IsRequired();
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");

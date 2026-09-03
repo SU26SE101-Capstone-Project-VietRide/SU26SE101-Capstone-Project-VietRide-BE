@@ -3710,6 +3710,12 @@ decision-evidence là audit bất biến, ghi reviewer/thời điểm và có r�
 claim; appeal chỉ được chọn evidence của claim gốc. Dữ liệu quyết định lịch sử không backfill:
 `proofStatus=null`, accepted evidence rỗng.
 
+Khi sender tạo claim từ incident `LOST_CONFIRMED`, các `evidenceUrls` hợp lệ đã đính kèm lúc báo
+incident được sao chép bất biến sang `ParcelClaimEvidence` loại `INCIDENT_PHOTO` trong cùng
+transaction. Việc kế thừa chỉ giúp Operator xem/chọn lại evidence từ `claim.evidence[]`; không tự
+đặt proof là `VERIFIED`, không tự đưa ID vào `acceptedEvidenceIds` và không thay thế chứng từ giá
+trị hàng. Evidence mới do sender bổ sung sau đó vẫn dùng endpoint claim evidence riêng.
+
 `maxCompensationVnd`/`policyCapVnd` chỉ là trần của `cargoAward`; hoàn cước nằm ngoài trần nên
 `totalAward` có thể lớn hơn cap. Hai preview read-only cho Operator Admin trả breakdown theo cùng
 calculator, nhưng mutation luôn tính lại dưới transaction/lock và không tin số tiền từ client.

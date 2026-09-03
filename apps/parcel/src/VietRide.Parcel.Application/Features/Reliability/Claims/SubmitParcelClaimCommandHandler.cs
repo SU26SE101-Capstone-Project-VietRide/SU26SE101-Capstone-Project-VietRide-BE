@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Parcels;
@@ -90,6 +91,18 @@ public sealed class SubmitParcelClaimCommandHandler
                 : DefaultNoProofFallbackMultiplier);
         await _reliability.AddClaimAsync(claim, cancellationToken);
 
+        var now = _clock.UtcNow;
+        var inheritedEvidence = DeserializeIncidentEvidence(incident.EvidenceJson)
+            .Select(reference => ParcelClaimEvidence.Create(
+                claim.Id,
+                ParcelClaimEvidence.IncidentPhotoEvidenceType,
+                reference,
+                "Inherited from the incident report.",
+                incident.ReporterId ?? command.SenderUserId))
+            .ToArray();
+        foreach (var evidence in inheritedEvidence)
+            await _reliability.AddClaimEvidenceAsync(evidence, cancellationToken);
+
         var submittedEventId = Guid.NewGuid();
         await ParcelOutboxEvents.EnqueueAsync(
             _outbox,
@@ -98,7 +111,7 @@ public sealed class SubmitParcelClaimCommandHandler
             new
             {
                 eventId = submittedEventId,
-                occurredAt = _clock.UtcNow,
+                occurredAt = now,
                 claimId = claim.Id,
                 parcelId = parcel.Id,
                 incidentId = incident.Id,
@@ -108,13 +121,53 @@ public sealed class SubmitParcelClaimCommandHandler
             },
             cancellationToken);
 
-        return await ParcelClaimResponseMapper.MapAsync(
+        var response = await ParcelClaimResponseMapper.MapAsync(
             claim,
             _reliability,
             cancellationToken,
             parcel,
             incident,
             operatorView: false,
-            now: _clock.UtcNow);
+            now: now);
+        if (inheritedEvidence.Length == 0)
+            return response;
+
+        // The unit of work commits after this handler returns. Include inherited rows in the
+        // immediate response because a database query cannot see Added entities before commit.
+        return response with
+        {
+            Evidence =
+            [
+                .. response.Evidence,
+                .. inheritedEvidence.Select(evidence => new ParcelClaimEvidenceResponse(
+                    evidence.Id,
+                    evidence.EvidenceType,
+                    evidence.Reference,
+                    evidence.Note,
+                    evidence.UploadedByUserId,
+                    now)),
+            ],
+        };
+    }
+
+    private static IReadOnlyList<string> DeserializeIncidentEvidence(string? evidenceJson)
+    {
+        if (string.IsNullOrWhiteSpace(evidenceJson))
+            return [];
+
+        try
+        {
+            return (JsonSerializer.Deserialize<string[]>(evidenceJson) ?? [])
+                .Where(reference => !string.IsNullOrWhiteSpace(reference))
+                .Select(reference => reference.Trim())
+                .Where(reference => reference.Length <= ParcelClaimEvidence.MaximumReferenceLength)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+        }
+        catch (JsonException)
+        {
+            // A malformed historical incident must not prevent the sender from submitting a claim.
+            return [];
+        }
     }
 }

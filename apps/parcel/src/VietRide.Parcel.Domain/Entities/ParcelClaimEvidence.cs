@@ -4,6 +4,9 @@ namespace VietRide.Parcel.Domain.Entities;
 
 public sealed class ParcelClaimEvidence : BaseEntity<Guid>
 {
+    public const int MaximumReferenceLength = 2000;
+    public const string IncidentPhotoEvidenceType = "INCIDENT_PHOTO";
+
     public Guid ClaimId { get; private set; }
     public string EvidenceType { get; private set; } = null!;
     public string Reference { get; private set; } = null!;
