@@ -56,6 +56,13 @@ public sealed class ConfirmSubscriptionUpgradePaymentCommandHandler
             if (subscription is null || subscription.OperatorId != request.OperatorId)
                 throw new NotFoundException(nameof(OperatorSubscription), attempt.SubscriptionId);
 
+            if (attempt.Status == SubscriptionUpgradeAttemptStatus.CANCELLED)
+            {
+                throw new CodedConflictException(
+                    "SUBSCRIPTION_UPGRADE_CANCELLED",
+                    "The subscription upgrade quote was cancelled.");
+            }
+
             var targetPlan = await _plans.GetByIdForUpdateAsync(attempt.TargetPlanId, cancellationToken);
             QuoteSubscriptionUpgradeCommandHandler.EnsureTargetVisibleAndActive(
                 targetPlan,

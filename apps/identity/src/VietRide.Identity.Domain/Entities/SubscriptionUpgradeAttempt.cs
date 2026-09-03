@@ -206,6 +206,16 @@ public sealed class SubscriptionUpgradeAttempt : BaseEntity<Guid>
         LatestPaymentStatus = SubscriptionPaymentSessionStatus.FAILED;
     }
 
+    public void Cancel()
+    {
+        if (Status == SubscriptionUpgradeAttemptStatus.CANCELLED)
+            return;
+        if (Status != SubscriptionUpgradeAttemptStatus.INITIATED || PaymentId.HasValue)
+            throw new InvalidOperationException("Only an initiated upgrade attempt without a payment can be cancelled.");
+
+        Status = SubscriptionUpgradeAttemptStatus.CANCELLED;
+    }
+
     private void EnsureLatestPayment(Guid paymentId)
     {
         if (Status != SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING || PaymentId != paymentId)

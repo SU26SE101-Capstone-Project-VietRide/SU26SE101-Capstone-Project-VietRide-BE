@@ -19,6 +19,7 @@ using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Events;
 using VietRide.Identity.Application.Features.Subscriptions;
+using VietRide.Identity.Application.Features.Subscriptions.CancelSubscriptionUpgrade;
 using VietRide.Identity.Application.Features.Subscriptions.ConfirmSubscriptionUpgradePayment;
 using VietRide.Identity.Application.Features.Subscriptions.CustomRequests;
 using VietRide.Identity.Application.Features.Subscriptions.QuoteSubscriptionUpgrade;
@@ -211,6 +212,118 @@ public sealed class SubscriptionUpgradePostgresTests
                 .SingleAsync(item => item.Id == quote.UpgradeAttemptId);
             attempt.Status.Should().Be(SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING);
             attempt.PaymentId.Should().Be(factory.Payments.PaymentId);
+        }
+        finally
+        {
+            await factory.DropDatabaseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentConfirmAndCancel_AreSerializedWithOneWinner()
+    {
+        using var factory = new SubscriptionFactory();
+        try
+        {
+            await factory.InitializeAsync();
+            var seed = await SeedAsync(factory);
+            var quote = await SendAsync(
+                factory,
+                new QuoteSubscriptionUpgradeCommand(
+                    seed.OperatorId,
+                    seed.TargetPlanId,
+                    "MONTHLY",
+                    "VNPAY",
+                    Guid.NewGuid().ToString()));
+
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var confirm = ConfirmAsync(factory, gate.Task, seed.OperatorId, quote.UpgradeAttemptId);
+            var cancel = CancelAsync(factory, gate.Task, seed.OperatorId, quote.UpgradeAttemptId);
+            gate.SetResult();
+            await Task.WhenAll(confirm, cancel);
+            var confirmOutcome = await confirm;
+            var cancelOutcome = await cancel;
+
+            var outcomes = new Exception?[] { confirmOutcome.Exception, cancelOutcome.Exception };
+            outcomes.Count(exception => exception is null).Should().Be(1);
+            outcomes.Count(exception => exception is CodedConflictException).Should().Be(1);
+
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var attempt = await db.SubscriptionUpgradeAttempts.AsNoTracking()
+                .SingleAsync(item => item.Id == quote.UpgradeAttemptId);
+            attempt.Status.Should().BeOneOf(
+                SubscriptionUpgradeAttemptStatus.CANCELLED,
+                SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING);
+            factory.Payments.CreateCalls.Should().Be(
+                attempt.Status == SubscriptionUpgradeAttemptStatus.PAYMENT_PENDING ? 1 : 0);
+        }
+        finally
+        {
+            await factory.DropDatabaseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CancelledAttempt_ReleasesUniqueActiveSlotForNewQuote()
+    {
+        using var factory = new SubscriptionFactory();
+        try
+        {
+            await factory.InitializeAsync();
+            var seed = await SeedAsync(factory);
+            var first = await SendAsync(
+                factory,
+                new QuoteSubscriptionUpgradeCommand(
+                    seed.OperatorId,
+                    seed.TargetPlanId,
+                    "MONTHLY",
+                    "VNPAY",
+                    Guid.NewGuid().ToString()));
+
+            var cancelled = await SendAsync(
+                factory,
+                new CancelSubscriptionUpgradeCommand(seed.OperatorId, first.UpgradeAttemptId));
+            var second = await SendAsync(
+                factory,
+                new QuoteSubscriptionUpgradeCommand(
+                    seed.OperatorId,
+                    seed.TargetPlanId,
+                    "MONTHLY",
+                    "VNPAY",
+                    Guid.NewGuid().ToString()));
+
+            cancelled.Status.Should().Be("CANCELLED");
+            second.UpgradeAttemptId.Should().NotBe(first.UpgradeAttemptId);
+        }
+        finally
+        {
+            await factory.DropDatabaseAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CancellationMigration_DownAndReapplies()
+    {
+        using var factory = new SubscriptionFactory();
+        try
+        {
+            await factory.InitializeAsync();
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+            var migrator = db.GetService<IMigrator>();
+
+            await migrator.MigrateAsync("20260819124848_ContractSubscriptionPricingSnapshots");
+            await migrator.MigrateAsync("20260903061306_AddSubscriptionUpgradeCancellation");
+
+            var cancelledLabelCount = await db.Database.SqlQueryRaw<int>("""
+                SELECT COUNT(*)::integer AS "Value"
+                FROM pg_enum enum_value
+                JOIN pg_type enum_type ON enum_type.oid = enum_value.enumtypid
+                WHERE enum_type.typname = 'subscription_upgrade_attempt_status'
+                  AND enum_value.enumlabel = 'CANCELLED'
+                """).SingleAsync();
+            cancelledLabelCount.Should().Be(1);
         }
         finally
         {
@@ -622,6 +735,26 @@ public sealed class SubscriptionUpgradePostgresTests
         }
     }
 
+    private static async Task<CancelOutcome> CancelAsync(
+        SubscriptionFactory factory,
+        Task gate,
+        Guid operatorId,
+        Guid attemptId)
+    {
+        await gate;
+        try
+        {
+            var response = await SendAsync(
+                factory,
+                new CancelSubscriptionUpgradeCommand(operatorId, attemptId));
+            return new CancelOutcome(response, null);
+        }
+        catch (Exception exception)
+        {
+            return new CancelOutcome(null, exception);
+        }
+    }
+
     private static Task<int> CountSnapshotColumnsAsync(IdentityDbContext db)
         => db.Database.SqlQueryRaw<int>("""
             SELECT COUNT(*)::integer AS "Value"
@@ -655,6 +788,8 @@ public sealed class SubscriptionUpgradePostgresTests
         Guid CallerUserId);
 
     private sealed record ConfirmOutcome(SubscriptionUpgradeResponseDto? Response, Exception? Exception);
+
+    private sealed record CancelOutcome(CancelSubscriptionUpgradeResponseDto? Response, Exception? Exception);
 
     private class SubscriptionFactory : AdminUsersEndpointsTests.DbBackedAdminUsersFactory
     {

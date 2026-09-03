@@ -1343,6 +1343,7 @@ Các mutation endpoints tiêu biểu sau yêu cầu header (inventory executable
 | 9 | `POST /v1/wallet/top-up/init` | Payment |
 | 10 | `POST /v1/admin/trip-settlements/{id}/settle` | Payment |
 | 11 | `POST /v1/operator/subscription/upgrade` | Identity (+Payment) |
+| 11a | `POST /v1/operator/subscription/upgrade/{upgradeAttemptId}/cancel` | Identity (+Payment status reconciliation) |
 | 11b | `POST /v1/operator/subscription/upgrade/{upgradeAttemptId}/retry-payment` | Identity (+Payment) |
 | 12 | `POST /v1/operator/voucher-consents/{id}/accept` | Booking |
 | 13 | `POST /v1/operator/voucher-consents/{id}/reject` | Booking |
@@ -1848,6 +1849,9 @@ phát integration event.
 | | `SUBSCRIPTION_UPGRADE_EXPIRED` | 409 | Upgrade attempt đã quá hạn 15 phút |
 | | `SUBSCRIPTION_PAYMENT_NOT_RETRYABLE` | 409 | Latest payment chưa FAILED/EXPIRED hoặc session khác còn pending |
 | | `SUBSCRIPTION_UPGRADE_ALREADY_ACTIVE` | 409 | Unique active quote/attempt đã tồn tại cho subscription |
+| | `SUBSCRIPTION_UPGRADE_PAYMENT_ALREADY_STARTED` | 409 | Không thể hủy quote vì phiên Payment đã bắt đầu hoặc có thể hoàn tất |
+| | `SUBSCRIPTION_UPGRADE_NOT_CANCELLABLE` | 409 | Upgrade attempt đã ở trạng thái terminal không cho phép hủy |
+| | `SUBSCRIPTION_UPGRADE_CANCELLED` | 409 | Không thể bắt đầu Payment cho upgrade attempt đã hủy |
 | | `SUBSCRIPTION_UPGRADE_TARGET_PLAN_INACTIVE` | 409 | Target plan bị ngừng bán trước thời điểm confirm |
 | | `SUBSCRIPTION_UPGRADE_QUOTE_STALE` | 409 | Source cycle hoặc current usage đã đổi sau quote |
 | | `SUBSCRIPTION_UPGRADE_AMOUNT_NOT_PAYABLE` | 422 | Target không tạo ra amount due dương |

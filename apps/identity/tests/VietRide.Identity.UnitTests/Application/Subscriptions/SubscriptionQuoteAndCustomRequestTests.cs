@@ -3,8 +3,10 @@ using NSubstitute;
 using VietRide.Identity.Application.Abstractions.ExternalClients;
 using VietRide.Identity.Application.Abstractions.Repositories;
 using VietRide.Identity.Application.Events;
+using VietRide.Identity.Application.Features.Subscriptions.CancelSubscriptionUpgrade;
 using VietRide.Identity.Application.Features.Subscriptions.ConfirmSubscriptionUpgradePayment;
 using VietRide.Identity.Application.Features.Subscriptions.CustomRequests;
+using VietRide.Identity.Application.Features.Subscriptions.GetOperatorSubscription;
 using VietRide.Identity.Application.Features.Subscriptions.QuoteSubscriptionUpgrade;
 using VietRide.Identity.Domain.Entities;
 using VietRide.Identity.Domain.Enums;
@@ -162,6 +164,25 @@ public sealed class SubscriptionQuoteAndCustomRequestTests
         fixture.Attempt.PaymentId.Should().BeNull();
         fixture.Attempt.LatestPaymentStatus.Should().Be(SubscriptionPaymentSessionStatus.NONE);
         fixture.Subscription.Status.Should().Be(SubscriptionStatus.ACTIVE);
+    }
+
+    [Fact]
+    public async Task Confirm_CancelledAttempt_RejectsBeforePayment()
+    {
+        var fixture = CreateConfirmFixture();
+        fixture.Attempt.Cancel();
+
+        var action = () => fixture.Handler.Handle(
+            new ConfirmSubscriptionUpgradePaymentCommand(
+                fixture.OperatorId,
+                fixture.Attempt.Id,
+                Guid.NewGuid().ToString(),
+                "203.0.113.10"),
+            CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<CodedConflictException>();
+        exception.Which.ErrorCode.Should().Be("SUBSCRIPTION_UPGRADE_CANCELLED");
+        await fixture.Payments.DidNotReceiveWithAnyArgs().CreateAsync(default!, default);
     }
 
     [Fact]
@@ -516,6 +537,142 @@ public sealed class SubscriptionQuoteAndCustomRequestTests
 
         result.OperatorId.Should().Be(operatorTenant.Id);
         result.OperatorName.Should().Be(operatorTenant.Name);
+    }
+
+    [Fact]
+    public async Task GetSubscription_WithInitiatedAttempt_ReturnsRecoverableUpgrade()
+    {
+        var operatorId = Guid.NewGuid();
+        var currentPlan = CreatePlan("Current", 300_000, 10);
+        var targetPlan = CreatePlan("Target", 500_000, 20);
+        var subscription = CreatePaidSubscription(operatorId, currentPlan.Id, 300_000);
+        var attempt = SubscriptionUpgradeAttempt.Create(
+            subscription.Id,
+            operatorId,
+            targetPlan.Id,
+            SubscriptionBillingPeriod.MONTHLY,
+            Money.FromRaw(200_000),
+            SubscriptionPaymentMethod.VNPAY,
+            Guid.NewGuid().ToString(),
+            Now,
+            Now.AddMinutes(15));
+        var subscriptions = Substitute.For<IOperatorSubscriptionRepository>();
+        var attempts = Substitute.For<ISubscriptionUpgradeAttemptRepository>();
+        var plans = Substitute.For<ISubscriptionPlanRepository>();
+        subscriptions.GetCurrentWithPlanByOperatorIdAsync(operatorId, Arg.Any<CancellationToken>())
+            .Returns((subscription, currentPlan));
+        attempts.GetActiveBySubscriptionIdAsync(subscription.Id, Arg.Any<CancellationToken>())
+            .Returns(attempt);
+        plans.GetByIdAsync(targetPlan.Id, Arg.Any<CancellationToken>()).Returns(targetPlan);
+        var handler = new GetOperatorSubscriptionQueryHandler(subscriptions, attempts, plans, CreateClock());
+
+        var result = await handler.Handle(new GetOperatorSubscriptionQuery(operatorId), CancellationToken.None);
+
+        result.PendingUpgrade.Should().NotBeNull();
+        result.PendingUpgrade!.Status.Should().Be("INITIATED");
+        result.PendingUpgrade.UpgradeAttemptId.Should().Be(attempt.Id);
+        result.PendingUpgrade.LatestPayment.Status.Should().Be("NONE");
+        result.PendingUpgrade.LatestPayment.CanRetry.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CancelInitiatedAttempt_TransitionsToCancelled()
+    {
+        var fixture = CreateConfirmFixture();
+        fixture.Payments.GetStatusesAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<SubscriptionPaymentStatusResult>());
+        var attempts = Substitute.For<ISubscriptionUpgradeAttemptRepository>();
+        attempts.GetByIdForUpdateAsync(fixture.Attempt.Id, Arg.Any<CancellationToken>()).Returns(fixture.Attempt);
+        var handler = new CancelSubscriptionUpgradeCommandHandler(
+            attempts,
+            fixture.Payments,
+            Substitute.For<IUnitOfWork>());
+
+        var result = await handler.Handle(
+            new CancelSubscriptionUpgradeCommand(fixture.OperatorId, fixture.Attempt.Id),
+            CancellationToken.None);
+
+        result.Status.Should().Be("CANCELLED");
+        fixture.Attempt.Status.Should().Be(SubscriptionUpgradeAttemptStatus.CANCELLED);
+        attempts.Received(1).Update(fixture.Attempt);
+    }
+
+    [Fact]
+    public async Task CancelCancelledAttempt_IsIdempotent()
+    {
+        var fixture = CreateConfirmFixture();
+        fixture.Attempt.Cancel();
+        var attempts = Substitute.For<ISubscriptionUpgradeAttemptRepository>();
+        attempts.GetByIdForUpdateAsync(fixture.Attempt.Id, Arg.Any<CancellationToken>()).Returns(fixture.Attempt);
+        var handler = new CancelSubscriptionUpgradeCommandHandler(
+            attempts,
+            fixture.Payments,
+            Substitute.For<IUnitOfWork>());
+
+        var result = await handler.Handle(
+            new CancelSubscriptionUpgradeCommand(fixture.OperatorId, fixture.Attempt.Id),
+            CancellationToken.None);
+
+        result.Status.Should().Be("CANCELLED");
+        await fixture.Payments.DidNotReceiveWithAnyArgs().GetStatusesAsync(default!, default);
+        attempts.DidNotReceiveWithAnyArgs().Update(default!);
+    }
+
+    [Fact]
+    public async Task CancelForeignAttempt_ReturnsMaskedNotFound()
+    {
+        var fixture = CreateConfirmFixture();
+        var attempts = Substitute.For<ISubscriptionUpgradeAttemptRepository>();
+        attempts.GetByIdForUpdateAsync(fixture.Attempt.Id, Arg.Any<CancellationToken>()).Returns(fixture.Attempt);
+        var handler = new CancelSubscriptionUpgradeCommandHandler(
+            attempts,
+            fixture.Payments,
+            Substitute.For<IUnitOfWork>());
+
+        var action = () => handler.Handle(
+            new CancelSubscriptionUpgradeCommand(Guid.NewGuid(), fixture.Attempt.Id),
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<NotFoundException>();
+        await fixture.Payments.DidNotReceiveWithAnyArgs().GetStatusesAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Cancel_WhenPaymentExistsWithoutIdentityBinding_IsRejected()
+    {
+        var fixture = CreateConfirmFixture();
+        fixture.Payments.GetStatusesAsync(Arg.Any<IReadOnlyCollection<Guid>>(), Arg.Any<CancellationToken>())
+            .Returns(new[]
+            {
+                new SubscriptionPaymentStatusResult(
+                    Guid.NewGuid(),
+                    fixture.Attempt.Id,
+                    fixture.OperatorId,
+                    fixture.Subscription.Id,
+                    fixture.TargetPlan.Id,
+                    "PENDING_REDIRECT",
+                    fixture.Attempt.Amount.Amount,
+                    "VNPAY",
+                    "MONTHLY",
+                    fixture.Attempt.PeriodFrom,
+                    fixture.Attempt.PeriodTo,
+                    null,
+                    fixture.Attempt.DueAt),
+            });
+        var attempts = Substitute.For<ISubscriptionUpgradeAttemptRepository>();
+        attempts.GetByIdForUpdateAsync(fixture.Attempt.Id, Arg.Any<CancellationToken>()).Returns(fixture.Attempt);
+        var handler = new CancelSubscriptionUpgradeCommandHandler(
+            attempts,
+            fixture.Payments,
+            Substitute.For<IUnitOfWork>());
+
+        var action = () => handler.Handle(
+            new CancelSubscriptionUpgradeCommand(fixture.OperatorId, fixture.Attempt.Id),
+            CancellationToken.None);
+
+        var exception = await action.Should().ThrowAsync<CodedConflictException>();
+        exception.Which.ErrorCode.Should().Be("SUBSCRIPTION_UPGRADE_PAYMENT_ALREADY_STARTED");
+        fixture.Attempt.Status.Should().Be(SubscriptionUpgradeAttemptStatus.INITIATED);
     }
 
     private static ConfirmFixture CreateConfirmFixture()

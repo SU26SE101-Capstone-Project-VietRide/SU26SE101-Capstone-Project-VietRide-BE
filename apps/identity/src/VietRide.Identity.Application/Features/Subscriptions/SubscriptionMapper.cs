@@ -45,6 +45,7 @@ internal static class SubscriptionMapper
             subscription.LastResetAt),
         pendingUpgrade is null ? null : new PendingSubscriptionUpgradeDto(
             pendingUpgrade.Id,
+            pendingUpgrade.Status.ToString(),
             ToPlanDto(targetPlan ?? throw new InvalidOperationException("Pending upgrade target plan is missing.")),
             pendingUpgrade.BillingPeriod.ToString(),
             pendingUpgrade.Amount.Amount,
