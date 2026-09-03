@@ -18,11 +18,21 @@ internal static class ParcelClaimResponseMapper
         ParcelIncident? incident = null,
         bool operatorView = false,
         DateTimeOffset? now = null,
-        ParcelClaimAppeal? appealOverride = null)
+        ParcelClaimAppeal? appealOverride = null,
+        IReadOnlyList<Guid>? acceptedEvidenceIdsOverride = null)
     {
         var evidence = await reliability.ListClaimEvidenceAsync(claim.Id, cancellationToken);
+        var acceptedEvidenceIds = acceptedEvidenceIdsOverride
+            ?? (await reliability.ListClaimDecisionEvidenceAsync(claim.Id, cancellationToken))
+                .Select(link => link.EvidenceId)
+                .ToArray();
         var appeal = appealOverride
             ?? await reliability.GetClaimAppealByClaimAsync(claim.Id, cancellationToken);
+        var appealAcceptedEvidenceIds = appeal is null
+            ? Array.Empty<Guid>()
+            : (await reliability.ListClaimAppealDecisionEvidenceAsync(appeal.Id, cancellationToken))
+                .Select(link => link.EvidenceId)
+                .ToArray();
         incident ??= await reliability.GetIncidentAsync(claim.IncidentId, cancellationToken);
         var at = now ?? DateTimeOffset.UtcNow;
         DateTimeOffset? decisionDeadline = parcel is not null
@@ -50,6 +60,7 @@ internal static class ParcelClaimResponseMapper
             claim.IncidentId,
             claim.Status.ToString(),
             claim.DeclaredValueVnd,
+            claim.ProofStatus?.ToString(),
             claim.ProvenDirectLossVnd,
             claim.CompensationRatePercent,
             claim.PolicyCapVnd,
@@ -66,6 +77,7 @@ internal static class ParcelClaimResponseMapper
             claim.AppealReason,
             claim.AppealedByUserId,
             claim.AppealedAt,
+            acceptedEvidenceIds,
             evidence.Select(x => new ParcelClaimEvidenceResponse(
                 x.Id,
                 x.EvidenceType,
@@ -98,6 +110,8 @@ internal static class ParcelClaimResponseMapper
             decisionDeadline,
             payoutDeadline,
             actions,
-            appeal is null ? null : ParcelClaimAppealResponseMapper.Map(appeal, operatorView));
+            appeal is null
+                ? null
+                : ParcelClaimAppealResponseMapper.Map(appeal, operatorView, appealAcceptedEvidenceIds));
     }
 }

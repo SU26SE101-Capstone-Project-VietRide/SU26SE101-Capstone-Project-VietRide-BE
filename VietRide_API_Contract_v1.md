@@ -4846,8 +4846,10 @@ Identity batch; nullable display enrichment degrades without hiding the Parcel f
 | `GET /v1/parcels/{parcelId}/claims` | Sender or same-tenant operator; recipient is not authorized | `200` claims and evidence metadata |
 
 The sender is always `beneficiaryUserId`. Claim response freezes `declaredValueVnd,
-provenDirectLossVnd,compensationRatePercent,policyCapVnd,cargoAwardVnd,freightRefundVnd,
-totalAwardVnd,policyVersion,status,decisionReason,decidedBy,decidedAt,payoutReferenceId,paidAt`.
+proofStatus,acceptedEvidenceIds,provenDirectLossVnd,compensationRatePercent,policyCapVnd,
+cargoAwardVnd,freightRefundVnd,totalAwardVnd,policyVersion,status,decisionReason,decidedBy,
+decidedAt,payoutReferenceId,paidAt`. Historical decisions may return `proofStatus=null` and an
+empty `acceptedEvidenceIds` list; new decisions always return a non-null proof status.
 Legacy `appealReason,appealedByUserId,appealedAt` remain nullable compatibility fields; new writes
 use the nested `appeal` resource. The original claim remains `PAID` or `REJECTED` and is never
 mutated to `APPEALED`.
@@ -4860,7 +4862,7 @@ Outbox row is committed.
 
 `data.appeal` has
 `appealId,claimId,originalClaimStatus,originalTotalAwardVnd,status,reason,submittedByUserId,
-submittedAt,revisedProvenDirectLossVnd,revisedCargoAwardVnd,revisedFreightRefundVnd,
+submittedAt,proofStatus,acceptedEvidenceIds,revisedProvenDirectLossVnd,revisedCargoAwardVnd,revisedFreightRefundVnd,
 revisedTotalAwardVnd,supplementaryAwardVnd,decisionReason,decidedByUserId,decidedAt,
 payoutReferenceId,paidAt,availableActions`. One claim may have at most one appeal.
 
@@ -5163,10 +5165,17 @@ funding state, Trip, and actions. `GET /v1/operator/claims/{claimId}` is the sin
 read with evidence, custody, incident, Trip and beneficiary. Staff may read; only
 `OPERATOR_ADMIN` may decide.
 
-`POST /v1/operator/claims/{claimId}/decision` requires `OPERATOR_ADMIN` and body
-`{ decision: "APPROVE|REJECT", provenDirectLossVnd?, reason }`. Approval calculates the award from
-the Parcel's frozen policy; the client cannot provide rate, cap, or award. Approval emits
-`parcel.claim.decided`; rejection does not call Payment.
+`POST /v1/operator/claims/{claimId}/decision` requires `OPERATOR_ADMIN`, UUID-v4
+`Idempotency-Key`, and body
+`{ decision: "APPROVE|REJECT", proofStatus: "VERIFIED|UNVERIFIED|NO_PROOF",
+provenDirectLossVnd: number|null, acceptedEvidenceIds: uuid[], reason }`. The proof fields are
+required for both approval and rejection. Approval calculates the award from the Parcel's frozen
+policy; the client cannot provide rate, cap, or award. Approval emits `parcel.claim.decided`;
+rejection does not call Payment.
+
+`POST /v1/operator/claims/{claimId}/award-preview` is a read-only `OPERATOR_ADMIN` calculation and
+does not require `Idempotency-Key`. Its body is `{ proofStatus, provenDirectLossVnd,
+acceptedEvidenceIds }` with the same proof validation as the mutation.
 
 Claim appeals are a separate resource:
 
@@ -5174,13 +5183,28 @@ Claim appeals are a separate resource:
 |---|---|---|
 | `GET /v1/operator/claim-appeals?status=&page=&pageSize=` | Same-tenant `OPERATOR_STAFF|OPERATOR_ADMIN`; `status` is a `ParcelClaimAppealStatus` name | `200` `PagedResult<ParcelClaimAppealResponse>` |
 | `GET /v1/operator/claim-appeals/{appealId}` | Same roles | `200` appeal detail |
-| `POST /v1/operator/claim-appeals/{appealId}/decision` | `OPERATOR_ADMIN`; UUID-v4 `Idempotency-Key`; `{ decision: "UPHOLD|APPROVE_ADJUSTMENT", revisedProvenDirectLossVnd?, reason }` | `200` decided appeal |
+| `POST /v1/operator/claim-appeals/{appealId}/adjustment-preview` | `OPERATOR_ADMIN`; read-only, no `Idempotency-Key`; `{ proofStatus, revisedProvenDirectLossVnd, acceptedEvidenceIds }` | `200` authoritative preview breakdown including original award and positive supplementary delta |
+| `POST /v1/operator/claim-appeals/{appealId}/decision` | `OPERATOR_ADMIN`; UUID-v4 `Idempotency-Key`; `{ decision: "UPHOLD|APPROVE_ADJUSTMENT", proofStatus: "VERIFIED|UNVERIFIED|NO_PROOF", revisedProvenDirectLossVnd: number|null, acceptedEvidenceIds: uuid[], reason }` | `200` decided appeal |
 
 `UPHOLD` keeps the original outcome and creates no payout. `APPROVE_ADJUSTMENT` recalculates with
 the original frozen rate/cap/fallback and requires the revised total award to exceed the original
 paid award. Payment receives only `supplementaryAwardVnd`; the payout unique reference is
 `appealId`, not the old claim payout reference. Insufficient operator funds move the appeal to
 `FUNDING_PENDING`; a successful compensation event moves it to `PAID`.
+
+For both claim and appeal, `VERIFIED` requires a non-negative loss and at least one unique accepted
+evidence ID belonging to the original claim. `UNVERIFIED|NO_PROOF` require a null loss and an empty
+accepted list. Missing/cross-claim evidence is tenant-masked `404 PARCEL_CLAIM_EVIDENCE_NOT_FOUND`;
+invalid proof combinations return `422 PARCEL_CLAIM_EVIDENCE_REQUIRED`. Preview returns
+`calculationBasis,assessedLossVnd,declaredLiabilityVnd,fallbackAmountVnd,policySnapshot,
+cargoAwardVnd,freightRefundVnd,totalAwardVnd`; appeal also returns `originalTotalAwardVnd` and
+`supplementaryAwardVnd`. Mutations always recalculate under their transaction and their response is
+the final result.
+
+For `UNVERIFIED|NO_PROOF`, cargo award is `min(freight * fallbackMultiplier, policyCapVnd,
+declaredLiabilityVnd)` when declared value exists; without declared value it remains
+`min(freight * fallbackMultiplier, policyCapVnd)`. `policyCapVnd` limits cargo only. Freight refund
+is `max(freightCollected-alreadyRefunded,0)`, so total award may exceed the policy cap.
 
 `GET /v1/operator/policies/parcel-compensation` returns the active policy. PUT on the same path
 accepts:
@@ -5221,7 +5245,7 @@ never exposed through Gateway.
 `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED`, `PARCEL_SEARCH_TASK_NOT_FOUND`, `PARCEL_SEARCH_TASK_MISMATCH`,
 `PARCEL_SEARCH_SLA_NOT_EXPIRED`, `PARCEL_CLAIM_NOT_FOUND`, `PARCEL_CLAIM_WINDOW_NOT_OPEN`,
 `PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED`, `PARCEL_CLAIM_ALREADY_EXISTS`,
-`PARCEL_CLAIM_EVIDENCE_REQUIRED`, `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY`,
+`PARCEL_CLAIM_EVIDENCE_REQUIRED`, `PARCEL_CLAIM_EVIDENCE_NOT_FOUND`, `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY`,
 `PARCEL_CLAIM_ALREADY_DECIDED`, `PARCEL_CLAIM_APPEAL_NOT_ALLOWED`,
 `PARCEL_CLAIM_APPEAL_ALREADY_EXISTS`, `PARCEL_CLAIM_APPEAL_NOT_FOUND`,
 `PARCEL_CLAIM_APPEAL_ALREADY_DECIDED`, `PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED`,

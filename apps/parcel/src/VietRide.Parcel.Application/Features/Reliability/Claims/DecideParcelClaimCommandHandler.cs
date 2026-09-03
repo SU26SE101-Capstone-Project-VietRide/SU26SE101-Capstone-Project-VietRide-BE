@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -43,20 +44,33 @@ public sealed class DecideParcelClaimCommandHandler
             throw new CodedConflictException("PARCEL_CLAIM_ALREADY_DECIDED", "Claim has already been decided.");
         var parcel = await _parcels.GetByIdAsync(claim.ParcelId, cancellationToken)
             ?? throw new CodedNotFoundException("PARCEL_NOT_FOUND", "Parcel was not found.");
+        var proof = await ParcelClaimProofAssessmentValidator.ValidateAsync(
+            command.ProofStatus,
+            command.ProvenDirectLossVnd,
+            command.AcceptedEvidenceIds,
+            claim.Id,
+            _reliability,
+            cancellationToken);
 
         claim.BeginReview();
         var now = _clock.UtcNow;
         Guid? tripId = parcel.TripId;
         if (string.Equals(command.Decision, "REJECT", StringComparison.OrdinalIgnoreCase))
         {
-            claim.Reject(command.Reason, command.DecidedBy, now);
+            claim.Reject(
+                proof.ProofStatus,
+                proof.ProvenDirectLossVnd,
+                command.Reason,
+                command.DecidedBy,
+                now);
         }
         else if (string.Equals(command.Decision, "APPROVE", StringComparison.OrdinalIgnoreCase))
         {
             var rate = claim.CompensationRatePercent;
             var cap = claim.PolicyCapVnd;
             var award = ParcelCompensationCalculator.Calculate(
-                command.ProvenDirectLossVnd,
+                proof.ProofStatus,
+                proof.ProvenDirectLossVnd,
                 parcel.DeclaredValueVnd,
                 parcel.FinalTotalPriceVnd.Amount,
                 parcel.RefundedAmountVnd.Amount,
@@ -69,7 +83,8 @@ public sealed class DecideParcelClaimCommandHandler
                     "An approved claim must have a positive total award.");
 
             claim.Approve(
-                command.ProvenDirectLossVnd,
+                proof.ProofStatus,
+                proof.ProvenDirectLossVnd,
                 rate,
                 cap,
                 award.CargoAwardVnd,
@@ -83,6 +98,16 @@ public sealed class DecideParcelClaimCommandHandler
             throw new CodedValidationException("VALIDATION_ERROR", "Decision must be APPROVE or REJECT.");
         }
 
+        foreach (var evidenceId in proof.AcceptedEvidenceIds)
+        {
+            await _reliability.AddClaimDecisionEvidenceAsync(
+                ParcelClaimDecisionEvidence.Create(
+                    claim.Id,
+                    evidenceId,
+                    command.DecidedBy,
+                    now),
+                cancellationToken);
+        }
         await _reliability.UpdateClaimAsync(claim, cancellationToken);
         var decisionEventId = Guid.NewGuid();
         await ParcelOutboxEvents.EnqueueAsync(
@@ -109,6 +134,7 @@ public sealed class DecideParcelClaimCommandHandler
             cancellationToken,
             parcel,
             operatorView: true,
-            now: now);
+            now: now,
+            acceptedEvidenceIdsOverride: proof.AcceptedEvidenceIds);
     }
 }

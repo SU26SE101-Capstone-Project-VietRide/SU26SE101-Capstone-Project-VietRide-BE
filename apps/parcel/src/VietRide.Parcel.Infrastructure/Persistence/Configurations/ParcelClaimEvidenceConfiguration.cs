@@ -20,6 +20,7 @@ internal sealed class ParcelClaimEvidenceConfiguration : IEntityTypeConfiguratio
         builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()");
         builder.Ignore(x => x.RowVersion);
 
+        builder.HasAlternateKey(x => new { x.ClaimId, x.Id });
         builder.HasOne<ParcelClaim>().WithMany().HasForeignKey(x => x.ClaimId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(x => new { x.ClaimId, x.CreatedAt });
     }

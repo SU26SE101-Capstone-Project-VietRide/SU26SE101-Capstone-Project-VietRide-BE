@@ -7,5 +7,7 @@ public sealed record DecideParcelClaimCommand(
     Guid OperatorId,
     Guid DecidedBy,
     string Decision,
+    string? ProofStatus,
     long? ProvenDirectLossVnd,
+    IReadOnlyList<Guid>? AcceptedEvidenceIds,
     string Reason) : IRequest<ParcelClaimResponse>;

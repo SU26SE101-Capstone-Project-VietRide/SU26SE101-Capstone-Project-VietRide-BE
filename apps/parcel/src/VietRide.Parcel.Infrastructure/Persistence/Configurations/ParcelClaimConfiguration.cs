@@ -13,6 +13,9 @@ internal sealed class ParcelClaimConfiguration : IEntityTypeConfiguration<Parcel
         {
             table.HasCheckConstraint("chk_parcel_claims_rate", "compensation_rate_percent BETWEEN 1 AND 100");
             table.HasCheckConstraint("chk_parcel_claims_amounts", "policy_cap_vnd > 0 AND cargo_award_vnd >= 0 AND freight_refund_vnd >= 0 AND total_award_vnd >= 0");
+            table.HasCheckConstraint(
+                "chk_parcel_claims_proof_status",
+                "proof_status IS NULL OR proof_status IN ('VERIFIED', 'UNVERIFIED', 'NO_PROOF')");
         });
 
         builder.HasKey(x => x.Id);
@@ -23,6 +26,7 @@ internal sealed class ParcelClaimConfiguration : IEntityTypeConfiguration<Parcel
         builder.Property(x => x.BeneficiaryUserId).HasColumnName("beneficiary_user_id").HasColumnType("uuid").IsRequired();
         builder.Property(x => x.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20).IsRequired();
         builder.Property(x => x.DeclaredValueVnd).HasColumnName("declared_value_vnd").HasColumnType("bigint");
+        builder.Property(x => x.ProofStatus).HasColumnName("proof_status").HasConversion<string>().HasMaxLength(20);
         builder.Property(x => x.ProvenDirectLossVnd).HasColumnName("proven_direct_loss_vnd").HasColumnType("bigint");
         builder.Property(x => x.CompensationRatePercent).HasColumnName("compensation_rate_percent").IsRequired();
         builder.Property(x => x.PolicyCapVnd).HasColumnName("policy_cap_vnd").HasColumnType("bigint").IsRequired();

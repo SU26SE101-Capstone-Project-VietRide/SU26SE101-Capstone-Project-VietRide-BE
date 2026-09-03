@@ -36,6 +36,9 @@ public sealed class ParcelDbContext : VietRideDbContextBase
     public DbSet<ParcelClaim> ParcelClaims => Set<ParcelClaim>();
     public DbSet<ParcelClaimAppeal> ParcelClaimAppeals => Set<ParcelClaimAppeal>();
     public DbSet<ParcelClaimEvidence> ParcelClaimEvidence => Set<ParcelClaimEvidence>();
+    public DbSet<ParcelClaimDecisionEvidence> ParcelClaimDecisionEvidence => Set<ParcelClaimDecisionEvidence>();
+    public DbSet<ParcelClaimAppealDecisionEvidence> ParcelClaimAppealDecisionEvidence
+        => Set<ParcelClaimAppealDecisionEvidence>();
     public DbSet<ParcelCompensationPolicy> ParcelCompensationPolicies => Set<ParcelCompensationPolicy>();
     public DbSet<UnidentifiedParcelPackage> UnidentifiedParcelPackages => Set<UnidentifiedParcelPackage>();
     public DbSet<ParcelRouteFare> ParcelRouteFares => Set<ParcelRouteFare>();

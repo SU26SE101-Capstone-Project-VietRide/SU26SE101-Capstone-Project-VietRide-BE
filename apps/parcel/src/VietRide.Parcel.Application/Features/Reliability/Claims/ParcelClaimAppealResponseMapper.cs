@@ -5,7 +5,10 @@ namespace VietRide.Parcel.Application.Features.Reliability.Claims;
 
 internal static class ParcelClaimAppealResponseMapper
 {
-    public static ParcelClaimAppealResponse Map(ParcelClaimAppeal appeal, bool operatorView)
+    public static ParcelClaimAppealResponse Map(
+        ParcelClaimAppeal appeal,
+        bool operatorView,
+        IReadOnlyList<Guid>? acceptedEvidenceIds = null)
     {
         var actions = new List<string>();
         if (operatorView && appeal.Status == ParcelClaimAppealStatus.SUBMITTED)
@@ -20,6 +23,7 @@ internal static class ParcelClaimAppealResponseMapper
             appeal.Reason,
             appeal.SubmittedByUserId,
             appeal.SubmittedAt,
+            appeal.ProofStatus?.ToString(),
             appeal.RevisedProvenDirectLossVnd,
             appeal.RevisedCargoAwardVnd,
             appeal.RevisedFreightRefundVnd,
@@ -30,6 +34,7 @@ internal static class ParcelClaimAppealResponseMapper
             appeal.DecidedAt,
             appeal.PayoutReferenceId,
             appeal.PaidAt,
+            acceptedEvidenceIds ?? [],
             actions);
     }
 }

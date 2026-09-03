@@ -11,6 +11,8 @@ public sealed record OperatorParcelClaimListItem(
     OperatorUserSummaryResponse Sender,
     ReliabilityIncidentSummaryResponse? Incident,
     int EvidenceCount,
+    string? ProofStatus,
+    IReadOnlyList<Guid> AcceptedEvidenceIds,
     ParcelCompensationPolicySnapshotResponse PolicySnapshot,
     long CargoAwardVnd,
     long FreightRefundVnd,

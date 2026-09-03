@@ -39,6 +39,7 @@ public sealed class ParcelClaimAppealTests
         appeal.BeginReview();
 
         appeal.ApproveAdjustment(
+            ParcelClaimProofStatus.VERIFIED,
             20_000_000,
             10_000_000,
             100_000,
@@ -67,6 +68,7 @@ public sealed class ParcelClaimAppealTests
         appeal.BeginReview();
 
         var action = () => appeal.ApproveAdjustment(
+            ParcelClaimProofStatus.VERIFIED,
             10_000_000,
             5_900_000,
             100_000,
@@ -90,7 +92,12 @@ public sealed class ParcelClaimAppealTests
             30_000_000,
             4);
         claim.BeginReview();
-        claim.Reject("Evidence did not match.", Guid.NewGuid(), DateTimeOffset.UtcNow);
+        claim.Reject(
+            ParcelClaimProofStatus.NO_PROOF,
+            null,
+            "Evidence did not match.",
+            Guid.NewGuid(),
+            DateTimeOffset.UtcNow);
         return claim;
     }
 
@@ -108,6 +115,7 @@ public sealed class ParcelClaimAppealTests
             4);
         claim.BeginReview();
         claim.Approve(
+            ParcelClaimProofStatus.VERIFIED,
             12_000_000,
             50,
             30_000_000,

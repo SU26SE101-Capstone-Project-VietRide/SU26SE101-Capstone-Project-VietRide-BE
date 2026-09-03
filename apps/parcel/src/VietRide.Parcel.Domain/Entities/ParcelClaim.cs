@@ -11,6 +11,7 @@ public sealed class ParcelClaim : BaseEntity<Guid>
     public Guid BeneficiaryUserId { get; private set; }
     public ParcelClaimStatus Status { get; private set; }
     public long? DeclaredValueVnd { get; private set; }
+    public ParcelClaimProofStatus? ProofStatus { get; private set; }
     public long? ProvenDirectLossVnd { get; private set; }
     public int CompensationRatePercent { get; private set; }
     public long PolicyCapVnd { get; private set; }
@@ -77,6 +78,7 @@ public sealed class ParcelClaim : BaseEntity<Guid>
     }
 
     public void Approve(
+        ParcelClaimProofStatus proofStatus,
         long? provenDirectLossVnd,
         int compensationRatePercent,
         long policyCapVnd,
@@ -88,8 +90,10 @@ public sealed class ParcelClaim : BaseEntity<Guid>
     {
         if (Status != ParcelClaimStatus.UNDER_REVIEW)
             throw new InvalidOperationException("Only claims under review can be approved.");
+        ValidateProof(proofStatus, provenDirectLossVnd);
         ValidateAward(provenDirectLossVnd, compensationRatePercent, policyCapVnd, cargoAwardVnd, freightRefundVnd);
         Status = ParcelClaimStatus.APPROVED;
+        ProofStatus = proofStatus;
         ProvenDirectLossVnd = provenDirectLossVnd;
         CompensationRatePercent = compensationRatePercent;
         PolicyCapVnd = policyCapVnd;
@@ -101,11 +105,19 @@ public sealed class ParcelClaim : BaseEntity<Guid>
         DecidedAt = decidedAt;
     }
 
-    public void Reject(string reason, Guid decidedBy, DateTimeOffset decidedAt)
+    public void Reject(
+        ParcelClaimProofStatus proofStatus,
+        long? provenDirectLossVnd,
+        string reason,
+        Guid decidedBy,
+        DateTimeOffset decidedAt)
     {
         if (Status != ParcelClaimStatus.UNDER_REVIEW)
             throw new InvalidOperationException("Only claims under review can be rejected.");
+        ValidateProof(proofStatus, provenDirectLossVnd);
         Status = ParcelClaimStatus.REJECTED;
+        ProofStatus = proofStatus;
+        ProvenDirectLossVnd = provenDirectLossVnd;
         DecisionReason = Normalize(reason) ?? throw new ArgumentException("Decision reason is required.");
         DecidedBy = decidedBy;
         DecidedAt = decidedAt;
@@ -144,6 +156,18 @@ public sealed class ParcelClaim : BaseEntity<Guid>
             throw new ArgumentOutOfRangeException(nameof(policyCapVnd));
         if (cargoAwardVnd > policyCapVnd)
             throw new ArgumentException("Cargo award cannot exceed policy cap.", nameof(cargoAwardVnd));
+    }
+
+    private static void ValidateProof(
+        ParcelClaimProofStatus proofStatus,
+        long? provenDirectLossVnd)
+    {
+        if (provenDirectLossVnd is < 0)
+            throw new ArgumentOutOfRangeException(nameof(provenDirectLossVnd));
+        if (proofStatus == ParcelClaimProofStatus.VERIFIED && !provenDirectLossVnd.HasValue)
+            throw new ArgumentException("Verified proof requires a proven direct loss.", nameof(provenDirectLossVnd));
+        if (proofStatus != ParcelClaimProofStatus.VERIFIED && provenDirectLossVnd.HasValue)
+            throw new ArgumentException("Unverified or missing proof cannot carry a proven direct loss.", nameof(provenDirectLossVnd));
     }
 
     private static string? Normalize(string? value)

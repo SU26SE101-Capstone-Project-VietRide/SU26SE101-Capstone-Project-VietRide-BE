@@ -577,6 +577,56 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
                 .ToArrayAsync(ct);
     }
 
+    public async Task<IReadOnlyList<ParcelClaimDecisionEvidence>> ListClaimDecisionEvidenceAsync(
+        Guid claimId,
+        CancellationToken ct = default)
+        => await _db.ParcelClaimDecisionEvidence
+            .AsNoTracking()
+            .Where(x => x.ClaimId == claimId)
+            .OrderBy(x => x.AcceptedAt)
+            .ThenBy(x => x.EvidenceId)
+            .ToArrayAsync(ct);
+
+    public async Task<IReadOnlyList<ParcelClaimDecisionEvidence>> ListClaimDecisionEvidenceByClaimsAsync(
+        IReadOnlyCollection<Guid> claimIds,
+        CancellationToken ct = default)
+    {
+        var ids = NormalizeIds(claimIds, nameof(claimIds));
+        return ids.Length == 0
+            ? []
+            : await _db.ParcelClaimDecisionEvidence
+                .AsNoTracking()
+                .Where(link => ids.Contains(link.ClaimId))
+                .OrderBy(link => link.AcceptedAt)
+                .ThenBy(link => link.EvidenceId)
+                .ToArrayAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ParcelClaimAppealDecisionEvidence>> ListClaimAppealDecisionEvidenceAsync(
+        Guid appealId,
+        CancellationToken ct = default)
+        => await _db.ParcelClaimAppealDecisionEvidence
+            .AsNoTracking()
+            .Where(x => x.AppealId == appealId)
+            .OrderBy(x => x.AcceptedAt)
+            .ThenBy(x => x.EvidenceId)
+            .ToArrayAsync(ct);
+
+    public async Task<IReadOnlyList<ParcelClaimAppealDecisionEvidence>> ListClaimAppealDecisionEvidenceByAppealsAsync(
+        IReadOnlyCollection<Guid> appealIds,
+        CancellationToken ct = default)
+    {
+        var ids = NormalizeIds(appealIds, nameof(appealIds));
+        return ids.Length == 0
+            ? []
+            : await _db.ParcelClaimAppealDecisionEvidence
+                .AsNoTracking()
+                .Where(link => ids.Contains(link.AppealId))
+                .OrderBy(link => link.AcceptedAt)
+                .ThenBy(link => link.EvidenceId)
+                .ToArrayAsync(ct);
+    }
+
     public async Task<PagedResult<UnidentifiedParcelPackage>> ListUnidentifiedPackagesAsync(
         Guid operatorId,
         UnidentifiedParcelPackageStatus? status,
@@ -666,6 +716,16 @@ internal sealed class ParcelReliabilityRepository : IParcelReliabilityRepository
 
     public async Task AddClaimEvidenceAsync(ParcelClaimEvidence entity, CancellationToken ct = default)
         => await _db.ParcelClaimEvidence.AddAsync(entity, ct);
+
+    public async Task AddClaimDecisionEvidenceAsync(
+        ParcelClaimDecisionEvidence entity,
+        CancellationToken ct = default)
+        => await _db.ParcelClaimDecisionEvidence.AddAsync(entity, ct);
+
+    public async Task AddClaimAppealDecisionEvidenceAsync(
+        ParcelClaimAppealDecisionEvidence entity,
+        CancellationToken ct = default)
+        => await _db.ParcelClaimAppealDecisionEvidence.AddAsync(entity, ct);
 
     public async Task AddCompensationPolicyAsync(ParcelCompensationPolicy entity, CancellationToken ct = default)
         => await _db.ParcelCompensationPolicies.AddAsync(entity, ct);

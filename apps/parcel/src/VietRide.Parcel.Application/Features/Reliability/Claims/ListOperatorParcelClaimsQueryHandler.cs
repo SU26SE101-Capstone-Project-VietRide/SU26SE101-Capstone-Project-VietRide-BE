@@ -96,6 +96,12 @@ public sealed class ListOperatorParcelClaimsQueryHandler
             page.Items.Select(claim => claim.Id).ToArray(),
             cancellationToken);
         var evidenceCounts = evidence.GroupBy(item => item.ClaimId).ToDictionary(group => group.Key, group => group.Count());
+        var acceptedEvidence = await _reliability.ListClaimDecisionEvidenceByClaimsAsync(
+            page.Items.Select(claim => claim.Id).ToArray(),
+            cancellationToken);
+        var acceptedEvidenceByClaim = acceptedEvidence
+            .GroupBy(link => link.ClaimId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<Guid>)group.Select(link => link.EvidenceId).ToArray());
 
         var tripOutcome = await _trips.GetTripSummariesAsync(
             parcels.Select(parcel => parcel.TripId).Distinct().ToArray(),
@@ -127,6 +133,8 @@ public sealed class ListOperatorParcelClaimsQueryHandler
                 ListParcelIncidentsQueryHandler.MapUser(parcel.SenderUserId, userById, "SENDER"),
                 ParcelReliabilityReadModelService.MapIncident(incident, now),
                 evidenceCounts.GetValueOrDefault(claim.Id),
+                claim.ProofStatus?.ToString(),
+                acceptedEvidenceByClaim.GetValueOrDefault(claim.Id) ?? [],
                 new ParcelCompensationPolicySnapshotResponse(
                     claim.PolicyVersion,
                     claim.CompensationRatePercent,
