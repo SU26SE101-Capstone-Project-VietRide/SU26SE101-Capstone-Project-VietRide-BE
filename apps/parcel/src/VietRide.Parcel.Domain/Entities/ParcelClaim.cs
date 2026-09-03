@@ -92,6 +92,8 @@ public sealed class ParcelClaim : BaseEntity<Guid>
             throw new InvalidOperationException("Only claims under review can be approved.");
         ValidateProof(proofStatus, provenDirectLossVnd);
         ValidateAward(provenDirectLossVnd, compensationRatePercent, policyCapVnd, cargoAwardVnd, freightRefundVnd);
+        if (proofStatus != ParcelClaimProofStatus.VERIFIED && cargoAwardVnd != 0)
+            throw new ArgumentException("Cargo compensation requires verified proof.", nameof(cargoAwardVnd));
         Status = ParcelClaimStatus.APPROVED;
         ProofStatus = proofStatus;
         ProvenDirectLossVnd = provenDirectLossVnd;
@@ -162,6 +164,8 @@ public sealed class ParcelClaim : BaseEntity<Guid>
         ParcelClaimProofStatus proofStatus,
         long? provenDirectLossVnd)
     {
+        if (!Enum.IsDefined(proofStatus))
+            throw new ArgumentOutOfRangeException(nameof(proofStatus));
         if (provenDirectLossVnd is < 0)
             throw new ArgumentOutOfRangeException(nameof(provenDirectLossVnd));
         if (proofStatus == ParcelClaimProofStatus.VERIFIED && !provenDirectLossVnd.HasValue)

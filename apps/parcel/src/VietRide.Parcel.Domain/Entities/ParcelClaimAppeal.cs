@@ -104,6 +104,8 @@ public sealed class ParcelClaimAppeal : BaseEntity<Guid>
         ValidateProof(proofStatus, revisedProvenDirectLossVnd);
         if (revisedProvenDirectLossVnd is < 0 || revisedCargoAwardVnd < 0 || revisedFreightRefundVnd < 0)
             throw new ArgumentOutOfRangeException(nameof(revisedProvenDirectLossVnd));
+        if (proofStatus != ParcelClaimProofStatus.VERIFIED && revisedCargoAwardVnd != 0)
+            throw new ArgumentException("Cargo compensation requires verified proof.", nameof(revisedCargoAwardVnd));
         var revisedTotal = checked(revisedCargoAwardVnd + revisedFreightRefundVnd);
         var supplementary = checked(revisedTotal - OriginalTotalAwardVnd);
         if (supplementary <= 0)
@@ -163,6 +165,8 @@ public sealed class ParcelClaimAppeal : BaseEntity<Guid>
         ParcelClaimProofStatus proofStatus,
         long? revisedProvenDirectLossVnd)
     {
+        if (!Enum.IsDefined(proofStatus))
+            throw new ArgumentOutOfRangeException(nameof(proofStatus));
         if (revisedProvenDirectLossVnd is < 0)
             throw new ArgumentOutOfRangeException(nameof(revisedProvenDirectLossVnd));
         if (proofStatus == ParcelClaimProofStatus.VERIFIED && !revisedProvenDirectLossVnd.HasValue)

@@ -5187,7 +5187,7 @@ Claim appeals are a separate resource:
 | `POST /v1/operator/claim-appeals/{appealId}/decision` | `OPERATOR_ADMIN`; UUID-v4 `Idempotency-Key`; `{ decision: "UPHOLD|APPROVE_ADJUSTMENT", proofStatus: "VERIFIED|UNVERIFIED|NO_PROOF", revisedProvenDirectLossVnd: number|null, acceptedEvidenceIds: uuid[], reason }` | `200` decided appeal |
 
 `UPHOLD` keeps the original outcome and creates no payout. `APPROVE_ADJUSTMENT` recalculates with
-the original frozen rate/cap/fallback and requires the revised total award to exceed the original
+the original frozen rate/cap and requires the revised total award to exceed the original
 paid award. Payment receives only `supplementaryAwardVnd`; the payout unique reference is
 `appealId`, not the old claim payout reference. Insufficient operator funds move the appeal to
 `FUNDING_PENDING`; a successful compensation event moves it to `PAID`.
@@ -5201,11 +5201,20 @@ cargoAwardVnd,freightRefundVnd,totalAwardVnd`; appeal also returns `originalTota
 `supplementaryAwardVnd`. Mutations always recalculate under their transaction and their response is
 the final result.
 
-For `UNVERIFIED|NO_PROOF`, cargo award is `min(freight * fallbackMultiplier, policyCapVnd,
-declaredLiabilityVnd)` when declared value exists. Without declared value, cargo award is
-`0`; khách chỉ nhận `max(freightCollected-alreadyRefunded,0)`. Giá khai báo không phải chứng từ và
-không tự kích hoạt nhánh VERIFIED. `policyCapVnd` limits cargo only. Freight refund is
-`max(freightCollected-alreadyRefunded,0)`, so total award may exceed the policy cap.
+For every new decision, including pending cases with legacy fallback snapshots,
+`UNVERIFIED|NO_PROOF` always produce `cargoAwardVnd=0`, `assessedLossVnd=null` and
+`calculationBasis=NO_VERIFIED_PROOF_FREIGHT_ONLY`, regardless of declared value. Only the remaining
+freight is refunded. `VERIFIED` uses `calculationBasis=VERIFIED_LOSS` and
+`assessedLossVnd=min(provenLoss,declaredValueVnd)` when declared value exists, otherwise proven loss;
+cargo is `min(round(assessedLossVnd*rate/100),policyCapVnd)` with midpoint rounding away from zero.
+Self-declaration is a liability ceiling, never evidence. `declaredLiabilityVnd` is the rounded
+declaration times rate (nullable without declaration), for context only, not a verified valuation
+or payable amount. `fallbackAmountVnd` is always null in new previews; legacy multiplier snapshots
+cannot enable cargo payout. Already decided awards/payouts are not recalculated.
+`policyCapVnd` limits cargo only. Freight refund is `max(freightCollected-alreadyRefunded,0)`, so
+total award may exceed the policy cap. A claim preview may return `200` with a zero-total breakdown,
+but its approval mutation rejects zero total (`422 VALIDATION_ERROR`). Both appeal preview and
+approval reject a non-positive supplementary delta (`422 PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED`).
 
 `GET /v1/operator/policies/parcel-compensation` returns the active policy. PUT on the same path
 accepts:
@@ -5226,6 +5235,11 @@ accepts:
 Rate must be `1..100`; `noProofFallbackMultiplier` must be `1..2`; monetary/SLA/window fields must be positive. A rate below 50 or cap below
 30,000,000 requires `belowDefaultAcknowledged=true`. Updates create a new version; accepted Parcel
 snapshots never change.
+
+`noProofFallbackMultiplier` is deprecated compatibility/audit metadata, not a payout setting.
+Retain it in GET/PUT and frozen snapshots, but hide its editing control in FE; changing it never
+increases a new cargo award. The proof eligibility rule above applies to all new decisions and
+does not rewrite historical awards.
 
 Policy GET/PUT responses additionally return `platformDefaultPolicy,isBelowPlatformDefault,
 effectiveForNewParcelsOnly=true,updatedAt,updatedBy`, so Operator Web never hard-codes 50%/30m.

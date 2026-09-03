@@ -53,17 +53,20 @@ Driver or Operator review and cannot use this shortcut while approval is pending
 
 The sender owns the claim and receives payout; a linked recipient may track and report an incident but cannot become beneficiary. VietRide orchestrates evidence, clearing, audit, and payout; the operator bears the financial obligation and VietRide does not advance funds.
 
-The default policy is 50% of assessed direct loss capped at 30,000,000 VND, with no-proof fallback of four times Parcel freight, a 30-day claim window, 72-hour search SLA, seven-business-day decision SLA, and three-business-day payout SLA. An operator may configure rate `1..100` and a positive cap. Below-default terms require explicit acknowledgement. The accepted policy/version is disclosed and frozen on the Parcel; later policy changes do not alter an existing claim.
+The default policy is 50% of assessed direct loss capped at 30,000,000 VND, a 30-day claim window, 72-hour search SLA, seven-business-day decision SLA, and three-business-day payout SLA. An operator may configure rate `1..100` and a positive cap. Below-default terms require explicit acknowledgement. The accepted policy/version is disclosed and frozen on the Parcel; subsequent operator configuration does not alter those snapshots.
+
+**Amendment — 2026-09-03:** The original freight-multiplier fallback, subsequently reduced from 4x to 2x, is retired for every new claim/appeal decision, including pending cases with legacy snapshots. `UNVERIFIED|NO_PROOF` only refund remaining freight. The multiplier remains deprecated compatibility/audit metadata; it cannot enable new cargo awards. Completed decisions and payouts are never recalculated. This proof-eligibility amendment does not rewrite frozen declaration/rate/cap/version or multiplier fields.
 
 For evidence-backed claims:
 
 ```text
 assessedLoss = min(provenDirectLoss, declaredValue) when declaredValue exists
+assessedLoss = provenDirectLoss otherwise
 cargoAward = min(round(assessedLoss * rate / 100), policyCap)
 totalAward = cargoAward + max(parcelFreight - priorRefunds, 0)
 ```
 
-Without acceptable proof, `cargoAward = min(fallbackMultiplier * parcelFreight, policyCap)`. Money arithmetic uses integer VND and midpoint rounding away from zero. Expected profit and indirect loss are excluded. Investigation records prohibited/misdeclared goods, inadequate packaging/natural characteristics, sender/recipient fault, state seizure, force majeure, and invalid evidence. Wrong stop, operator/crew loss, or a missing valid custody fact is presumed an operational breach unless evidence establishes otherwise.
+Without verified proof, `cargoAward = 0` regardless of declaration; no self-reported value establishes direct loss. Reviewer verification must establish evidence authenticity, relevance to the specific goods, and direct loss; storing evidence IDs alone is not fraud detection. Money arithmetic uses integer VND and midpoint rounding away from zero. Expected profit and indirect loss are excluded. Investigation records prohibited/misdeclared goods, inadequate packaging/natural characteristics, sender/recipient fault, state seizure, force majeure, and invalid evidence. Wrong stop, operator/crew loss, or a missing valid custody fact is presumed an operational breach unless evidence establishes otherwise.
 
 ### Payout is durable and tenant-fenced
 

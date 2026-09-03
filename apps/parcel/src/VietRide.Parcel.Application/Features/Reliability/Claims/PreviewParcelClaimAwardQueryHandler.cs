@@ -51,9 +51,8 @@ public sealed class PreviewParcelClaimAwardQueryHandler
             claim.CompensationRatePercent,
             claim.PolicyCapVnd,
             claim.NoProofFallbackMultiplier);
-        if (award.TotalAwardVnd <= 0)
-            throw new CodedValidationException("VALIDATION_ERROR", "An approved claim must have a positive total award.");
-
+        // A read-only preview may explain a zero award; only the approval mutation requires
+        // a positive payable total. In particular, unverified proof plus fully refunded freight is zero.
         return BuildResponse(claim, parcel, proof, award);
     }
 

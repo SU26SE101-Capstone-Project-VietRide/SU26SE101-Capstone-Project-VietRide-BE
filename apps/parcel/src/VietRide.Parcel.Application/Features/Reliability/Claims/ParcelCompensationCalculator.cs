@@ -37,7 +37,6 @@ public static class ParcelCompensationCalculator
         var freightRefundVnd = Math.Max(0, freightCollectedVnd - alreadyRefundedVnd);
         long cargoAwardVnd;
         long? assessedLossVnd = null;
-        long? fallbackAmountVnd = null;
         long? declaredLiabilityVnd = declaredValueVnd.HasValue
             ? RoundRate(declaredValueVnd.Value, compensationRatePercent)
             : null;
@@ -45,23 +44,10 @@ public static class ParcelCompensationCalculator
 
         if (proofStatus != ParcelClaimProofStatus.VERIFIED)
         {
-            var fallback = decimal.Multiply(freightCollectedVnd, noProofFallbackMultiplier);
-            if (fallback > long.MaxValue)
-                throw new CodedValidationException("VALIDATION_ERROR", "Compensation amount exceeds the supported range.");
-            fallbackAmountVnd = (long)fallback;
-            if (declaredLiabilityVnd.HasValue)
-            {
-                var guardedFallback = Math.Min(fallbackAmountVnd.Value, policyCapVnd);
-                cargoAwardVnd = Math.Min(guardedFallback, declaredLiabilityVnd.Value);
-                calculationBasis = "NO_PROOF_FALLBACK";
-            }
-            else
-            {
-                // Without a value declared before carriage, there is no auditable cargo-liability
-                // basis. The customer still receives the remaining freight refund.
-                cargoAwardVnd = 0;
-                calculationBasis = "NO_DECLARATION_FREIGHT_ONLY";
-            }
+            // Self-declaration never establishes loss. Legacy multiplier snapshots are retained
+            // for audit/compatibility only and cannot enable a new unverified cargo award.
+            cargoAwardVnd = 0;
+            calculationBasis = "NO_VERIFIED_PROOF_FREIGHT_ONLY";
         }
         else
         {
@@ -79,7 +65,7 @@ public static class ParcelCompensationCalculator
             calculationBasis,
             assessedLossVnd,
             declaredLiabilityVnd,
-            fallbackAmountVnd,
+            null,
             cargoAwardVnd,
             freightRefundVnd,
             AddAmounts(cargoAwardVnd, freightRefundVnd));

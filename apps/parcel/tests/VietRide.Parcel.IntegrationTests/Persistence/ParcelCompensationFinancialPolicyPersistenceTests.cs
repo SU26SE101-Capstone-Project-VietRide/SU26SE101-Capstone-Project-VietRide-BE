@@ -23,9 +23,15 @@ namespace VietRide.Parcel.IntegrationTests.Persistence;
 
 public sealed class ParcelCompensationFinancialPolicyPersistenceTests
 {
-    [Fact]
-    public async Task MinimalParcelFlow_PersistsProofAudit_AndPaysOnlyPositiveAppealDelta()
+    [Theory]
+    [InlineData(ParcelClaimProofStatus.VERIFIED)]
+    [InlineData(ParcelClaimProofStatus.NO_PROOF)]
+    [InlineData(ParcelClaimProofStatus.UNVERIFIED)]
+    public async Task MinimalParcelFlow_PersistsProofAudit_AndPaysOnlyPositiveAppealDelta(ParcelClaimProofStatus claimProof)
     {
+        var verified = claimProof == ParcelClaimProofStatus.VERIFIED;
+        var expectedOriginalAward = verified ? 200_000 : 150_000;
+        var expectedDelta = 300_000 - expectedOriginalAward;
         var databaseName = $"vietride_parcel_compensation_{Guid.NewGuid():N}";
         var connectionString = CreateConnectionString(databaseName);
         await CreateDatabaseAsync(connectionString, databaseName);
@@ -105,12 +111,12 @@ public sealed class ParcelCompensationFinancialPolicyPersistenceTests
                         AcceptedEvidenceIds: []),
                     CancellationToken.None);
 
-                noProofPreview.CalculationBasis.Should().Be("NO_PROOF_FALLBACK");
-                noProofPreview.FallbackAmountVnd.Should().Be(300_000);
+                noProofPreview.CalculationBasis.Should().Be("NO_VERIFIED_PROOF_FREIGHT_ONLY");
+                noProofPreview.FallbackAmountVnd.Should().BeNull();
                 noProofPreview.DeclaredLiabilityVnd.Should().Be(150_000);
-                noProofPreview.CargoAwardVnd.Should().Be(150_000);
+                noProofPreview.CargoAwardVnd.Should().Be(0);
                 noProofPreview.FreightRefundVnd.Should().Be(150_000);
-                noProofPreview.TotalAwardVnd.Should().Be(300_000);
+                noProofPreview.TotalAwardVnd.Should().Be(150_000);
 
                 var wrongTenantAction = async () => await previewHandler.Handle(
                     new PreviewParcelClaimAwardQuery(
@@ -157,16 +163,17 @@ public sealed class ParcelCompensationFinancialPolicyPersistenceTests
                         operatorId,
                         operatorAdminId,
                         "APPROVE",
-                        ParcelClaimProofStatus.VERIFIED.ToString(),
-                        ProvenDirectLossVnd: 100_000,
-                        AcceptedEvidenceIds: [evidence.Id],
-                        "Verified direct loss."));
+                        claimProof.ToString(),
+                        ProvenDirectLossVnd: verified ? 100_000 : null,
+                        AcceptedEvidenceIds: verified ? [evidence.Id] : [],
+                        "Compensation according to the assessed proof status."));
             }
 
             claimDecision.Status.Should().Be(ParcelClaimStatus.APPROVED.ToString());
-            claimDecision.ProofStatus.Should().Be(ParcelClaimProofStatus.VERIFIED.ToString());
-            claimDecision.AcceptedEvidenceIds.Should().Equal(evidence.Id);
-            claimDecision.TotalAwardVnd.Should().Be(200_000);
+            claimDecision.ProofStatus.Should().Be(claimProof.ToString());
+            claimDecision.AcceptedEvidenceIds.Should().Equal(verified ? [evidence.Id] : Array.Empty<Guid>());
+            claimDecision.CargoAwardVnd.Should().Be(verified ? 50_000 : 0);
+            claimDecision.TotalAwardVnd.Should().Be(expectedOriginalAward);
 
             ParcelClaimAppeal appeal;
             await using (var appealSeedContext = CreateDbContext(dataSource))
@@ -183,6 +190,24 @@ public sealed class ParcelCompensationFinancialPolicyPersistenceTests
                 await appealSeedContext.SaveChangesAsync();
             }
 
+            // Repeating self-declaration in an appeal must not produce another freight payout.
+            await using (var invalidDecisionContext = CreateDbContext(dataSource))
+            {
+                var action = () => ExecuteAppealDecisionAsync(invalidDecisionContext,
+                    new DecideParcelClaimAppealCommand(appeal.Id, operatorId, operatorAdminId,
+                        "APPROVE_ADJUSTMENT", "NO_PROOF", null, [], "No verified evidence."));
+                (await action.Should().ThrowAsync<CodedValidationException>()).Which.ErrorCode
+                    .Should().Be("PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED");
+            }
+            await using (var rollbackContext = CreateDbContext(dataSource))
+            {
+                (await rollbackContext.ParcelClaimAppeals.AsNoTracking().SingleAsync(item => item.Id == appeal.Id))
+                    .Status.Should().Be(ParcelClaimAppealStatus.SUBMITTED);
+                (await rollbackContext.OutboxEvents.CountAsync(item =>
+                    item.EventType == ParcelOutboxEvents.ParcelClaimAppealDecided)).Should().Be(0);
+                (await rollbackContext.ParcelClaimAppealDecisionEvidence.CountAsync()).Should().Be(0);
+            }
+
             await using (var appealPreviewContext = CreateDbContext(dataSource))
             {
                 var appealPreviewHandler = new PreviewParcelClaimAppealAdjustmentQueryHandler(
@@ -197,11 +222,11 @@ public sealed class ParcelCompensationFinancialPolicyPersistenceTests
                         AcceptedEvidenceIds: [evidence.Id]),
                     CancellationToken.None);
 
-                appealPreview.OriginalTotalAwardVnd.Should().Be(200_000);
+                appealPreview.OriginalTotalAwardVnd.Should().Be(expectedOriginalAward);
                 appealPreview.CargoAwardVnd.Should().Be(150_000);
                 appealPreview.FreightRefundVnd.Should().Be(150_000);
                 appealPreview.TotalAwardVnd.Should().Be(300_000);
-                appealPreview.SupplementaryAwardVnd.Should().Be(100_000);
+                appealPreview.SupplementaryAwardVnd.Should().Be(expectedDelta);
             }
 
             ParcelClaimAppealResponse appealDecision;
@@ -224,7 +249,7 @@ public sealed class ParcelCompensationFinancialPolicyPersistenceTests
             appealDecision.ProofStatus.Should().Be(ParcelClaimProofStatus.VERIFIED.ToString());
             appealDecision.AcceptedEvidenceIds.Should().Equal(evidence.Id);
             appealDecision.RevisedTotalAwardVnd.Should().Be(300_000);
-            appealDecision.SupplementaryAwardVnd.Should().Be(100_000);
+            appealDecision.SupplementaryAwardVnd.Should().Be(expectedDelta);
 
             await using (var assertionContext = CreateDbContext(dataSource))
             {
@@ -236,15 +261,24 @@ public sealed class ParcelCompensationFinancialPolicyPersistenceTests
                     .SingleAsync(item => item.Id == appeal.Id);
                 var claimAudit = await assertionContext.ParcelClaimDecisionEvidence
                     .AsNoTracking()
-                    .SingleAsync(item => item.ClaimId == claim.Id);
+                    .SingleOrDefaultAsync(item => item.ClaimId == claim.Id);
                 var appealAudit = await assertionContext.ParcelClaimAppealDecisionEvidence
                     .AsNoTracking()
                     .SingleAsync(item => item.AppealId == appeal.Id);
 
-                persistedClaim.ProofStatus.Should().Be(ParcelClaimProofStatus.VERIFIED);
+                persistedClaim.ProofStatus.Should().Be(claimProof);
                 persistedAppeal.ProofStatus.Should().Be(ParcelClaimProofStatus.VERIFIED);
-                claimAudit.EvidenceId.Should().Be(evidence.Id);
-                claimAudit.AcceptedByUserId.Should().Be(operatorAdminId);
+                if (verified)
+                {
+                    claimAudit.Should().NotBeNull();
+                    claimAudit!.EvidenceId.Should().Be(evidence.Id);
+                    claimAudit.AcceptedByUserId.Should().Be(operatorAdminId);
+                }
+                else
+                {
+                    claimAudit.Should().BeNull();
+                }
+                persistedClaim.TotalAwardVnd.Should().Be(expectedOriginalAward);
                 appealAudit.ClaimId.Should().Be(claim.Id);
                 appealAudit.EvidenceId.Should().Be(evidence.Id);
                 appealAudit.AcceptedByUserId.Should().Be(operatorAdminId);
@@ -254,9 +288,9 @@ public sealed class ParcelCompensationFinancialPolicyPersistenceTests
                     item.EventType == ParcelOutboxEvents.ParcelClaimAppealDecided)).Should().Be(1);
 
                 var mutationAction = async () => await assertionContext.Database.ExecuteSqlInterpolatedAsync($"""
-                    UPDATE vietride_parcel.parcel_claim_decision_evidence
+                    UPDATE vietride_parcel.parcel_claim_appeal_decision_evidence
                     SET accepted_by_user_id = {Guid.NewGuid()}
-                    WHERE id = {claimAudit.Id};
+                    WHERE id = {appealAudit.Id};
                     """);
                 var immutable = await mutationAction.Should().ThrowAsync<PostgresException>();
                 immutable.Which.SqlState.Should().Be(PostgresErrorCodes.ObjectNotInPrerequisiteState);
