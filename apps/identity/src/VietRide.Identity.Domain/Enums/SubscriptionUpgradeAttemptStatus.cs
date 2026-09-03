@@ -7,4 +7,5 @@ public enum SubscriptionUpgradeAttemptStatus
     SUCCEEDED,
     EXPIRED,
     FAILED,
+    CANCELLED,
 }

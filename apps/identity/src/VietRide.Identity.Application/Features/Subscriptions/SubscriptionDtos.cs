@@ -44,6 +44,7 @@ public sealed record OperatorSubscriptionDto(
 
 public sealed record PendingSubscriptionUpgradeDto(
     Guid UpgradeAttemptId,
+    string Status,
     SubscriptionPlanDto TargetPlan,
     string BillingPeriod,
     long Amount,

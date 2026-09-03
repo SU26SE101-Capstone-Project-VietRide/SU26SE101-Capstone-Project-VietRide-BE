@@ -90,7 +90,7 @@ CREATE TYPE subscription_payment_method AS ENUM ('VNPAY', 'WALLET');
 CREATE TYPE subscription_billing_period AS ENUM ('MONTHLY', 'YEARLY');
 
 CREATE TYPE subscription_upgrade_attempt_status AS ENUM (
-    'INITIATED', 'PAYMENT_PENDING', 'SUCCEEDED', 'EXPIRED', 'FAILED'
+    'INITIATED', 'PAYMENT_PENDING', 'SUCCEEDED', 'EXPIRED', 'FAILED', 'CANCELLED'
 );
 
 CREATE TYPE outbox_event_status AS ENUM (

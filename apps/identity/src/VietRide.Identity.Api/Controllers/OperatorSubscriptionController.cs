@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using VietRide.Identity.Api.Controllers.Requests;
 using VietRide.Identity.Api.Filters;
 using VietRide.Identity.Application.Features.Subscriptions;
+using VietRide.Identity.Application.Features.Subscriptions.CancelSubscriptionUpgrade;
 using VietRide.Identity.Application.Features.Subscriptions.ConfirmSubscriptionUpgradePayment;
 using VietRide.Identity.Application.Features.Subscriptions.CustomRequests;
 using VietRide.Identity.Application.Features.Subscriptions.GetOperatorSubscription;
@@ -173,6 +174,25 @@ public sealed class OperatorSubscriptionController : ControllerBase
                 ? StatusCodes.Status200OK
                 : StatusCodes.Status202Accepted,
             result);
+    }
+
+    [HttpPost("upgrade/{upgradeAttemptId:guid}/cancel")]
+    [IdempotencyOpenApi]
+    [ProducesResponseType(typeof(ApiResponse<CancelSubscriptionUpgradeResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<CancelSubscriptionUpgradeResponseDto>> CancelAsync(
+        Guid upgradeAttemptId,
+        CancellationToken cancellationToken)
+    {
+        _ = GetRequiredIdempotencyKey();
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "The authenticated user is not scoped to an operator.");
+        var result = await _sender.Send(
+            new CancelSubscriptionUpgradeCommand(operatorId, upgradeAttemptId),
+            cancellationToken);
+        return Ok(result);
     }
 
     [HttpPost("upgrade/{upgradeAttemptId:guid}/retry-payment")]

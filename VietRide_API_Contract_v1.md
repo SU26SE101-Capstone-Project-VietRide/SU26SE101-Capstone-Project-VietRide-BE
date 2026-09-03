@@ -6487,6 +6487,7 @@ Response `200`:
     "usage": {},
     "pendingUpgrade": {
       "upgradeAttemptId": "uuid",
+      "status": "PAYMENT_PENDING",
       "targetPlan": { "planId": "uuid", "name": "Enterprise", "limits": {}, "modules": {} },
       "amount": 900000,
       "billingPeriod": "MONTHLY",
@@ -6502,6 +6503,9 @@ Response `200`:
 `PENDING_PAYMENT` and `EXPIRED` are valid readable states. While status is `PENDING_PAYMENT`,
 `plan`/`activePlan` remains the sole entitlement source: quota allocation/increment and module
 gates such as `enableParcel`, `enableShuttle`, and `enableRag` must not use the pending target plan.
+`pendingUpgrade` returns every active attempt. `INITIATED` means the quote exists but Payment has
+not started; `PAYMENT_PENDING` means a payment session has been bound. An `INITIATED` attempt keeps
+the current subscription status and entitlement unchanged.
 Errors: `403 FORBIDDEN`, `404 RESOURCE_NOT_FOUND`.
 
 ### GET `/v1/operator/subscription-plans`
@@ -6529,8 +6533,20 @@ Auth: `OPERATOR_ADMIN`. `Idempotency-Key`: required UUID v4 and must be new for 
 - Target deactivated before confirm: `409 SUBSCRIPTION_UPGRADE_TARGET_PLAN_INACTIVE`.
 - Source or usage changed after quote: `409 SUBSCRIPTION_UPGRADE_QUOTE_STALE`.
 - Expired quote: `409 SUBSCRIPTION_UPGRADE_EXPIRED`.
+- Cancelled quote: `409 SUBSCRIPTION_UPGRADE_CANCELLED`.
 
 A VNPAY session accepted before plan deactivation may still complete. During `PENDING_PAYMENT`, current-plan entitlement remains authoritative, while usage increments are additionally capped by the quoted target limits.
+
+### POST `/v1/operator/subscription/upgrade/{upgradeAttemptId}/cancel`
+
+Auth: `OPERATOR_ADMIN`. `Idempotency-Key`: required UUID v4. No request body. Cancels only an
+`INITIATED` attempt that has no bound or recoverable Payment session. The attempt is locked and
+ownership is checked before Payment reconciliation. A foreign valid UUID returns
+`404 RESOURCE_NOT_FOUND`. Replaying a cancelled attempt returns the same `200`
+`{ upgradeAttemptId, status: "CANCELLED" }` result.
+
+Errors: `404 RESOURCE_NOT_FOUND`; `409 SUBSCRIPTION_UPGRADE_PAYMENT_ALREADY_STARTED`;
+`409 SUBSCRIPTION_UPGRADE_NOT_CANCELLABLE`; `503 PAYMENT_SERVICE_UNAVAILABLE`.
 
 ### Custom subscription requests
 

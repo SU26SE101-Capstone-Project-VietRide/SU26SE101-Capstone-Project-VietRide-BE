@@ -32,7 +32,7 @@ public sealed class GetOperatorSubscriptionQueryHandler
     {
         var current = await _subscriptions.GetCurrentWithPlanByOperatorIdAsync(request.OperatorId, cancellationToken)
             ?? throw new NotFoundException(nameof(OperatorSubscription), request.OperatorId);
-        var pending = await _attempts.GetPendingBySubscriptionIdAsync(current.Subscription.Id, cancellationToken);
+        var pending = await _attempts.GetActiveBySubscriptionIdAsync(current.Subscription.Id, cancellationToken);
         var targetPlan = pending is null
             ? null
             : await _plans.GetByIdAsync(pending.TargetPlanId, cancellationToken)
