@@ -966,20 +966,17 @@ describe('buildRouteTable', () => {
   });
 
   it('routes the unified Parcel approval inbox to Parcel for Drivers only', () => {
-    expect(matchRoute(routes, '/v1/crew/parcel-approval-requests', 'GET'))
-      .toMatchObject({
-        prefix: '/v1/crew/parcel-approval-requests',
-        method: 'GET',
-        target: env.PARCEL_BASE_URL,
-        authRequired: 'user',
-        requiredRoles: ['DRIVER'],
-      });
+    expect(matchRoute(routes, '/v1/crew/parcel-approval-requests', 'GET')).toMatchObject({
+      prefix: '/v1/crew/parcel-approval-requests',
+      method: 'GET',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['DRIVER'],
+    });
     const inboxIndex = routes.findIndex(
       (route) => route.prefix === '/v1/crew/parcel-approval-requests',
     );
-    const genericCrewParcelIndex = routes.findIndex(
-      (route) => route.prefix === '/v1/crew/parcels',
-    );
+    const genericCrewParcelIndex = routes.findIndex((route) => route.prefix === '/v1/crew/parcels');
     expect(inboxIndex).toBeLessThan(genericCrewParcelIndex);
   });
 
@@ -1048,10 +1045,20 @@ describe('buildRouteTable', () => {
     const incidents = matchRoute(routes, '/v1/operator/parcel-incidents', 'GET');
     const claimQueue = matchRoute(routes, '/v1/operator/claims', 'GET');
     const claimDecision = matchRoute(routes, `/v1/operator/claims/${claimId}/decision`, 'POST');
+    const claimAwardPreview = matchRoute(
+      routes,
+      `/v1/operator/claims/${claimId}/award-preview`,
+      'POST',
+    );
     const claimAppealQueue = matchRoute(routes, '/v1/operator/claim-appeals', 'GET');
     const claimAppealDecision = matchRoute(
       routes,
       `/v1/operator/claim-appeals/${claimId}/decision`,
+      'POST',
+    );
+    const claimAppealAdjustmentPreview = matchRoute(
+      routes,
+      `/v1/operator/claim-appeals/${claimId}/adjustment-preview`,
       'POST',
     );
     const operatorDepartureApproval = matchRoute(
@@ -1076,12 +1083,11 @@ describe('buildRouteTable', () => {
     expect(incidents?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
     expect(claimQueue?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
     expect(claimDecision?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
+    expect(claimAwardPreview?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
     expect(claimAppealQueue?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
     expect(claimAppealDecision?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
-    expect(operatorDepartureApproval?.requiredRoles).toEqual([
-      'OPERATOR_ADMIN',
-      'OPERATOR_STAFF',
-    ]);
+    expect(claimAppealAdjustmentPreview?.requiredRoles).toEqual(['OPERATOR_ADMIN']);
+    expect(operatorDepartureApproval?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
     expect(driverDepartureApproval?.requiredRoles).toEqual(['DRIVER']);
     expect(unidentified?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);
     expect(policyRead?.requiredRoles).toEqual(['OPERATOR_ADMIN', 'OPERATOR_STAFF']);

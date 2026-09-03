@@ -33,8 +33,17 @@ public sealed class ListParcelClaimAppealsQueryHandler
             query.Page,
             query.PageSize,
             cancellationToken);
+        var acceptedEvidence = await _reliability.ListClaimAppealDecisionEvidenceByAppealsAsync(
+            result.Items.Select(item => item.Id).ToArray(),
+            cancellationToken);
+        var acceptedByAppeal = acceptedEvidence
+            .GroupBy(link => link.AppealId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<Guid>)group.Select(link => link.EvidenceId).ToArray());
         return PagedResult<ParcelClaimAppealResponse>.Create(
-            result.Items.Select(item => ParcelClaimAppealResponseMapper.Map(item, operatorView: true)).ToArray(),
+            result.Items.Select(item => ParcelClaimAppealResponseMapper.Map(
+                item,
+                operatorView: true,
+                acceptedByAppeal.GetValueOrDefault(item.Id) ?? [])).ToArray(),
             result.Page,
             result.PageSize,
             result.TotalItems);

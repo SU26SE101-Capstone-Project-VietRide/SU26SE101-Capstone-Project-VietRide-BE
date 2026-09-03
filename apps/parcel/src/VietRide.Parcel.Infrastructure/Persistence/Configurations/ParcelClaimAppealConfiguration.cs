@@ -16,6 +16,9 @@ internal sealed class ParcelClaimAppealConfiguration : IEntityTypeConfiguration<
             tableBuilder.HasCheckConstraint(
                 "chk_parcel_claim_appeal_awards",
                 "original_total_award_vnd >= 0 AND revised_cargo_award_vnd >= 0 AND revised_freight_refund_vnd >= 0 AND revised_total_award_vnd >= 0 AND supplementary_award_vnd >= 0");
+            tableBuilder.HasCheckConstraint(
+                "chk_parcel_claim_appeal_proof_status",
+                "proof_status IS NULL OR proof_status IN ('VERIFIED', 'UNVERIFIED', 'NO_PROOF')");
         });
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).HasColumnName("id").HasColumnType("uuid").HasDefaultValueSql("gen_random_uuid()");
@@ -30,6 +33,7 @@ internal sealed class ParcelClaimAppealConfiguration : IEntityTypeConfiguration<
         builder.Property(x => x.Reason).HasColumnName("reason").HasColumnType("text").IsRequired();
         builder.Property(x => x.SubmittedByUserId).HasColumnName("submitted_by_user_id").HasColumnType("uuid").IsRequired();
         builder.Property(x => x.SubmittedAt).HasColumnName("submitted_at").IsRequired();
+        builder.Property(x => x.ProofStatus).HasColumnName("proof_status").HasConversion<string>().HasMaxLength(20);
         builder.Property(x => x.RevisedProvenDirectLossVnd).HasColumnName("revised_proven_direct_loss_vnd").HasColumnType("bigint");
         builder.Property(x => x.RevisedCargoAwardVnd).HasColumnName("revised_cargo_award_vnd").HasColumnType("bigint").IsRequired();
         builder.Property(x => x.RevisedFreightRefundVnd).HasColumnName("revised_freight_refund_vnd").HasColumnType("bigint").IsRequired();
@@ -47,6 +51,7 @@ internal sealed class ParcelClaimAppealConfiguration : IEntityTypeConfiguration<
 
         builder.HasOne<ParcelClaim>().WithMany().HasForeignKey(x => x.ClaimId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<ParcelIncident>().WithMany().HasForeignKey(x => x.IncidentId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasAlternateKey(x => new { x.Id, x.ClaimId });
         builder.HasIndex(x => x.ClaimId).HasDatabaseName("uq_parcel_claim_appeals_claim").IsUnique();
         builder.HasIndex(x => x.IdempotencyKey).HasDatabaseName("uq_parcel_claim_appeals_idempotency").IsUnique();
         builder.HasIndex(x => new { x.OperatorId, x.Status, x.CreatedAt })

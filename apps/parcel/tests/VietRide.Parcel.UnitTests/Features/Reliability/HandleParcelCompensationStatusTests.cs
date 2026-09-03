@@ -3,6 +3,7 @@ using NSubstitute;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Reliability.Claims;
 using VietRide.Parcel.Domain.Entities;
+using VietRide.Parcel.Domain.Enums;
 
 namespace VietRide.Parcel.UnitTests.Features.Reliability;
 
@@ -20,6 +21,7 @@ public sealed class HandleParcelCompensationStatusTests
             Guid.NewGuid());
         appeal.BeginReview();
         appeal.ApproveAdjustment(
+            ParcelClaimProofStatus.VERIFIED,
             20_000_000,
             10_000_000,
             0,
@@ -62,6 +64,7 @@ public sealed class HandleParcelCompensationStatusTests
             4);
         claim.BeginReview();
         claim.Approve(
+            ParcelClaimProofStatus.VERIFIED,
             12_000_000,
             50,
             30_000_000,

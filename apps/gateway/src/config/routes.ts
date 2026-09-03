@@ -642,6 +642,14 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
       requiredRoles: ['OPERATOR_ADMIN'],
     },
     {
+      prefix: '/v1/operator/claims/{claimId}/award-preview',
+      pathPattern: /^\/v1\/operator\/claims\/[0-9a-fA-F-]{36}\/award-preview$/,
+      method: 'POST',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
       prefix: '/v1/operator/claims',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
@@ -650,6 +658,14 @@ export function buildRouteTable(env: Env): ProxyRoute[] {
     {
       prefix: '/v1/operator/claim-appeals/{appealId}/decision',
       pathPattern: /^\/v1\/operator\/claim-appeals\/[0-9a-fA-F-]{36}\/decision$/,
+      method: 'POST',
+      target: env.PARCEL_BASE_URL,
+      authRequired: 'user',
+      requiredRoles: ['OPERATOR_ADMIN'],
+    },
+    {
+      prefix: '/v1/operator/claim-appeals/{appealId}/adjustment-preview',
+      pathPattern: /^\/v1\/operator\/claim-appeals\/[0-9a-fA-F-]{36}\/adjustment-preview$/,
       method: 'POST',
       target: env.PARCEL_BASE_URL,
       authRequired: 'user',
