@@ -1,6 +1,7 @@
 using MediatR;
 using VietRide.Parcel.Application.Abstractions.Repositories;
 using VietRide.Parcel.Application.Features.Parcels;
+using VietRide.Parcel.Domain.Entities;
 using VietRide.Parcel.Domain.Enums;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Application.Outbox;
@@ -48,17 +49,30 @@ public sealed class DecideParcelClaimAppealCommandHandler
             ?? throw new CodedNotFoundException("PARCEL_NOT_FOUND", "Parcel was not found.");
         if (claim.OperatorId != command.OperatorId || parcel.OperatorId != command.OperatorId)
             throw new CodedNotFoundException("PARCEL_CLAIM_APPEAL_NOT_FOUND", "Claim appeal was not found.");
+        var proof = await ParcelClaimProofAssessmentValidator.ValidateAsync(
+            command.ProofStatus,
+            command.RevisedProvenDirectLossVnd,
+            command.AcceptedEvidenceIds,
+            claim.Id,
+            _reliability,
+            cancellationToken);
 
         var now = _clock.UtcNow;
         appeal.BeginReview();
         if (command.Decision == "UPHOLD")
         {
-            appeal.UpholdOriginalDecision(command.Reason, command.DecidedByUserId, now);
+            appeal.UpholdOriginalDecision(
+                proof.ProofStatus,
+                proof.ProvenDirectLossVnd,
+                command.Reason,
+                command.DecidedByUserId,
+                now);
         }
-        else
+        else if (command.Decision == "APPROVE_ADJUSTMENT")
         {
             var award = ParcelCompensationCalculator.Calculate(
-                command.RevisedProvenDirectLossVnd,
+                proof.ProofStatus,
+                proof.ProvenDirectLossVnd,
                 parcel.DeclaredValueVnd,
                 parcel.FinalTotalPriceVnd.Amount,
                 parcel.RefundedAmountVnd.Amount,
@@ -70,14 +84,32 @@ public sealed class DecideParcelClaimAppealCommandHandler
                     "PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED",
                     "An approved appeal must increase the total compensation award.");
             appeal.ApproveAdjustment(
-                command.RevisedProvenDirectLossVnd,
+                proof.ProofStatus,
+                proof.ProvenDirectLossVnd,
                 award.CargoAwardVnd,
                 award.FreightRefundVnd,
                 command.Reason,
                 command.DecidedByUserId,
                 now);
         }
+        else
+        {
+            throw new CodedValidationException(
+                "VALIDATION_ERROR",
+                "Decision must be UPHOLD or APPROVE_ADJUSTMENT.");
+        }
 
+        foreach (var evidenceId in proof.AcceptedEvidenceIds)
+        {
+            await _reliability.AddClaimAppealDecisionEvidenceAsync(
+                ParcelClaimAppealDecisionEvidence.Create(
+                    appeal.Id,
+                    claim.Id,
+                    evidenceId,
+                    command.DecidedByUserId,
+                    now),
+                cancellationToken);
+        }
         await _reliability.UpdateClaimAppealAsync(appeal, cancellationToken);
         var eventId = Guid.NewGuid();
         await ParcelOutboxEvents.EnqueueAsync(
@@ -99,6 +131,9 @@ public sealed class DecideParcelClaimAppealCommandHandler
             },
             cancellationToken);
 
-        return ParcelClaimAppealResponseMapper.Map(appeal, operatorView: true);
+        return ParcelClaimAppealResponseMapper.Map(
+            appeal,
+            operatorView: true,
+            proof.AcceptedEvidenceIds);
     }
 }

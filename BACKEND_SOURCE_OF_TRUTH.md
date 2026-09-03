@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.90.0
+> **Phiên bản:** 1.91.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-09-03
 > **Capstone:** SU26SE101 — SU26
@@ -1092,7 +1092,7 @@ Idempotent: chạy migration 2 lần không lỗi (EF Core / Prisma migrations h
 
 #### Parcel (`vietride_parcel`)
 
-`Parcel` · `ParcelRouteFare` · `ParcelStats` · `ParcelTransitLeg` · `ParcelCustodyEvent` · `ParcelCurrentCustody` · `ParcelIncident` · `ParcelSearchTask` · `ParcelClaim` · `ParcelClaimEvidence` · `ParcelCompensationPolicy` · `UnidentifiedParcelPackage` · `OutboxEvent`
+`Parcel` · `ParcelRouteFare` · `ParcelStats` · `ParcelTransitLeg` · `ParcelCustodyEvent` · `ParcelCurrentCustody` · `ParcelIncident` · `ParcelSearchTask` · `ParcelClaim` · `ParcelClaimEvidence` · `ParcelClaimDecisionEvidence` · `ParcelClaimAppeal` · `ParcelClaimAppealDecisionEvidence` · `ParcelCompensationPolicy` · `UnidentifiedParcelPackage` · `OutboxEvent`
 
 #### Tracking (`vietride_tracking`)
 
@@ -1794,6 +1794,7 @@ phát integration event.
 | | `PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED` | 409 | Claim nộp sau frozen `claimWindowDays` kể từ lost confirmation |
 | | `PARCEL_CLAIM_ALREADY_EXISTS` | 409 | Incident đã có claim |
 | | `PARCEL_CLAIM_EVIDENCE_REQUIRED` | 422 | Claim decision thiếu reason/evidence bắt buộc |
+| | `PARCEL_CLAIM_EVIDENCE_NOT_FOUND` | 404 | Evidence được chọn không tồn tại hoặc không thuộc claim; tenant-mask không tiết lộ claim khác |
 | | `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY` | 422 | Requested/assessed claim value vi phạm frozen declaration/policy cap |
 | | `PARCEL_CLAIM_ALREADY_DECIDED` | 409 | Claim đã rời `SUBMITTED`, không nhận decision/evidence mutation mới |
 | | `PARCEL_CLAIM_APPEAL_NOT_ALLOWED` | 409 | Claim không ở `PAID` hoặc `REJECTED`, nên sender chưa thể appeal |
@@ -3370,6 +3371,20 @@ leg. Default search/decision/payout SLA is 72 hours / 7 business days / 3 busine
 `OPEN|IN_PROGRESS` search tasks, while `LOST_CONFIRMED` fails them; completed task evidence is never
 overwritten.
 
+Every new claim or appeal decision persists `proofStatus=VERIFIED|UNVERIFIED|NO_PROOF`; request
+contracts never infer proof from a nullable loss. `VERIFIED` requires non-negative direct loss and
+at least one accepted evidence row; the other statuses require null loss and no accepted evidence.
+Accepted decision-evidence links are append-only reviewer/time audit records, and composite foreign
+keys guarantee each evidence belongs to the decided claim. Historical decisions are not
+recalculated or backfilled and therefore may retain null proof status and no links.
+
+The shared calculator uses verified direct loss only for `VERIFIED`. For `UNVERIFIED|NO_PROOF`, the
+fallback is capped by both frozen cargo policy cap and declared-value liability when a declaration
+exists; undeclared Parcels retain the current fallback/cap rule. The policy cap applies only to the
+cargo award. Freight refund is separately reduced by prior refunds and added to total award.
+Operator Admin preview endpoints expose this breakdown without idempotency, while decision
+mutations require idempotency and always recalculate under their existing transaction/lock.
+
 Assistant manual custody exceptions use a two-step approval aggregate. The assigned Assistant
 submits the observed location/evidence and the system opens an approval-pending incident and
 quarantines the Parcel in `PENDING_OPERATOR_ACTION/CUSTODY_EXCEPTION`; it does not append
@@ -4432,6 +4447,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.91.0** | 2026-09-03 | Codex | **MINOR** — Khóa financial policy cho Parcel claim/appeal: decision mới bắt buộc proof status và accepted-evidence audit immutable; fallback không chứng từ bị chặn bởi declared liability khi có khai giá; thêm hai preview endpoint OPERATOR_ADMIN, breakdown cargo/refund/total, nullable legacy reads, error tenant-masked và canonical DDL/migration. `policyCapVnd` chỉ cap cargo; event Payment/Notification, payout lịch sử và state sync giữ nguyên. |
 | **1.90.0** | 2026-09-03 | Codex | **MINOR** — Thêm ba fact Outbox cho vòng đời yêu cầu gói tùy chỉnh và ba Notification type tương ứng. Submitted fan-out tới System Admin; approved/rejected chỉ tới Operator Admin đúng tenant. Cả ba chỉ lưu chuông web và phát Socket.IO với semantic action, không enqueue FCM/email, không mở rộng trạng thái thanh toán hay backfill dữ liệu cũ. |
 | **1.89.0** | 2026-09-02 | Codex | **MINOR** — Đồng bộ đối soát PlatformWallet Admin và OperatorWallet tenant-scoped: thêm projection link allocation immutable, bounded idempotent backfill, canonical positive payable dùng chung, taxonomy/enrichment/completeness additive, summary Admin và hai XLSX reconciliation export fail-closed. Mọi payment/refund/settlement/subscription/compensation movement mới ghi link atomically; giữ nguyên balance/refund/settlement, không thêm commission, dependency hoặc Gateway route. |
 | **1.88.0** | 2026-09-01 | Codex | **MINOR** — Thêm Booking-level Shuttle unassignment cho `OPERATOR_ADMIN|OPERATOR_STAFF`: toàn bộ manifest `PENDING` trở lại `PENDING_ASSIGNMENT`, compact pickup order và refresh reservation nguyên tử; xe rỗng tự hủy và phát thêm lifecycle cancellation. Đăng ký `trip.shuttle.unassigned`, `SHUTTLE_UNASSIGNED`, Gateway exact route, hai Shuttle error code và một Notification Prisma migration. Inventory tăng lên 220/198/22; không đổi Trip schema, Booking chính, thanh toán hoặc API hủy hiện có. |

@@ -9,6 +9,7 @@ public sealed record ParcelClaimAppealResponse(
     string Reason,
     Guid SubmittedByUserId,
     DateTimeOffset SubmittedAt,
+    string? ProofStatus,
     long? RevisedProvenDirectLossVnd,
     long RevisedCargoAwardVnd,
     long RevisedFreightRefundVnd,
@@ -19,4 +20,5 @@ public sealed record ParcelClaimAppealResponse(
     DateTimeOffset? DecidedAt,
     Guid? PayoutReferenceId,
     DateTimeOffset? PaidAt,
+    IReadOnlyList<Guid> AcceptedEvidenceIds,
     IReadOnlyList<string> AvailableActions);

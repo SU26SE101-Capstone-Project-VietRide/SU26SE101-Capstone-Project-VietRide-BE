@@ -3681,12 +3681,29 @@ search 72 giờ, decision 7 ngày làm việc và payout 3 ngày làm việc. Op
 khai và snapshot khi Parcel được chấp nhận, không hồi tố.
 
 ```text
-assessedLoss = min(provenDirectLoss, declaredValueVnd) nếu có declaredValueVnd
-cargoAward = min(round(assessedLoss * compensationRatePercent / 100), maxCompensationVnd)
+declaredLiability = round(declaredValueVnd * compensationRatePercent / 100) nếu có declaredValueVnd
+VERIFIED:
+  assessedLoss = min(provenDirectLoss, declaredValueVnd) nếu có declaredValueVnd
+  cargoAward = min(round(assessedLoss * compensationRatePercent / 100), maxCompensationVnd)
+UNVERIFIED | NO_PROOF:
+  fallbackAmount = noProofFallbackMultiplier * parcelFreight
+  cargoAward = min(fallbackAmount, declaredLiability, maxCompensationVnd) nếu có declaredValueVnd
+  cargoAward = min(fallbackAmount, maxCompensationVnd) nếu không có declaredValueVnd
 freightRefund = max(parcelFreight - priorRefunds, 0)
 totalAward = cargoAward + freightRefund
-noProofCargoAward = min(noProofFallbackMultiplier * parcelFreight, maxCompensationVnd)
 ```
+
+Mọi quyết định claim/appeal mới bắt buộc ghi rõ `proofStatus=VERIFIED|UNVERIFIED|NO_PROOF`;
+không được suy luận trạng thái chứng từ từ việc `provenDirectLossVnd` có giá trị hay không.
+`VERIFIED` bắt buộc có thiệt hại trực tiếp không âm và ít nhất một evidence được reviewer chấp
+nhận. `UNVERIFIED|NO_PROOF` bắt buộc loss là `null` và danh sách accepted evidence rỗng. Liên kết
+decision-evidence là audit bất biến, ghi reviewer/thời điểm và có ràng buộc evidence thuộc đúng
+claim; appeal chỉ được chọn evidence của claim gốc. Dữ liệu quyết định lịch sử không backfill:
+`proofStatus=null`, accepted evidence rỗng.
+
+`maxCompensationVnd`/`policyCapVnd` chỉ là trần của `cargoAward`; hoàn cước nằm ngoài trần nên
+`totalAward` có thể lớn hơn cap. Hai preview read-only cho Operator Admin trả breakdown theo cùng
+calculator, nhưng mutation luôn tính lại dưới transaction/lock và không tin số tiền từ client.
 
 Chỉ bồi thường thiệt hại trực tiếp; không bồi thường lợi nhuận kỳ vọng/thiệt hại gián tiếp. Điều
 tra xem xét hàng cấm/khai sai, đóng gói/đặc tính tự nhiên, lỗi sender/recipient, cơ quan nhà nước,
@@ -5325,7 +5342,7 @@ Mỗi service chỉ được phép read/write key bắt đầu bằng prefix ser
   - **Payment:** `PAYMENT_INSUFFICIENT_WALLET`, `PAYMENT_VNPAY_ERROR`, `PAYMENT_TIMEOUT`, `PAYMENT_ALREADY_PROCESSED`, `PAYMENT_SIGNATURE_INVALID` (VNPay HMAC verify fail)
   - **Wallet:** `WALLET_INSUFFICIENT_BALANCE`, `WALLET_TOP_UP_FAILED`, `WALLET_TOP_UP_AMOUNT_TOO_LOW`
   - **Trip:** `TRIP_NOT_FOUND`, `TRIP_NOT_EDITABLE`, `TRIP_VEHICLE_CONFLICT`, `TRIP_DRIVER_CONFLICT`, `TRIP_ROUTE_CHANGE_BOOKINGS_EXIST`, `TRIP_VEHICLE_SWAP_HELD_SEAT_CONFLICT`, `TRIP_VEHICLE_SWAP_TOO_LATE`, `TRIP_NOT_ACCEPTING_PARCEL` (Trip IN_PROGRESS — không nhận parcel mới), `TRIP_NOT_IN_PROGRESS`, `TRIP_STOP_NOT_ARRIVED`, `TRIP_STOP_ALREADY_DEPARTED`, `DRIVER_SCHEDULE_EDIT_TOO_LATE`, `INCIDENT_NOT_FOUND`, `INCIDENT_ALREADY_RESOLVED`
-  - **Parcel:** `PARCEL_NOT_FOUND`, `PARCEL_CAPACITY_EXCEEDED`, `PARCEL_PRICING_NOT_CONFIGURED`, `PARCEL_QUOTE_INVALID`, `PARCEL_QUOTE_EXPIRED`, `PARCEL_QUOTE_STALE`, `PARCEL_QUOTE_MISMATCH`, `PARCEL_CARGO_RECOVERY_IN_PROGRESS`, `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, `PARCEL_NOT_TRANSFERABLE`, `PARCEL_ADDITIONAL_PAYMENT_REQUIRED`, `PARCEL_REVIEW_TIMEOUT`, `PARCEL_CUSTODY_LOCATION_REQUIRED`, `PARCEL_CUSTODY_LOCATION_MISMATCH`, `PARCEL_CUSTODY_EVENT_DUPLICATE`, `SCAN_IDENTITY_MISMATCH`, `PACKAGE_IDENTITY_MISMATCH`, `UNIDENTIFIED_PACKAGE_NOT_FOUND`, `PARCEL_INCIDENT_NOT_FOUND`, `PARCEL_INCIDENT_ALREADY_OPEN`, `PARCEL_INCIDENT_INVALID_STATUS`, `PARCEL_CUSTODY_EXCEPTION_REQUEST_NOT_FOUND`, `PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED`, `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED`, `PARCEL_STOP_DEPARTURE_APPROVAL_NOT_FOUND`, `PARCEL_STOP_DEPARTURE_ALREADY_DECIDED`, `PARCEL_STOP_RECONCILIATION_REQUIRED`, `PARCEL_SEARCH_TASK_NOT_FOUND`, `PARCEL_SEARCH_TASK_MISMATCH`, `PARCEL_SEARCH_SLA_NOT_EXPIRED`, `PARCEL_CLAIM_NOT_FOUND`, `PARCEL_CLAIM_WINDOW_NOT_OPEN`, `PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED`, `PARCEL_CLAIM_ALREADY_EXISTS`, `PARCEL_CLAIM_EVIDENCE_REQUIRED`, `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY`, `PARCEL_CLAIM_ALREADY_DECIDED`, `PARCEL_CLAIM_APPEAL_NOT_ALLOWED`, `PARCEL_CLAIM_APPEAL_ALREADY_EXISTS`, `PARCEL_CLAIM_APPEAL_NOT_FOUND`, `PARCEL_CLAIM_APPEAL_ALREADY_DECIDED`, `PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED`, `PARCEL_CLAIM_FUNDING_PENDING`, `POLICY_BELOW_DEFAULT_ACK_REQUIRED`
+  - **Parcel:** `PARCEL_NOT_FOUND`, `PARCEL_CAPACITY_EXCEEDED`, `PARCEL_PRICING_NOT_CONFIGURED`, `PARCEL_QUOTE_INVALID`, `PARCEL_QUOTE_EXPIRED`, `PARCEL_QUOTE_STALE`, `PARCEL_QUOTE_MISMATCH`, `PARCEL_CARGO_RECOVERY_IN_PROGRESS`, `PARCEL_DELIVERY_TOKEN_INVALID`, `PARCEL_DELIVERY_TOKEN_EXPIRED`, `PARCEL_NOT_TRANSFERABLE`, `PARCEL_ADDITIONAL_PAYMENT_REQUIRED`, `PARCEL_REVIEW_TIMEOUT`, `PARCEL_CUSTODY_LOCATION_REQUIRED`, `PARCEL_CUSTODY_LOCATION_MISMATCH`, `PARCEL_CUSTODY_EVENT_DUPLICATE`, `SCAN_IDENTITY_MISMATCH`, `PACKAGE_IDENTITY_MISMATCH`, `UNIDENTIFIED_PACKAGE_NOT_FOUND`, `PARCEL_INCIDENT_NOT_FOUND`, `PARCEL_INCIDENT_ALREADY_OPEN`, `PARCEL_INCIDENT_INVALID_STATUS`, `PARCEL_CUSTODY_EXCEPTION_REQUEST_NOT_FOUND`, `PARCEL_CUSTODY_EXCEPTION_APPROVAL_REQUIRED`, `PARCEL_CUSTODY_EXCEPTION_ALREADY_DECIDED`, `PARCEL_STOP_DEPARTURE_APPROVAL_NOT_FOUND`, `PARCEL_STOP_DEPARTURE_ALREADY_DECIDED`, `PARCEL_STOP_RECONCILIATION_REQUIRED`, `PARCEL_SEARCH_TASK_NOT_FOUND`, `PARCEL_SEARCH_TASK_MISMATCH`, `PARCEL_SEARCH_SLA_NOT_EXPIRED`, `PARCEL_CLAIM_NOT_FOUND`, `PARCEL_CLAIM_WINDOW_NOT_OPEN`, `PARCEL_INCIDENT_CLAIM_WINDOW_EXPIRED`, `PARCEL_CLAIM_ALREADY_EXISTS`, `PARCEL_CLAIM_EVIDENCE_REQUIRED`, `PARCEL_CLAIM_EVIDENCE_NOT_FOUND`, `PARCEL_CLAIM_VALUE_EXCEEDS_POLICY`, `PARCEL_CLAIM_ALREADY_DECIDED`, `PARCEL_CLAIM_APPEAL_NOT_ALLOWED`, `PARCEL_CLAIM_APPEAL_ALREADY_EXISTS`, `PARCEL_CLAIM_APPEAL_NOT_FOUND`, `PARCEL_CLAIM_APPEAL_ALREADY_DECIDED`, `PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED`, `PARCEL_CLAIM_FUNDING_PENDING`, `POLICY_BELOW_DEFAULT_ACK_REQUIRED`
   - **Stop/Route:** `STOP_NOT_FOUND`, `STOP_REPLACEMENT_INVALID`, `STOP_REPLACEMENT_CYCLE` (replacedByStopId tạo cycle), `STOP_REPLACEMENT_DIFFERENT_OPERATOR`, `STOP_ALREADY_DISABLED`, `STOP_DISABLED_BOOKING_AFFECTED` (legacy/deprecated synchronous warning/count for DELETE; unrelated usages remain unchanged), `STOP_NOT_PICKUP_ALLOWED`, `STOP_NOT_DROPOFF_ALLOWED`, `ROUTE_NOT_FOUND`, `ROUTE_RETURN_NOT_CONFIGURED` (Route.returnRouteId null khi đặt round-trip)
   - **Station:** `STATION_NOT_FOUND`, `STATION_DUPLICATE_NEARBY` (warning khi operator tạo Station mới quá gần Station hiện có — gợi ý link thay vì tạo), `STATION_MERGE_CONFLICT` (merge vi phạm Route/domain invariant; không partial write)
   - **Invoice:** `INVOICE_NOT_FOUND`, `INVOICE_PDF_GENERATION_FAILED`

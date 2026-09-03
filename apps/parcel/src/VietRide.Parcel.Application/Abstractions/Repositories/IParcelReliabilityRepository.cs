@@ -158,6 +158,22 @@ public interface IParcelReliabilityRepository
         IReadOnlyCollection<Guid> claimIds,
         CancellationToken ct = default);
 
+    Task<IReadOnlyList<ParcelClaimDecisionEvidence>> ListClaimDecisionEvidenceAsync(
+        Guid claimId,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<ParcelClaimDecisionEvidence>> ListClaimDecisionEvidenceByClaimsAsync(
+        IReadOnlyCollection<Guid> claimIds,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<ParcelClaimAppealDecisionEvidence>> ListClaimAppealDecisionEvidenceAsync(
+        Guid appealId,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<ParcelClaimAppealDecisionEvidence>> ListClaimAppealDecisionEvidenceByAppealsAsync(
+        IReadOnlyCollection<Guid> appealIds,
+        CancellationToken ct = default);
+
     Task<PagedResult<UnidentifiedParcelPackage>> ListUnidentifiedPackagesAsync(
         Guid operatorId,
         UnidentifiedParcelPackageStatus? status,
@@ -182,6 +198,10 @@ public interface IParcelReliabilityRepository
     Task AddClaimAsync(ParcelClaim entity, CancellationToken ct = default);
     Task AddClaimAppealAsync(ParcelClaimAppeal entity, CancellationToken ct = default);
     Task AddClaimEvidenceAsync(ParcelClaimEvidence entity, CancellationToken ct = default);
+    Task AddClaimDecisionEvidenceAsync(ParcelClaimDecisionEvidence entity, CancellationToken ct = default);
+    Task AddClaimAppealDecisionEvidenceAsync(
+        ParcelClaimAppealDecisionEvidence entity,
+        CancellationToken ct = default);
     Task AddCompensationPolicyAsync(ParcelCompensationPolicy entity, CancellationToken ct = default);
     Task AddUnidentifiedPackageAsync(UnidentifiedParcelPackage entity, CancellationToken ct = default);
 

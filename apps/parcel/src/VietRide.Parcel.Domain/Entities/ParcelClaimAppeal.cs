@@ -16,6 +16,7 @@ public sealed class ParcelClaimAppeal : BaseEntity<Guid>
     public string Reason { get; private set; } = string.Empty;
     public Guid SubmittedByUserId { get; private set; }
     public DateTimeOffset SubmittedAt { get; private set; }
+    public ParcelClaimProofStatus? ProofStatus { get; private set; }
     public long? RevisedProvenDirectLossVnd { get; private set; }
     public long RevisedCargoAwardVnd { get; private set; }
     public long RevisedFreightRefundVnd { get; private set; }
@@ -75,17 +76,23 @@ public sealed class ParcelClaimAppeal : BaseEntity<Guid>
     }
 
     public void UpholdOriginalDecision(
+        ParcelClaimProofStatus proofStatus,
+        long? revisedProvenDirectLossVnd,
         string decisionReason,
         Guid decidedByUserId,
         DateTimeOffset decidedAt)
     {
         EnsureUnderReview();
+        ValidateProof(proofStatus, revisedProvenDirectLossVnd);
+        ProofStatus = proofStatus;
+        RevisedProvenDirectLossVnd = revisedProvenDirectLossVnd;
         SetDecisionAudit(decisionReason, decidedByUserId, decidedAt);
         Status = ParcelClaimAppealStatus.UPHELD;
         RowVersion++;
     }
 
     public void ApproveAdjustment(
+        ParcelClaimProofStatus proofStatus,
         long? revisedProvenDirectLossVnd,
         long revisedCargoAwardVnd,
         long revisedFreightRefundVnd,
@@ -94,6 +101,7 @@ public sealed class ParcelClaimAppeal : BaseEntity<Guid>
         DateTimeOffset decidedAt)
     {
         EnsureUnderReview();
+        ValidateProof(proofStatus, revisedProvenDirectLossVnd);
         if (revisedProvenDirectLossVnd is < 0 || revisedCargoAwardVnd < 0 || revisedFreightRefundVnd < 0)
             throw new ArgumentOutOfRangeException(nameof(revisedProvenDirectLossVnd));
         var revisedTotal = checked(revisedCargoAwardVnd + revisedFreightRefundVnd);
@@ -101,6 +109,7 @@ public sealed class ParcelClaimAppeal : BaseEntity<Guid>
         if (supplementary <= 0)
             throw new ArgumentException("An approved appeal must increase the total award.");
 
+        ProofStatus = proofStatus;
         RevisedProvenDirectLossVnd = revisedProvenDirectLossVnd;
         RevisedCargoAwardVnd = revisedCargoAwardVnd;
         RevisedFreightRefundVnd = revisedFreightRefundVnd;
@@ -148,5 +157,17 @@ public sealed class ParcelClaimAppeal : BaseEntity<Guid>
         DecisionReason = decisionReason.Trim();
         DecidedByUserId = decidedByUserId;
         DecidedAt = decidedAt;
+    }
+
+    private static void ValidateProof(
+        ParcelClaimProofStatus proofStatus,
+        long? revisedProvenDirectLossVnd)
+    {
+        if (revisedProvenDirectLossVnd is < 0)
+            throw new ArgumentOutOfRangeException(nameof(revisedProvenDirectLossVnd));
+        if (proofStatus == ParcelClaimProofStatus.VERIFIED && !revisedProvenDirectLossVnd.HasValue)
+            throw new ArgumentException("Verified proof requires a proven direct loss.", nameof(revisedProvenDirectLossVnd));
+        if (proofStatus != ParcelClaimProofStatus.VERIFIED && revisedProvenDirectLossVnd.HasValue)
+            throw new ArgumentException("Unverified or missing proof cannot carry a proven direct loss.", nameof(revisedProvenDirectLossVnd));
     }
 }

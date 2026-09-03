@@ -21,6 +21,9 @@ public sealed class GetParcelClaimAppealQueryHandler
         var appeal = await _reliability.GetClaimAppealByIdAsync(query.AppealId, cancellationToken);
         if (appeal is null || appeal.OperatorId != query.OperatorId)
             throw new CodedNotFoundException("PARCEL_CLAIM_APPEAL_NOT_FOUND", "Claim appeal was not found.");
-        return ParcelClaimAppealResponseMapper.Map(appeal, operatorView: true);
+        var acceptedEvidenceIds = (await _reliability.ListClaimAppealDecisionEvidenceAsync(
+            appeal.Id,
+            cancellationToken)).Select(link => link.EvidenceId).ToArray();
+        return ParcelClaimAppealResponseMapper.Map(appeal, operatorView: true, acceptedEvidenceIds);
     }
 }

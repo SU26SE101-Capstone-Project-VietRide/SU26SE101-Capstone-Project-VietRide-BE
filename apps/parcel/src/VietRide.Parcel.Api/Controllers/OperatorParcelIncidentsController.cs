@@ -11,6 +11,7 @@ using VietRide.Parcel.Application.Features.Reliability.Policies;
 using VietRide.Parcel.Application.Features.Reliability.Reconciliation;
 using VietRide.Shared.Application.Exceptions;
 using VietRide.Shared.Kernel.Primitives;
+using VietRide.Shared.Web.Idempotency;
 
 namespace VietRide.Parcel.Api.Controllers;
 
@@ -366,6 +367,7 @@ public sealed class OperatorParcelIncidentsController : ControllerBase
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<OperatorParcelClaimDetailResponse>> DecideClaimAsync(
         Guid claimId,
         [FromBody] DecideParcelClaimRequest request,
@@ -379,11 +381,38 @@ public sealed class OperatorParcelIncidentsController : ControllerBase
                 operatorId,
                 CurrentUserClaims.GetUserId(User),
                 request.Decision,
+                request.ProofStatus,
                 request.ProvenDirectLossVnd,
+                request.AcceptedEvidenceIds,
                 request.Reason),
             cancellationToken);
         return Ok(await _mediator.Send(
             new GetOperatorParcelClaimDetailQuery(claimId, operatorId),
+            cancellationToken));
+    }
+
+    [HttpPost("~/v1/operator/claims/{claimId:guid}/award-preview")]
+    [Authorize(Roles = "OPERATOR_ADMIN")]
+    [SkipIdempotency("Compensation award preview is read-only and never creates a decision.")]
+    [ProducesResponseType(typeof(ApiResponse<ParcelCompensationPreviewResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ParcelCompensationPreviewResponse>> PreviewClaimAwardAsync(
+        Guid claimId,
+        [FromBody] PreviewParcelClaimAwardRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new PreviewParcelClaimAwardQuery(
+                claimId,
+                operatorId,
+                request.ProofStatus,
+                request.ProvenDirectLossVnd,
+                request.AcceptedEvidenceIds),
             cancellationToken));
     }
 
@@ -439,8 +468,35 @@ public sealed class OperatorParcelIncidentsController : ControllerBase
                 operatorId,
                 CurrentUserClaims.GetUserId(User),
                 request.Decision?.Trim().ToUpperInvariant() ?? string.Empty,
+                request.ProofStatus,
                 request.RevisedProvenDirectLossVnd,
+                request.AcceptedEvidenceIds,
                 request.Reason),
+            cancellationToken));
+    }
+
+    [HttpPost("~/v1/operator/claim-appeals/{appealId:guid}/adjustment-preview")]
+    [Authorize(Roles = "OPERATOR_ADMIN")]
+    [SkipIdempotency("Claim appeal adjustment preview is read-only and never creates a decision.")]
+    [ProducesResponseType(typeof(ApiResponse<ParcelCompensationPreviewResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ParcelCompensationPreviewResponse>> PreviewClaimAppealAdjustmentAsync(
+        Guid appealId,
+        [FromBody] PreviewParcelClaimAppealAdjustmentRequest request,
+        CancellationToken cancellationToken)
+    {
+        var operatorId = CurrentUserClaims.GetOperatorId(User)
+            ?? throw new ForbiddenException("FORBIDDEN", "Operator scope is required.");
+        return Ok(await _mediator.Send(
+            new PreviewParcelClaimAppealAdjustmentQuery(
+                appealId,
+                operatorId,
+                request.ProofStatus,
+                request.RevisedProvenDirectLossVnd,
+                request.AcceptedEvidenceIds),
             cancellationToken));
     }
 

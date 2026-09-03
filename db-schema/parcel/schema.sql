@@ -825,6 +825,7 @@ CREATE TABLE parcel_claims (
     beneficiary_user_id UUID NOT NULL,
     status VARCHAR(20) NOT NULL,
     declared_value_vnd BIGINT NULL,
+    proof_status VARCHAR(20) NULL,
     proven_direct_loss_vnd BIGINT NULL,
     compensation_rate_percent INT NOT NULL,
     policy_cap_vnd BIGINT NOT NULL,
@@ -846,7 +847,9 @@ CREATE TABLE parcel_claims (
     CONSTRAINT chk_parcel_claims_rate CHECK (compensation_rate_percent BETWEEN 1 AND 100),
     CONSTRAINT chk_parcel_claims_amounts CHECK (
         policy_cap_vnd > 0 AND cargo_award_vnd >= 0
-        AND freight_refund_vnd >= 0 AND total_award_vnd >= 0)
+        AND freight_refund_vnd >= 0 AND total_award_vnd >= 0),
+    CONSTRAINT chk_parcel_claims_proof_status CHECK (
+        proof_status IS NULL OR proof_status IN ('VERIFIED', 'UNVERIFIED', 'NO_PROOF'))
 );
 CREATE UNIQUE INDEX uq_parcel_claims_incident ON parcel_claims (incident_id);
 CREATE INDEX idx_parcel_claims_operator_status ON parcel_claims (operator_id, status, created_at);
@@ -865,6 +868,7 @@ CREATE TABLE parcel_claim_appeals (
     reason TEXT NOT NULL,
     submitted_by_user_id UUID NOT NULL,
     submitted_at TIMESTAMPTZ NOT NULL,
+    proof_status VARCHAR(20) NULL,
     revised_proven_direct_loss_vnd BIGINT NULL,
     revised_cargo_award_vnd BIGINT NOT NULL DEFAULT 0,
     revised_freight_refund_vnd BIGINT NOT NULL DEFAULT 0,
@@ -885,7 +889,10 @@ CREATE TABLE parcel_claim_appeals (
     CONSTRAINT chk_parcel_claim_appeal_awards CHECK (
         original_total_award_vnd >= 0 AND revised_cargo_award_vnd >= 0
         AND revised_freight_refund_vnd >= 0 AND revised_total_award_vnd >= 0
-        AND supplementary_award_vnd >= 0)
+        AND supplementary_award_vnd >= 0),
+    CONSTRAINT chk_parcel_claim_appeal_proof_status CHECK (
+        proof_status IS NULL OR proof_status IN ('VERIFIED', 'UNVERIFIED', 'NO_PROOF')),
+    CONSTRAINT ak_parcel_claim_appeals_id_claim_id UNIQUE (id, claim_id)
 );
 CREATE UNIQUE INDEX uq_parcel_claim_appeals_claim ON parcel_claim_appeals (claim_id);
 CREATE UNIQUE INDEX uq_parcel_claim_appeals_idempotency ON parcel_claim_appeals (idempotency_key);
@@ -900,10 +907,47 @@ CREATE TABLE parcel_claim_evidence (
     note TEXT NULL,
     uploaded_by_user_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ak_parcel_claim_evidence_claim_id_id UNIQUE (claim_id, id)
 );
 CREATE INDEX idx_parcel_claim_evidence_claim_time
     ON parcel_claim_evidence (claim_id, created_at);
+
+CREATE TABLE parcel_claim_decision_evidence (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    claim_id UUID NOT NULL REFERENCES parcel_claims(id) ON DELETE RESTRICT,
+    evidence_id UUID NOT NULL,
+    accepted_by_user_id UUID NOT NULL,
+    accepted_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT fk_parcel_claim_decision_evidence_claim_evidence
+        FOREIGN KEY (claim_id, evidence_id)
+        REFERENCES parcel_claim_evidence(claim_id, id) ON DELETE RESTRICT,
+    CONSTRAINT uq_parcel_claim_decision_evidence UNIQUE (claim_id, evidence_id)
+);
+
+CREATE TABLE parcel_claim_appeal_decision_evidence (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    appeal_id UUID NOT NULL,
+    claim_id UUID NOT NULL,
+    evidence_id UUID NOT NULL,
+    accepted_by_user_id UUID NOT NULL,
+    accepted_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT fk_parcel_claim_appeal_decision_evidence_appeal
+        FOREIGN KEY (appeal_id, claim_id)
+        REFERENCES parcel_claim_appeals(id, claim_id) ON DELETE RESTRICT,
+    CONSTRAINT fk_parcel_claim_appeal_decision_evidence_claim_evidence
+        FOREIGN KEY (claim_id, evidence_id)
+        REFERENCES parcel_claim_evidence(claim_id, id) ON DELETE RESTRICT,
+    CONSTRAINT uq_parcel_claim_appeal_decision_evidence UNIQUE (appeal_id, evidence_id)
+);
+CREATE INDEX idx_parcel_claim_appeal_decision_evidence_appeal_claim
+    ON parcel_claim_appeal_decision_evidence (appeal_id, claim_id);
+CREATE INDEX idx_parcel_claim_appeal_decision_evidence_claim_evidence
+    ON parcel_claim_appeal_decision_evidence (claim_id, evidence_id);
 
 CREATE TABLE unidentified_parcel_packages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1030,6 +1074,22 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_parcel_custody_events_immutable
     BEFORE UPDATE OR DELETE ON parcel_custody_events
     FOR EACH ROW EXECUTE FUNCTION reject_parcel_custody_event_mutation();
+
+CREATE FUNCTION reject_parcel_claim_decision_evidence_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'parcel claim decision evidence is append-only'
+        USING ERRCODE = '55000';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_parcel_claim_decision_evidence_immutable
+    BEFORE UPDATE OR DELETE ON parcel_claim_decision_evidence
+    FOR EACH ROW EXECUTE FUNCTION reject_parcel_claim_decision_evidence_mutation();
+
+CREATE TRIGGER trg_parcel_claim_appeal_decision_evidence_immutable
+    BEFORE UPDATE OR DELETE ON parcel_claim_appeal_decision_evidence
+    FOR EACH ROW EXECUTE FUNCTION reject_parcel_claim_decision_evidence_mutation();
 
 CREATE FUNCTION capture_parcel_status_history()
 RETURNS TRIGGER AS $$
