@@ -49,11 +49,19 @@ public static class ParcelCompensationCalculator
             if (fallback > long.MaxValue)
                 throw new CodedValidationException("VALIDATION_ERROR", "Compensation amount exceeds the supported range.");
             fallbackAmountVnd = (long)fallback;
-            var guardedFallback = Math.Min(fallbackAmountVnd.Value, policyCapVnd);
-            cargoAwardVnd = declaredLiabilityVnd.HasValue
-                ? Math.Min(guardedFallback, declaredLiabilityVnd.Value)
-                : guardedFallback;
-            calculationBasis = "NO_PROOF_FALLBACK";
+            if (declaredLiabilityVnd.HasValue)
+            {
+                var guardedFallback = Math.Min(fallbackAmountVnd.Value, policyCapVnd);
+                cargoAwardVnd = Math.Min(guardedFallback, declaredLiabilityVnd.Value);
+                calculationBasis = "NO_PROOF_FALLBACK";
+            }
+            else
+            {
+                // Without a value declared before carriage, there is no auditable cargo-liability
+                // basis. The customer still receives the remaining freight refund.
+                cargoAwardVnd = 0;
+                calculationBasis = "NO_DECLARATION_FREIGHT_ONLY";
+            }
         }
         else
         {

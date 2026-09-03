@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Domain.Entities;
 using VietRide.Payment.Domain.Enums;
@@ -25,6 +26,7 @@ public sealed class ParcelCompensationPayoutService
     private readonly IIntegrationEventOutbox _outbox;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IClock _clock;
+    private readonly ILogger<ParcelCompensationPayoutService> _logger;
 
     public ParcelCompensationPayoutService(
         IParcelCompensationPayoutRepository payouts,
@@ -36,7 +38,8 @@ public sealed class ParcelCompensationPayoutService
         IOperatorTripSettlementRepository settlements,
         IIntegrationEventOutbox outbox,
         IUnitOfWork unitOfWork,
-        IClock clock)
+        IClock clock,
+        ILogger<ParcelCompensationPayoutService> logger)
     {
         _payouts = payouts;
         _wallets = wallets;
@@ -48,6 +51,7 @@ public sealed class ParcelCompensationPayoutService
         _outbox = outbox;
         _unitOfWork = unitOfWork;
         _clock = clock;
+        _logger = logger;
     }
 
     public Task ProcessApprovedClaimAsync(
@@ -62,16 +66,14 @@ public sealed class ParcelCompensationPayoutService
         => _unitOfWork.ExecuteInTransactionAsync(async () =>
         {
             var existing = await _payouts.FindByClaimIdAsync(claimId, cancellationToken);
-            if (existing?.Status == ParcelCompensationPayoutStatus.PAID)
-                return false;
-
             var payout = existing ?? ParcelCompensationPayout.Create(
                 claimId,
                 parcelId,
                 tripId,
                 operatorId,
                 beneficiaryUserId,
-                amountVnd);
+                amountVnd,
+                sourceEventId);
             if (existing is not null
                 && (payout.ParcelId != parcelId
                     || payout.TripId != tripId
@@ -80,6 +82,10 @@ public sealed class ParcelCompensationPayoutService
                     || payout.AmountVnd != amountVnd))
                 throw new InvalidOperationException(
                     "A replayed parcel compensation claim does not match the persisted payout snapshot.");
+            if (existing?.PaidEventId.HasValue == true)
+                return false;
+
+            payout.EnsureSourceEvent(sourceEventId);
             if (existing is null)
                 await _payouts.AddAsync(payout, cancellationToken);
 
@@ -91,50 +97,63 @@ public sealed class ParcelCompensationPayoutService
                 WalletTransactionRef.PARCEL_COMPENSATION,
                 claimId,
                 cancellationToken);
-            if (walletReplay is not null)
-            {
-                payout.MarkPaid(
-                    payout.FundingSource ?? ParcelCompensationFundingSource.OPERATOR_WALLET,
-                    walletReplay.Id,
-                    payout.PaidAt ?? _clock.UtcNow);
-                return false;
-            }
-
-            var settlement = await _settlements.FindByOperatorTripAsync(operatorId, tripId, cancellationToken);
-            var source = settlement is null || settlement.Status != OperatorTripSettlementStatus.SETTLED
-                ? ParcelCompensationFundingSource.PLATFORM_HOLDING
-                : ParcelCompensationFundingSource.OPERATOR_WALLET;
             var amount = Money.FromRaw(amountVnd);
+            var existingSource = await FindExistingFundingSourceAsync(payout, amount, cancellationToken);
+            var source = existingSource
+                ?? await ResolveFundingSourceAsync(operatorId, tripId, cancellationToken);
             var wasFundingPending = payout.Status == ParcelCompensationPayoutStatus.FUNDING_PENDING;
-            var funded = await TryDebitFundingAsync(source, payout, amount, cancellationToken);
+            var funded = existingSource.HasValue
+                || await TryDebitFundingAsync(source, payout, amount, cancellationToken);
             if (!funded)
             {
+                if (walletReplay is not null)
+                {
+                    throw new InvalidOperationException(
+                        "Passenger compensation exists without its funding debit; recovery will retry when funds are available.");
+                }
+
                 payout.MarkFundingPending();
                 if (!wasFundingPending)
                     await EnqueueAsync(FundingPendingEventType, payout, sourceEventId, cancellationToken);
                 return true;
             }
 
-            await _wallets.EnsureBootstrapWalletAsync(beneficiaryUserId, cancellationToken);
-            var passengerTransaction = await _wallets.CreditRefundAsync(
-                beneficiaryUserId,
-                amount,
-                WalletTransactionRef.PARCEL_COMPENSATION,
-                claimId,
-                cancellationToken);
-            var ledgerEntry = OperatorLedgerEntry.Create(
-                operatorId,
-                tripId,
-                OperatorLedgerEntryType.PARCEL_COMPENSATION,
-                -amountVnd,
-                OperatorLedgerReferenceType.PARCEL,
-                parcelId,
-                sourceEventId,
-                $"Parcel claim compensation {claimId:D}");
-            await _ledger.AddAsync(ledgerEntry, cancellationToken);
+            var passengerTransaction = walletReplay;
+            if (passengerTransaction is null)
+            {
+                await _wallets.EnsureBootstrapWalletAsync(beneficiaryUserId, cancellationToken);
+                passengerTransaction = await _wallets.CreditRefundAsync(
+                    beneficiaryUserId,
+                    amount,
+                    WalletTransactionRef.PARCEL_COMPENSATION,
+                    claimId,
+                    cancellationToken);
+            }
+            else if (passengerTransaction.UserId != beneficiaryUserId
+                || passengerTransaction.Type != WalletTransactionType.CREDIT
+                || passengerTransaction.Amount != amount)
+            {
+                throw new InvalidOperationException(
+                    "Persisted passenger compensation transaction does not match the payout snapshot.");
+            }
 
-            payout.MarkPaid(source, passengerTransaction.Id, _clock.UtcNow);
-            await EnqueueAsync(PaidEventType, payout, sourceEventId, cancellationToken);
+            if (!await _ledger.HasSourceEntryAsync(sourceEventId, parcelId, cancellationToken))
+            {
+                var ledgerEntry = OperatorLedgerEntry.Create(
+                    operatorId,
+                    tripId,
+                    OperatorLedgerEntryType.PARCEL_COMPENSATION,
+                    -amountVnd,
+                    OperatorLedgerReferenceType.PARCEL,
+                    parcelId,
+                    sourceEventId,
+                    $"Parcel claim compensation {claimId:D}");
+                await _ledger.AddAsync(ledgerEntry, cancellationToken);
+            }
+
+            payout.MarkPaid(source, passengerTransaction.Id, payout.PaidAt ?? _clock.UtcNow);
+            var paidEventId = await EnqueueAsync(PaidEventType, payout, sourceEventId, cancellationToken);
+            payout.MarkPaidEventEnqueued(paidEventId);
             return true;
         }, cancellationToken);
 
@@ -147,6 +166,7 @@ public sealed class ParcelCompensationPayoutService
             .Take(Math.Clamp(maxBatch, 1, 200))
             .Select(x => new
             {
+                SourceEventId = x.SourceEventId ?? x.ClaimId,
                 x.ClaimId,
                 x.ParcelId,
                 x.TripId,
@@ -158,7 +178,7 @@ public sealed class ParcelCompensationPayoutService
         foreach (var payout in pending)
         {
             await ProcessApprovedClaimAsync(
-                payout.ClaimId,
+                payout.SourceEventId,
                 payout.ClaimId,
                 payout.ParcelId,
                 payout.TripId,
@@ -169,6 +189,112 @@ public sealed class ParcelCompensationPayoutService
         }
 
         return pending.Length;
+    }
+
+    public async Task<int> ReconcileIncompletePaidAsync(int maxBatch, CancellationToken cancellationToken)
+    {
+        var incomplete = await _payouts.QueryNoTracking()
+            .Where(x => x.Status == ParcelCompensationPayoutStatus.PAID
+                && x.SourceEventId != null
+                && x.PaidEventId == null)
+            .OrderBy(x => x.CreatedAt)
+            .ThenBy(x => x.Id)
+            .Take(Math.Clamp(maxBatch, 1, 200))
+            .Select(x => new
+            {
+                SourceEventId = x.SourceEventId ?? x.ClaimId,
+                x.ClaimId,
+                x.ParcelId,
+                x.TripId,
+                x.OperatorId,
+                x.BeneficiaryUserId,
+                x.AmountVnd,
+            })
+            .ToArrayAsync(cancellationToken);
+
+        var repaired = 0;
+        foreach (var payout in incomplete)
+        {
+            try
+            {
+                await ProcessApprovedClaimAsync(
+                    payout.SourceEventId,
+                    payout.ClaimId,
+                    payout.ParcelId,
+                    payout.TripId,
+                    payout.OperatorId,
+                    payout.BeneficiaryUserId,
+                    payout.AmountVnd,
+                    cancellationToken);
+                repaired++;
+            }
+            catch (InvalidOperationException exception)
+            {
+                // A passenger credit without an available funding source must remain visible to
+                // the next reconciliation run; never fabricate a debit or publish PAID early.
+                _logger.LogWarning(
+                    exception,
+                    "Could not reconcile incomplete parcel compensation payout {ClaimId}.",
+                    payout.ClaimId);
+            }
+        }
+
+        return repaired;
+    }
+
+    private async Task<ParcelCompensationFundingSource?> FindExistingFundingSourceAsync(
+        ParcelCompensationPayout payout,
+        Money amount,
+        CancellationToken cancellationToken)
+    {
+        var platformTransaction = await _platformWallets.FindTransactionByReferenceAsync(
+            PlatformWalletTransactionRef.PARCEL_COMPENSATION,
+            payout.ClaimId,
+            cancellationToken);
+        var operatorTransaction = await _operatorTransactions.FindByReferenceAsync(
+            payout.OperatorId,
+            OperatorWalletTransactionRef.PARCEL_COMPENSATION,
+            payout.ClaimId,
+            cancellationToken);
+
+        if (platformTransaction is not null && operatorTransaction is not null)
+            throw new InvalidOperationException("Parcel compensation was debited from both funding sources.");
+        if (platformTransaction is not null)
+        {
+            if (platformTransaction.Type != PlatformWalletTransactionType.DEBIT
+                || platformTransaction.Amount != amount)
+            {
+                throw new InvalidOperationException(
+                    "Persisted platform compensation debit does not match the payout snapshot.");
+            }
+
+            return ParcelCompensationFundingSource.PLATFORM_HOLDING;
+        }
+
+        if (operatorTransaction is not null)
+        {
+            if (operatorTransaction.Type != OperatorWalletTransactionType.DEBIT
+                || operatorTransaction.Amount != amount)
+            {
+                throw new InvalidOperationException(
+                    "Persisted operator compensation debit does not match the payout snapshot.");
+            }
+
+            return ParcelCompensationFundingSource.OPERATOR_WALLET;
+        }
+
+        return null;
+    }
+
+    private async Task<ParcelCompensationFundingSource> ResolveFundingSourceAsync(
+        Guid operatorId,
+        Guid tripId,
+        CancellationToken cancellationToken)
+    {
+        var settlement = await _settlements.FindByOperatorTripAsync(operatorId, tripId, cancellationToken);
+        return settlement is null || settlement.Status != OperatorTripSettlementStatus.SETTLED
+            ? ParcelCompensationFundingSource.PLATFORM_HOLDING
+            : ParcelCompensationFundingSource.OPERATOR_WALLET;
     }
 
     private async Task<bool> TryDebitFundingAsync(
@@ -224,7 +350,7 @@ public sealed class ParcelCompensationPayoutService
         return true;
     }
 
-    private Task EnqueueAsync(
+    private async Task<Guid> EnqueueAsync(
         string eventType,
         ParcelCompensationPayout payout,
         Guid sourceEventId,
@@ -246,6 +372,7 @@ public sealed class ParcelCompensationPayoutService
             fundingSource = payout.FundingSource?.ToString(),
             walletTransactionId = payout.WalletTransactionId,
         });
-        return _outbox.EnqueueAsync(eventId, eventType, payload, cancellationToken);
+        await _outbox.EnqueueAsync(eventId, eventType, payload, cancellationToken);
+        return eventId;
     }
 }

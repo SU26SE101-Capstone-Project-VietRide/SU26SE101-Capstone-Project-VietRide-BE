@@ -3653,7 +3653,7 @@ Response `201`:
       "version": 1,
       "compensationRatePercent": 50,
       "maxCompensationVnd": 30000000,
-      "noProofFallbackMultiplier": 4,
+      "noProofFallbackMultiplier": 2,
       "claimWindowDays": 30,
       "searchSlaHours": 72,
       "decisionSlaBusinessDays": 7,
@@ -5202,9 +5202,10 @@ cargoAwardVnd,freightRefundVnd,totalAwardVnd`; appeal also returns `originalTota
 the final result.
 
 For `UNVERIFIED|NO_PROOF`, cargo award is `min(freight * fallbackMultiplier, policyCapVnd,
-declaredLiabilityVnd)` when declared value exists; without declared value it remains
-`min(freight * fallbackMultiplier, policyCapVnd)`. `policyCapVnd` limits cargo only. Freight refund
-is `max(freightCollected-alreadyRefunded,0)`, so total award may exceed the policy cap.
+declaredLiabilityVnd)` when declared value exists. Without declared value, cargo award is
+`0`; khách chỉ nhận `max(freightCollected-alreadyRefunded,0)`. Giá khai báo không phải chứng từ và
+không tự kích hoạt nhánh VERIFIED. `policyCapVnd` limits cargo only. Freight refund is
+`max(freightCollected-alreadyRefunded,0)`, so total award may exceed the policy cap.
 
 `GET /v1/operator/policies/parcel-compensation` returns the active policy. PUT on the same path
 accepts:
@@ -5213,7 +5214,7 @@ accepts:
 {
   "compensationRatePercent": 50,
   "maxCompensationVnd": 30000000,
-  "noProofFallbackMultiplier": 4,
+  "noProofFallbackMultiplier": 2,
   "claimWindowDays": 30,
   "searchSlaHours": 72,
   "decisionSlaBusinessDays": 7,
@@ -5222,7 +5223,7 @@ accepts:
 }
 ```
 
-Rate must be `1..100`; monetary/SLA/window fields must be positive. A rate below 50 or cap below
+Rate must be `1..100`; `noProofFallbackMultiplier` must be `1..2`; monetary/SLA/window fields must be positive. A rate below 50 or cap below
 30,000,000 requires `belowDefaultAcknowledged=true`. Updates create a new version; accepted Parcel
 snapshots never change.
 

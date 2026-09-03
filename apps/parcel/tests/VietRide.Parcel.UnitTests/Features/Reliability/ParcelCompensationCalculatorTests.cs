@@ -25,7 +25,7 @@ public sealed class ParcelCompensationCalculatorTests
             alreadyRefundedVnd: 0,
             compensationRatePercent: rate,
             policyCapVnd: cap,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
         award.CargoAwardVnd.Should().Be(expectedCargoAward);
         award.FreightRefundVnd.Should().Be(120_000);
@@ -43,7 +43,7 @@ public sealed class ParcelCompensationCalculatorTests
             alreadyRefundedVnd: 25_000,
             compensationRatePercent: 50,
             policyCapVnd: 30_000_000,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
         award.AssessedLossVnd.Should().Be(4_000_000);
         award.CargoAwardVnd.Should().Be(2_000_000);
@@ -57,11 +57,11 @@ public sealed class ParcelCompensationCalculatorTests
             ParcelClaimProofStatus.NO_PROOF,
             provenDirectLossVnd: null,
             declaredValueVnd: 50_000_000,
-            freightCollectedVnd: 10_000_000,
+            freightCollectedVnd: 20_000_000,
             alreadyRefundedVnd: 0,
             compensationRatePercent: 50,
             policyCapVnd: 30_000_000,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
         award.AssessedLossVnd.Should().BeNull();
         award.DeclaredLiabilityVnd.Should().Be(25_000_000);
@@ -83,7 +83,7 @@ public sealed class ParcelCompensationCalculatorTests
             alreadyRefundedVnd: 0,
             compensationRatePercent: 50,
             policyCapVnd: 30_000_000,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
         award.CalculationBasis.Should().Be("NO_PROOF_FALLBACK");
         award.CargoAwardVnd.Should().Be(150_000);
@@ -92,7 +92,7 @@ public sealed class ParcelCompensationCalculatorTests
     }
 
     [Fact]
-    public void Calculate_WithoutDeclaredValue_PreservesFallbackPolicy()
+    public void Calculate_WithoutDeclaredValue_RefundsFreightOnly()
     {
         var award = ParcelCompensationCalculator.Calculate(
             ParcelClaimProofStatus.NO_PROOF,
@@ -102,10 +102,14 @@ public sealed class ParcelCompensationCalculatorTests
             alreadyRefundedVnd: 0,
             compensationRatePercent: 50,
             policyCapVnd: 30_000_000,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
         award.DeclaredLiabilityVnd.Should().BeNull();
-        award.CargoAwardVnd.Should().Be(30_000_000);
+        award.FallbackAmountVnd.Should().Be(20_000_000);
+        award.CalculationBasis.Should().Be("NO_DECLARATION_FREIGHT_ONLY");
+        award.CargoAwardVnd.Should().Be(0);
+        award.FreightRefundVnd.Should().Be(10_000_000);
+        award.TotalAwardVnd.Should().Be(10_000_000);
     }
 
     [Fact]
@@ -119,7 +123,7 @@ public sealed class ParcelCompensationCalculatorTests
             alreadyRefundedVnd: 100,
             compensationRatePercent: 50,
             policyCapVnd: 30_000_000,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
         award.DeclaredLiabilityVnd.Should().Be(2);
         award.CargoAwardVnd.Should().Be(2);

@@ -179,11 +179,15 @@ Trước đây flow check `OperatorBalance >= refundTotal` + `OPERATOR_INSUFFICI
 | `idx_platform_wallet_transactions_created_at` | `(created_at DESC)` | B-tree | Admin reconciliation list |
 | `idx_platform_wallet_transactions_reference` | `(reference_type, reference_id)` partial | B-tree | Trace hold/refund/settlement movement |
 | `uq_platform_wallet_transactions_subscription` | `(type, reference_type, reference_id)` partial where SUBSCRIPTION_PAYMENT | unique | Idempotent subscription credit |
+| `uq_platform_wallet_transactions_parcel_compensation` | `(reference_type, reference_id, type)` partial where PARCEL_COMPENSATION | unique | Idempotent compensation debit from platform holding |
 | `idx_operator_wallet_transactions_operator_id_created_at` | `(operator_id, created_at DESC)` | B-tree | Operator wallet history |
 | `idx_operator_wallet_transactions_reference` | `(reference_type, reference_id)` partial | B-tree | Trace credit/adjustment |
 | `uq_operator_wallet_transactions_subscription` | `(operator_id, type, reference_type, reference_id)` partial where SUBSCRIPTION_PAYMENT | unique | Idempotent subscription debit |
+| `uq_operator_wallet_transactions_parcel_compensation` | `(reference_type, reference_id, operator_id, type)` partial where PARCEL_COMPENSATION | unique | Idempotent compensation debit from operator wallet |
 | `uq_operator_trip_settlements_operator_trip` | `(operator_id, trip_id)` | unique | 1 settlement per trip per operator |
 | `uq_parcel_compensation_payouts_claim` | `claim_id` | unique | Một payout idempotent cho mỗi claim |
+| `ix_parcel_compensation_payouts_source_event_id` | `source_event_id` partial | unique | Persist consumed decision identity for recovery |
+| `ix_parcel_compensation_payouts_paid_event_id` | `paid_event_id` partial | unique | Marker that PAID outbox was enqueued exactly once |
 | `idx_parcel_compensation_payouts_operator_status` | `(operator_id, status, created_at)` | B-tree | Tenant-safe funding retry/đối soát |
 | `idx_operator_trip_settlements_status_eligible` | `(status, eligible_at)` partial | B-tree | **Hangfire daily 02:00 + Monday 09:00 jobs** |
 | `idx_operator_trip_settlements_operator_status` | `(operator_id, status)` | B-tree | Operator dashboard "pending revenue" tab |

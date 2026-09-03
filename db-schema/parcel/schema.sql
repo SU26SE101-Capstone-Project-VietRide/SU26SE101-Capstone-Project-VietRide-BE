@@ -86,7 +86,7 @@ CREATE TABLE parcels (
     declaration_policy_version INT NOT NULL DEFAULT 1,
     compensation_rate_percent_snapshot INT NOT NULL DEFAULT 50,
     compensation_policy_cap_vnd_snapshot BIGINT NOT NULL DEFAULT 30000000,
-    no_proof_fallback_multiplier_snapshot INT NOT NULL DEFAULT 4,
+    no_proof_fallback_multiplier_snapshot INT NOT NULL DEFAULT 2,
     compensation_policy_version_snapshot INT NOT NULL DEFAULT 1,
     claim_window_days_snapshot INT NOT NULL DEFAULT 30,
     search_sla_hours_snapshot INT NOT NULL DEFAULT 72,

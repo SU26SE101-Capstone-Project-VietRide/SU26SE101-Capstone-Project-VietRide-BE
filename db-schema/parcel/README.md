@@ -27,7 +27,7 @@ Quản lý **parcel lifecycle full**: tạo request, deposit + re-weigh + additi
 | `ParcelClaimEvidence` | Chứng từ claim. | Invoice/receipt/payment proof/photo/serial/biên bản reference và uploader |
 | `ParcelClaimDecisionEvidence` | Liên kết evidence được chấp nhận cho quyết định claim. | Composite FK đúng claim, reviewer/time snapshot; trigger chặn update/delete |
 | `ParcelClaimAppealDecisionEvidence` | Liên kết evidence claim được chấp nhận cho quyết định appeal. | Composite FK đúng appeal/claim/evidence, reviewer/time snapshot; trigger chặn update/delete |
-| `ParcelCompensationPolicy` | Active versioned policy per operator. | Default 50%/30m, fallback 4x freight, claim/search/decision/payout SLA |
+| `ParcelCompensationPolicy` | Active versioned policy per operator. | Default 50%/30m, fallback tối đa 2x freight, claim/search/decision/payout SLA |
 | `UnidentifiedParcelPackage` | Kiện không đọc được QR ở station. | Temporary tag, location, description/weight/evidence, matched Parcel audit |
 | `ParcelStatusHistory` | Dòng thời gian trạng thái bất biến do trigger sở hữu. | `status`, `occurredAt`, `actorType`, `actorId`, `source`, `reason` |
 | `ParcelRouteFare` | Operator config giá per route per size. | composite PK `(routeId, sizeCategory)`, future-dated effective window |

@@ -65,6 +65,11 @@ Error cũng nằm trong envelope:
 - `proofStatus: null` trên `SUBMITTED|UNDER_REVIEW` nghĩa là chưa có quyết định; hiển thị
   **“Chưa đánh giá”**. Chỉ khi claim/appeal đã ở trạng thái quyết định cuối mà proof vẫn `null` mới
   hiển thị **“Chưa ghi nhận (legacy)”**. Không suy diễn proof từ loss/evidence.
+- Giá khai báo chỉ là trần trách nhiệm đã chốt trước chuyến, không phải chứng từ. Không tự chọn
+  `VERIFIED` chỉ vì parcel có `declaredValueVnd`.
+- Với `UNVERIFIED|NO_PROOF`, fallback mặc định/tối đa là `2x` cước và vẫn bị chặn bởi trách nhiệm
+  theo giá khai báo. Nếu khách không khai giá, `cargoAwardVnd=0` và chỉ hoàn phần cước còn lại;
+  hiển thị rõ “Không có cơ sở xác định giá trị hàng”.
 
 Nguồn evidence để render checkbox là `data.claim.evidence[]` từ
 `GET /v1/operator/claims/{claimId}`. Giá trị gửi lên là `evidence[].evidenceId`, không phải URL
@@ -139,7 +144,7 @@ Preview là read-only, chỉ `OPERATOR_ADMIN`, không gửi `Idempotency-Key`. D
     "version": 1,
     "compensationRatePercent": 50,
     "maxCompensationVnd": 30000000,
-    "noProofFallbackMultiplier": 4,
+    "noProofFallbackMultiplier": 2,
     "claimWindowDays": 7,
     "searchSlaHours": 72,
     "decisionSlaBusinessDays": 7,
@@ -216,10 +221,13 @@ adjustment preview. Mutation appeal trả `ParcelClaimAppeal` trực tiếp tạ
 
 Preview trả:
 
-- `calculationBasis`: `VERIFIED_LOSS` hoặc `NO_PROOF_FALLBACK`.
+- `calculationBasis`: `VERIFIED_LOSS`, `NO_PROOF_FALLBACK` hoặc
+  `NO_DECLARATION_FREIGHT_ONLY`.
 - `assessedLossVnd`: loss được dùng cho nhánh verified; nullable.
 - `declaredLiabilityVnd`: trách nhiệm theo giá khai báo và rate; nullable nếu parcel không khai giá.
 - `fallbackAmountVnd`: `freight × multiplier` trước khi áp các trần; chỉ có ở nhánh fallback.
+  Với `NO_DECLARATION_FREIGHT_ONLY`, field này vẫn phục vụ audit nhưng không được cộng vào
+  `cargoAwardVnd`.
 - `policySnapshot`: policy đã đóng băng cho parcel. Trần nằm ở
   `policySnapshot.maxCompensationVnd`; field tương ứng trên claim là `policyCapVnd`.
 - `cargoAwardVnd`: bồi thường hàng.
@@ -267,7 +275,21 @@ Appeal:
 - `UPHELD`: giữ nguyên quyết định cũ, không có payout bổ sung.
 
 Đây là luồng bất đồng bộ. Không hiển thị `APPROVED`/`ADJUSTMENT_APPROVED` là đã thanh toán và không
-tự chuyển trạng thái khi chưa nhận response/read model mới từ BE.
+tự chuyển trạng thái khi chưa nhận response/read model mới từ BE. Sau notification, reconnect hoặc
+manual refresh, refetch detail/list; không suy ra `PAID` chỉ vì Passenger Wallet đã xuất hiện tiền.
+Payment tự chạy retry/reconciliation mỗi 10 phút cho payout thiếu nguồn tiền hoặc payout mới thiếu
+completion marker, nhưng FE vẫn chỉ dùng trạng thái canonical từ Parcel read model.
+
+Đối soát không yêu cầu đồng thời cả hai source wallet transaction. Mỗi payout có đúng một nguồn:
+
+- Trước Trip settlement: Admin thấy một PlatformWallet `DEBIT/PARCEL_COMPENSATION`; Operator xem
+  khoản giảm trong `OperatorLedgerEntry`, không có OperatorWallet transaction.
+- Sau Trip settlement: Operator thấy một OperatorWallet `DEBIT/PARCEL_COMPENSATION` và một
+  `OperatorLedgerEntry`; Admin không có PlatformWallet compensation debit cho payout đó.
+- Passenger luôn thấy đúng một Wallet `CREDIT/PARCEL_COMPENSATION`.
+
+Nếu cần support đối soát, dùng `claimId`/`appealId` làm payout reference và `parcelId` cho operator
+ledger; không kết luận thiếu sổ chỉ vì cả PlatformWallet và OperatorWallet không cùng xuất hiện.
 
 ## 9. Passenger Mobile
 

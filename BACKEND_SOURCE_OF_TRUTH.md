@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.91.0
+> **Phiên bản:** 1.92.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-09-03
 > **Capstone:** SU26SE101 — SU26
@@ -3964,7 +3964,7 @@ permitted.
 | `TripSettlementWeeklyAutoSettleJob` | Recurring | Weekly Mon 09:00 Asia/Ho_Chi_Minh | Debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE |
 | `InvoicePdfRetryJob` | Triggered (retry) | Post-payment-success event | Generate PDF, retry max 5 nếu fail |
 | `RefundFailureRetryJob` | Recurring | Every 10 phút | Retry refund từ RefundFailureLog, max 5 lần |
-| `ParcelCompensationFundingRetryJob` | Recurring every 10 minutes | `parcel_compensation_payouts.status=FUNDING_PENDING` | Retry at most 100 oldest payouts against the same operator's current funding source; unique claim/wallet references prevent double credit and operator wallet cannot become negative |
+| `ParcelCompensationFundingRetryJob` | Recurring every 10 minutes | `parcel_compensation_payouts.status=FUNDING_PENDING` or new `PAID` rows with `source_event_id` but no `paid_event_id` | Retry at most 100 oldest unfunded payouts and reconcile at most 100 incomplete paid payouts; source debit, passenger credit, operator ledger and PAID Outbox are independently detected/repaired under one transaction, while unique references prevent double movement. Pre-marker legacy PAID rows require replay/manual reconciliation because their original source identity cannot be inferred safely. |
 | `PlatformWalletTransactionLinkBackfillJob` | Recurring every 5 minutes | PlatformWallet transaction chưa có link và khác manual adjustment | Bounded tối đa 100 dòng/lần; chỉ insert link khi chứng minh được từ dữ liệu Payment-owned, không đoán hoặc rewrite ledger; unique identity làm replay idempotent |
 
 ### 10.2 BullMQ jobs (NestJS services)
@@ -4447,6 +4447,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.92.0** | 2026-09-03 | Codex | **MINOR** — Siết Parcel compensation demo policy: fallback không chứng từ mặc định/tối đa giảm 4x xuống 2x; parcel không khai giá và không có verified evidence chỉ được hoàn cước, không có cargo award; declared value không được coi là proof. Payment payout lưu source/paid event completion markers, thêm unique compensation debit indexes và recurring reconciliation để tự bù ledger/PAID Outbox còn thiếu mà không credit PassengerWallet lần hai. |
 | **1.91.0** | 2026-09-03 | Codex | **MINOR** — Khóa financial policy cho Parcel claim/appeal: decision mới bắt buộc proof status và accepted-evidence audit immutable; fallback không chứng từ bị chặn bởi declared liability khi có khai giá; thêm hai preview endpoint OPERATOR_ADMIN, breakdown cargo/refund/total, nullable legacy reads, error tenant-masked và canonical DDL/migration. `policyCapVnd` chỉ cap cargo; event Payment/Notification, payout lịch sử và state sync giữ nguyên. |
 | **1.90.0** | 2026-09-03 | Codex | **MINOR** — Thêm ba fact Outbox cho vòng đời yêu cầu gói tùy chỉnh và ba Notification type tương ứng. Submitted fan-out tới System Admin; approved/rejected chỉ tới Operator Admin đúng tenant. Cả ba chỉ lưu chuông web và phát Socket.IO với semantic action, không enqueue FCM/email, không mở rộng trạng thái thanh toán hay backfill dữ liệu cũ. |
 | **1.89.0** | 2026-09-02 | Codex | **MINOR** — Đồng bộ đối soát PlatformWallet Admin và OperatorWallet tenant-scoped: thêm projection link allocation immutable, bounded idempotent backfill, canonical positive payable dùng chung, taxonomy/enrichment/completeness additive, summary Admin và hai XLSX reconciliation export fail-closed. Mọi payment/refund/settlement/subscription/compensation movement mới ghi link atomically; giữ nguyên balance/refund/settlement, không thêm commission, dependency hoặc Gateway route. |

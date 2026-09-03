@@ -65,7 +65,7 @@ public sealed class ParcelCompensationFinancialPolicyPersistenceTests
                 policyVersion: 1,
                 compensationRatePercent: 50,
                 policyCapVnd: 30_000_000,
-                noProofFallbackMultiplier: 4);
+                noProofFallbackMultiplier: 2);
             var evidence = ParcelClaimEvidence.Create(
                 claim.Id,
                 "INVOICE",
@@ -106,7 +106,7 @@ public sealed class ParcelCompensationFinancialPolicyPersistenceTests
                     CancellationToken.None);
 
                 noProofPreview.CalculationBasis.Should().Be("NO_PROOF_FALLBACK");
-                noProofPreview.FallbackAmountVnd.Should().Be(600_000);
+                noProofPreview.FallbackAmountVnd.Should().Be(300_000);
                 noProofPreview.DeclaredLiabilityVnd.Should().Be(150_000);
                 noProofPreview.CargoAwardVnd.Should().Be(150_000);
                 noProofPreview.FreightRefundVnd.Should().Be(150_000);

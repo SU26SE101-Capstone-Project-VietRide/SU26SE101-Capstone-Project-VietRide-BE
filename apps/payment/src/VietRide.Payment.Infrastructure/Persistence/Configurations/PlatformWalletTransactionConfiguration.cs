@@ -123,6 +123,11 @@ internal sealed class PlatformWalletTransactionConfiguration : IEntityTypeConfig
             .HasFilter("reference_type = 'SUBSCRIPTION_PAYMENT'")
             .IsUnique();
 
+        builder.HasIndex(x => new { x.ReferenceType, x.ReferenceId, x.Type })
+            .HasDatabaseName("uq_platform_wallet_transactions_parcel_compensation")
+            .HasFilter("reference_type = 'PARCEL_COMPENSATION'")
+            .IsUnique();
+
         builder.HasIndex(x => x.ActorUserId)
             .HasDatabaseName("idx_platform_wallet_transactions_actor_user_id")
             .HasFilter("actor_user_id IS NOT NULL");

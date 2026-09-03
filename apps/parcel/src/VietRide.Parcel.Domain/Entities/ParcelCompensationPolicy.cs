@@ -6,7 +6,7 @@ public sealed class ParcelCompensationPolicy : BaseEntity<Guid>
 {
     public const int DefaultRatePercent = 50;
     public const long DefaultMaximumCompensationVnd = 30_000_000;
-    public const int DefaultNoProofFallbackMultiplier = 4;
+    public const int DefaultNoProofFallbackMultiplier = 2;
     public const int DefaultClaimWindowDays = 30;
     public const int DefaultSearchSlaHours = 72;
     public const int DefaultDecisionSlaBusinessDays = 7;
@@ -89,7 +89,7 @@ public sealed class ParcelCompensationPolicy : BaseEntity<Guid>
             throw new ArgumentOutOfRangeException(nameof(compensationRatePercent));
         if (maxCompensationVnd <= 0)
             throw new ArgumentOutOfRangeException(nameof(maxCompensationVnd));
-        if (noProofFallbackMultiplier is < 1 or > 100)
+        if (noProofFallbackMultiplier is < 1 or > DefaultNoProofFallbackMultiplier)
             throw new ArgumentOutOfRangeException(nameof(noProofFallbackMultiplier));
         if (claimWindowDays is < 1 or > 365
             || searchSlaHours is < 1 or > 720
