@@ -411,6 +411,7 @@ function seed() {
 async function fixture(label, declaration, proofStatus, loss = null, refunded = 0) {
   const parcelId = randomUUID();
   const incidentId = randomUUID();
+  const incidentEvidenceReference = `https://example.invalid/${tag}/${label}-incident.jpg`;
   sql(
     'parcel',
     `INSERT INTO parcels(id,parcel_code,sender_user_id,recipient_name,recipient_phone,operator_id,trip_id,description,
@@ -418,15 +419,24 @@ async function fixture(label, declaration, proofStatus, loss = null, refunded = 
       final_total_price_vnd,deposit_paid_vnd,refunded_amount_vnd,no_proof_fallback_multiplier_snapshot)
     VALUES ('${parcelId}','PCL-${tag}-${label}','${ids.passenger}','E2E recipient','+84910000009','${ids.operator}','${ids.trip}',
       'Simulated accepted lost parcel ${label}','SMALL','SMALL',1,150000,'PENDING_OPERATOR_ACTION',${declaration ?? 'NULL'},now(),150000,150000,${refunded},4);
-    INSERT INTO parcel_incidents(id,parcel_id,operator_id,trip_id,type,status,reporter_id,reporter_source,description,resolved_at,operator_process_breach)
-    VALUES ('${incidentId}','${parcelId}','${ids.operator}','${ids.trip}','MISSING','LOST_CONFIRMED','${ids.assistant}','ASSISTANT',
-      'Simulated completed investigation to isolate compensation policy',now(),true);`,
+    INSERT INTO parcel_incidents(id,parcel_id,operator_id,trip_id,type,status,reporter_id,reporter_source,description,evidence_json,resolved_at,operator_process_breach)
+    VALUES ('${incidentId}','${parcelId}','${ids.operator}','${ids.trip}','MISSING','LOST_CONFIRMED','${ids.passenger}','USER',
+      'Simulated completed investigation to isolate compensation policy','["${incidentEvidenceReference}"]'::jsonb,now(),true);`,
   );
   const claim = await request('POST', `/v1/parcels/${parcelId}/claims`, {
     actor: 'passenger',
     key: randomUUID(),
     expected: 201,
   });
+  const inheritedEvidence = claim.evidence.find(
+    (evidence) =>
+      evidence.evidenceType === 'INCIDENT_PHOTO' &&
+      evidence.reference === incidentEvidenceReference,
+  );
+  assert.ok(inheritedEvidence, 'Incident evidence must be inherited into the claim response');
+  assert.equal(inheritedEvidence.uploadedByUserId, ids.passenger);
+  assert.deepEqual(claim.acceptedEvidenceIds, []);
+  assert.equal(claim.proofStatus, null);
   // Upload is deliberately independent of acceptance: even NO_PROOF has an unaccepted document.
   const uploaded = await request(
     'POST',
@@ -442,7 +452,16 @@ async function fixture(label, declaration, proofStatus, loss = null, refunded = 
       },
     },
   );
-  const evidenceId = uploaded.evidence[0].evidenceId;
+  const invoiceEvidence = uploaded.evidence.find((evidence) => evidence.evidenceType === 'INVOICE');
+  assert.ok(invoiceEvidence, 'Separately uploaded invoice evidence must remain available');
+  const operatorDetail = await request('GET', `/v1/operator/claims/${claim.claimId}`);
+  const operatorIncidentEvidence = operatorDetail.claim.evidence.find(
+    (evidence) => evidence.evidenceId === inheritedEvidence.evidenceId,
+  );
+  assert.equal(operatorIncidentEvidence?.reference, incidentEvidenceReference);
+  assert.equal(operatorIncidentEvidence?.evidenceType, 'INCIDENT_PHOTO');
+  assert.deepEqual(operatorDetail.claim.acceptedEvidenceIds, []);
+  const evidenceId = invoiceEvidence.evidenceId;
   const body = {
     proofStatus,
     provenDirectLossVnd: loss,
@@ -453,6 +472,7 @@ async function fixture(label, declaration, proofStatus, loss = null, refunded = 
     parcelId,
     incidentId,
     claimId: claim.claimId,
+    inheritedEvidenceId: inheritedEvidence.evidenceId,
     evidenceId,
     declaration,
     refunded,

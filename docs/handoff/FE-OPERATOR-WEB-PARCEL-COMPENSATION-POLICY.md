@@ -90,6 +90,12 @@ Nguồn evidence để render checkbox là `data.claim.evidence[]` từ
 `reference`. Appeal không có API upload evidence riêng; từ `claimId` của appeal, tải detail claim
 gốc và chỉ cho chọn evidence của claim đó.
 
+Ảnh Passenger đã gửi trong `evidenceUrls` lúc báo incident được BE kế thừa vào claim khi sender
+submit claim, với `evidenceType=INCIDENT_PHOTO`; FE không upload/gửi URL lần hai. Ảnh xuất hiện trong
+chính `data.claim.evidence[]` như các evidence khác. Đây chỉ là evidence hiện trường chưa được chấp
+nhận: checkbox mặc định dựa vào `acceptedEvidenceIds`, không dựa vào loại evidence hay việc URL đã
+tồn tại. Reviewer vẫn cần chứng từ giá trị phù hợp trước khi chọn `VERIFIED` và nhập proven loss.
+
 ## 3. Operator Web — dữ liệu khởi tạo
 
 Các endpoint read dùng được cho `OPERATOR_ADMIN|OPERATOR_STAFF`:

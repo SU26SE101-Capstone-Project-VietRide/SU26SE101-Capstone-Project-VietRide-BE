@@ -1,8 +1,8 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.93.0
+> **Phiên bản:** 1.94.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
-> **Cập nhật lần cuối:** 2026-09-03
+> **Cập nhật lần cuối:** 2026-09-04
 > **Capstone:** SU26SE101 — SU26
 > **Owner doc:** Senior Backend Architect (rotate khi handover)
 
@@ -3375,6 +3375,11 @@ leg. Default search/decision/payout SLA is 72 hours / 7 business days / 3 busine
 `OPEN|IN_PROGRESS` search tasks, while `LOST_CONFIRMED` fails them; completed task evidence is never
 overwritten.
 
+Submitting a claim atomically imports the distinct usable `evidenceUrls` from its `LOST_CONFIRMED`
+incident into `ParcelClaimEvidence` as `INCIDENT_PHOTO`. The original incident/custody evidence is
+not mutated. Imported rows are visible/selectable in claim detail but remain unaccepted and do not
+establish `VERIFIED` proof by themselves; reviewer decision evidence remains the authoritative link.
+
 Every new claim or appeal decision persists `proofStatus=VERIFIED|UNVERIFIED|NO_PROOF`; request
 contracts never infer proof from a nullable loss. `VERIFIED` requires non-negative direct loss and
 at least one accepted evidence row; the other statuses require null loss and no accepted evidence.
@@ -4458,6 +4463,7 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.94.0** | 2026-09-04 | Codex | **MINOR** — Khi submit Parcel claim, kế thừa atomically các evidence URL hợp lệ từ incident `LOST_CONFIRMED` thành `ParcelClaimEvidence/INCIDENT_PHOTO`, để Operator đọc ngay qua `claim.evidence[]` mà Passenger không phải upload lại. Không tự VERIFIED/accepted, không sửa incident/custody row, không đổi schema/event. |
 | **1.93.0** | 2026-09-03 | Codex | **MINOR** — Bỏ hoàn toàn cargo fallback cho mọi quyết định Parcel claim/appeal mới: UNVERIFIED/NO_PROOF chỉ hoàn cước còn lại, không dùng giá tự khai để tạo award. VERIFIED dùng proven loss, khai giá chỉ là trần, giữ rate/cap; bổ sung domain guard, regression cho khai khống/no declaration/legacy multiplier/zero delta. Multiplier giữ làm metadata tương thích; preview basis và FE handoff cập nhật. Không sửa quyết định/payout lịch sử, event hoặc schema. |
 | **1.92.0** | 2026-09-03 | Codex | **MINOR** — Siết Parcel compensation demo policy: fallback không chứng từ mặc định/tối đa giảm 4x xuống 2x; parcel không khai giá và không có verified evidence chỉ được hoàn cước, không có cargo award; declared value không được coi là proof. Payment payout lưu source/paid event completion markers, thêm unique compensation debit indexes và recurring reconciliation để tự bù ledger/PAID Outbox còn thiếu mà không credit PassengerWallet lần hai. |
 | **1.91.0** | 2026-09-03 | Codex | **MINOR** — Khóa financial policy cho Parcel claim/appeal: decision mới bắt buộc proof status và accepted-evidence audit immutable; fallback không chứng từ bị chặn bởi declared liability khi có khai giá; thêm hai preview endpoint OPERATOR_ADMIN, breakdown cargo/refund/total, nullable legacy reads, error tenant-masked và canonical DDL/migration. `policyCapVnd` chỉ cap cargo; event Payment/Notification, payout lịch sử và state sync giữ nguyên. |

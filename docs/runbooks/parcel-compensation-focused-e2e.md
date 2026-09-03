@@ -66,6 +66,8 @@ All examples use a frozen 50% rate, 30m cargo cap, legacy multiplier 4, and 150,
   management is reachable and the isolated `vietride.events` exchange is a topic exchange.
 - Rejected validation leaves claim SUBMITTED; zero-total approval creates no payout.
 - Upload alone never makes proof VERIFIED; accepted evidence links match the reviewer.
+- Incident `evidenceUrls` are inherited as unaccepted `INCIDENT_PHOTO` rows in the new claim and
+  appear immediately in the submit response; a separate invoice remains independently selectable.
 - Preview has no Outbox write; accepted mutation uses the same calculated award.
 - Six claims reach PAID through real Payment events, with one passenger credit and one source
   debit each. Same-key replay and a new-key duplicate decision cannot pay again.
@@ -78,10 +80,14 @@ All examples use a frozen 50% rate, 30m cargo cap, legacy multiplier 4, and 150,
 
 ## Recorded verification
 
-2026-09-03, final run `8978aec38a`: **PASS — 23 check groups, 87 Gateway business HTTP requests**,
-plus direct health, forged Internal JWT and broker checks. Earlier run `6eb7dbd22f` also passed
-the business matrix (21 groups, 89 requests); polling count varies with event delivery timing.
-Reports: `artifacts/parcel-compensation-focused-e2e/8978aec38a/report.md` and `report.json`.
+2026-09-04 local time, final run `da4d56fd28`: **PASS — 23 check groups, 96 Gateway business HTTP
+requests**, plus direct health, forged Internal JWT and broker checks. All seven claim fixtures
+asserted that an incident URL was returned immediately as an unaccepted `INCIDENT_PHOTO`; each was
+then read back through the Operator claim-detail API, while the separately uploaded invoice remained
+a different selectable evidence row. Earlier baseline run `8978aec38a` passed before evidence
+inheritance was added. Polling request count varies with event delivery timing. Reports:
+`artifacts/parcel-compensation-focused-e2e/da4d56fd28/report.md` and
+`report.json`.
 Cleanup completed: all five app processes, four databases, DB role, RabbitMQ vhost/user removed.
 
 Two earlier setup attempts are retained transparently: `c0cd3096af` failed to resolve a built

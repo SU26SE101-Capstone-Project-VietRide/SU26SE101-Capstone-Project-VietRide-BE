@@ -4845,6 +4845,13 @@ Identity batch; nullable display enrichment degrades without hiding the Parcel f
 | `POST /v1/parcels/{parcelId}/claims/{claimId}/appeal` | Sender; `{ reason }`; claim must be `PAID` or `REJECTED`; UUID-v4 `Idempotency-Key` | `200` original claim unchanged, with the new separate appeal in `data.appeal` |
 | `GET /v1/parcels/{parcelId}/claims` | Sender or same-tenant operator; recipient is not authorized | `200` claims and evidence metadata |
 
+On claim creation, non-empty, distinct incident `evidenceUrls` that fit the canonical evidence
+reference length are persisted atomically as claim evidence with `evidenceType=INCIDENT_PHOTO`.
+They therefore appear immediately in `data.evidence[]`/`data.claim.evidence[]` without requiring a
+second upload. Inheritance does not accept the evidence or set proof status: the reviewer must still
+select its `evidenceId`, and a verified value/loss assessment may require separate invoice/payment
+proof. Malformed historical incident evidence is ignored and never blocks claim submission.
+
 The sender is always `beneficiaryUserId`. Claim response freezes `declaredValueVnd,
 proofStatus,acceptedEvidenceIds,provenDirectLossVnd,compensationRatePercent,policyCapVnd,
 cargoAwardVnd,freightRefundVnd,totalAwardVnd,policyVersion,status,decisionReason,decidedBy,
