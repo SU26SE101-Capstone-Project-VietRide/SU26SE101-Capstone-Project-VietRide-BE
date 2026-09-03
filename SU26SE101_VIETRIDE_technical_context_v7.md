@@ -3675,23 +3675,32 @@ hợp lệ giữ nguyên identity và phát lại `parcel.approval.requested` ch
 còn Driver, request đang chờ bị `CANCELLED`.
 
 Sender là claim owner/beneficiary; recipient chỉ tracking và report incident. Policy mặc định của
-operator là rate 50%, cap 30.000.000 VND, fallback không chứng từ 4 lần cước, claim window 30 ngày,
+operator là rate 50%, cap 30.000.000 VND, claim window 30 ngày,
 search 72 giờ, decision 7 ngày làm việc và payout 3 ngày làm việc. Operator được cấu hình rate
-`1..100` và cap dương; điều khoản thấp hơn 50%/30 triệu cần xác nhận rõ. Policy/version được công
+`1..100`, cap dương; điều khoản thấp hơn 50%/30 triệu cần xác nhận rõ. Policy/version được công
 khai và snapshot khi Parcel được chấp nhận, không hồi tố.
 
 ```text
 declaredLiability = round(declaredValueVnd * compensationRatePercent / 100) nếu có declaredValueVnd
 VERIFIED:
   assessedLoss = min(provenDirectLoss, declaredValueVnd) nếu có declaredValueVnd
+  assessedLoss = provenDirectLoss nếu không có declaredValueVnd
   cargoAward = min(round(assessedLoss * compensationRatePercent / 100), maxCompensationVnd)
 UNVERIFIED | NO_PROOF:
-  fallbackAmount = noProofFallbackMultiplier * parcelFreight
-  cargoAward = min(fallbackAmount, declaredLiability, maxCompensationVnd) nếu có declaredValueVnd
-  cargoAward = min(fallbackAmount, maxCompensationVnd) nếu không có declaredValueVnd
+  cargoAward = 0 dù không khai giá, khai thấp hay khai cao; chỉ hoàn phần cước còn lại
 freightRefund = max(parcelFreight - priorRefunds, 0)
 totalAward = cargoAward + freightRefund
 ```
+
+Từ bản sửa policy ngày 2026-09-03, mọi quyết định claim/appeal mới áp dụng điều kiện có bằng
+chứng được xác minh trước khi có tiền bồi thường hàng, kể cả hồ sơ đang chờ có snapshot fallback
+cũ. Không sửa snapshot hay tính lại quyết định đã duyệt/đã trả. `noProofFallbackMultiplier` chỉ
+giữ để đọc lịch sử/tương thích payload (default 2, PUT vẫn nhận `1..2`), không tham gia tính award
+mới; `fallbackAmountVnd=null`. Giá khai báo và `declaredLiability` không phải bằng chứng giá trị,
+không phải tiền chắc chắn được nhận. Tỷ lệ 50% là mức chi trả của policy, không phải kết luận rằng
+hàng chỉ đáng giá một nửa. Reviewer phải đối chiếu evidence với đúng hàng và thiệt hại thực tế;
+BE kiểm tra quyền/liên kết/audit, không tự xác thực hóa đơn thật hay giả. Claim không có verified
+proof và đã hoàn đủ cước có preview tổng 0; không duyệt giao dịch 0 đồng. Appeal chỉ chi delta dương.
 
 Mọi quyết định claim/appeal mới bắt buộc ghi rõ `proofStatus=VERIFIED|UNVERIFIED|NO_PROOF`;
 không được suy luận trạng thái chứng từ từ việc `provenDirectLossVnd` có giá trị hay không.
@@ -3712,9 +3721,12 @@ bất khả kháng và chứng từ không hợp lệ. Wrong stop, lỗi crew/op
 
 Operator chịu nghĩa vụ tài chính; VietRide không ứng trước. Payment dùng một payout unique theo
 `claimId`: trước settlement debit đúng operator/Trip PlatformWallet holding, sau settlement debit
-đúng OperatorWallet, rồi credit PassengerWallet và ghi `PARCEL_COMPENSATION` ledger. Thiếu tiền
-chuyển `FUNDING_PENDING` và job retry khấu trừ settlement tương lai; không cho ví âm, cross-tenant
-funding hoặc double payout.
+đúng OperatorWallet, rồi credit PassengerWallet và ghi `PARCEL_COMPENSATION` ledger. Source debit,
+PassengerWallet credit, operator ledger và Outbox `payment.parcel_compensation.paid` phải hoàn tất
+idempotent; payout mới lưu source/paid event marker và recurring job tự reconcile bản ghi `PAID` có
+source marker nhưng còn thiếu ledger/event. Legacy PAID không có source marker không được suy đoán
+tự động. Thiếu tiền trước khi credit chuyển `FUNDING_PENDING` và job retry khấu trừ
+settlement tương lai; không cho ví âm, cross-tenant funding hoặc double payout.
 
 Sender có thể tạo đúng một `ParcelClaimAppeal` cho claim gốc `PAID` hoặc `REJECTED`; claim gốc và
 payout gốc luôn bất biến. Appeal đi theo
@@ -5271,7 +5283,7 @@ Role:              PASSENGER | DRIVER | ASSISTANT | OPERATOR_STAFF | OPERATOR_AD
 | Booking | Seat release tại authoritative Payment deadline · schedule-change auto-accept · BookingTransfer `PENDING_CONFIRM -> ESCALATED` sau 2 giờ (scan mỗi 5 phút, tối đa 200 nhóm/lần) |
 | Trip-Route-Vehicle | Auto-BOARDING 30 phút trước departure · COMPLETED fallback +30 phút sau ETA · Generate Trip từ DriverSchedule (CN 23:00) |
 | Parcel | Undo-reject 15 phút · cancel EXTRA_LARGE review timeout 24h · reject/forfeit RESERVED quá `latestCheckInAt` · reject/forfeit PENDING_FINAL_PAYMENT quá `finalPaymentDeadline` (interval 5 phút) · PENDING_TRANSFER_CONFIRM escalation 30 phút · stale Day-32 cargo-recovery operation replay 5 phút · PENDING_OPERATOR_ACTION re-alert 2h |
-| Payment | PENDING_REDIRECT expired khi `dueAt ?? createdAt + 15 phút <= now` · TopUpRequest expired 15 phút · **Trip settlement eligibility flag (daily 02:00)** — set `OperatorTripSettlement.status=ELIGIBLE` khi `eligibleAt <= now` · **Trip settlement weekly auto-settle (Monday 09:00 weekly)** — debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE · Subscription paid invoice generation post-payment-success (event-driven, không phải scheduled — nhưng retry via Hangfire nếu PDF gen fail) |
+| Payment | PENDING_REDIRECT expired khi `dueAt ?? createdAt + 15 phút <= now` · TopUpRequest expired 15 phút · Parcel compensation retry/reconcile mỗi 10 phút cho `FUNDING_PENDING` và payout mới `PAID` có source marker nhưng thiếu completion marker · **Trip settlement eligibility flag (daily 02:00)** — set `OperatorTripSettlement.status=ELIGIBLE` khi `eligibleAt <= now` · **Trip settlement weekly auto-settle (Monday 09:00 weekly)** — debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE · Subscription paid invoice generation post-payment-success (event-driven, không phải scheduled — nhưng retry via Hangfire nếu PDF gen fail) |
 | Identity | OTP expired cleanup (optional) · FCM token stale cleanup (weekly) · Subscription trial expire check (daily 00:30 `Asia/Ho_Chi_Minh`) · Trial expiring T-3 days warn (daily 09:00 `Asia/Ho_Chi_Minh`, registered with explicit UTC cron) · Subscription upgrade attempt hết hạn/reconciliation mỗi phút |
 
 **Redis namespace conventions (canonical — tránh conflict cross-service):**
@@ -5486,7 +5498,7 @@ Email/password registration: tạo User `status=PENDING_EMAIL_VERIFICATION` → 
 - **`ParcelStats`** — Counter table per (operatorId, date) cho reporting.
 - **`ParcelTransitLeg` + `ParcelCustodyEvent` + `ParcelCurrentCustody`** — multi-leg physical chain of custody append-only và latest-location projection; status history không thay thế custody proof.
 - **`ParcelIncident` + `ParcelSearchTask`** — wrong-stop/missing/unscanned/not-received/damage investigation, actor/evidence/deadline/result và `LOST_CONFIRMED` riêng khỏi `ParcelStatus`.
-- **`ParcelClaim` + `ParcelClaimEvidence` + `ParcelCompensationPolicy`** — sender claim, evidence, frozen declaration/rate/cap/fallback/version/award; default operator policy 50%/30 triệu.
+- **`ParcelClaim` + `ParcelClaimEvidence` + `ParcelCompensationPolicy`** — sender claim, evidence, frozen declaration/rate/cap/legacy fallback/version/award; default operator policy 50%/30 triệu; quyết định mới chỉ có cargo award khi proof VERIFIED.
 - **`UnidentifiedParcelPackage`** — temporary-tag lost-and-found record cho kiện không đọc được QR, được supervisor match lại với Parcel thật.
 - **`OutboxEvent`**.
 

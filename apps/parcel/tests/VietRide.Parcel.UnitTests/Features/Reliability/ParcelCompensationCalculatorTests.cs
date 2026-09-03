@@ -25,7 +25,7 @@ public sealed class ParcelCompensationCalculatorTests
             alreadyRefundedVnd: 0,
             compensationRatePercent: rate,
             policyCapVnd: cap,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
         award.CargoAwardVnd.Should().Be(expectedCargoAward);
         award.FreightRefundVnd.Should().Be(120_000);
@@ -43,7 +43,7 @@ public sealed class ParcelCompensationCalculatorTests
             alreadyRefundedVnd: 25_000,
             compensationRatePercent: 50,
             policyCapVnd: 30_000_000,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
         award.AssessedLossVnd.Should().Be(4_000_000);
         award.CargoAwardVnd.Should().Be(2_000_000);
@@ -51,22 +51,23 @@ public sealed class ParcelCompensationCalculatorTests
     }
 
     [Fact]
-    public void Calculate_WithoutProof_IsGuardedByDeclaredLiability()
+    public void Calculate_WithoutProof_DeclaredLiabilityIsNotAnAward()
     {
         var award = ParcelCompensationCalculator.Calculate(
             ParcelClaimProofStatus.NO_PROOF,
             provenDirectLossVnd: null,
             declaredValueVnd: 50_000_000,
-            freightCollectedVnd: 10_000_000,
+            freightCollectedVnd: 20_000_000,
             alreadyRefundedVnd: 0,
             compensationRatePercent: 50,
             policyCapVnd: 30_000_000,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
         award.AssessedLossVnd.Should().BeNull();
         award.DeclaredLiabilityVnd.Should().Be(25_000_000);
-        award.FallbackAmountVnd.Should().Be(40_000_000);
-        award.CargoAwardVnd.Should().Be(25_000_000);
+        award.FallbackAmountVnd.Should().BeNull();
+        award.CargoAwardVnd.Should().Be(0);
+        award.TotalAwardVnd.Should().Be(20_000_000);
     }
 
     [Theory]
@@ -83,16 +84,16 @@ public sealed class ParcelCompensationCalculatorTests
             alreadyRefundedVnd: 0,
             compensationRatePercent: 50,
             policyCapVnd: 30_000_000,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
-        award.CalculationBasis.Should().Be("NO_PROOF_FALLBACK");
-        award.CargoAwardVnd.Should().Be(150_000);
+        award.CalculationBasis.Should().Be("NO_VERIFIED_PROOF_FREIGHT_ONLY");
+        award.CargoAwardVnd.Should().Be(0);
         award.FreightRefundVnd.Should().Be(150_000);
-        award.TotalAwardVnd.Should().Be(300_000);
+        award.TotalAwardVnd.Should().Be(150_000);
     }
 
     [Fact]
-    public void Calculate_WithoutDeclaredValue_PreservesFallbackPolicy()
+    public void Calculate_WithoutDeclaredValue_RefundsFreightOnly()
     {
         var award = ParcelCompensationCalculator.Calculate(
             ParcelClaimProofStatus.NO_PROOF,
@@ -102,24 +103,28 @@ public sealed class ParcelCompensationCalculatorTests
             alreadyRefundedVnd: 0,
             compensationRatePercent: 50,
             policyCapVnd: 30_000_000,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
         award.DeclaredLiabilityVnd.Should().BeNull();
-        award.CargoAwardVnd.Should().Be(30_000_000);
+        award.FallbackAmountVnd.Should().BeNull();
+        award.CalculationBasis.Should().Be("NO_VERIFIED_PROOF_FREIGHT_ONLY");
+        award.CargoAwardVnd.Should().Be(0);
+        award.FreightRefundVnd.Should().Be(10_000_000);
+        award.TotalAwardVnd.Should().Be(10_000_000);
     }
 
     [Fact]
     public void Calculate_RefundedFreightAndRounding_UseFinancialRules()
     {
         var award = ParcelCompensationCalculator.Calculate(
-            ParcelClaimProofStatus.NO_PROOF,
-            provenDirectLossVnd: null,
+            ParcelClaimProofStatus.VERIFIED,
+            provenDirectLossVnd: 3,
             declaredValueVnd: 3,
             freightCollectedVnd: 100,
             alreadyRefundedVnd: 100,
             compensationRatePercent: 50,
             policyCapVnd: 30_000_000,
-            noProofFallbackMultiplier: 4);
+            noProofFallbackMultiplier: 2);
 
         award.DeclaredLiabilityVnd.Should().Be(2);
         award.CargoAwardVnd.Should().Be(2);
@@ -127,9 +132,9 @@ public sealed class ParcelCompensationCalculatorTests
     }
 
     [Fact]
-    public void Calculate_FallbackOverflow_IsRejected()
+    public void Calculate_UnusedLegacyMultiplier_CannotOverflowFreightOnlyAward()
     {
-        var action = () => ParcelCompensationCalculator.Calculate(
+        var award = ParcelCompensationCalculator.Calculate(
             ParcelClaimProofStatus.NO_PROOF,
             provenDirectLossVnd: null,
             declaredValueVnd: null,
@@ -137,9 +142,54 @@ public sealed class ParcelCompensationCalculatorTests
             alreadyRefundedVnd: 0,
             compensationRatePercent: 50,
             policyCapVnd: long.MaxValue,
-            noProofFallbackMultiplier: 2);
+            noProofFallbackMultiplier: int.MaxValue);
 
-        action.Should().Throw<CodedValidationException>();
+        award.FallbackAmountVnd.Should().BeNull();
+        award.CargoAwardVnd.Should().Be(0);
+        award.TotalAwardVnd.Should().Be(long.MaxValue);
+    }
+
+    public static IEnumerable<object?[]> UnverifiedAwardCases()
+    {
+        foreach (var proof in new[] { ParcelClaimProofStatus.NO_PROOF, ParcelClaimProofStatus.UNVERIFIED })
+            foreach (var declaration in new long?[] { null, 0, 200_000, 10_000_000, long.MaxValue })
+                foreach (var multiplier in new[] { 1, 2, 3, 4, int.MaxValue })
+                    foreach (var refunded in new long[] { 0, 50_000, 150_000, 200_000 })
+                        yield return [proof, declaration, multiplier, refunded];
+    }
+
+    [Theory]
+    [MemberData(nameof(UnverifiedAwardCases))]
+    public void Calculate_Unverified_DeclarationAndLegacyMultiplierNeverCreateCargoAward(
+        ParcelClaimProofStatus proof,
+        long? declaredValue,
+        int multiplier,
+        long refunded)
+    {
+        var award = ParcelCompensationCalculator.Calculate(
+            proof, null, declaredValue, 150_000, refunded, 50, 30_000_000, multiplier);
+
+        award.CalculationBasis.Should().Be("NO_VERIFIED_PROOF_FREIGHT_ONLY");
+        award.AssessedLossVnd.Should().BeNull();
+        award.FallbackAmountVnd.Should().BeNull();
+        award.CargoAwardVnd.Should().Be(0);
+        award.FreightRefundVnd.Should().Be(Math.Max(150_000 - refunded, 0));
+        award.TotalAwardVnd.Should().Be(award.FreightRefundVnd);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(200_000L)]
+    [InlineData(10_000_000L)]
+    [InlineData(long.MaxValue)]
+    public void Calculate_Verified_InflatingDeclarationBeyondProvenLossDoesNotIncreaseAward(long? declaration)
+    {
+        var award = ParcelCompensationCalculator.Calculate(
+            ParcelClaimProofStatus.VERIFIED, 200_000, declaration, 150_000, 0, 50, 30_000_000, 4);
+
+        award.AssessedLossVnd.Should().Be(200_000);
+        award.CargoAwardVnd.Should().Be(100_000);
+        award.TotalAwardVnd.Should().Be(250_000);
     }
 
     [Fact]

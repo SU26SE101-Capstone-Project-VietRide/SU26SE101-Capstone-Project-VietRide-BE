@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using VietRide.Payment.Application.Abstractions.Repositories;
 using VietRide.Payment.Domain.Entities;
+using VietRide.Payment.Domain.Enums;
 
 namespace VietRide.Payment.Infrastructure.Persistence.Repositories;
 
@@ -14,4 +15,15 @@ internal sealed class OperatorWalletTransactionRepository : IOperatorWalletTrans
     public void Remove(OperatorWalletTransaction entity) => throw new NotSupportedException("Operator wallet transactions are immutable.");
     public IQueryable<OperatorWalletTransaction> Query() => _db.OperatorWalletTransactions;
     public IQueryable<OperatorWalletTransaction> QueryNoTracking() => _db.OperatorWalletTransactions.AsNoTracking();
+
+    public Task<OperatorWalletTransaction?> FindByReferenceAsync(
+        Guid operatorId,
+        OperatorWalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => _db.OperatorWalletTransactions.FirstOrDefaultAsync(
+            transaction => transaction.OperatorId == operatorId
+                && transaction.ReferenceType == referenceType
+                && transaction.ReferenceId == referenceId,
+            cancellationToken);
 }

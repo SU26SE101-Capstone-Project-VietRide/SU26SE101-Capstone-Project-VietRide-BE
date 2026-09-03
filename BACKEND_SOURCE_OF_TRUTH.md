@@ -1,6 +1,6 @@
 # VietRide — Backend Source of Truth
 
-> **Phiên bản:** 1.91.0
+> **Phiên bản:** 1.93.0
 > **Trạng thái:** ACTIVE — sealed for capstone v1
 > **Cập nhật lần cuối:** 2026-09-03
 > **Capstone:** SU26SE101 — SU26
@@ -3382,12 +3382,19 @@ Accepted decision-evidence links are append-only reviewer/time audit records, an
 keys guarantee each evidence belongs to the decided claim. Historical decisions are not
 recalculated or backfilled and therefore may retain null proof status and no links.
 
-The shared calculator uses verified direct loss only for `VERIFIED`. For `UNVERIFIED|NO_PROOF`, the
-fallback is capped by both frozen cargo policy cap and declared-value liability when a declaration
-exists; undeclared Parcels retain the current fallback/cap rule. The policy cap applies only to the
-cargo award. Freight refund is separately reduced by prior refunds and added to total award.
+The shared calculator uses verified direct loss only for `VERIFIED`, capped by declared value
+when present, then applies the frozen rate and cargo cap. For `UNVERIFIED|NO_PROOF`, cargo is zero
+regardless of declared value: self-declaration never establishes proven loss. This rule applies
+to all new claim/appeal decisions, including pending cases with legacy multiplier snapshots;
+previous decisions/payouts remain unchanged. Both domain approval methods also reject positive
+cargo without verified proof. `noProofFallbackMultiplier` remains deprecated API/DB audit metadata
+but never participates in new awards. Preview returns `NO_VERIFIED_PROOF_FREIGHT_ONLY` for both
+non-verified statuses, null assessed loss and null fallback amount. The policy cap applies only
+to cargo. Freight refund is separately reduced by prior refunds and added to total award.
 Operator Admin preview endpoints expose this breakdown without idempotency, while decision
 mutations require idempotency and always recalculate under their existing transaction/lock.
+Claim preview permits a zero-total breakdown for explanation; approval still requires a positive
+total. Appeal preview/approval both require a positive supplementary delta.
 
 Assistant manual custody exceptions use a two-step approval aggregate. The assigned Assistant
 submits the observed location/evidence and the system opens an approval-pending incident and
@@ -3968,7 +3975,7 @@ permitted.
 | `TripSettlementWeeklyAutoSettleJob` | Recurring | Weekly Mon 09:00 Asia/Ho_Chi_Minh | Debit PlatformWallet + credit OperatorWallet cho mọi settlement ELIGIBLE |
 | `InvoicePdfRetryJob` | Triggered (retry) | Post-payment-success event | Generate PDF, retry max 5 nếu fail |
 | `RefundFailureRetryJob` | Recurring | Every 10 phút | Retry refund từ RefundFailureLog, max 5 lần |
-| `ParcelCompensationFundingRetryJob` | Recurring every 10 minutes | `parcel_compensation_payouts.status=FUNDING_PENDING` | Retry at most 100 oldest payouts against the same operator's current funding source; unique claim/wallet references prevent double credit and operator wallet cannot become negative |
+| `ParcelCompensationFundingRetryJob` | Recurring every 10 minutes | `parcel_compensation_payouts.status=FUNDING_PENDING` or new `PAID` rows with `source_event_id` but no `paid_event_id` | Retry at most 100 oldest unfunded payouts and reconcile at most 100 incomplete paid payouts; source debit, passenger credit, operator ledger and PAID Outbox are independently detected/repaired under one transaction, while unique references prevent double movement. Pre-marker legacy PAID rows require replay/manual reconciliation because their original source identity cannot be inferred safely. |
 | `PlatformWalletTransactionLinkBackfillJob` | Recurring every 5 minutes | PlatformWallet transaction chưa có link và khác manual adjustment | Bounded tối đa 100 dòng/lần; chỉ insert link khi chứng minh được từ dữ liệu Payment-owned, không đoán hoặc rewrite ledger; unique identity làm replay idempotent |
 
 ### 10.2 BullMQ jobs (NestJS services)
@@ -4451,6 +4458,8 @@ PR fail nếu bất kỳ step nào fail.
 
 | Version | Date | Author | Change |
 |---|---|---|---|
+| **1.93.0** | 2026-09-03 | Codex | **MINOR** — Bỏ hoàn toàn cargo fallback cho mọi quyết định Parcel claim/appeal mới: UNVERIFIED/NO_PROOF chỉ hoàn cước còn lại, không dùng giá tự khai để tạo award. VERIFIED dùng proven loss, khai giá chỉ là trần, giữ rate/cap; bổ sung domain guard, regression cho khai khống/no declaration/legacy multiplier/zero delta. Multiplier giữ làm metadata tương thích; preview basis và FE handoff cập nhật. Không sửa quyết định/payout lịch sử, event hoặc schema. |
+| **1.92.0** | 2026-09-03 | Codex | **MINOR** — Siết Parcel compensation demo policy: fallback không chứng từ mặc định/tối đa giảm 4x xuống 2x; parcel không khai giá và không có verified evidence chỉ được hoàn cước, không có cargo award; declared value không được coi là proof. Payment payout lưu source/paid event completion markers, thêm unique compensation debit indexes và recurring reconciliation để tự bù ledger/PAID Outbox còn thiếu mà không credit PassengerWallet lần hai. |
 | **1.91.0** | 2026-09-03 | Codex | **MINOR** — Khóa financial policy cho Parcel claim/appeal: decision mới bắt buộc proof status và accepted-evidence audit immutable; fallback không chứng từ bị chặn bởi declared liability khi có khai giá; thêm hai preview endpoint OPERATOR_ADMIN, breakdown cargo/refund/total, nullable legacy reads, error tenant-masked và canonical DDL/migration. `policyCapVnd` chỉ cap cargo; event Payment/Notification, payout lịch sử và state sync giữ nguyên. |
 | **1.90.0** | 2026-09-03 | Codex | **MINOR** — Thêm ba fact Outbox cho vòng đời yêu cầu gói tùy chỉnh và ba Notification type tương ứng. Submitted fan-out tới System Admin; approved/rejected chỉ tới Operator Admin đúng tenant. Cả ba chỉ lưu chuông web và phát Socket.IO với semantic action, không enqueue FCM/email, không mở rộng trạng thái thanh toán hay backfill dữ liệu cũ. |
 | **1.89.0** | 2026-09-02 | Codex | **MINOR** — Đồng bộ đối soát PlatformWallet Admin và OperatorWallet tenant-scoped: thêm projection link allocation immutable, bounded idempotent backfill, canonical positive payable dùng chung, taxonomy/enrichment/completeness additive, summary Admin và hai XLSX reconciliation export fail-closed. Mọi payment/refund/settlement/subscription/compensation movement mới ghi link atomically; giữ nguyên balance/refund/settlement, không thêm commission, dependency hoặc Gateway route. |

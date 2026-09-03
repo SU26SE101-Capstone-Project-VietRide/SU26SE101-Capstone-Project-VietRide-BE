@@ -6,6 +6,45 @@ namespace VietRide.Parcel.UnitTests.Domain;
 
 public sealed class ParcelClaimAppealTests
 {
+    [Theory]
+    [InlineData(ParcelClaimProofStatus.NO_PROOF)]
+    [InlineData(ParcelClaimProofStatus.UNVERIFIED)]
+    [InlineData((ParcelClaimProofStatus)999)]
+    public void ClaimApproval_WithoutVerifiedProof_CannotBypassCalculator(ParcelClaimProofStatus proof)
+    {
+        var claim = ParcelClaim.Submit(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            50_000_000, 1, 50, 30_000_000, 4);
+        claim.BeginReview();
+
+        var action = () => claim.Approve(proof, null, 50, 30_000_000, 100_000, 150_000,
+            "Attempted unverified cargo award.", Guid.NewGuid(), DateTimeOffset.UtcNow);
+
+        action.Should().Throw<ArgumentException>();
+        claim.Status.Should().Be(ParcelClaimStatus.UNDER_REVIEW);
+        claim.ProofStatus.Should().BeNull();
+        claim.TotalAwardVnd.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(ParcelClaimProofStatus.NO_PROOF)]
+    [InlineData(ParcelClaimProofStatus.UNVERIFIED)]
+    [InlineData((ParcelClaimProofStatus)999)]
+    public void AppealApproval_WithoutVerifiedProof_CannotBypassCalculator(ParcelClaimProofStatus proof)
+    {
+        var claim = CreateRejectedClaim();
+        var appeal = ParcelClaimAppeal.Submit(claim, "Please reconsider.", claim.BeneficiaryUserId,
+            DateTimeOffset.UtcNow, Guid.NewGuid());
+        appeal.BeginReview();
+
+        var action = () => appeal.ApproveAdjustment(proof, null, 100_000, 150_000,
+            "Attempted unverified cargo award.", Guid.NewGuid(), DateTimeOffset.UtcNow);
+
+        action.Should().Throw<ArgumentException>();
+        appeal.Status.Should().Be(ParcelClaimAppealStatus.UNDER_REVIEW);
+        appeal.ProofStatus.Should().BeNull();
+        appeal.SupplementaryAwardVnd.Should().Be(0);
+    }
+
     [Fact]
     public void Submit_FromRejectedClaim_PreservesOriginalDecisionAndCreatesSeparateCase()
     {

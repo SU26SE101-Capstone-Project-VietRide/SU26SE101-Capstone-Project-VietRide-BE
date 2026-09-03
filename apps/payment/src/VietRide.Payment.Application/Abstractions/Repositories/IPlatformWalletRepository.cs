@@ -15,6 +15,12 @@ public sealed record PlatformWalletTransactionLinkInput(
 
 public interface IPlatformWalletRepository : IRepository<PlatformWallet, Guid>
 {
+    Task<PlatformWalletTransaction?> FindTransactionByReferenceAsync(
+        PlatformWalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => Task.FromResult<PlatformWalletTransaction?>(null);
+
     Task<PlatformWallet> GetSingletonAsync(CancellationToken cancellationToken);
 
     Task<PlatformWalletTransaction> CreditAsync(

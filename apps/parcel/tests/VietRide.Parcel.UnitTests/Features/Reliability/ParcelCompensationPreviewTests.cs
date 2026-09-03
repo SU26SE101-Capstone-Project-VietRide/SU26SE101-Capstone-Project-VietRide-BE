@@ -15,6 +15,112 @@ namespace VietRide.Parcel.UnitTests.Features.Reliability;
 
 public sealed class ParcelCompensationPreviewTests
 {
+    [Theory]
+    [InlineData("NO_PROOF", null)]
+    [InlineData("NO_PROOF", 200_000L)]
+    [InlineData("NO_PROOF", 50_000_000L)]
+    [InlineData("UNVERIFIED", null)]
+    [InlineData("UNVERIFIED", 200_000L)]
+    [InlineData("UNVERIFIED", 50_000_000L)]
+    public async Task ClaimWithoutVerifiedProof_PreviewAndDecisionRefundOnlyFreight(
+        string proofStatus,
+        long? declaredValue)
+    {
+        var fixture = CreateFixture(declaredValue, freightVnd: 150_000);
+        fixture.Reliability.GetClaimByIdForUpdateAsync(fixture.Claim.Id, Arg.Any<CancellationToken>())
+            .Returns(fixture.Claim);
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(DateTimeOffset.UtcNow);
+        var handler = new DecideParcelClaimCommandHandler(fixture.Parcels, fixture.Reliability, outbox, clock);
+
+        var preview = await fixture.Handler.Handle(
+            new PreviewParcelClaimAwardQuery(fixture.Claim.Id, fixture.Claim.OperatorId, proofStatus, null, []),
+            CancellationToken.None);
+        fixture.Claim.Status.Should().Be(ParcelClaimStatus.SUBMITTED);
+        var command = new DecideParcelClaimCommand(
+            fixture.Claim.Id, fixture.Claim.OperatorId, Guid.NewGuid(), "APPROVE", proofStatus, null, [],
+            "No verified value evidence; remaining freight only.");
+        var response = await handler.Handle(command, CancellationToken.None);
+
+        preview.CalculationBasis.Should().Be("NO_VERIFIED_PROOF_FREIGHT_ONLY");
+        preview.FallbackAmountVnd.Should().BeNull();
+        response.CargoAwardVnd.Should().Be(0);
+        response.FreightRefundVnd.Should().Be(150_000);
+        response.TotalAwardVnd.Should().Be(preview.TotalAwardVnd).And.Be(150_000);
+        response.ProofStatus.Should().Be(proofStatus);
+        response.AcceptedEvidenceIds.Should().BeEmpty();
+        await fixture.Reliability.DidNotReceive().AddClaimDecisionEvidenceAsync(
+            Arg.Any<ParcelClaimDecisionEvidence>(), Arg.Any<CancellationToken>());
+
+        var replay = () => handler.Handle(command, CancellationToken.None);
+        (await replay.Should().ThrowAsync<CodedConflictException>()).Which.ErrorCode
+            .Should().Be("PARCEL_CLAIM_ALREADY_DECIDED");
+        await outbox.Received(1).EnqueueAsync(
+            Arg.Any<Guid>(), "parcel.claim.decided", Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("NO_PROOF", 150_000L)]
+    [InlineData("UNVERIFIED", 200_000L)]
+    public async Task ClaimWithoutVerifiedProof_FullyRefundedFreightCannotProduceAPayout(string proofStatus, long refunded)
+    {
+        var fixture = CreateFixture(declaredValueVnd: 50_000_000, freightVnd: 150_000);
+        SetPrivateProperty(fixture.Parcel, nameof(ParcelEntity.RefundedAmountVnd), Money.FromRaw(refunded));
+        fixture.Reliability.GetClaimByIdForUpdateAsync(fixture.Claim.Id, Arg.Any<CancellationToken>())
+            .Returns(fixture.Claim);
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        var handler = new DecideParcelClaimCommandHandler(
+            fixture.Parcels, fixture.Reliability, outbox, Substitute.For<IClock>());
+
+        var preview = await fixture.Handler.Handle(
+            new PreviewParcelClaimAwardQuery(fixture.Claim.Id, fixture.Claim.OperatorId, proofStatus, null, []),
+            CancellationToken.None);
+        preview.TotalAwardVnd.Should().Be(0);
+        var action = () => handler.Handle(new DecideParcelClaimCommand(
+            fixture.Claim.Id, fixture.Claim.OperatorId, Guid.NewGuid(), "APPROVE", proofStatus, null, [],
+            "Freight already refunded."), CancellationToken.None);
+
+        (await action.Should().ThrowAsync<CodedValidationException>()).Which.ErrorCode.Should().Be("VALIDATION_ERROR");
+        await outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("NO_PROOF")]
+    [InlineData("UNVERIFIED")]
+    public async Task AppealWithoutVerifiedProof_CannotRepayFreightFromPaidClaim(string proofStatus)
+    {
+        var fixture = CreateFixture(declaredValueVnd: 50_000_000, freightVnd: 150_000);
+        fixture.Claim.BeginReview();
+        fixture.Claim.Approve(ParcelClaimProofStatus.NO_PROOF, null, 50, 30_000_000, 0, 150_000,
+            "Freight only.", Guid.NewGuid(), DateTimeOffset.UtcNow);
+        fixture.Claim.MarkPaid(Guid.NewGuid(), DateTimeOffset.UtcNow);
+        var appeal = ParcelClaimAppeal.Submit(fixture.Claim, "Please reconsider.", fixture.Claim.BeneficiaryUserId,
+            DateTimeOffset.UtcNow, Guid.NewGuid());
+        fixture.Reliability.GetClaimAppealByIdAsync(appeal.Id, Arg.Any<CancellationToken>()).Returns(appeal);
+        fixture.Reliability.GetClaimAppealByIdForUpdateAsync(appeal.Id, Arg.Any<CancellationToken>()).Returns(appeal);
+        var outbox = Substitute.For<IIntegrationEventOutbox>();
+        var previewHandler = new PreviewParcelClaimAppealAdjustmentQueryHandler(fixture.Parcels, fixture.Reliability);
+        var decisionHandler = new DecideParcelClaimAppealCommandHandler(
+            fixture.Parcels, fixture.Reliability, outbox, Substitute.For<IClock>());
+
+        var preview = () => previewHandler.Handle(new PreviewParcelClaimAppealAdjustmentQuery(
+            appeal.Id, appeal.OperatorId, proofStatus, null, []), CancellationToken.None);
+        (await preview.Should().ThrowAsync<CodedValidationException>()).Which.ErrorCode
+            .Should().Be("PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED");
+        appeal.Status.Should().Be(ParcelClaimAppealStatus.SUBMITTED);
+        var decision = () => decisionHandler.Handle(new DecideParcelClaimAppealCommand(
+            appeal.Id, appeal.OperatorId, Guid.NewGuid(), "APPROVE_ADJUSTMENT", proofStatus, null, [],
+            "Declaration is not proof."), CancellationToken.None);
+        (await decision.Should().ThrowAsync<CodedValidationException>()).Which.ErrorCode
+            .Should().Be("PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED");
+        fixture.Claim.TotalAwardVnd.Should().Be(150_000);
+        fixture.Claim.Status.Should().Be(ParcelClaimStatus.PAID);
+        await outbox.DidNotReceive().EnqueueAsync(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task ClaimPreview_VerifiedProof_ReturnsAuthoritativeBreakdown()
     {

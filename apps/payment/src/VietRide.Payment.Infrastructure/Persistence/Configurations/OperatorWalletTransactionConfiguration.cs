@@ -37,5 +37,8 @@ internal sealed class OperatorWalletTransactionConfiguration : IEntityTypeConfig
         builder.HasIndex(x => new { x.OperatorId, x.Type, x.ReferenceType, x.ReferenceId })
             .HasDatabaseName("uq_operator_wallet_transactions_subscription")
             .HasFilter("reference_type = 'SUBSCRIPTION_PAYMENT'").IsUnique();
+        builder.HasIndex(x => new { x.ReferenceType, x.ReferenceId, x.OperatorId, x.Type })
+            .HasDatabaseName("uq_operator_wallet_transactions_parcel_compensation")
+            .HasFilter("reference_type = 'PARCEL_COMPENSATION'").IsUnique();
     }
 }

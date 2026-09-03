@@ -356,6 +356,9 @@ CREATE INDEX idx_platform_wallet_transactions_reference
 CREATE UNIQUE INDEX uq_platform_wallet_transactions_subscription
     ON platform_wallet_transactions (type, reference_type, reference_id)
     WHERE reference_type = 'SUBSCRIPTION_PAYMENT';
+CREATE UNIQUE INDEX uq_platform_wallet_transactions_parcel_compensation
+    ON platform_wallet_transactions (reference_type, reference_id, type)
+    WHERE reference_type = 'PARCEL_COMPENSATION';
 CREATE INDEX idx_platform_wallet_transactions_actor_user_id
     ON platform_wallet_transactions (actor_user_id)
     WHERE actor_user_id IS NOT NULL;
@@ -469,6 +472,9 @@ CREATE INDEX idx_operator_wallet_transactions_reference
 CREATE UNIQUE INDEX uq_operator_wallet_transactions_subscription
     ON operator_wallet_transactions (operator_id, type, reference_type, reference_id)
     WHERE reference_type = 'SUBSCRIPTION_PAYMENT';
+CREATE UNIQUE INDEX uq_operator_wallet_transactions_parcel_compensation
+    ON operator_wallet_transactions (reference_type, reference_id, operator_id, type)
+    WHERE reference_type = 'PARCEL_COMPENSATION';
 
 COMMENT ON TABLE operator_wallet_transactions IS
     'Immutable wallet ledger for OperatorWallet. INSERT atomic with UPDATE operator_wallets via optimistic lock.';
@@ -668,12 +674,18 @@ CREATE TABLE parcel_compensation_payouts (
     funding_source VARCHAR(24) NULL,     -- PLATFORM_HOLDING | OPERATOR_WALLET
     wallet_transaction_id UUID NULL,     -- logical reference wallet_transactions
     paid_at TIMESTAMPTZ NULL,
+    source_event_id UUID NULL,           -- immutable consumed decision event identity
+    paid_event_id UUID NULL,             -- outbox identity; marker that PAID was published
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_parcel_compensation_payout_amount CHECK (amount_vnd > 0)
 );
 CREATE UNIQUE INDEX uq_parcel_compensation_payouts_claim
     ON parcel_compensation_payouts (claim_id);
+CREATE UNIQUE INDEX ix_parcel_compensation_payouts_source_event_id
+    ON parcel_compensation_payouts (source_event_id) WHERE source_event_id IS NOT NULL;
+CREATE UNIQUE INDEX ix_parcel_compensation_payouts_paid_event_id
+    ON parcel_compensation_payouts (paid_event_id) WHERE paid_event_id IS NOT NULL;
 CREATE INDEX idx_parcel_compensation_payouts_operator_status
     ON parcel_compensation_payouts (operator_id, status, created_at);
 

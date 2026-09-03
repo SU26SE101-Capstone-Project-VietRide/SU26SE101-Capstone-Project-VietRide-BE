@@ -35,7 +35,7 @@ public sealed class ParcelReliabilityStateTests
             .Update(
                 compensationRatePercent: 49,
                 maxCompensationVnd: 29_000_000,
-                noProofFallbackMultiplier: 4,
+                noProofFallbackMultiplier: 2,
                 claimWindowDays: 30,
                 searchSlaHours: 72,
                 decisionSlaBusinessDays: 7,
@@ -44,6 +44,24 @@ public sealed class ParcelReliabilityStateTests
                 updatedByUserId: Guid.NewGuid());
 
         action.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void CompensationPolicy_FallbackAboveTwo_IsRejected()
+    {
+        var action = () => ParcelCompensationPolicy.CreateDefault(Guid.NewGuid(), Guid.NewGuid())
+            .Update(
+                compensationRatePercent: 50,
+                maxCompensationVnd: 30_000_000,
+                noProofFallbackMultiplier: 3,
+                claimWindowDays: 30,
+                searchSlaHours: 72,
+                decisionSlaBusinessDays: 7,
+                payoutSlaBusinessDays: 3,
+                belowDefaultAcknowledged: false,
+                updatedByUserId: Guid.NewGuid());
+
+        action.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Fact]

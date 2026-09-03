@@ -1,0 +1,1274 @@
+{
+  "tag": "8978aec38a",
+  "startedAt": "2026-09-03T08:35:40.747Z",
+  "result": "PASS",
+  "scope": "Simulated users/one trip/accepted lost parcels; real Gateway, JWT, HTTP, PostgreSQL, Redis, RabbitMQ and Payment payout.",
+  "excluded": "Registration/email, booking, carriage/check-in/search SLA, VNPay, Notification, full-day suites and Docker builds.",
+  "resources": {
+    "operator": "363603fa-fec6-4ec6-985d-dca37deacc77",
+    "foreignOperator": "d7f8d313-5dfc-43b4-9547-facb40c8686e",
+    "admin": "6c82d894-4bc5-472f-bc9e-2583d4ccba12",
+    "foreignAdmin": "dc53a2a4-e75a-4b93-8d5a-ed0b4072df11",
+    "staff": "f5bd6781-b5eb-4757-b170-3524a9db72f2",
+    "driver": "2e6470c7-67f7-4e67-a558-b487e897ce23",
+    "assistant": "04c7cae5-2e10-4427-8cbd-5b8ab6820a00",
+    "passenger": "a6f4bfa4-238f-409c-9d63-e752229ce1b1",
+    "origin": "945b3097-39a0-4614-884d-f54300339dd3",
+    "destination": "4ff8d377-442b-48dd-b32e-4a8879cca5bf",
+    "vehicleType": "b57f4041-79e0-42a9-b1e0-7f2aab74b843",
+    "vehicle": "4490f554-4e63-4a75-8b1f-a8b021a4c69a",
+    "route": "6117b9bf-dad0-45d7-a2a1-49c35cf82cd1",
+    "trip": "05b4a595-cd8a-4f2c-ba69-02ad280915ba",
+    "databases": {
+      "identity": "pcl_e2e_8978aec38a_identity",
+      "trip": "pcl_e2e_8978aec38a_trip",
+      "payment": "pcl_e2e_8978aec38a_payment",
+      "parcel": "pcl_e2e_8978aec38a_parcel"
+    },
+    "undeclared": {
+      "label": "undeclared",
+      "parcelId": "ab27dd80-c042-4f3a-8a62-1c716b823c4f",
+      "incidentId": "48bdf56f-33dc-4a9f-82cf-2fc88138e251",
+      "claimId": "59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb",
+      "evidenceId": "f8f9da24-920d-4e8d-ab0c-e47eee6c7fce",
+      "declaration": null,
+      "refunded": 0
+    },
+    "declared": {
+      "label": "declared",
+      "parcelId": "b0e9b708-fcb7-4509-9732-3fa030cd01a3",
+      "incidentId": "4b588431-7a0a-4201-bb5a-feb163073989",
+      "claimId": "bfb555be-e503-4829-a962-fcb0fdfc9dda",
+      "evidenceId": "406e9469-6ec6-4587-8d29-ebe950dd2b39",
+      "declaration": 200000,
+      "refunded": 0
+    },
+    "inflated": {
+      "label": "inflated",
+      "parcelId": "efaa0682-2c0e-43a4-934e-a446b06a5f6b",
+      "incidentId": "dfec2c78-507e-4b0a-ae14-fbc7345c7198",
+      "claimId": "a9f00a6b-5eaf-4af1-a48f-1bdc86dd1904",
+      "evidenceId": "f2b978d7-fdaa-41ae-9e15-0d8216fe0a71",
+      "declaration": 10000000,
+      "refunded": 0
+    },
+    "verified": {
+      "label": "verified",
+      "parcelId": "704a46eb-efac-4261-80be-ba0c23faf44e",
+      "incidentId": "31b6b393-71e9-423f-bc01-d9a547b608ad",
+      "claimId": "abb1476e-e4fd-4821-8c02-57974ce8e224",
+      "evidenceId": "cc236742-73b6-4a65-b9e6-7496ace89a33",
+      "declaration": 10000000,
+      "refunded": 0
+    },
+    "verified-null": {
+      "label": "verified-null",
+      "parcelId": "9a259791-7359-4252-af37-c1370146f27b",
+      "incidentId": "2d40a8e4-b744-4950-9c16-da4690ddd753",
+      "claimId": "597ae1f0-b7b9-4fa5-9f9b-9bc54c86f990",
+      "evidenceId": "2d36e425-f94a-4555-943d-b6059d681161",
+      "declaration": null,
+      "refunded": 0
+    },
+    "fully-refunded": {
+      "label": "fully-refunded",
+      "parcelId": "c1f1a4d4-89bc-4d6e-8e1e-c5c7360fa08e",
+      "incidentId": "a81dffa4-4ef6-40bd-9ccd-336755927274",
+      "claimId": "ceaab576-0183-467c-a7dc-c296c1cdb44a",
+      "evidenceId": "a9362961-9cef-4a93-bf21-3e6de5b5dd1a",
+      "declaration": 10000000,
+      "refunded": 150000
+    },
+    "part-refunded": {
+      "label": "part-refunded",
+      "parcelId": "737c9292-d2fc-41a3-86d7-a74536289dd9",
+      "incidentId": "213508b3-0713-4ca8-94bc-1988ba864b01",
+      "claimId": "5a5b9cce-e6a1-4d63-a109-d52ca7e81858",
+      "evidenceId": "75718544-9d0c-4982-9585-24a3f8276b5e",
+      "declaration": 10000000,
+      "refunded": 50000
+    },
+    "appealId": "78aa8f5d-09d8-4a01-a4de-623da6174330"
+  },
+  "checks": [
+    {
+      "label": "gateway live health"
+    },
+    {
+      "label": "identity live health"
+    },
+    {
+      "label": "trip live health"
+    },
+    {
+      "label": "payment live health"
+    },
+    {
+      "label": "parcel live health"
+    },
+    {
+      "label": "Gateway -> identity health"
+    },
+    {
+      "label": "Gateway -> trip health"
+    },
+    {
+      "label": "Gateway -> payment health"
+    },
+    {
+      "label": "Gateway -> parcel health"
+    },
+    {
+      "label": "Parcel rejects a correctly shaped Internal JWT with a forged signature"
+    },
+    {
+      "label": "RabbitMQ management reachable; isolated vietride.events topic exchange exists"
+    },
+    {
+      "label": "Minimal users, assigned driver/assistant and ONE simulated completed trip seeded"
+    },
+    {
+      "label": "Gateway role/tenant fences, proof matrix, wrong/duplicate evidence; failed decisions remain SUBMITTED"
+    },
+    {
+      "label": "undeclared: preview = mutation = PAID = wallet/ledger; replay safe",
+      "details": {
+        "preview": {
+          "claimId": "59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb",
+          "appealId": null,
+          "proofStatus": "NO_PROOF",
+          "acceptedEvidenceIds": [],
+          "calculationBasis": "NO_VERIFIED_PROOF_FREIGHT_ONLY",
+          "provenDirectLossVnd": null,
+          "assessedLossVnd": null,
+          "declaredLiabilityVnd": null,
+          "fallbackAmountVnd": null,
+          "policySnapshot": {
+            "version": 1,
+            "compensationRatePercent": 50,
+            "maxCompensationVnd": 30000000,
+            "noProofFallbackMultiplier": 4,
+            "claimWindowDays": 30,
+            "searchSlaHours": 72,
+            "decisionSlaBusinessDays": 7,
+            "payoutSlaBusinessDays": 3
+          },
+          "cargoAwardVnd": 0,
+          "freightRefundVnd": 150000,
+          "totalAwardVnd": 150000,
+          "originalTotalAwardVnd": null,
+          "supplementaryAwardVnd": null
+        },
+        "snapshot": {
+          "payout": [
+            {
+              "status": "PAID",
+              "amount_vnd": 150000,
+              "funding_source": "PLATFORM_HOLDING",
+              "paid_event_id": "de37c1a2-483c-407e-b3e4-4606ad34b61b"
+            }
+          ],
+          "passenger": [
+            {
+              "type": "CREDIT",
+              "amount": 150000
+            }
+          ],
+          "platform": [
+            {
+              "type": "DEBIT",
+              "amount": 150000
+            }
+          ],
+          "operator": []
+        }
+      }
+    },
+    {
+      "label": "declared: preview = mutation = PAID = wallet/ledger; replay safe",
+      "details": {
+        "preview": {
+          "claimId": "bfb555be-e503-4829-a962-fcb0fdfc9dda",
+          "appealId": null,
+          "proofStatus": "NO_PROOF",
+          "acceptedEvidenceIds": [],
+          "calculationBasis": "NO_VERIFIED_PROOF_FREIGHT_ONLY",
+          "provenDirectLossVnd": null,
+          "assessedLossVnd": null,
+          "declaredLiabilityVnd": 100000,
+          "fallbackAmountVnd": null,
+          "policySnapshot": {
+            "version": 1,
+            "compensationRatePercent": 50,
+            "maxCompensationVnd": 30000000,
+            "noProofFallbackMultiplier": 4,
+            "claimWindowDays": 30,
+            "searchSlaHours": 72,
+            "decisionSlaBusinessDays": 7,
+            "payoutSlaBusinessDays": 3
+          },
+          "cargoAwardVnd": 0,
+          "freightRefundVnd": 150000,
+          "totalAwardVnd": 150000,
+          "originalTotalAwardVnd": null,
+          "supplementaryAwardVnd": null
+        },
+        "snapshot": {
+          "payout": [
+            {
+              "status": "PAID",
+              "amount_vnd": 150000,
+              "funding_source": "PLATFORM_HOLDING",
+              "paid_event_id": "c243a050-11f4-4f6a-8d4a-3763dbe2e5e2"
+            }
+          ],
+          "passenger": [
+            {
+              "type": "CREDIT",
+              "amount": 150000
+            }
+          ],
+          "platform": [
+            {
+              "type": "DEBIT",
+              "amount": 150000
+            }
+          ],
+          "operator": []
+        }
+      }
+    },
+    {
+      "label": "inflated: preview = mutation = PAID = wallet/ledger; replay safe",
+      "details": {
+        "preview": {
+          "claimId": "a9f00a6b-5eaf-4af1-a48f-1bdc86dd1904",
+          "appealId": null,
+          "proofStatus": "UNVERIFIED",
+          "acceptedEvidenceIds": [],
+          "calculationBasis": "NO_VERIFIED_PROOF_FREIGHT_ONLY",
+          "provenDirectLossVnd": null,
+          "assessedLossVnd": null,
+          "declaredLiabilityVnd": 5000000,
+          "fallbackAmountVnd": null,
+          "policySnapshot": {
+            "version": 1,
+            "compensationRatePercent": 50,
+            "maxCompensationVnd": 30000000,
+            "noProofFallbackMultiplier": 4,
+            "claimWindowDays": 30,
+            "searchSlaHours": 72,
+            "decisionSlaBusinessDays": 7,
+            "payoutSlaBusinessDays": 3
+          },
+          "cargoAwardVnd": 0,
+          "freightRefundVnd": 150000,
+          "totalAwardVnd": 150000,
+          "originalTotalAwardVnd": null,
+          "supplementaryAwardVnd": null
+        },
+        "snapshot": {
+          "payout": [
+            {
+              "status": "PAID",
+              "amount_vnd": 150000,
+              "funding_source": "PLATFORM_HOLDING",
+              "paid_event_id": "6b4dd764-744c-4b6d-a9d8-a4af35e5cccd"
+            }
+          ],
+          "passenger": [
+            {
+              "type": "CREDIT",
+              "amount": 150000
+            }
+          ],
+          "platform": [
+            {
+              "type": "DEBIT",
+              "amount": 150000
+            }
+          ],
+          "operator": []
+        }
+      }
+    },
+    {
+      "label": "verified: preview = mutation = PAID = wallet/ledger; replay safe",
+      "details": {
+        "preview": {
+          "claimId": "abb1476e-e4fd-4821-8c02-57974ce8e224",
+          "appealId": null,
+          "proofStatus": "VERIFIED",
+          "acceptedEvidenceIds": [
+            "cc236742-73b6-4a65-b9e6-7496ace89a33"
+          ],
+          "calculationBasis": "VERIFIED_LOSS",
+          "provenDirectLossVnd": 200000,
+          "assessedLossVnd": 200000,
+          "declaredLiabilityVnd": 5000000,
+          "fallbackAmountVnd": null,
+          "policySnapshot": {
+            "version": 1,
+            "compensationRatePercent": 50,
+            "maxCompensationVnd": 30000000,
+            "noProofFallbackMultiplier": 4,
+            "claimWindowDays": 30,
+            "searchSlaHours": 72,
+            "decisionSlaBusinessDays": 7,
+            "payoutSlaBusinessDays": 3
+          },
+          "cargoAwardVnd": 100000,
+          "freightRefundVnd": 150000,
+          "totalAwardVnd": 250000,
+          "originalTotalAwardVnd": null,
+          "supplementaryAwardVnd": null
+        },
+        "snapshot": {
+          "payout": [
+            {
+              "status": "PAID",
+              "amount_vnd": 250000,
+              "funding_source": "PLATFORM_HOLDING",
+              "paid_event_id": "5b8bf502-0884-4482-9bff-298755c1cf99"
+            }
+          ],
+          "passenger": [
+            {
+              "type": "CREDIT",
+              "amount": 250000
+            }
+          ],
+          "platform": [
+            {
+              "type": "DEBIT",
+              "amount": 250000
+            }
+          ],
+          "operator": []
+        }
+      }
+    },
+    {
+      "label": "verified-null: preview = mutation = PAID = wallet/ledger; replay safe",
+      "details": {
+        "preview": {
+          "claimId": "597ae1f0-b7b9-4fa5-9f9b-9bc54c86f990",
+          "appealId": null,
+          "proofStatus": "VERIFIED",
+          "acceptedEvidenceIds": [
+            "2d36e425-f94a-4555-943d-b6059d681161"
+          ],
+          "calculationBasis": "VERIFIED_LOSS",
+          "provenDirectLossVnd": 200000,
+          "assessedLossVnd": 200000,
+          "declaredLiabilityVnd": null,
+          "fallbackAmountVnd": null,
+          "policySnapshot": {
+            "version": 1,
+            "compensationRatePercent": 50,
+            "maxCompensationVnd": 30000000,
+            "noProofFallbackMultiplier": 4,
+            "claimWindowDays": 30,
+            "searchSlaHours": 72,
+            "decisionSlaBusinessDays": 7,
+            "payoutSlaBusinessDays": 3
+          },
+          "cargoAwardVnd": 100000,
+          "freightRefundVnd": 150000,
+          "totalAwardVnd": 250000,
+          "originalTotalAwardVnd": null,
+          "supplementaryAwardVnd": null
+        },
+        "snapshot": {
+          "payout": [
+            {
+              "status": "PAID",
+              "amount_vnd": 250000,
+              "funding_source": "PLATFORM_HOLDING",
+              "paid_event_id": "1e777cad-fc3c-460e-8cf8-9f635fbd8bdb"
+            }
+          ],
+          "passenger": [
+            {
+              "type": "CREDIT",
+              "amount": 250000
+            }
+          ],
+          "platform": [
+            {
+              "type": "DEBIT",
+              "amount": 250000
+            }
+          ],
+          "operator": []
+        }
+      }
+    },
+    {
+      "label": "part-refunded: preview = mutation = PAID = wallet/ledger; replay safe",
+      "details": {
+        "preview": {
+          "claimId": "5a5b9cce-e6a1-4d63-a109-d52ca7e81858",
+          "appealId": null,
+          "proofStatus": "UNVERIFIED",
+          "acceptedEvidenceIds": [],
+          "calculationBasis": "NO_VERIFIED_PROOF_FREIGHT_ONLY",
+          "provenDirectLossVnd": null,
+          "assessedLossVnd": null,
+          "declaredLiabilityVnd": 5000000,
+          "fallbackAmountVnd": null,
+          "policySnapshot": {
+            "version": 1,
+            "compensationRatePercent": 50,
+            "maxCompensationVnd": 30000000,
+            "noProofFallbackMultiplier": 4,
+            "claimWindowDays": 30,
+            "searchSlaHours": 72,
+            "decisionSlaBusinessDays": 7,
+            "payoutSlaBusinessDays": 3
+          },
+          "cargoAwardVnd": 0,
+          "freightRefundVnd": 100000,
+          "totalAwardVnd": 100000,
+          "originalTotalAwardVnd": null,
+          "supplementaryAwardVnd": null
+        },
+        "snapshot": {
+          "payout": [
+            {
+              "status": "PAID",
+              "amount_vnd": 100000,
+              "funding_source": "PLATFORM_HOLDING",
+              "paid_event_id": "d99f8f4e-1711-4c60-b18e-70f7a45e71db"
+            }
+          ],
+          "passenger": [
+            {
+              "type": "CREDIT",
+              "amount": 100000
+            }
+          ],
+          "platform": [
+            {
+              "type": "DEBIT",
+              "amount": 100000
+            }
+          ],
+          "operator": []
+        }
+      }
+    },
+    {
+      "label": "Fully refunded + no verified proof: preview 200/zero; approval 422, no payout, transaction rolled back"
+    },
+    {
+      "label": "Appeal: no-proof cannot refund twice; VERIFIED delta 100000 paid exactly once; original award unchanged",
+      "details": {
+        "preview": {
+          "claimId": "bfb555be-e503-4829-a962-fcb0fdfc9dda",
+          "appealId": "78aa8f5d-09d8-4a01-a4de-623da6174330",
+          "proofStatus": "VERIFIED",
+          "acceptedEvidenceIds": [
+            "406e9469-6ec6-4587-8d29-ebe950dd2b39"
+          ],
+          "calculationBasis": "VERIFIED_LOSS",
+          "provenDirectLossVnd": 200000,
+          "assessedLossVnd": 200000,
+          "declaredLiabilityVnd": 100000,
+          "fallbackAmountVnd": null,
+          "policySnapshot": {
+            "version": 1,
+            "compensationRatePercent": 50,
+            "maxCompensationVnd": 30000000,
+            "noProofFallbackMultiplier": 4,
+            "claimWindowDays": 30,
+            "searchSlaHours": 72,
+            "decisionSlaBusinessDays": 7,
+            "payoutSlaBusinessDays": 3
+          },
+          "cargoAwardVnd": 100000,
+          "freightRefundVnd": 150000,
+          "totalAwardVnd": 250000,
+          "originalTotalAwardVnd": 150000,
+          "supplementaryAwardVnd": 100000
+        },
+        "snapshot": {
+          "payout": [
+            {
+              "status": "PAID",
+              "amount_vnd": 100000,
+              "funding_source": "OPERATOR_WALLET",
+              "paid_event_id": "da128143-ebe3-429f-a1f7-e497c521cf4d"
+            }
+          ],
+          "passenger": [
+            {
+              "type": "CREDIT",
+              "amount": 100000
+            }
+          ],
+          "platform": [],
+          "operator": [
+            {
+              "type": "DEBIT",
+              "amount": 100000
+            }
+          ]
+        }
+      }
+    },
+    {
+      "label": "Passenger wallet API exposes compensation transactions; balance equals all awards + appeal delta",
+      "details": {
+        "wallet": {
+          "userId": "a6f4bfa4-238f-409c-9d63-e752229ce1b1",
+          "balance": 1150000,
+          "currency": "VND"
+        },
+        "total": 1150000
+      }
+    },
+    {
+      "label": "FE read APIs: Admin sees six holding debits, Operator sees one post-settlement debit and all seven ledger entries"
+    }
+  ],
+  "http": [
+    {
+      "method": "POST",
+      "route": "/v1/parcels/ab27dd80-c042-4f3a-8a62-1c716b823c4f/claims",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "c8c17e72-d644-4441-bb21-ed77528f86f9"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/ab27dd80-c042-4f3a-8a62-1c716b823c4f/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/evidence",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "a87cf8d6-37de-404b-a0d7-61bbac8e1d93"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/b0e9b708-fcb7-4509-9732-3fa030cd01a3/claims",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "60e218db-957b-410d-8cb3-ae878748c6ea"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/b0e9b708-fcb7-4509-9732-3fa030cd01a3/claims/bfb555be-e503-4829-a962-fcb0fdfc9dda/evidence",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "41048b26-5cf3-4c93-b16e-16bf2807b9cd"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/efaa0682-2c0e-43a4-934e-a446b06a5f6b/claims",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "54b0c72d-776e-4225-980b-ff1891d0cf7b"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/efaa0682-2c0e-43a4-934e-a446b06a5f6b/claims/a9f00a6b-5eaf-4af1-a48f-1bdc86dd1904/evidence",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "19fb8a1f-68df-460a-9239-d0bcadd079e6"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/704a46eb-efac-4261-80be-ba0c23faf44e/claims",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "9e6a1908-8076-4d1d-87a2-9093ec0d699d"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/704a46eb-efac-4261-80be-ba0c23faf44e/claims/abb1476e-e4fd-4821-8c02-57974ce8e224/evidence",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "92ffb922-f122-4aa8-ac88-ead871296055"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/9a259791-7359-4252-af37-c1370146f27b/claims",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "f3ffba12-724a-4298-a9ed-bf58c8e7dde2"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/9a259791-7359-4252-af37-c1370146f27b/claims/597ae1f0-b7b9-4fa5-9f9b-9bc54c86f990/evidence",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "141c85c0-5301-4576-a1c8-425b0f58d887"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/c1f1a4d4-89bc-4d6e-8e1e-c5c7360fa08e/claims",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "4226e893-aaf7-44fc-92ae-6023805de5d4"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/c1f1a4d4-89bc-4d6e-8e1e-c5c7360fa08e/claims/ceaab576-0183-467c-a7dc-c296c1cdb44a/evidence",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "49144e51-08eb-49f3-a2a1-11b1692c55bb"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/737c9292-d2fc-41a3-86d7-a74536289dd9/claims",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "2598fb1d-fd5f-45c8-bb8a-a2e986405649"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/737c9292-d2fc-41a3-86d7-a74536289dd9/claims/5a5b9cce-e6a1-4d63-a109-d52ca7e81858/evidence",
+      "actor": "passenger",
+      "status": 201,
+      "expected": 201,
+      "traceId": "163e34a7-a0ef-40b0-95c8-3b29bdc3a9de"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "passenger",
+      "status": 403,
+      "expected": 403,
+      "errorCode": "FORBIDDEN",
+      "traceId": "ea9d6f78-a504-4f5f-a191-b16d796cc313"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "driver",
+      "status": 403,
+      "expected": 403,
+      "errorCode": "FORBIDDEN",
+      "traceId": "cd58ab3d-ecb8-4da4-a93f-3d65de8bee6c"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "assistant",
+      "status": 403,
+      "expected": 403,
+      "errorCode": "FORBIDDEN",
+      "traceId": "f8041e9a-a4a3-4781-bc3c-075be412a9bb"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "staff",
+      "status": 403,
+      "expected": 403,
+      "errorCode": "FORBIDDEN",
+      "traceId": "128235f1-698c-4f11-bf52-b996f7596792"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "foreignAdmin",
+      "status": 404,
+      "expected": 404,
+      "errorCode": "PARCEL_CLAIM_NOT_FOUND",
+      "traceId": "4d1cadda-378f-44ea-b42f-64f04d6048a0"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_REQUIRED",
+      "traceId": "01a18a55-0366-4e37-9e9c-bf832156ee5d"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/decision",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_REQUIRED",
+      "traceId": "de3b1090-ee84-4481-a6e1-bffaa436fd1f"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_REQUIRED",
+      "traceId": "5bca5d15-a324-4573-b3b1-ddd3d7c31dbd"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/decision",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_REQUIRED",
+      "traceId": "a1a9b204-0332-48a4-96f0-75f453cde859"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_REQUIRED",
+      "traceId": "e6daa97a-ac6b-4c41-b9c5-2948cbc0de5b"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/decision",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_REQUIRED",
+      "traceId": "0bbfc82c-fab4-4e4d-9078-05fec3a2d965"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_REQUIRED",
+      "traceId": "91889b8a-12b5-47d6-8d9d-f02e4416bdd9"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/decision",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_REQUIRED",
+      "traceId": "1c9a9b81-7d5e-4671-baa1-d689ac4e0b35"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_REQUIRED",
+      "traceId": "56cac106-ac8c-4890-b3ce-088bae7b099b"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/decision",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_REQUIRED",
+      "traceId": "b6a0670e-5f26-4fe3-abbc-f971745a0e8c"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "admin",
+      "status": 404,
+      "expected": 404,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_NOT_FOUND",
+      "traceId": "857ec4a0-4e67-40d3-81cc-5a3731e67195"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "admin",
+      "status": 404,
+      "expected": 404,
+      "errorCode": "PARCEL_CLAIM_EVIDENCE_NOT_FOUND",
+      "traceId": "ee01dc48-8537-4393-94a6-4adadd3c3b29"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/award-preview",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "fdd6213e-47c9-4f9d-813b-852e0552f8f1"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "d001b0f6-cd90-4f46-85b4-c63037fa6f03"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/ab27dd80-c042-4f3a-8a62-1c716b823c4f/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "0db3c051-68b2-47a7-b1ba-0a727fdbd3ff"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/ab27dd80-c042-4f3a-8a62-1c716b823c4f/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "3722d596-db89-48bd-b41f-9627a58f8099"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/ab27dd80-c042-4f3a-8a62-1c716b823c4f/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "22aa0e33-7be2-4400-8d4c-4cf4b9fb24f9"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "d001b0f6-cd90-4f46-85b4-c63037fa6f03"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/59f20fc9-4254-4f03-ace3-c1f6cb2ed4fb/decision",
+      "actor": "admin",
+      "status": 409,
+      "expected": 409,
+      "errorCode": "PARCEL_CLAIM_ALREADY_DECIDED",
+      "traceId": "a8a22a00-51ac-4714-afd9-34112109104a"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/bfb555be-e503-4829-a962-fcb0fdfc9dda/award-preview",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "740607af-1b48-4ac2-8a59-4347c1816d75"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/bfb555be-e503-4829-a962-fcb0fdfc9dda/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "7c89dadd-3bf2-42d5-8d1f-a16ce17e227c"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/b0e9b708-fcb7-4509-9732-3fa030cd01a3/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "0378072f-9252-4633-8a06-898a7093d902"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/b0e9b708-fcb7-4509-9732-3fa030cd01a3/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "523c43f7-3746-4892-9b6b-5a414d4f7b35"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/bfb555be-e503-4829-a962-fcb0fdfc9dda/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "7c89dadd-3bf2-42d5-8d1f-a16ce17e227c"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/bfb555be-e503-4829-a962-fcb0fdfc9dda/decision",
+      "actor": "admin",
+      "status": 409,
+      "expected": 409,
+      "errorCode": "PARCEL_CLAIM_ALREADY_DECIDED",
+      "traceId": "840a148c-f5bd-4cf6-a428-45d2924be863"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/a9f00a6b-5eaf-4af1-a48f-1bdc86dd1904/award-preview",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "3715d2c2-913c-4d84-bd40-8f1855319e7d"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/a9f00a6b-5eaf-4af1-a48f-1bdc86dd1904/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "01e34225-c92a-4419-bac2-d275606724b9"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/efaa0682-2c0e-43a4-934e-a446b06a5f6b/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "36835f44-3f0d-4eca-b581-6ed31a8a2665"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/efaa0682-2c0e-43a4-934e-a446b06a5f6b/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "8f509166-ff4b-4f86-8db8-4684c877d359"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/a9f00a6b-5eaf-4af1-a48f-1bdc86dd1904/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "01e34225-c92a-4419-bac2-d275606724b9"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/a9f00a6b-5eaf-4af1-a48f-1bdc86dd1904/decision",
+      "actor": "admin",
+      "status": 409,
+      "expected": 409,
+      "errorCode": "PARCEL_CLAIM_ALREADY_DECIDED",
+      "traceId": "ee8de240-3d41-4613-a58d-4d01b9e4c319"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/abb1476e-e4fd-4821-8c02-57974ce8e224/award-preview",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "0e25a231-4cd5-4641-a680-0934070825a1"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/abb1476e-e4fd-4821-8c02-57974ce8e224/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "272bbf9c-3e82-4bfa-9a59-bde142001dcc"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/704a46eb-efac-4261-80be-ba0c23faf44e/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "303690a5-b12b-4e0d-abc6-cb099433d539"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/704a46eb-efac-4261-80be-ba0c23faf44e/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "e9bb8d14-5d21-4809-93a0-02586e1434a6"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/abb1476e-e4fd-4821-8c02-57974ce8e224/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "272bbf9c-3e82-4bfa-9a59-bde142001dcc"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/abb1476e-e4fd-4821-8c02-57974ce8e224/decision",
+      "actor": "admin",
+      "status": 409,
+      "expected": 409,
+      "errorCode": "PARCEL_CLAIM_ALREADY_DECIDED",
+      "traceId": "5318b213-71c7-4d97-8dbf-9fc6263e5915"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/597ae1f0-b7b9-4fa5-9f9b-9bc54c86f990/award-preview",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "01690144-82d3-45dd-bcc6-a49f1765a83a"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/597ae1f0-b7b9-4fa5-9f9b-9bc54c86f990/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "f5dd4de4-a8ba-4aab-b50d-d7088a962c7a"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/9a259791-7359-4252-af37-c1370146f27b/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "aba35aaa-9b04-441e-8839-43643048516e"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/9a259791-7359-4252-af37-c1370146f27b/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "7b81fcac-02a2-4fa5-9d2c-b8735ce141db"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/9a259791-7359-4252-af37-c1370146f27b/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "bbd5fd53-c326-49f2-9608-9a3d95e8e6ec"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/597ae1f0-b7b9-4fa5-9f9b-9bc54c86f990/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "f5dd4de4-a8ba-4aab-b50d-d7088a962c7a"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/597ae1f0-b7b9-4fa5-9f9b-9bc54c86f990/decision",
+      "actor": "admin",
+      "status": 409,
+      "expected": 409,
+      "errorCode": "PARCEL_CLAIM_ALREADY_DECIDED",
+      "traceId": "e4ae968b-c896-47f1-b6d1-e69e71611822"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/5a5b9cce-e6a1-4d63-a109-d52ca7e81858/award-preview",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "294479a4-8bd3-4618-a45f-0b88008eadc2"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/5a5b9cce-e6a1-4d63-a109-d52ca7e81858/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "9ede4f19-4ef0-44ab-831e-4e12fbd6f027"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/737c9292-d2fc-41a3-86d7-a74536289dd9/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "c13f5b94-eded-4035-944b-b5a8bf63d140"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/737c9292-d2fc-41a3-86d7-a74536289dd9/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "2b5c2a9b-3edc-4d42-a7bc-4d6b44073216"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/737c9292-d2fc-41a3-86d7-a74536289dd9/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "694123cd-f850-4c88-9a23-25a368bcf36b"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/5a5b9cce-e6a1-4d63-a109-d52ca7e81858/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "9ede4f19-4ef0-44ab-831e-4e12fbd6f027"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/5a5b9cce-e6a1-4d63-a109-d52ca7e81858/decision",
+      "actor": "admin",
+      "status": 409,
+      "expected": 409,
+      "errorCode": "PARCEL_CLAIM_ALREADY_DECIDED",
+      "traceId": "163ad16f-6c8e-4846-a3fd-c3f0fbc12de1"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/ceaab576-0183-467c-a7dc-c296c1cdb44a/award-preview",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "0fd31fe3-7570-4293-a985-9096aff54aa5"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claims/ceaab576-0183-467c-a7dc-c296c1cdb44a/decision",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "VALIDATION_ERROR",
+      "traceId": "d24bd21c-3e3d-4769-8cb5-fef2e6711a1c"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/parcels/b0e9b708-fcb7-4509-9732-3fa030cd01a3/claims/bfb555be-e503-4829-a962-fcb0fdfc9dda/appeal",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "66eb954b-cb72-4b46-98ed-8921e3d55437"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claim-appeals/78aa8f5d-09d8-4a01-a4de-623da6174330/adjustment-preview",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED",
+      "traceId": "f64bea76-21af-4e25-bb82-c01f5ff0c3a4"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claim-appeals/78aa8f5d-09d8-4a01-a4de-623da6174330/decision",
+      "actor": "admin",
+      "status": 422,
+      "expected": 422,
+      "errorCode": "PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED",
+      "traceId": "32d3ee91-98d4-4c09-9e1d-c871f98fe173"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claim-appeals/78aa8f5d-09d8-4a01-a4de-623da6174330/adjustment-preview",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "a79c8f3d-64c2-479e-a74c-624db8bc8a44"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claim-appeals/78aa8f5d-09d8-4a01-a4de-623da6174330/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "ff895d77-f275-43a5-a21d-6982ab88f598"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/operator/claim-appeals/78aa8f5d-09d8-4a01-a4de-623da6174330",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "cbf638bc-3cca-49df-93fc-fbe16735f56c"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/operator/claim-appeals/78aa8f5d-09d8-4a01-a4de-623da6174330",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "db6a89ea-d8fd-4319-a93e-25371cd48448"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/operator/claim-appeals/78aa8f5d-09d8-4a01-a4de-623da6174330",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "bb2208a9-6204-4459-b530-c212c674c0c7"
+    },
+    {
+      "method": "POST",
+      "route": "/v1/operator/claim-appeals/78aa8f5d-09d8-4a01-a4de-623da6174330/decision",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "ff895d77-f275-43a5-a21d-6982ab88f598"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/parcels/b0e9b708-fcb7-4509-9732-3fa030cd01a3/claims",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "2a96d601-f04f-41a6-9d26-ad91f2638263"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/wallet",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "f3f45cb0-6109-4040-a72f-ec8129bb4cef"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/wallet/transactions?page=1&pageSize=50",
+      "actor": "passenger",
+      "status": 200,
+      "expected": 200,
+      "traceId": "63d79692-0724-46f1-970d-6831d1624922"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/admin/platform-wallet/transactions?referenceType=PARCEL_COMPENSATION&page=1&pageSize=50",
+      "actor": "systemAdmin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "d2b893c9-184c-4cba-9647-f139a3ee298d"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/operator/wallet/transactions?referenceType=PARCEL_COMPENSATION&page=1&pageSize=50",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "097fcb4a-9136-4e44-b3e1-8515e54d72ee"
+    },
+    {
+      "method": "GET",
+      "route": "/v1/operator/ledger?entryType=PARCEL_COMPENSATION&page=1&pageSize=50",
+      "actor": "admin",
+      "status": 200,
+      "expected": 200,
+      "traceId": "59898bb2-db4f-4ea2-beb4-8e5d97e94cc9"
+    }
+  ],
+  "cleanup": [
+    "Stopped parcel PID 20348",
+    "Stopped payment PID 24236",
+    "Stopped trip PID 31292",
+    "Stopped identity PID 33356",
+    "Stopped gateway PID 29100",
+    "Dropped isolated pcl_e2e_8978aec38a_identity",
+    "Dropped isolated pcl_e2e_8978aec38a_trip",
+    "Dropped isolated pcl_e2e_8978aec38a_payment",
+    "Dropped isolated pcl_e2e_8978aec38a_parcel",
+    "Dropped test DB role",
+    "Deleted isolated test vhost/queues",
+    "Deleted test RabbitMQ user"
+  ],
+  "finishedAt": "2026-09-03T08:37:10.800Z"
+}

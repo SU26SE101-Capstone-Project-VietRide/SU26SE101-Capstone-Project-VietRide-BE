@@ -3,7 +3,7 @@ namespace VietRide.Parcel.Api.Controllers.Requests;
 public sealed record UpdateParcelCompensationPolicyRequest(
     int CompensationRatePercent,
     long MaxCompensationVnd,
-    int NoProofFallbackMultiplier = 4,
+    int NoProofFallbackMultiplier = 2,
     int ClaimWindowDays = 30,
     int SearchSlaHours = 72,
     int DecisionSlaBusinessDays = 7,

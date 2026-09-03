@@ -39,6 +39,15 @@ internal sealed class PlatformWalletRepository : IPlatformWalletRepository
     public IQueryable<PlatformWallet> QueryNoTracking()
         => _db.PlatformWallets.AsNoTracking();
 
+    public Task<PlatformWalletTransaction?> FindTransactionByReferenceAsync(
+        PlatformWalletTransactionRef referenceType,
+        Guid referenceId,
+        CancellationToken cancellationToken)
+        => _db.PlatformWalletTransactions.FirstOrDefaultAsync(
+            transaction => transaction.ReferenceType == referenceType
+                && transaction.ReferenceId == referenceId,
+            cancellationToken);
+
     public async Task<PlatformWallet> GetSingletonAsync(CancellationToken cancellationToken)
     {
         return await _db.PlatformWallets.AsNoTracking().SingleAsync(cancellationToken);

@@ -6,6 +6,11 @@ BE đã chuyển quyết định claim/appeal sang contract proof tường minh 
 thường. Contract mới có hiệu lực ngay; body cũ thiếu `proofStatus` hoặc
 `acceptedEvidenceIds` sẽ bị từ chối.
 
+**Cập nhật 2026-09-03:** mọi quyết định mới chỉ bồi thường tiền hàng khi proof `VERIFIED`.
+Không còn fallback x2/x3/x4 theo cước; không khai giá hoặc khai giá cao mà chưa xác minh proof đều
+chỉ được xét hoàn cước còn lại. Áp dụng cả hồ sơ đang chờ có snapshot multiplier cũ; không sửa
+quyết định/payout đã chốt. FE Web và Mobile phải bỏ diễn giải fallback cũ trước khi tích hợp.
+
 Phân công tích hợp:
 
 - **Operator Web — `OPERATOR_ADMIN`:** đọc claim/appeal, chọn proof/evidence, gọi preview và gửi
@@ -65,6 +70,20 @@ Error cũng nằm trong envelope:
 - `proofStatus: null` trên `SUBMITTED|UNDER_REVIEW` nghĩa là chưa có quyết định; hiển thị
   **“Chưa đánh giá”**. Chỉ khi claim/appeal đã ở trạng thái quyết định cuối mà proof vẫn `null` mới
   hiển thị **“Chưa ghi nhận (legacy)”**. Không suy diễn proof từ loss/evidence.
+- Giá khai báo chỉ là trần trách nhiệm đã chốt trước chuyến, không phải chứng từ. Không tự chọn
+  `VERIFIED` chỉ vì parcel có `declaredValueVnd`.
+- Với `UNVERIFIED|NO_PROOF`, luôn `cargoAwardVnd=0`, kể cả khi có khai giá; chỉ hoàn phần cước
+  chưa hoàn. Hiển thị “Chưa có bằng chứng giá trị/thiệt hại được xác minh — chỉ hoàn cước còn lại”.
+- Với `VERIFIED`, BE dùng loss đã xác minh, giới hạn bởi giá khai báo nếu có, rồi áp rate và cap.
+  Không khai giá vẫn có thể được bồi thường hàng nếu có proof được xác minh. Không tự chuyển
+  proof sang `VERIFIED` chỉ vì evidence list có phần tử hoặc đã upload thành công.
+- Reviewer phải đối chiếu chứng từ với đúng hàng (mô tả, serial, giao dịch mua, tình trạng/thiệt hại)
+  và chỉ nhập thiệt hại trực tiếp được chứng minh, không copy `declaredValueVnd` vào loss.
+  BE kiểm tra quyền, ID evidence, liên kết và lưu audit; không tự chứng thực hóa đơn thật/giả.
+- Tỷ lệ mặc định 50% là tỷ lệ chi trả theo policy, không phải BE định giá hàng chỉ bằng một nửa.
+- `noProofFallbackMultiplier` giữ trong payload/snapshot để tương thích và đọc lịch sử nhưng
+  không tham gia tính award mới. Ẩn control chỉnh hệ số này; PUT policy vẫn giữ field hợp lệ
+  `1..2` theo contract, không dùng snapshot legacy `4` làm giá trị PUT hay diễn giải mức được nhận.
 
 Nguồn evidence để render checkbox là `data.claim.evidence[]` từ
 `GET /v1/operator/claims/{claimId}`. Giá trị gửi lên là `evidence[].evidenceId`, không phải URL
@@ -139,7 +158,7 @@ Preview là read-only, chỉ `OPERATOR_ADMIN`, không gửi `Idempotency-Key`. D
     "version": 1,
     "compensationRatePercent": 50,
     "maxCompensationVnd": 30000000,
-    "noProofFallbackMultiplier": 4,
+    "noProofFallbackMultiplier": 2,
     "claimWindowDays": 7,
     "searchSlaHours": 72,
     "decisionSlaBusinessDays": 7,
@@ -216,10 +235,12 @@ adjustment preview. Mutation appeal trả `ParcelClaimAppeal` trực tiếp tạ
 
 Preview trả:
 
-- `calculationBasis`: `VERIFIED_LOSS` hoặc `NO_PROOF_FALLBACK`.
+- `calculationBasis`: `VERIFIED_LOSS` hoặc `NO_VERIFIED_PROOF_FREIGHT_ONLY`.
+  Preview mới không còn trả `NO_PROOF_FALLBACK`/`NO_DECLARATION_FREIGHT_ONLY`; bỏ cache preview cũ.
 - `assessedLossVnd`: loss được dùng cho nhánh verified; nullable.
-- `declaredLiabilityVnd`: trách nhiệm theo giá khai báo và rate; nullable nếu parcel không khai giá.
-- `fallbackAmountVnd`: `freight × multiplier` trước khi áp các trần; chỉ có ở nhánh fallback.
+- `declaredLiabilityVnd`: trần theo giá khai báo và rate; nullable nếu parcel không khai giá.
+  Chỉ là thông tin tham chiếu, không phải giá trị được chứng minh hoặc khoản được nhận.
+- `fallbackAmountVnd`: luôn `null` trong preview mới; giữ field để tương thích, không render thành award.
 - `policySnapshot`: policy đã đóng băng cho parcel. Trần nằm ở
   `policySnapshot.maxCompensationVnd`; field tương ứng trên claim là `policyCapVnd`.
 - `cargoAwardVnd`: bồi thường hàng.
@@ -227,9 +248,25 @@ Preview trả:
 - `totalAwardVnd`: `cargoAwardVnd + freightRefundVnd`.
 - Appeal thêm `originalTotalAwardVnd` và `supplementaryAwardVnd`.
 
+Claim preview trả `200` với tổng `0` khi không có khoản đủ điều kiện chi thêm (ví dụ không verified
+proof và cước đã hoàn đủ). Khóa nút `APPROVE`; người duyệt có thể bổ sung đánh giá hợp lệ hoặc
+`REJECT` với lý do rõ ràng. Mutation `APPROVE` tổng 0 trả `422 VALIDATION_ERROR`, không tạo payout.
+Appeal preview và `APPROVE_ADJUSTMENT` vẫn trả `422 PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED` khi
+không có delta dương; không biến lỗi này thành một khoản bồi thường mới. `UPHOLD` không cần preview
+thành công và vẫn phải gửi proof/loss/evidence đúng ma trận.
+
+Ví dụ giải thích cho người dùng (rate 50%, chưa chạm cap, cước 150.000đ chưa hoàn):
+
+| Hồ sơ | Bồi thường hàng | Hoàn cước | Tổng |
+|---|---:|---:|---:|
+| Không khai giá, không proof được xác minh | 0đ | 150.000đ | 150.000đ |
+| Khai 200.000đ hoặc 10.000.000đ, không proof được xác minh | 0đ | 150.000đ | 150.000đ |
+| Khai 10.000.000đ, thiệt hại xác minh 200.000đ | 100.000đ | 150.000đ | 250.000đ |
+| Không khai giá, thiệt hại xác minh 200.000đ | 100.000đ | 150.000đ | 250.000đ |
+
 Luôn hiển thị riêng bồi thường hàng, hoàn cước và tổng chi. `policyCapVnd` chỉ giới hạn
 `cargoAwardVnd`; `totalAwardVnd` có thể cao hơn cap do cộng hoàn cước. FE không tự tính, làm tròn
-hoặc gửi bất kỳ award/rate/cap nào. Giá trị VND là số nguyên; chỉ format tiền ở view.
+hoặc gửi bất kỳ award/rate/cap nào trong preview/decision. Giá trị VND là số nguyên; chỉ format tiền ở view.
 
 Preview không phải cam kết payout. Mutation tính lại dưới transaction/lock; response mutation là
 nguồn cuối cùng để cập nhật cache/store/màn hình. Trong lúc preview hoặc mutation đang chạy, khóa
@@ -242,7 +279,7 @@ nút submit. Bỏ qua response preview cũ nếu form đã thay đổi sau khi r
   đúng key đó. Chỉ tạo key mới khi người dùng bắt đầu một thao tác mới.
 - `409 PARCEL_CLAIM_ALREADY_DECIDED` hoặc `PARCEL_CLAIM_APPEAL_ALREADY_DECIDED`: form đã stale;
   đóng form và reload detail.
-- `409 PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED`: revised award không tạo delta dương; giữ form để
+- `422 PARCEL_CLAIM_APPEAL_ADJUSTMENT_REQUIRED`: revised award không tạo delta dương; giữ form để
   admin sửa proof/loss/evidence hoặc chọn `UPHOLD`.
 - `404 PARCEL_CLAIM_EVIDENCE_NOT_FOUND`: reload claim detail vì evidence selection đã stale hoặc
   không thuộc claim.
@@ -267,7 +304,21 @@ Appeal:
 - `UPHELD`: giữ nguyên quyết định cũ, không có payout bổ sung.
 
 Đây là luồng bất đồng bộ. Không hiển thị `APPROVED`/`ADJUSTMENT_APPROVED` là đã thanh toán và không
-tự chuyển trạng thái khi chưa nhận response/read model mới từ BE.
+tự chuyển trạng thái khi chưa nhận response/read model mới từ BE. Sau notification, reconnect hoặc
+manual refresh, refetch detail/list; không suy ra `PAID` chỉ vì Passenger Wallet đã xuất hiện tiền.
+Payment tự chạy retry/reconciliation mỗi 10 phút cho payout thiếu nguồn tiền hoặc payout mới thiếu
+completion marker, nhưng FE vẫn chỉ dùng trạng thái canonical từ Parcel read model.
+
+Đối soát không yêu cầu đồng thời cả hai source wallet transaction. Mỗi payout có đúng một nguồn:
+
+- Trước Trip settlement: Admin thấy một PlatformWallet `DEBIT/PARCEL_COMPENSATION`; Operator xem
+  khoản giảm trong `OperatorLedgerEntry`, không có OperatorWallet transaction.
+- Sau Trip settlement: Operator thấy một OperatorWallet `DEBIT/PARCEL_COMPENSATION` và một
+  `OperatorLedgerEntry`; Admin không có PlatformWallet compensation debit cho payout đó.
+- Passenger luôn thấy đúng một Wallet `CREDIT/PARCEL_COMPENSATION`.
+
+Nếu cần support đối soát, dùng `claimId`/`appealId` làm payout reference và `parcelId` cho operator
+ledger; không kết luận thiếu sổ chỉ vì cả PlatformWallet và OperatorWallet không cùng xuất hiện.
 
 ## 9. Passenger Mobile
 

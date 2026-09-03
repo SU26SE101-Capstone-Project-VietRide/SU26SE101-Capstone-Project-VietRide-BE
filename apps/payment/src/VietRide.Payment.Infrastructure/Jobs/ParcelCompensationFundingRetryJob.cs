@@ -21,7 +21,11 @@ public sealed class ParcelCompensationFundingRetryJob
     [DisableConcurrentExecution(timeoutInSeconds: 300)]
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
-        var count = await _service.RetryFundingPendingAsync(100, cancellationToken);
-        _logger.LogInformation("Retried {Count} funding-pending parcel compensation payout(s).", count);
+        var retryCount = await _service.RetryFundingPendingAsync(100, cancellationToken);
+        var repairCount = await _service.ReconcileIncompletePaidAsync(100, cancellationToken);
+        _logger.LogInformation(
+            "Retried {RetryCount} funding-pending and reconciled {RepairCount} incomplete paid parcel compensation payout(s).",
+            retryCount,
+            repairCount);
     }
 }
